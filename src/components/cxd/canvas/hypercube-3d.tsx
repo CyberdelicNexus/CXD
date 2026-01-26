@@ -210,6 +210,9 @@ interface ElementPreview {
   thumbnail?: string;
   domain?: string;
   isEmpty: boolean;
+  elementCount?: number; // For boards/containers
+  fileName?: string; // For file elements
+  url?: string; // For links
 }
 
 function getElementPreview(element: CanvasElement): ElementPreview {
@@ -219,8 +222,9 @@ function getElementPreview(element: CanvasElement): ElementPreview {
     case "text":
     case "freeform": {
       const content = (element as any).content || "";
-      const title = content.split("\n")[0]?.slice(0, 50) || "Text";
-      const excerpt = content.split("\n").slice(1).join(" ").slice(0, 100);
+      const lines = content.split("\n").filter((l: string) => l.trim().length > 0);
+      const title = lines[0]?.slice(0, 60) || "Text Card";
+      const excerpt = lines.slice(1).join(" ").slice(0, 120);
       return {
         ...base,
         title,
@@ -230,34 +234,43 @@ function getElementPreview(element: CanvasElement): ElementPreview {
     }
     case "link": {
       const url = (element as any).url || "";
-      const title = (element as any).title || "Link";
+      const title = (element as any).title || url || "Link";
       let domain = "";
       try {
         domain = new URL(url).hostname;
       } catch {}
-      return { ...base, title, domain, isEmpty: !url };
+      return { ...base, title, domain, url, isEmpty: !url };
     }
     case "image": {
       const alt = (element as any).alt || "Image";
       const src = (element as any).src;
       return { ...base, title: alt, thumbnail: src, isEmpty: !src };
     }
-    case "board":
+    case "board": {
+      const name = (element as any).name || "Untitled Board";
+      const children = (element as any).children || [];
       return {
         ...base,
-        title: (element as any).name || "Board",
-        isEmpty: !(element as any).name,
+        title: name,
+        elementCount: children.length,
+        isEmpty: !name,
       };
-    case "container":
+    }
+    case "container": {
+      const title = (element as any).title || "Untitled Container";
+      const children = (element as any).children || [];
       return {
         ...base,
-        title: (element as any).title || "Container",
-        isEmpty: !(element as any).title,
+        title,
+        elementCount: children.length,
+        isEmpty: !title,
       };
+    }
     case "experienceBlock":
       return {
         ...base,
         title: (element as any).title || "Experience Block",
+        excerpt: (element as any).description?.slice(0, 100),
         isEmpty: !(element as any).title,
       };
     default:
@@ -1764,7 +1777,7 @@ export function Hypercube3D({
                           <div
                             key={preview.id}
                             className={cn(
-                              "group p-3 rounded-lg border transition-all hover:bg-white/5",
+                              "group p-3 rounded-lg border transition-all hover:bg-white/5 cursor-pointer",
                               preview.isEmpty
                                 ? "border-border/30 opacity-60"
                                 : "border-border/50",
@@ -1773,17 +1786,27 @@ export function Hypercube3D({
                               borderLeftColor: `hsl(${focusedFace.tint.hue} 40% 50%)`,
                               borderLeftWidth: "3px",
                             }}
+                            onClick={() => {
+                              if (onPreviewElement && element) {
+                                onPreviewElement(element);
+                              }
+                            }}
                           >
                             <div className="flex items-start gap-3">
                               <Icon className="w-4 h-4 mt-0.5 text-muted-foreground flex-shrink-0" />
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-sm font-medium text-foreground truncate">
                                     {preview.title}
                                   </span>
                                   {preview.domain && (
                                     <span className="text-[10px] text-muted-foreground/70 px-1.5 py-0.5 bg-white/5 rounded">
                                       {preview.domain}
+                                    </span>
+                                  )}
+                                  {preview.elementCount !== undefined && (
+                                    <span className="text-[10px] text-muted-foreground/70 px-1.5 py-0.5 bg-white/5 rounded">
+                                      {preview.elementCount} {preview.elementCount === 1 ? 'item' : 'items'}
                                     </span>
                                   )}
                                 </div>
@@ -1797,8 +1820,8 @@ export function Hypercube3D({
                                     No content yet
                                   </p>
                                 )}
-                                {/* Action buttons - visible on hover */}
-                                <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {/* Action buttons - always visible for better discoverability */}
+                                <div className="flex items-center gap-2 mt-2">
                                   {element && onPreviewElement && (
                                     <button
                                       onClick={(e) => {
@@ -1808,7 +1831,7 @@ export function Hypercube3D({
                                       className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-primary/20 hover:bg-primary/30 text-primary transition-colors"
                                     >
                                       <Eye className="w-3 h-3" />
-                                      Preview
+                                      Quick View
                                     </button>
                                   )}
                                   {onNavigateToElement && (
@@ -1823,22 +1846,22 @@ export function Hypercube3D({
                                       View on Canvas
                                     </button>
                                   )}
-                                  {preview.type === 'link' && preview.domain && (
+                                  {preview.type === 'link' && preview.url && (
                                     <a
-                                      href={(element as any)?.url}
+                                      href={preview.url}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       onClick={(e) => e.stopPropagation()}
                                       className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-white/10 hover:bg-white/20 text-foreground/80 transition-colors"
                                     >
                                       <ExternalLink className="w-3 h-3" />
-                                      Open
+                                      Open Link
                                     </a>
                                   )}
                                 </div>
                               </div>
                               {preview.thumbnail && (
-                                <div className="w-12 h-12 rounded overflow-hidden bg-black/20 flex-shrink-0">
+                                <div className="w-16 h-16 rounded overflow-hidden bg-black/20 flex-shrink-0 border border-border/30">
                                   <img
                                     src={preview.thumbnail}
                                     alt=""

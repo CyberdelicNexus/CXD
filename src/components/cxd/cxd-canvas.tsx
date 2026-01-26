@@ -1198,6 +1198,18 @@ export function CXDCanvas() {
       }
 
       // Don't run shortcuts while editing text or in special editing modes
+      const target = e.target as HTMLElement;
+      const isEditingText =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.contentEditable === "true" ||
+        target.classList.contains("resize-none"); // TextElement textarea
+      
+      // Allow only Escape while editing text
+      if (isEditingText && e.key !== "Escape") {
+        return; // Let normal text editing work
+      }
+
       if (isEditingContext()) {
         return;
       }

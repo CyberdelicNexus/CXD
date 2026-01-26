@@ -3830,10 +3830,12 @@ function TextCard({
       // Small delay to ensure textarea is rendered
       requestAnimationFrame(() => {
         autoGrowTextarea();
-        // Focus and select all on edit start
+        // Focus WITHOUT selecting all - normal typing behavior
         if (textareaRef.current) {
           textareaRef.current.focus();
-          textareaRef.current.select();
+          // Move cursor to end of text
+          const length = textareaRef.current.value.length;
+          textareaRef.current.setSelectionRange(length, length);
         }
       });
     }
@@ -3874,24 +3876,18 @@ function TextCard({
 
   // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Prevent backspace/delete from deleting the text element
-    if (e.key === "Backspace" || e.key === "Delete") {
-      e.stopPropagation();
-    }
+    // Prevent ALL canvas shortcuts from triggering while editing
+    e.stopPropagation();
 
     // Escape cancels edit (revert changes)
     if (e.key === "Escape") {
       e.preventDefault();
-      e.stopPropagation();
       onUpdate({ content: originalContent });
       onBlur();
     }
 
-    // Enter creates new line - no special handling needed, just stop propagation
-    if (e.key === "Enter") {
-      e.stopPropagation();
-      // Let the default behavior create a newline
-    }
+    // Enter creates new line - default behavior works
+    // No need to prevent or handle
   };
 
   // Handle content change with auto-grow
@@ -3952,7 +3948,7 @@ function TextCard({
             color: textColor,
             width: effectiveWidth - 16,
             minHeight: 24,
-            overflow: "hidden", // Hide scrollbar, we auto-grow instead
+            overflow: "visible", // Allow text to be fully visible while editing
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
           }}
