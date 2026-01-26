@@ -7,6 +7,8 @@ import {
   CXDProject,
   createDefaultProject,
   RealityPlaneCode,
+  RealityPlaneV2,
+  DEFAULT_REALITY_PLANES_V2,
   SensoryDomainCode,
   PresenceTypeCode,
   ExperienceFlowStageCode,
@@ -71,11 +73,16 @@ interface CXDState {
   currentBoardId: string | null; // alias for activeBoardId (backward compatibility)
   boardPath: { id: string; title: string }[]; // breadcrumb path
   
+  // Highlighted element (for navigation from hypercube)
+  highlightedElementId: string | null;
+  
   // Actions - View
   setViewMode: (mode: ViewMode) => void;
   setFocusedSection: (section: CXDSectionId | null) => void;
   setCanvasViewMode: (mode: 'canvas' | 'hexagon') => void;
   setActiveSurface: (surface: 'canvas' | 'hypercube') => void;
+  setHighlightedElementId: (elementId: string | null) => void;
+  highlightElementBriefly: (elementId: string, durationMs?: number) => void;
   
   // Actions - Projects
   createProject: (name: string, ownerId: string) => string;
@@ -99,8 +106,14 @@ interface CXDState {
   setWizardStep: (step: number) => void;
   completeWizard: () => void;
   
-  // Actions - Reality Planes
+  // Actions - Reality Planes (Legacy percentage-based)
   updateRealityPlane: (code: RealityPlaneCode, value: number) => void;
+  
+  // Actions - Reality Planes V2 (Toggle-based with interface/modality and priority)
+  getRealityPlanesV2: () => RealityPlaneV2[];
+  toggleRealityPlane: (code: RealityPlaneCode) => void;
+  updateRealityPlaneInterface: (code: RealityPlaneCode, interfaceModality: string) => void;
+  reorderRealityPlanes: (newOrder: RealityPlaneCode[]) => void;
   
   // Actions - Sensory Domains
   updateSensoryDomain: (code: SensoryDomainCode, value: number) => void;
@@ -218,6 +231,7 @@ export const useCXDStore = create<CXDState>()(
       activeBoardId: null,
       currentBoardId: null, // backward compatibility alias
       boardPath: [],
+      highlightedElementId: null,
       canvasHistory: [],
       canvasHistoryIndex: -1,
       
@@ -247,6 +261,17 @@ export const useCXDStore = create<CXDState>()(
         }
       },
       setActiveSurface: (surface) => set({ activeSurface: surface }),
+      setHighlightedElementId: (elementId) => set({ highlightedElementId: elementId }),
+      highlightElementBriefly: (elementId, durationMs = 2000) => {
+        set({ highlightedElementId: elementId });
+        setTimeout(() => {
+          // Only clear if still the same element
+          const { highlightedElementId: currentId } = get();
+          if (currentId === elementId) {
+            set({ highlightedElementId: null });
+          }
+        }, durationMs);
+      },
       
       // Project actions
       createProject: (name, ownerId) => {
@@ -443,7 +468,7 @@ export const useCXDStore = create<CXDState>()(
         }
       },
       
-      // Reality Planes
+      // Reality Planes (Legacy percentage-based)
       updateRealityPlane: (code, value) => {
         const currentProject = get().getCurrentProject();
         if (currentProject) {
@@ -453,6 +478,77 @@ export const useCXDStore = create<CXDState>()(
                 ? {
                     ...p,
                     realityPlanes: { ...p.realityPlanes, [code]: value },
+                    updatedAt: new Date().toISOString(),
+                  }
+                : p
+            ),
+          }));
+        }
+      },
+      
+      // Reality Planes V2 (Toggle-based with interface/modality and priority)
+      getRealityPlanesV2: () => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return [...DEFAULT_REALITY_PLANES_V2];
+        return currentProject.realityPlanesV2 || [...DEFAULT_REALITY_PLANES_V2];
+      },
+      
+      toggleRealityPlane: (code) => {
+        const currentProject = get().getCurrentProject();
+        if (currentProject) {
+          const currentPlanes = currentProject.realityPlanesV2 || [...DEFAULT_REALITY_PLANES_V2];
+          const updatedPlanes = currentPlanes.map((plane) =>
+            plane.code === code ? { ...plane, enabled: !plane.enabled } : plane
+          );
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                    ...p,
+                    realityPlanesV2: updatedPlanes,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : p
+            ),
+          }));
+        }
+      },
+      
+      updateRealityPlaneInterface: (code, interfaceModality) => {
+        const currentProject = get().getCurrentProject();
+        if (currentProject) {
+          const currentPlanes = currentProject.realityPlanesV2 || [...DEFAULT_REALITY_PLANES_V2];
+          const updatedPlanes = currentPlanes.map((plane) =>
+            plane.code === code ? { ...plane, interfaceModality } : plane
+          );
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                    ...p,
+                    realityPlanesV2: updatedPlanes,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : p
+            ),
+          }));
+        }
+      },
+      
+      reorderRealityPlanes: (newOrder) => {
+        const currentProject = get().getCurrentProject();
+        if (currentProject) {
+          const currentPlanes = currentProject.realityPlanesV2 || [...DEFAULT_REALITY_PLANES_V2];
+          const reorderedPlanes = newOrder.map((code, index) => {
+            const plane = currentPlanes.find((p) => p.code === code);
+            return plane ? { ...plane, priority: index } : { code, enabled: false, interfaceModality: '', priority: index };
+          });
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                    ...p,
+                    realityPlanesV2: reorderedPlanes,
                     updatedAt: new Date().toISOString(),
                   }
                 : p
@@ -1379,19 +1475,53 @@ export const useCXDStore = create<CXDState>()(
       addNodeToContainer: (nodeId, containerId) => {
         const currentProject = get().getCurrentProject();
         if (currentProject) {
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { 
-                    ...p, 
-                    canvasElements: (p.canvasElements || []).map((el) =>
-                      el.id === nodeId ? { ...el, containerId } : el
-                    ),
-                    updatedAt: new Date().toISOString() 
-                  }
-                : p
-            ),
-          }));
+          const elements = currentProject.canvasElements || [];
+          const container = elements.find((el) => el.id === containerId);
+          const node = elements.find((el) => el.id === nodeId);
+          
+          if (container && node) {
+            // Calculate required container size to fit the node
+            const padding = 20; // Padding from container edges
+            const headerHeight = 40; // Height of container header
+            
+            // Calculate node's position relative to container
+            const nodeRight = node.x + node.width;
+            const nodeBottom = node.y + node.height;
+            
+            // Calculate new container dimensions if node extends beyond current bounds
+            const neededWidth = Math.max(
+              container.width,
+              nodeRight - container.x + padding
+            );
+            const neededHeight = Math.max(
+              container.height,
+              nodeBottom - container.y + padding + headerHeight
+            );
+            
+            set((state) => ({
+              projects: state.projects.map((p) =>
+                p.id === currentProject.id
+                  ? { 
+                      ...p, 
+                      canvasElements: (p.canvasElements || []).map((el) => {
+                        if (el.id === nodeId) {
+                          return { ...el, containerId };
+                        }
+                        if (el.id === containerId) {
+                          return { 
+                            ...el, 
+                            width: neededWidth,
+                            height: neededHeight 
+                          };
+                        }
+                        return el;
+                      }),
+                      updatedAt: new Date().toISOString() 
+                    }
+                  : p
+              ),
+            }));
+          }
         }
       },
       

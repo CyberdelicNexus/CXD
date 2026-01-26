@@ -72,6 +72,7 @@ export interface ElementStyle {
   bgColor?: string;
   borderColor?: string;
   borderWidth?: number;
+  borderStyle?: 'solid' | 'dashed' | 'dotted';
   textColor?: string;
   fontFamily?: string;
   fontSize?: number;
@@ -81,6 +82,24 @@ export interface ElementStyle {
 
 // Surface types for separating canvas vs hypercube nodes
 export type SurfaceType = 'canvas' | 'hypercube';
+
+// Hypercube face tags for semantic tagging
+export type HypercubeFaceTag =
+  | 'Reality Planes'
+  | 'Sensory Domains'
+  | 'Presence Types'
+  | 'State Mapping'
+  | 'Trait Mapping'
+  | 'Meaning Architecture';
+
+export const HYPERCUBE_FACE_TAGS: HypercubeFaceTag[] = [
+  'Reality Planes',
+  'Sensory Domains',
+  'Presence Types',
+  'State Mapping',
+  'Trait Mapping',
+  'Meaning Architecture',
+];
 
 // Base interface for all canvas elements
 export interface CanvasElementBase {
@@ -96,6 +115,7 @@ export interface CanvasElementBase {
   containerId?: string; // ID of parent container if nested
   boardId?: string | null; // ID of the board this element belongs to (null = root canvas)
   surface?: SurfaceType; // Which surface this element belongs to ('canvas' or 'hypercube')
+  hypercubeTags?: HypercubeFaceTag[]; // Optional semantic face tags
 }
 
 // Freeform Card (Post-it style)
@@ -117,6 +137,17 @@ export interface ImageElement extends CanvasElementBase {
     height: number;
     bytes: number;
     originalName?: string;
+  };
+  // Non-destructive image editing metadata
+  imageEdits?: {
+    crop?: {
+      x: number; // Percentage of image width
+      y: number; // Percentage of image height
+      width: number; // Percentage of image width
+      height: number; // Percentage of image height
+    };
+    flipH?: boolean; // Horizontal flip
+    flipV?: boolean; // Vertical flip
   };
 }
 
@@ -215,6 +246,7 @@ export interface ExperienceBlockElement extends CanvasElementBase {
   componentKey: InspectorSectionId; // Which experience component this block represents
   title: string; // Display title
   viewMode?: 'compact' | 'inline'; // View mode for the block (default: compact)
+  style?: ElementStyle; // Optional style for custom gradients
 }
 
 // Union type for all canvas elements
@@ -381,4 +413,35 @@ export function getAutoAnchorPosition(
   } else {
     return { x: clampedX, y: y + height };
   }
+}
+
+// Helper function to get nearest anchor point on an element from a source position
+export function getNearestAnchor(
+  element: CanvasElement,
+  sourcePoint: { x: number; y: number }
+): 'top' | 'right' | 'bottom' | 'left' {
+  const { x, y, width, height } = element;
+  
+  const anchors = {
+    top: { x: x + width / 2, y, anchor: 'top' as const },
+    right: { x: x + width, y: y + height / 2, anchor: 'right' as const },
+    bottom: { x: x + width / 2, y: y + height, anchor: 'bottom' as const },
+    left: { x, y: y + height / 2, anchor: 'left' as const },
+  };
+  
+  let nearestAnchor: 'top' | 'right' | 'bottom' | 'left' = 'top';
+  let minDistance = Infinity;
+  
+  for (const anchor of Object.values(anchors)) {
+    const dx = anchor.x - sourcePoint.x;
+    const dy = anchor.y - sourcePoint.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearestAnchor = anchor.anchor;
+    }
+  }
+  
+  return nearestAnchor;
 }

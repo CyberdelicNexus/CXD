@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { CXDProject } from "@/types/cxd-schema";
+import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { useCXDStore } from "@/store/cxd-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -141,7 +142,11 @@ interface ExperienceInspectorRailProps {
   activeSection: InspectorSectionId | null;
   onSectionClick: (sectionId: InspectorSectionId) => void;
   isPanelOpen: boolean;
-  onStartDrag?: (sectionId: InspectorSectionId, clientX: number, clientY: number) => void;
+  onStartDrag?: (
+    sectionId: InspectorSectionId,
+    clientX: number,
+    clientY: number,
+  ) => void;
 }
 
 export function ExperienceInspectorRail({
@@ -156,48 +161,57 @@ export function ExperienceInspectorRail({
     startY: number;
   }>({ sectionId: null, startX: 0, startY: 0 });
 
-  const handleMouseDown = useCallback((e: React.MouseEvent, sectionId: InspectorSectionId) => {
-    setDragState({
-      sectionId,
-      startX: e.clientX,
-      startY: e.clientY,
-    });
-  }, []);
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent, sectionId: InspectorSectionId) => {
+      setDragState({
+        sectionId,
+        startX: e.clientX,
+        startY: e.clientY,
+      });
+    },
+    [],
+  );
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (dragState.sectionId) {
-      const deltaX = Math.abs(e.clientX - dragState.startX);
-      const deltaY = Math.abs(e.clientY - dragState.startY);
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (dragState.sectionId) {
+        const deltaX = Math.abs(e.clientX - dragState.startX);
+        const deltaY = Math.abs(e.clientY - dragState.startY);
 
-      // If moved more than 5px, start drag
-      if (deltaX > 5 || deltaY > 5) {
-        if (onStartDrag) {
-          onStartDrag(dragState.sectionId, e.clientX, e.clientY);
+        // If moved more than 5px, start drag
+        if (deltaX > 5 || deltaY > 5) {
+          if (onStartDrag) {
+            onStartDrag(dragState.sectionId, e.clientX, e.clientY);
+          }
+          setDragState({ sectionId: null, startX: 0, startY: 0 });
         }
-        setDragState({ sectionId: null, startX: 0, startY: 0 });
       }
-    }
-  }, [dragState, onStartDrag]);
+    },
+    [dragState, onStartDrag],
+  );
 
-  const handleMouseUp = useCallback((sectionId: InspectorSectionId) => {
-    // If mouse up without significant movement, treat as click
-    if (dragState.sectionId === sectionId) {
-      onSectionClick(sectionId);
-    }
-    setDragState({ sectionId: null, startX: 0, startY: 0 });
-  }, [dragState, onSectionClick]);
+  const handleMouseUp = useCallback(
+    (sectionId: InspectorSectionId) => {
+      // If mouse up without significant movement, treat as click
+      if (dragState.sectionId === sectionId) {
+        onSectionClick(sectionId);
+      }
+      setDragState({ sectionId: null, startX: 0, startY: 0 });
+    },
+    [dragState, onSectionClick],
+  );
 
   return (
     <div
       className="fixed top-1/2 -translate-y-1/2 z-30 flex flex-col gap-y-6 transition-transform duration-300 ease-out"
       style={{
-        right: '0px',
+        right: "0px",
         width: `${RAIL_WIDTH}px`,
         transform: `translateY(-50%) translateX(${isPanelOpen ? -(PANEL_WIDTH + GUTTER) : 0}px)`,
       }}
       onMouseMove={handleMouseMove}
     >
-      <div className="flex flex-col gap-1.5 px-3">
+      <div className="flex flex-col gap-1.5 px-3 gap-y-[26px] h-fit">
         {INSPECTOR_SECTIONS.map((section) => (
           <Button
             key={section.id}
@@ -528,34 +542,8 @@ export function ExperienceInspectorPanel({
 
       case "realityPlanes":
         return (
-          <div className="space-y-4">
-            {Object.entries(REALITY_PLANE_LABELS).map(([code, label]) => (
-              <div key={code} className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <Label className="text-sm font-medium">{label}</Label>
-                  <span className="text-sm text-muted-foreground">
-                    {project.realityPlanes?.[
-                      code as keyof typeof project.realityPlanes
-                    ] || 0}
-                    %
-                  </span>
-                </div>
-                <Slider
-                  value={[
-                    project.realityPlanes?.[
-                      code as keyof typeof project.realityPlanes
-                    ] || 0,
-                  ]}
-                  onValueChange={([value]) => {
-                    updateRealityPlane(code as any, value);
-                    triggerSave();
-                  }}
-                  max={100}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            ))}
+          <div className="space-y-4 w-full overflow-auto">
+            <RealityPlanesEditor className="w-full" compact />
           </div>
         );
 
@@ -694,20 +682,14 @@ export function ExperienceInspectorPanel({
     <div
       className="fixed top-16 bottom-0 z-20 flex flex-col bg-card/95 backdrop-blur-xl border-l border-border shadow-2xl shadow-black/20 transition-transform duration-300 ease-out"
       style={{
-        right: '0px',
+        right: "0px",
         width: `${PANEL_WIDTH}px`,
-        maxWidth: '40vw',
-        transform: `translateX(${isOpen ? '0%' : '100%'})`,
+        maxWidth: "40vw",
+        transform: `translateX(${isOpen ? "0%" : "100%"})`,
       }}
     >
       {/* Vertical divider/glow when panel is open */}
-      {isOpen && (
-        <div
-          className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-primary/30 to-transparent"
-          style={{ left: `-${GUTTER}px` }}
-        />
-      )}
-
+      {isOpen && <></>}
       {/* Panel Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-3">
@@ -749,11 +731,10 @@ export function ExperienceInspectorPanel({
           <X className="w-4 h-4" />
         </Button>
       </div>
-
       {/* Scrollable Content with fade transition */}
       <ScrollArea className="flex-1">
         <div
-          className={`p-4 transition-opacity duration-150 ${isContentFading ? 'opacity-0' : 'opacity-100'}`}
+          className={`p-4 transition-opacity duration-150 ${isContentFading ? "opacity-0" : "opacity-100"}`}
         >
           {renderSectionContent()}
         </div>
@@ -766,7 +747,11 @@ export function ExperienceInspectorPanel({
 interface ExperienceInspectorProps {
   project: CXDProject;
   onPanelOpenChange?: (isOpen: boolean) => void;
-  onStartDrag?: (sectionId: InspectorSectionId, clientX: number, clientY: number) => void;
+  onStartDrag?: (
+    sectionId: InspectorSectionId,
+    clientX: number,
+    clientY: number,
+  ) => void;
   onOpenSection?: (sectionId: InspectorSectionId) => void;
   className?: string;
 }
@@ -805,10 +790,13 @@ export function ExperienceInspector({
   };
 
   // Expose a way to programmatically open a section
-  const handleOpenSection = useCallback((sectionId: InspectorSectionId) => {
-    setActiveSection(sectionId);
-    onPanelOpenChange?.(true);
-  }, [onPanelOpenChange]);
+  const handleOpenSection = useCallback(
+    (sectionId: InspectorSectionId) => {
+      setActiveSection(sectionId);
+      onPanelOpenChange?.(true);
+    },
+    [onPanelOpenChange],
+  );
 
   // Call onOpenSection when provided (for external control)
   useEffect(() => {
@@ -835,7 +823,6 @@ export function ExperienceInspector({
         isPanelOpen={isPanelOpen}
         onStartDrag={onStartDrag}
       />
-
       {/* Inspector Panel - always mounted but translated off-screen when closed */}
       {activeSection && (
         <ExperienceInspectorPanel

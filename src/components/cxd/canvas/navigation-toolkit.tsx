@@ -7,10 +7,10 @@ export interface NavigationToolkitProps {
   onZoomOut: () => void;
   onResetView: () => void;
   onFitAll: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  canUndo: boolean;
-  canRedo: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 export function NavigationToolkit({
@@ -56,26 +56,30 @@ export function NavigationToolkit({
         <Grid3X3 className="w-4 h-4" />
       </Button>
 
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onUndo}
-        disabled={!canUndo}
-        className="backdrop-blur border border-border disabled:opacity-50 bg-card opacity-80"
-        title="Undo (Ctrl+Z)"
-      >
-        <Undo2 className="w-4 h-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onRedo}
-        disabled={!canRedo}
-        className="bg-card/80 backdrop-blur border border-border disabled:opacity-50"
-        title="Redo (Ctrl+Shift+Z)"
-      >
-        <Redo2 className="w-4 h-4" />
-      </Button>
+      {onUndo && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onUndo}
+          disabled={!canUndo}
+          className="backdrop-blur border border-border disabled:opacity-50 bg-card opacity-80"
+          title="Undo (Ctrl+Z)"
+        >
+          <Undo2 className="w-4 h-4" />
+        </Button>
+      )}
+      {onRedo && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onRedo}
+          disabled={!canRedo}
+          className="bg-card/80 backdrop-blur border border-border disabled:opacity-50"
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          <Redo2 className="w-4 h-4" />
+        </Button>
+      )}
     </div>
   );
 }

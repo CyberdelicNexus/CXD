@@ -9,9 +9,10 @@ import { CanvasToolkit } from "./canvas/canvas-toolkit";
 import { CanvasElementRenderer } from "./canvas/canvas-element";
 import { ExperienceInspector } from "./canvas/experience-inspector";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
-import { LinesOverlay } from "./canvas/lines-overlay";
+import { LineLayer } from "./canvas/line-layer";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Home } from "lucide-react";
+import { ChevronRight, Home, Minus, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   CanvasElement,
   CanvasElementType,
@@ -21,6 +22,7 @@ import {
   getAnchorPosition,
   getAutoAnchorPosition,
   getClosestAnchors,
+  getNearestAnchor,
   CanvasEdge,
 } from "@/types/canvas-elements";
 
@@ -74,11 +76,13 @@ export function CXDCanvas() {
     boardPath,
     moveContainerWithChildren,
     addNodeToContainer,
+    removeNodeFromContainer,
     pushCanvasHistory,
     undo,
     redo,
     canUndo,
     canRedo,
+    highlightedElementId,
   } = useCXDStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -110,7 +114,6 @@ export function CXDCanvas() {
   const [draggingBendHandle, setDraggingBendHandle] = useState<string | null>(
     null,
   );
-  const [bendDragStart, setBendDragStart] = useState({ x: 0, y: 0 });
 
   // Connector hover target for glow feedback
   const [hoverTargetNodeId, setHoverTargetNodeId] = useState<string | null>(
@@ -120,6 +123,9 @@ export function CXDCanvas() {
     nodeId: string;
     port: string;
   } | null>(null);
+  
+  // Hovered anchor for connector attachment (specific anchor point)
+  const [hoveredAnchor, setHoveredAnchor] = useState<string | null>(null);
 
   // Multi-select marquee state
   const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
@@ -140,6 +146,11 @@ export function CXDCanvas() {
   const [dropTargetBoardId, setDropTargetBoardId] = useState<string | null>(
     null,
   );
+
+  // Drop target container (for hover feedback)
+  const [dropTargetContainerId, setDropTargetContainerId] = useState<
+    string | null
+  >(null);
 
   // Experience block drag state
   const [draggingExperienceBlock, setDraggingExperienceBlock] = useState<{
@@ -162,6 +173,9 @@ export function CXDCanvas() {
     y: number;
   } | null>(null);
 
+  // Active tool state (lifted from toolkit for line layer integration)
+  const [activeTool, setActiveTool] = useState<CanvasElementType | null>(null);
+
   const project = getCurrentProject();
   const canvasElements = getCanvasElements();
   const canvasEdges = getCanvasEdges();
@@ -176,58 +190,29 @@ export function CXDCanvas() {
   console.log("[CANVAS] All edges in project:", project?.canvasEdges || []);
   console.log("[CANVAS] Filtered edges for current view:", canvasEdges);
 
-  // Listen for line creation events from the toolkit
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const handleCreateLine = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      const { startX, startY, endX, endY } = customEvent.detail;
-
+  // Line creation callback from LineLayer
+  const handleCreateLine = useCallback(
+    (lineData: Omit<LineElement, "id" | "zIndex" | "boardId" | "surface">) => {
       const maxZIndex = canvasElements.reduce(
         (max, el) => Math.max(max, el.zIndex),
         0,
       );
 
-      const midX = (startX + endX) / 2;
-      const midY = (startY + endY) / 2;
-
       const newLine: LineElement = {
+        ...lineData,
         id: uuidv4(),
-        type: "line",
-        x: Math.min(startX, endX), // Nominal position for backward compat
-        y: Math.min(startY, endY),
-        width: Math.abs(endX - startX),
-        height: Math.abs(endY - startY),
         zIndex: maxZIndex + 1,
         boardId: activeBoardId,
         surface: activeSurface,
-        start: { x: startX, y: startY },
-        end: { x: endX, y: endY },
-        bend: { x: midX, y: midY },
-        style: {
-          color: "hsl(180 100% 50% / 0.8)",
-          widthPx: 2,
-          kind: "solid" as const,
-        },
       };
 
       addCanvasElement(newLine);
-    };
-
-    const canvas = containerRef.current;
-    canvas.addEventListener("createLine", handleCreateLine);
-
-    return () => {
-      canvas.removeEventListener("createLine", handleCreateLine);
-    };
-  }, [
-    containerRef,
-    canvasElements,
-    activeBoardId,
-    activeSurface,
-    addCanvasElement,
-  ]);
+      // Select the newly created line
+      setSelectedElementId(newLine.id);
+      setSelectedElementIds(new Set([newLine.id]));
+    },
+    [canvasElements, activeBoardId, activeSurface, addCanvasElement],
+  );
 
   // Merge project's saved canvas layout with defaults
   const sectionPositions = useMemo(() => {
@@ -280,15 +265,16 @@ export function CXDCanvas() {
           return;
         }
 
+        // Deselect element when clicking on background
+        setSelectedElementId(null);
+        setSelectedElementIds(new Set());
+        setSelectedEdgeId(null); // Also deselect connector/edge
+
         setIsPanning(true);
         setPanStart({
           x: e.clientX - canvasPosition.x,
           y: e.clientY - canvasPosition.y,
         });
-        // Deselect element when clicking on background
-        setSelectedElementId(null);
-        setSelectedElementIds(new Set());
-        setSelectedEdgeId(null); // Also deselect connector/edge
         e.preventDefault();
       }
     },
@@ -343,11 +329,55 @@ export function CXDCanvas() {
                   x: el.x + deltaX,
                   y: el.y + deltaY,
                 });
+
+                // Check if child element moved outside its container
+                if (el.containerId) {
+                  const container = canvasElements.find(
+                    (c) => c.id === el.containerId,
+                  );
+                  if (container && container.type === 'container') {
+                    const newX = el.x + deltaX;
+                    const newY = el.y + deltaY;
+                    
+                    // Check if moved outside container's origin (detach)
+                    const isCompletelyOutside =
+                      newX < container.x - 50 ||
+                      newY < container.y - 50;
+
+                    if (isCompletelyOutside) {
+                      removeNodeFromContainer(id);
+                    } else {
+                      // Auto-expand container if element extends beyond bounds
+                      const padding = 20;
+                      const neededWidth = Math.max(
+                        container.width,
+                        newX + el.width - container.x + padding
+                      );
+                      const neededHeight = Math.max(
+                        container.height,
+                        newY + el.height - container.y + padding
+                      );
+                      
+                      if (neededWidth > container.width || neededHeight > container.height) {
+                        // Use a timeout to batch the update after drag completes
+                        setTimeout(() => {
+                          const currentContainer = canvasElements.find(c => c.id === container.id);
+                          if (currentContainer) {
+                            updateCanvasElement(container.id, {
+                              width: Math.max(currentContainer.width, neededWidth),
+                              height: Math.max(currentContainer.height, neededHeight),
+                            });
+                          }
+                        }, 0);
+                      }
+                    }
+                  }
+                }
               }
             }
           });
 
-          // Check for drop target board
+          // Check for drop target board and container
           if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             const mouseCanvasX =
@@ -365,6 +395,18 @@ export function CXDCanvas() {
                 mouseCanvasY <= el.y + el.height,
             );
             setDropTargetBoardId(boardTarget?.id || null);
+
+            // Check for container hover (only non-container elements can be dropped into containers)
+            const containerTarget = canvasElements.find(
+              (el) =>
+                el.type === "container" &&
+                !selectedElementIds.has(el.id) &&
+                mouseCanvasX >= el.x &&
+                mouseCanvasX <= el.x + el.width &&
+                mouseCanvasY >= el.y &&
+                mouseCanvasY <= el.y + el.height,
+            );
+            setDropTargetContainerId(containerTarget?.id || null);
           }
         } else {
           const element = canvasElements.find(
@@ -379,10 +421,54 @@ export function CXDCanvas() {
                 x: element.x + deltaX,
                 y: element.y + deltaY,
               });
+
+              // Check if child element moved outside its container
+              if (element.containerId) {
+                const container = canvasElements.find(
+                  (c) => c.id === element.containerId,
+                );
+                if (container && container.type === 'container') {
+                  const newX = element.x + deltaX;
+                  const newY = element.y + deltaY;
+                  
+                  // Check if moved outside container's origin (detach)
+                  const isCompletelyOutside =
+                    newX < container.x - 50 ||
+                    newY < container.y - 50;
+
+                  if (isCompletelyOutside) {
+                    removeNodeFromContainer(draggingElement);
+                  } else {
+                    // Auto-expand container if element extends beyond bounds
+                    const padding = 20;
+                    const neededWidth = Math.max(
+                      container.width,
+                      newX + element.width - container.x + padding
+                    );
+                    const neededHeight = Math.max(
+                      container.height,
+                      newY + element.height - container.y + padding
+                    );
+                    
+                    if (neededWidth > container.width || neededHeight > container.height) {
+                      // Use a timeout to batch the update after drag completes
+                      setTimeout(() => {
+                        const currentContainer = canvasElements.find(c => c.id === container.id);
+                        if (currentContainer) {
+                          updateCanvasElement(container.id, {
+                            width: Math.max(currentContainer.width, neededWidth),
+                            height: Math.max(currentContainer.height, neededHeight),
+                          });
+                        }
+                      }, 0);
+                    }
+                  }
+                }
+              }
             }
           }
 
-          // Check for drop target board (for single element drag)
+          // Check for drop target board and container (for single element drag)
           if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             const mouseCanvasX =
@@ -400,6 +486,20 @@ export function CXDCanvas() {
                 mouseCanvasY <= el.y + el.height,
             );
             setDropTargetBoardId(boardTarget?.id || null);
+
+            // Check for container hover (only non-container elements)
+            if (element && element.type !== "container") {
+              const containerTarget = canvasElements.find(
+                (el) =>
+                  el.type === "container" &&
+                  el.id !== draggingElement &&
+                  mouseCanvasX >= el.x &&
+                  mouseCanvasX <= el.x + el.width &&
+                  mouseCanvasY >= el.y &&
+                  mouseCanvasY <= el.y + el.height,
+              );
+              setDropTargetContainerId(containerTarget?.id || null);
+            }
           }
         }
         setDragElementStart({ x: e.clientX, y: e.clientY });
@@ -451,19 +551,9 @@ export function CXDCanvas() {
         const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
         const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
 
-        const dx = x - bendDragStart.x;
-        const dy = y - bendDragStart.y;
-
-        const edge = canvasEdges.find((e) => e.id === draggingBendHandle);
-        if (edge && edge.bend) {
-          updateCanvasEdge(draggingBendHandle, {
-            bend: {
-              x: edge.bend.x + dx,
-              y: edge.bend.y + dy,
-            },
-          });
-        }
-        setBendDragStart({ x, y });
+        updateCanvasEdge(draggingBendHandle, {
+          bend: { x, y },
+        });
       }
     },
     [
@@ -485,7 +575,7 @@ export function CXDCanvas() {
       selectedElementIds,
       dragOffsets,
       draggingBendHandle,
-      bendDragStart,
+      removeNodeFromContainer,
       canvasEdges,
       updateCanvasEdge,
     ],
@@ -531,36 +621,22 @@ export function CXDCanvas() {
 
     // Cancel connecting if clicking on background
     if (isConnecting) {
-      // Only cancel if no target node was detected
-      if (!hoverTargetNodeId) {
-        console.log(
-          "[CONNECTOR] Canceling connector - clicked on background, no target node",
-        );
-        setIsConnecting(false);
-        setConnectingFrom(null);
-        setConnectorPreview(null);
-        setHoverTargetNodeId(null);
-        setHoverTargetPort(null);
-      } else {
-        // Node was detected, create the connection
-        console.log(
-          "[CONNECTOR] Creating connector to node:",
-          hoverTargetNodeId,
-        );
-        if (
-          connectingFrom &&
-          hoverTargetNodeId &&
-          hoverTargetNodeId !== connectingFrom.elementId
-        ) {
+      // Create connection if hovering any element (snap to nearest anchor)
+      if (hoverTargetNodeId && connectingFrom) {
+        const toEl = canvasElements.find((el) => el.id === hoverTargetNodeId);
+        
+        if (toEl && hoverTargetNodeId !== connectingFrom.elementId) {
           const fromEl = canvasElements.find(
             (el) => el.id === connectingFrom.elementId,
           );
-          const toEl = canvasElements.find((el) => el.id === hoverTargetNodeId);
+
+          // Calculate nearest anchor on target element
+          const fromPos = fromEl ? getAnchorPosition(fromEl, connectingFrom.anchor) : { x: 0, y: 0 };
+          const targetAnchor = getNearestAnchor(toEl, fromPos);
 
           let bendPoint: { x: number; y: number } | undefined;
           if (fromEl && toEl) {
-            const fromPos = getAnchorPosition(fromEl, connectingFrom.anchor);
-            const toPos = getAutoAnchorPosition(toEl, fromPos);
+            const toPos = getAnchorPosition(toEl, targetAnchor);
             bendPoint = {
               x: (fromPos.x + toPos.x) / 2,
               y: (fromPos.y + toPos.y) / 2,
@@ -572,7 +648,7 @@ export function CXDCanvas() {
             fromNodeId: connectingFrom.elementId,
             toNodeId: hoverTargetNodeId,
             fromAnchor: connectingFrom.anchor,
-            toAnchor: "auto" as any,
+            toAnchor: targetAnchor,
             boardId: activeBoardId,
             surface: activeSurface,
             bend: bendPoint,
@@ -585,17 +661,16 @@ export function CXDCanvas() {
           };
           console.log("[CONNECTOR] Creating edge:", newEdge);
           addCanvasEdge(newEdge);
-          setTimeout(() => {
-            console.log("[CONNECTOR] Edge added. Checking after timeout...");
-          }, 100);
         }
-
-        setIsConnecting(false);
-        setConnectingFrom(null);
-        setConnectorPreview(null);
-        setHoverTargetNodeId(null);
-        setHoverTargetPort(null);
       }
+
+      // Always clean up connector state
+      setIsConnecting(false);
+      setConnectingFrom(null);
+      setConnectorPreview(null);
+      setHoverTargetNodeId(null);
+      setHoverTargetPort(null);
+      setHoveredAnchor(null);
     }
 
     // DON'T clear dropTargetBoardId here - it gets cleared in handleElementDragEnd
@@ -610,6 +685,7 @@ export function CXDCanvas() {
     marqueeEnd,
     canvasElements,
     hoverTargetNodeId,
+    hoveredAnchor,
     connectingFrom,
     activeBoardId,
     activeSurface,
@@ -675,7 +751,17 @@ export function CXDCanvas() {
           };
           break;
         case "container":
-          newElement = { ...baseElement, type: "container", label: "" };
+          // Containers should always be at the back, so use a lower z-index
+          const minZIndex = canvasElements.reduce(
+            (min, el) => Math.min(min, el.zIndex),
+            0,
+          );
+          newElement = {
+            ...baseElement,
+            type: "container",
+            label: "",
+            zIndex: minZIndex - 1, // Place behind all other elements
+          };
           break;
         case "connector":
           // Connectors are created via drag, not click placement
@@ -684,7 +770,12 @@ export function CXDCanvas() {
           // Line tool - handled separately via drag interaction in toolkit
           return;
         case "text":
-          newElement = { ...baseElement, type: "text", content: "" };
+          newElement = {
+            ...baseElement,
+            type: "text",
+            content: "",
+            style: { fontSize: 20 },
+          };
           break;
         case "link":
           const linkMode = options?.linkMode || "bookmark";
@@ -738,14 +829,37 @@ export function CXDCanvas() {
       e.stopPropagation();
       const element = canvasElements.find((el) => el.id === elementId);
 
-      // Store offsets for all selected elements for group dragging
+      // Don't allow dragging locked elements
+      if (element?.locked) {
+        return;
+      }
+
+      // Alt-drag to duplicate
+      if (e.altKey && element) {
+        pushCanvasHistory(); // Save state before duplicate
+        const newElement: CanvasElement = {
+          ...element,
+          id: uuidv4(),
+          x: element.x + 20,
+          y: element.y + 20,
+        };
+        addCanvasElement(newElement);
+        setSelectedElementId(newElement.id);
+        setSelectedElementIds(new Set([newElement.id]));
+        setDraggingElement(newElement.id);
+        setDragElementStart({ x: e.clientX, y: e.clientY });
+        return;
+      }
+
+      // Store offsets for all selected elements for group dragging (excluding locked ones)
       if (selectedElementIds.size > 1 && selectedElementIds.has(elementId)) {
         const offsets = new Map<string, { x: number; y: number }>();
         const baseEl = element;
         if (baseEl) {
           selectedElementIds.forEach((id) => {
             const el = canvasElements.find((e) => e.id === id);
-            if (el) {
+            // Only include unlocked elements in group drag
+            if (el && !el.locked) {
               offsets.set(id, { x: el.x - baseEl.x, y: el.y - baseEl.y });
             }
           });
@@ -757,7 +871,7 @@ export function CXDCanvas() {
       setDragElementStart({ x: e.clientX, y: e.clientY });
       setSelectedElementId(elementId);
     },
-    [canvasElements, selectedElementIds],
+    [canvasElements, selectedElementIds, addCanvasElement, pushCanvasHistory],
   );
 
   // Handle element drag end
@@ -806,38 +920,62 @@ export function CXDCanvas() {
       }
     }
 
-    // Check if element was dropped into a container
-    if (draggingElement) {
-      const draggedElement = canvasElements.find(
-        (el) => el.id === draggingElement,
+    // Check if elements were dropped into a container (support multi-drop)
+    if (dropTargetContainerId) {
+      const targetContainer = canvasElements.find(
+        (el) => el.id === dropTargetContainerId,
       );
-      if (draggedElement && draggedElement.type !== "container") {
-        // Find if we're inside any container
-        const containers = canvasElements.filter(
-          (el) => el.type === "container",
-        );
-        for (const container of containers) {
-          if (
-            draggedElement.x >= container.x &&
-            draggedElement.y >= container.y &&
-            draggedElement.x + draggedElement.width <=
-              container.x + container.width &&
-            draggedElement.y + draggedElement.height <=
-              container.y + container.height
-          ) {
-            addNodeToContainer(draggingElement, container.id);
-            break;
+
+      if (targetContainer && targetContainer.type === "container") {
+        // Collect elements to drop (either selected elements or the dragging element)
+        const elementsToDrop =
+          selectedElementIds.size > 0
+            ? Array.from(selectedElementIds).filter((id) => {
+                const el = canvasElements.find((e) => e.id === id);
+                return el && el.type !== "container" && el.type !== "board";
+              })
+            : draggingElement
+              ? [draggingElement]
+              : [];
+
+        // Attach all dropped elements to the container and expand if needed
+        elementsToDrop.forEach((id) => {
+          const el = canvasElements.find((e) => e.id === id);
+          if (el) {
+            // Add to container (this will trigger auto-expansion in addNodeToContainer)
+            addNodeToContainer(id, targetContainer.id);
+            
+            // Double check container expansion on drag end
+            const padding = 20;
+            const neededWidth = Math.max(
+              targetContainer.width,
+              el.x + el.width - targetContainer.x + padding
+            );
+            const neededHeight = Math.max(
+              targetContainer.height,
+              el.y + el.height - targetContainer.y + padding
+            );
+            
+            if (neededWidth > targetContainer.width || neededHeight > targetContainer.height) {
+              updateCanvasElement(targetContainer.id, {
+                width: neededWidth,
+                height: neededHeight,
+              });
+            }
           }
-        }
+        });
       }
     }
+
     setDraggingElement(null);
     setDropTargetBoardId(null);
+    setDropTargetContainerId(null);
   }, [
     draggingElement,
     canvasElements,
     addNodeToContainer,
     dropTargetBoardId,
+    dropTargetContainerId,
     selectedElementIds,
     updateCanvasElement,
   ]);
@@ -944,6 +1082,7 @@ export function CXDCanvas() {
       setSelectedElementId(null);
       setHoverTargetNodeId(null);
       setHoverTargetPort(null);
+      setHoveredAnchor(null);
     },
     [],
   );
@@ -993,16 +1132,13 @@ export function CXDCanvas() {
         };
         console.log("[CONNECTOR] Creating edge:", newEdge);
         addCanvasEdge(newEdge);
-        // Force a re-check after adding
-        setTimeout(() => {
-          console.log("[CONNECTOR] Edge added. Checking after timeout...");
-        }, 100);
       }
       setIsConnecting(false);
       setConnectingFrom(null);
       setConnectorPreview(null);
       setHoverTargetNodeId(null);
       setHoverTargetPort(null);
+      setHoveredAnchor(null);
     },
     [
       connectingFrom,
@@ -1021,11 +1157,155 @@ export function CXDCanvas() {
     [enterBoard],
   );
 
-  // Handle delete key for edges and elements, and undo/redo
+  // Clipboard state for copy/paste
+  const [clipboard, setClipboard] = useState<CanvasElement[]>([]);
+  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+
+  // Track mouse position for paste
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      setLastMousePos({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
+
+  // Check if user is in an editing context
+  const isEditingContext = useCallback(() => {
+    const target = document.activeElement as HTMLElement;
+    return (
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.contentEditable === "true" ||
+      target.hasAttribute("data-no-drag") ||
+      target.closest("[data-crop-mode]") !== null // Cropping mode
+    );
+  }, []);
+
+  // Global keyboard shortcut system
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Undo: Ctrl+Z or Cmd+Z
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      // ESCAPE - Always cancels current mode/closes menus
+      if (e.key === "Escape") {
+        setIsConnecting(false);
+        setConnectingFrom(null);
+        setConnectorPreview(null);
+        setSelectedElementIds(new Set());
+        setSelectedElementId(null);
+        setHoveredAnchor(null);
+        setSelectedEdgeId(null);
+        return;
+      }
+
+      // Don't run shortcuts while editing text or in special editing modes
+      if (isEditingContext()) {
+        return;
+      }
+
+      const isMod = e.ctrlKey || e.metaKey;
+
+      // ARROW KEY NAVIGATION: Move selected elements
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        if (selectedElementIds.size > 0) {
+          e.preventDefault();
+          pushCanvasHistory(); // Save state before move
+
+          const moveAmount = e.shiftKey ? 10 : 1; // Shift for 10px, otherwise 1px
+          let deltaX = 0;
+          let deltaY = 0;
+
+          if (e.key === "ArrowLeft") deltaX = -moveAmount;
+          if (e.key === "ArrowRight") deltaX = moveAmount;
+          if (e.key === "ArrowUp") deltaY = -moveAmount;
+          if (e.key === "ArrowDown") deltaY = moveAmount;
+
+          // Move all selected elements
+          selectedElementIds.forEach((id) => {
+            const element = canvasElements.find((el) => el.id === id);
+            if (element) {
+              updateCanvasElement(id, {
+                x: element.x + deltaX,
+                y: element.y + deltaY,
+              });
+            }
+          });
+
+          // Move selected edge bend point if only one edge is selected
+          if (selectedEdgeId && selectedElementIds.size === 0) {
+            const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
+            if (edge && edge.bend) {
+              updateCanvasEdge(selectedEdgeId, {
+                bend: {
+                  x: edge.bend.x + deltaX,
+                  y: edge.bend.y + deltaY,
+                },
+              });
+            }
+          }
+
+          return;
+        }
+      }
+
+      // ONE-KEY TOOL ACTIVATION
+      // T → Text tool
+      if (e.key === "t" || e.key === "T") {
+        e.preventDefault();
+        setActiveTool("text");
+        return;
+      }
+
+      // C → Card tool (freeform)
+      if (e.key === "c" || e.key === "C") {
+        e.preventDefault();
+        setActiveTool("freeform");
+        return;
+      }
+
+      // B → Board tool
+      if (e.key === "b" || e.key === "B") {
+        e.preventDefault();
+        setActiveTool("board");
+        return;
+      }
+
+      // L → Line tool
+      if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        setActiveTool("line");
+        return;
+      }
+
+      // I → Image tool
+      if (e.key === "i" || e.key === "I") {
+        e.preventDefault();
+        setActiveTool("image");
+        return;
+      }
+
+      // O → Container tool
+      if (e.key === "o" || e.key === "O") {
+        e.preventDefault();
+        setActiveTool("container");
+        return;
+      }
+
+      // E → Link tool
+      if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        setActiveTool("link");
+        return;
+      }
+
+      // F → Open Shape Context menu (activate shape tool)
+      if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        setActiveTool("shape");
+        return;
+      }
+
+      // UNDO: Ctrl/Cmd + Z
+      if (isMod && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         if (canUndo()) {
           undo();
@@ -1033,8 +1313,8 @@ export function CXDCanvas() {
         return;
       }
 
-      // Redo: Ctrl+Shift+Z or Cmd+Shift+Z
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey) {
+      // REDO: Ctrl/Cmd + Shift + Z
+      if (isMod && e.key === "z" && e.shiftKey) {
         e.preventDefault();
         if (canRedo()) {
           redo();
@@ -1042,8 +1322,8 @@ export function CXDCanvas() {
         return;
       }
 
-      // Redo: Ctrl+Y or Cmd+Y (alternative)
-      if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+      // REDO: Ctrl/Cmd + Y (alternative)
+      if (isMod && e.key === "y") {
         e.preventDefault();
         if (canRedo()) {
           redo();
@@ -1051,20 +1331,83 @@ export function CXDCanvas() {
         return;
       }
 
+      // COPY: Ctrl/Cmd + C
+      if (isMod && e.key === "c" && selectedElementIds.size > 0) {
+        e.preventDefault();
+        const elements = getCanvasElements();
+        const selectedElements = elements.filter((el) =>
+          selectedElementIds.has(el.id)
+        );
+        setClipboard(selectedElements);
+        return;
+      }
+
+      // PASTE: Ctrl/Cmd + V
+      if (isMod && e.key === "v" && clipboard.length > 0) {
+        e.preventDefault();
+        pushCanvasHistory(); // Save state before paste
+
+        // Calculate paste position
+        const containerRect = containerRef.current?.getBoundingClientRect();
+        if (!containerRect) return;
+
+        // Convert mouse position to canvas coordinates
+        const canvasX = (lastMousePos.x - containerRect.left - canvasPosition.x) / canvasZoom;
+        const canvasY = (lastMousePos.y - containerRect.top - canvasPosition.y) / canvasZoom;
+
+        // Find top-left of copied elements
+        const minX = Math.min(...clipboard.map((el) => el.x));
+        const minY = Math.min(...clipboard.map((el) => el.y));
+
+        // Paste with offset from original or at mouse position
+        const newIds = new Set<string>();
+        clipboard.forEach((element) => {
+          const offsetX = element.x - minX;
+          const offsetY = element.y - minY;
+
+          const newElement: CanvasElement = {
+            ...element,
+            id: uuidv4(),
+            x: canvasX + offsetX,
+            y: canvasY + offsetY,
+          };
+          addCanvasElement(newElement);
+          newIds.add(newElement.id);
+        });
+
+        // Select pasted elements
+        setSelectedElementIds(newIds);
+        return;
+      }
+
+      // DUPLICATE: Ctrl/Cmd + D
+      if (isMod && e.key === "d" && selectedElementIds.size > 0) {
+        e.preventDefault();
+        pushCanvasHistory(); // Save state before duplicate
+
+        const newIds = new Set<string>();
+        selectedElementIds.forEach((id) => {
+          const elements = getCanvasElements();
+          const element = elements.find((el) => el.id === id);
+          if (element) {
+            const newElement: CanvasElement = {
+              ...element,
+              id: uuidv4(),
+              x: element.x + 20,
+              y: element.y + 20,
+            };
+            addCanvasElement(newElement);
+            newIds.add(newElement.id);
+          }
+        });
+
+        // Select duplicated elements
+        setSelectedElementIds(newIds);
+        return;
+      }
+
+      // DELETE: Delete or Backspace
       if (e.key === "Delete" || e.key === "Backspace") {
-        // GUARD: Do not delete elements if user is editing text
-        const target = e.target as HTMLElement;
-        const isEditingText =
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.contentEditable === "true" ||
-          target.hasAttribute("data-no-drag"); // Our text editing marker
-
-        if (isEditingText) {
-          // User is typing - let normal text editing happen
-          return;
-        }
-
         // Prevent default browser behavior
         if (selectedElementIds.size > 0 || selectedEdgeId) {
           e.preventDefault();
@@ -1093,14 +1436,8 @@ export function CXDCanvas() {
           setSelectedElementId(null);
         }
       }
-      if (e.key === "Escape") {
-        setIsConnecting(false);
-        setConnectingFrom(null);
-        setConnectorPreview(null);
-        setSelectedElementIds(new Set());
-        setSelectedElementId(null);
-      }
     };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
@@ -1113,6 +1450,18 @@ export function CXDCanvas() {
     canUndo,
     canRedo,
     pushCanvasHistory,
+    isEditingContext,
+    clipboard,
+    getCanvasElements,
+    addCanvasElement,
+    canvasPosition,
+    canvasZoom,
+    lastMousePos,
+    canvasElements,
+    updateCanvasElement,
+    canvasEdges,
+    updateCanvasEdge,
+    setActiveTool,
   ]);
 
   // Smooth zoom with scroll wheel - zoom towards cursor position
@@ -1300,7 +1649,7 @@ export function CXDCanvas() {
           ? "cursor-grabbing"
           : draggingElement
             ? "cursor-move"
-            : "cursor-grab w-full"
+            : "cursor-grab w-full h-full"
       }`}
       style={{ right: canvasRightMargin }}
       onMouseDown={handleCanvasMouseDown}
@@ -1314,7 +1663,7 @@ export function CXDCanvas() {
     >
       {/* Canvas Background with dot grid */}
       <div
-        className="canvas-background absolute inset-0 top-full left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-1 w-[134px] h-[102px] py-[8px] mt-[14.75px] bg-[#0f0939] opacity-[1]"
+        className="canvas-background absolute inset-0 top-full left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-1 py-[8px] mt-[14.75px] bg-[#0f0939] opacity-[1] w-[937px] h-[363px]"
         style={{
           background:
             "radial-gradient(circle at center, hsl(270 45% 8%) 0%, hsl(270 50% 3%) 100%)",
@@ -1322,7 +1671,7 @@ export function CXDCanvas() {
       />
       {/* Dot grid that moves with pan */}
       <div
-        className="dot-grid absolute pointer-events-none"
+        className="dot-grid pointer-events-none fixed flex"
         style={{
           inset: "-100%",
           width: "300%",
@@ -1333,66 +1682,75 @@ export function CXDCanvas() {
           transition: "none",
         }}
       />
-      {/* Canvas Content */}
+      {/* Canvas Content - z-index 10 to render above connector lines (z-index 5) */}
       <div
         className="absolute will-change-transform"
         style={{
           transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
           transformOrigin: "0 0",
+          zIndex: 10,
         }}
       >
         {/* Canvas Elements (freeform, images, shapes, etc.) - excluding lines which are rendered in overlay */}
-        {canvasElements.filter((el) => el.type !== 'line').map((element) => (
-          <CanvasElementRenderer
-            key={element.id}
-            element={element}
-            onUpdate={(updates) => updateCanvasElement(element.id, updates)}
-            onDelete={() => removeCanvasElement(element.id)}
-            onDuplicate={() => duplicateCanvasElement(element.id)}
-            onDragStart={(e) => {
-              // Prevent dragging while connecting
-              if (!isConnecting) {
-                handleElementDragStart(element.id, e);
-              }
-            }}
-            onDragEnd={handleElementDragEnd}
-            isDragging={draggingElement === element.id}
-            isSelected={
-              selectedElementId === element.id ||
-              selectedElementIds.has(element.id)
-            }
-            isDropTarget={dropTargetBoardId === element.id}
-            isHoverTarget={hoverTargetNodeId === element.id}
-            onSelect={(e) => {
-              if (e?.shiftKey || e?.ctrlKey || e?.metaKey) {
-                // Multi-select with Shift/Ctrl/Cmd
-                const newSelected = new Set(selectedElementIds);
-                if (newSelected.has(element.id)) {
-                  newSelected.delete(element.id);
-                } else {
-                  newSelected.add(element.id);
+        {canvasElements
+          .filter((el) => el.type !== "line")
+          .map((element) => (
+            <CanvasElementRenderer
+              key={element.id}
+              element={element}
+              onUpdate={(updates) => updateCanvasElement(element.id, updates)}
+              onDelete={() => removeCanvasElement(element.id)}
+              onDuplicate={() => duplicateCanvasElement(element.id)}
+              onDragStart={(e) => {
+                // Prevent dragging while connecting
+                if (!isConnecting) {
+                  handleElementDragStart(element.id, e);
                 }
-                setSelectedElementIds(newSelected);
-                setSelectedElementId(element.id);
-              } else {
-                // Single select
-                setSelectedElementId(element.id);
-                setSelectedElementIds(new Set([element.id]));
+              }}
+              onDragEnd={handleElementDragEnd}
+              isDragging={draggingElement === element.id}
+              isSelected={
+                selectedElementId === element.id ||
+                selectedElementIds.has(element.id)
               }
-              setSelectedEdgeId(null);
-            }}
-            canvasZoom={canvasZoom}
-            onEnterBoard={handleEnterBoard}
-            onStartConnector={handleStartConnector}
-            onEndConnector={handleEndConnector}
-            isConnecting={isConnecting}
-            onOpenExperiencePanel={(sectionId: any) => {
-              if ((window as any).__openExperienceSection) {
-                (window as any).__openExperienceSection(sectionId);
+              isDropTarget={
+                dropTargetBoardId === element.id ||
+                dropTargetContainerId === element.id
               }
-            }}
-          />
-        ))}
+              isHighlighted={highlightedElementId === element.id}
+              isHoverTarget={hoverTargetNodeId === element.id}
+              onSelect={(e) => {
+                if (e?.shiftKey || e?.ctrlKey || e?.metaKey) {
+                  // Multi-select with Shift/Ctrl/Cmd
+                  const newSelected = new Set(selectedElementIds);
+                  if (newSelected.has(element.id)) {
+                    newSelected.delete(element.id);
+                  } else {
+                    newSelected.add(element.id);
+                  }
+                  setSelectedElementIds(newSelected);
+                  setSelectedElementId(element.id);
+                } else {
+                  // Single select
+                  setSelectedElementId(element.id);
+                  setSelectedElementIds(new Set([element.id]));
+                }
+                setSelectedEdgeId(null);
+              }}
+              canvasZoom={canvasZoom}
+              onEnterBoard={handleEnterBoard}
+              onStartConnector={handleStartConnector}
+              onEndConnector={handleEndConnector}
+              isConnecting={isConnecting}
+              hoveredAnchor={hoveredAnchor}
+              onAnchorHover={setHoveredAnchor}
+              onOpenExperiencePanel={(sectionId: any) => {
+                if ((window as any).__openExperienceSection) {
+                  (window as any).__openExperienceSection(sectionId);
+                }
+              }}
+            />
+          ))}
 
         {/* Marquee Selection Rectangle */}
         {isMarqueeSelecting && marqueeStart && marqueeEnd && (
@@ -1407,10 +1765,11 @@ export function CXDCanvas() {
           />
         )}
       </div>
-
-      {/* Lines Overlay (rendered outside transformed canvas, in screen coordinates) */}
-      <LinesOverlay
-        lines={canvasElements.filter((el) => el.type === 'line') as LineElement[]}
+      {/* Line Layer - SVG overlay for all lines with proper state machine */}
+      <LineLayer
+        lines={
+          canvasElements.filter((el) => el.type === "line") as LineElement[]
+        }
         selectedLineId={selectedElementId}
         onSelectLine={(id) => {
           if (id) {
@@ -1423,19 +1782,23 @@ export function CXDCanvas() {
           }
         }}
         onUpdateLine={(id, updates) => updateCanvasElement(id, updates)}
+        onCreateLine={handleCreateLine}
+        onDeleteLine={(id) => removeCanvasElement(id)}
         canvasPosition={canvasPosition}
         canvasZoom={canvasZoom}
-        onDeleteLine={(id) => removeCanvasElement(id)}
+        isLineToolActive={activeTool === "line"}
+        onLineToolComplete={() => setActiveTool(null)}
+        containerRef={containerRef}
       />
-
+      {/* Connectors SVG Layer - rendered BELOW elements */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
           transformOrigin: "0 0",
+          zIndex: 5,
         }}
       >
-        {/* Connectors SVG Layer */}
         <svg
           className="absolute inset-0 overflow-visible"
           style={{
@@ -1446,22 +1809,9 @@ export function CXDCanvas() {
             pointerEvents: "none",
           }}
         >
-          {/* Debug: render count */}
-          <text x="10" y="20" fill="white" fontSize="12">
-            Edges: {canvasEdges.length}
-          </text>
-          <rect x="0" y="0" width="100" height="30" fill="rgba(255,0,0,0.2)" />
 
           {/* Existing edges */}
           {canvasEdges.map((edge) => {
-            console.log(
-              "[SVG] Rendering edge:",
-              edge.id,
-              "from:",
-              edge.fromNodeId,
-              "to:",
-              edge.toNodeId,
-            );
             const fromElement = canvasElements.find(
               (el) => el.id === edge.fromNodeId,
             );
@@ -1471,14 +1821,9 @@ export function CXDCanvas() {
             if (!fromElement || !toElement) return null;
 
             const from = getAnchorPosition(fromElement, edge.fromAnchor);
-
-            // Handle auto anchor for target
-            let to: { x: number; y: number };
-            if ((edge.toAnchor as any) === "auto") {
-              to = getAutoAnchorPosition(toElement, from);
-            } else {
-              to = getAnchorPosition(toElement, edge.toAnchor);
-            }
+            const to = getAnchorPosition(toElement, edge.toAnchor);
+            
+            if (!from || !to) return null;
 
             const isSelected = selectedEdgeId === edge.id;
 
@@ -1574,244 +1919,229 @@ export function CXDCanvas() {
             </marker>
           </defs>
         </svg>
-
-        {/* Bend handles for selected connector */}
-        {selectedEdgeId &&
-          (() => {
-            const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
-            if (!edge) return null;
-
-            const fromElement = canvasElements.find(
-              (el) => el.id === edge.fromNodeId,
-            );
-            const toElement = canvasElements.find(
-              (el) => el.id === edge.toNodeId,
-            );
-            if (!fromElement || !toElement) return null;
-
-            const from = getAnchorPosition(fromElement, edge.fromAnchor);
-
-            // Handle auto anchor for target
-            let to: { x: number; y: number };
-            if ((edge.toAnchor as any) === "auto") {
-              to = getAutoAnchorPosition(toElement, from);
-            } else {
-              to = getAnchorPosition(toElement, edge.toAnchor);
-            }
-
-            const bend = edge.bend || {
-              x: (from.x + to.x) / 2,
-              y: (from.y + to.y) / 2,
-            };
-
-            return (
-              <div
-                className="absolute w-3 h-3 bg-purple-500 border-2 border-white rounded-full cursor-move z-50 hover:scale-125 transition-transform"
-                style={{
-                  left: bend.x - 6,
-                  top: bend.y - 6,
-                }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  setDraggingBendHandle(selectedEdgeId);
-                  const rect = containerRef.current?.getBoundingClientRect();
-                  if (rect) {
-                    const x =
-                      (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-                    const y =
-                      (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
-                    setBendDragStart({ x, y });
-                  }
-                }}
-              />
-            );
-          })()}
-
-        {/* Connector context menu */}
-        {selectedEdgeId &&
-          (() => {
-            const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
-            if (!edge) return null;
-
-            const fromElement = canvasElements.find(
-              (el) => el.id === edge.fromNodeId,
-            );
-            const toElement = canvasElements.find(
-              (el) => el.id === edge.toNodeId,
-            );
-            if (!fromElement || !toElement) return null;
-
-            const from = getAnchorPosition(fromElement, edge.fromAnchor);
-
-            // Handle auto anchor for target
-            let to: { x: number; y: number };
-            if ((edge.toAnchor as any) === "auto") {
-              to = getAutoAnchorPosition(toElement, from);
-            } else {
-              to = getAnchorPosition(toElement, edge.toAnchor);
-            }
-
-            const bend = edge.bend || {
-              x: (from.x + to.x) / 2,
-              y: (from.y + to.y) / 2,
-            };
-
-            // Calculate menu position near line but not covering it
-            const midX = bend.x;
-            const midY = bend.y;
-            const dx = to.x - from.x;
-            const dy = to.y - from.y;
-            const length = Math.sqrt(dx * dx + dy * dy);
-            const normalX = -dy / length; // perpendicular
-            const normalY = dx / length;
-            const offset = 24;
-            let menuX = midX + normalX * offset;
-            let menuY = midY + normalY * offset - 100; // center vertically around menu
-
-            // Clamp to viewport
-            if (menuX < 8) menuX = midX - normalX * offset;
-            if (menuY < 8) menuY = 8;
-
-            const THEME_COLORS = [
-              { name: "Cyan", value: "hsl(180 100% 50% / 0.8)" },
-              { name: "Purple", value: "hsl(280 100% 70% / 0.8)" },
-              { name: "Pink", value: "hsl(330 100% 70% / 0.8)" },
-              { name: "Blue", value: "hsl(220 100% 60% / 0.8)" },
-              { name: "Green", value: "hsl(150 100% 50% / 0.8)" },
-              { name: "Orange", value: "hsl(30 100% 60% / 0.8)" },
-              { name: "Yellow", value: "hsl(60 100% 60% / 0.8)" },
-              { name: "Red", value: "hsl(0 100% 60% / 0.8)" },
-            ];
-
-            return (
-              <div
-                className="absolute p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl z-50 min-w-[200px]"
-                style={{
-                  left: menuX,
-                  top: menuY,
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                {/* Line Style */}
-                <div className="space-y-2 mb-3">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Line Style
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() =>
-                        updateCanvasEdge(selectedEdgeId, {
-                          style: { ...edge.style, lineStyle: "solid" },
-                        })
-                      }
-                      className={`flex-1 px-2 py-1.5 text-xs rounded border transition-colors ${
-                        (edge.style?.lineStyle || "solid") === "solid"
-                          ? "bg-primary/20 border-primary text-primary"
-                          : "border-border hover:bg-primary/10"
-                      }`}
-                    >
-                      Solid
-                    </button>
-                    <button
-                      onClick={() =>
-                        updateCanvasEdge(selectedEdgeId, {
-                          style: { ...edge.style, lineStyle: "dashed" },
-                        })
-                      }
-                      className={`flex-1 px-2 py-1.5 text-xs rounded border transition-colors ${
-                        edge.style?.lineStyle === "dashed"
-                          ? "bg-primary/20 border-primary text-primary"
-                          : "border-border hover:bg-primary/10"
-                      }`}
-                    >
-                      Dashed
-                    </button>
-                    <button
-                      onClick={() =>
-                        updateCanvasEdge(selectedEdgeId, {
-                          style: { ...edge.style, lineStyle: "dotted" },
-                        })
-                      }
-                      className={`flex-1 px-2 py-1.5 text-xs rounded border transition-colors ${
-                        edge.style?.lineStyle === "dotted"
-                          ? "bg-primary/20 border-primary text-primary"
-                          : "border-border hover:bg-primary/10"
-                      }`}
-                    >
-                      Dotted
-                    </button>
-                  </div>
-                </div>
-                {/* Width */}
-                <div className="space-y-2 mb-3">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Width
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="8"
-                    value={edge.style?.thickness || 2}
-                    onChange={(e) =>
-                      updateCanvasEdge(selectedEdgeId, {
-                        style: {
-                          ...edge.style,
-                          thickness: parseInt(e.target.value),
-                        },
-                      })
-                    }
-                    className="w-full"
-                  />
-                  <div className="text-xs text-center text-muted-foreground">
-                    {edge.style?.thickness || 2}px
-                  </div>
-                </div>
-                {/* Color */}
-                <div className="space-y-2 mb-3">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Color
-                  </label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {THEME_COLORS.map((color) => (
-                      <button
-                        key={color.name}
-                        onClick={() =>
-                          updateCanvasEdge(selectedEdgeId, {
-                            style: { ...edge.style, color: color.value },
-                          })
-                        }
-                        className={`w-8 h-8 rounded border-2 transition-transform hover:scale-110 ${
-                          edge.style?.color === color.value
-                            ? "border-white"
-                            : "border-border"
-                        }`}
-                        style={{ backgroundColor: color.value }}
-                        title={color.name}
-                      />
-                    ))}
-                  </div>
-                </div>
-                {/* Delete */}
-                <button
-                  onClick={() => {
-                    removeCanvasEdge(selectedEdgeId);
-                    setSelectedEdgeId(null);
-                  }}
-                  className="w-full px-3 py-2 text-xs rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors"
-                >
-                  Delete Connector
-                </button>
-              </div>
-            );
-          })()}
-
-        {/* Line element context menu */}
-        {/* Line context menu is now handled in LinesOverlay component */}
       </div>
+      
+      {/* Bend handles for selected connector - outside pointer-events-none wrapper */}
+      {selectedEdgeId &&
+        (() => {
+          const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
+          if (!edge) return null;
+
+          const fromElement = canvasElements.find(
+            (el) => el.id === edge.fromNodeId,
+          );
+          const toElement = canvasElements.find(
+            (el) => el.id === edge.toNodeId,
+          );
+          if (!fromElement || !toElement) return null;
+
+          const from = getAnchorPosition(fromElement, edge.fromAnchor);
+          const to = getAnchorPosition(toElement, edge.toAnchor);
+          if (!from || !to) return null;
+
+          const bend = edge.bend || {
+            x: (from.x + to.x) / 2,
+            y: (from.y + to.y) / 2,
+          };
+
+          // Convert world coords to screen coords
+          const screenX = bend.x * canvasZoom + canvasPosition.x;
+          const screenY = bend.y * canvasZoom + canvasPosition.y;
+
+          return (
+            <div
+              className="absolute w-4 h-4 bg-purple-500 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
+              style={{
+                left: screenX - 8,
+                top: screenY - 8,
+                zIndex: 1000,
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setDraggingBendHandle(selectedEdgeId);
+              }}
+            />
+          );
+        })()}
+
+      {/* Connector context menu - outside pointer-events-none wrapper */}
+      {selectedEdgeId &&
+        (() => {
+          const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
+          if (!edge) return null;
+
+          const fromElement = canvasElements.find(
+            (el) => el.id === edge.fromNodeId,
+          );
+          const toElement = canvasElements.find(
+            (el) => el.id === edge.toNodeId,
+          );
+          if (!fromElement || !toElement) return null;
+
+          const from = getAnchorPosition(fromElement, edge.fromAnchor);
+          const to = getAnchorPosition(toElement, edge.toAnchor);
+          if (!from || !to) return null;
+
+          const bend = edge.bend || {
+            x: (from.x + to.x) / 2,
+            y: (from.y + to.y) / 2,
+          };
+
+          // Calculate midpoint on the quadratic curve
+          const t = 0.5;
+          const midWorld = {
+            x: (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * bend.x + t * t * to.x,
+            y: (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * bend.y + t * t * to.y,
+          };
+
+          // Convert to screen coords
+          const midScreenX = midWorld.x * canvasZoom + canvasPosition.x;
+          const midScreenY = midWorld.y * canvasZoom + canvasPosition.y;
+
+          // Determine menu placement based on line orientation
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const isHorizontal = Math.abs(dx) > Math.abs(dy);
+
+          const widthPx = edge.style?.thickness || 2;
+          const color = edge.style?.color || "hsl(180 100% 50% / 0.8)";
+          const lineStyle = edge.style?.lineStyle || "solid";
+
+          // Convert HSL to hex for color input
+          const getHexColor = () => {
+            try {
+              if (color.match(/#[0-9a-fA-F]{6}/)) return color;
+              return "#00ffff";
+            } catch {
+              return "#00ffff";
+            }
+          };
+
+          return (
+            <div
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-lg"
+              style={{
+                position: "absolute",
+                zIndex: 1001,
+                ...(isHorizontal
+                  ? { top: midScreenY + 16, left: midScreenX - 100 }
+                  : { top: midScreenY - 20, left: midScreenX + 16 }),
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Line style buttons */}
+              <button
+                onClick={() =>
+                  updateCanvasEdge(selectedEdgeId, {
+                    style: { ...edge.style, lineStyle: "solid" },
+                  })
+                }
+                className={cn(
+                  "p-1.5 rounded hover:bg-primary/20 transition-colors",
+                  lineStyle === "solid" && "bg-primary/30 ring-1 ring-primary",
+                )}
+                title="Solid"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() =>
+                  updateCanvasEdge(selectedEdgeId, {
+                    style: { ...edge.style, lineStyle: "dashed" },
+                  })
+                }
+                className={cn(
+                  "p-1.5 rounded hover:bg-primary/20 transition-colors",
+                  lineStyle === "dashed" && "bg-primary/30 ring-1 ring-primary",
+                )}
+                title="Dashed"
+              >
+                <svg
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <line x1="4" y1="12" x2="8" y2="12" />
+                  <line x1="12" y1="12" x2="16" y2="12" />
+                  <line x1="20" y1="12" x2="24" y2="12" />
+                </svg>
+              </button>
+              <button
+                onClick={() =>
+                  updateCanvasEdge(selectedEdgeId, {
+                    style: { ...edge.style, lineStyle: "dotted" },
+                  })
+                }
+                className={cn(
+                  "p-1.5 rounded hover:bg-primary/20 transition-colors",
+                  lineStyle === "dotted" && "bg-primary/30 ring-1 ring-primary",
+                )}
+                title="Dotted"
+              >
+                <svg
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                >
+                  <circle cx="4" cy="12" r="1" fill="currentColor" />
+                  <circle cx="10" cy="12" r="1" fill="currentColor" />
+                  <circle cx="16" cy="12" r="1" fill="currentColor" />
+                  <circle cx="22" cy="12" r="1" fill="currentColor" />
+                </svg>
+              </button>
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+              {/* Width slider */}
+              <input
+                type="range"
+                min="1"
+                max="12"
+                value={widthPx}
+                onChange={(e) =>
+                  updateCanvasEdge(selectedEdgeId, {
+                    style: { ...edge.style, thickness: parseInt(e.target.value) },
+                  })
+                }
+                className="w-16 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+                title={`Width: ${widthPx}px`}
+              />
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+              {/* Color input */}
+              <input
+                type="color"
+                value={getHexColor()}
+                onChange={(e) =>
+                  updateCanvasEdge(selectedEdgeId, { style: { ...edge.style, color: e.target.value } })
+                }
+                className="w-6 h-6 rounded cursor-pointer border-0"
+                title="Color"
+              />
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+              {/* Delete button */}
+              <button
+                onClick={() => {
+                  removeCanvasEdge(selectedEdgeId);
+                  setSelectedEdgeId(null);
+                }}
+                className="p-1.5 rounded hover:bg-destructive/20 text-destructive transition-colors"
+                title="Delete"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        })()}
+      
       {/* Breadcrumbs for board navigation */}
       {boardPath.length > 0 && (
-        <div className="absolute left-6 z-30 flex items-center gap-1 px-3 py-2 rounded-lg bg-card/80 backdrop-blur border border-border text-sm top-[21px]">
+        <div className="absolute left-6 z-30 flex items-center gap-1 px-3 py-2 rounded-lg bg-card/80 backdrop-blur border border-border text-sm top-[21px] shadow-[0_0_15px_rgba(168,85,247,0.4)]">
           <button
             onClick={() => navigateToBoardPath(-1)}
             className="flex items-center gap-1 hover:text-primary transition-colors"
@@ -1838,6 +2168,8 @@ export function CXDCanvas() {
         canvasRef={containerRef}
         canvasPosition={canvasPosition}
         canvasZoom={canvasZoom}
+        activeTool={activeTool}
+        onActiveToolChange={setActiveTool}
       />
       {/* Zoom Controls */}
       <NavigationToolkit

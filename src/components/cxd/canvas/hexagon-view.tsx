@@ -1,42 +1,98 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect } from "react";
+import React, { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { CXDSectionId } from "@/types/cxd-schema";
-import { ChevronRight, Home } from "lucide-react";
+import { HypercubeFaceTag, CanvasElement } from "@/types/canvas-elements";
+import { ChevronRight, Home, Layout, Box, Type, Link2, Image, Layers, ExternalLink } from "lucide-react";
 import { HexagonDetailPanel } from "./hexagon-detail-panel";
-import { ExperienceFlowDrawer } from "./experience-flow-drawer";
-import { CanvasToolkit } from "./canvas-toolkit";
-import { CanvasElementRenderer } from "./canvas-element";
 import { NavigationToolkit } from "./navigation-toolkit";
-import { v4 as uuidv4 } from "uuid";
-import {
-  CanvasElement,
-  CanvasElementType,
-  ShapeType,
-  DEFAULT_ELEMENT_SIZES,
-} from "@/types/canvas-elements";
+import { Hypercube3D } from "./hypercube-3d";
+
+// Feature toggle - set to true to use 3D cube view instead of 2D hexagon
+const USE_3D_CUBE = true;
+
+// Map CXDSectionId to HypercubeFaceTag for semantic tag checking
+const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
+  realityPlanes: 'Reality Planes',
+  sensoryDomains: 'Sensory Domains',
+  presence: 'Presence Types',
+  stateMapping: 'State Mapping',
+  traitMapping: 'Trait Mapping',
+  contextAndMeaning: 'Meaning Architecture',
+};
+
+// Element type icons for related elements preview
+const ELEMENT_TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  board: Layout,
+  container: Box,
+  text: Type,
+  link: Link2,
+  image: Image,
+  experienceBlock: Layers,
+  freeform: Type,
+};
+
+// Get display name for element
+function getElementDisplayName(element: CanvasElement): string {
+  switch (element.type) {
+    case 'board':
+      return (element as any).name || 'Untitled Board';
+    case 'container':
+      return (element as any).title || 'Untitled Container';
+    case 'text':
+      return (element as any).content?.slice(0, 30) || 'Text Card';
+    case 'freeform':
+      return (element as any).content?.slice(0, 30) || 'Freeform Card';
+    case 'link':
+      return (element as any).title || (element as any).url?.slice(0, 30) || 'Link';
+    case 'image':
+      return (element as any).alt || 'Image';
+    case 'experienceBlock':
+      return (element as any).title || 'Experience Block';
+    default:
+      return 'Element';
+  }
+}
+
+// Group elements by type
+function groupElementsByType(elements: CanvasElement[]) {
+  const groups: Record<string, CanvasElement[]> = {
+    board: [],
+    container: [],
+    text: [],
+    freeform: [],
+    link: [],
+    image: [],
+    experienceBlock: [],
+  };
+  
+  elements.forEach((el) => {
+    if (groups[el.type]) {
+      groups[el.type].push(el);
+    }
+  });
+  
+  return groups;
+}
 
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 2;
 const ZOOM_SENSITIVITY = 0.001;
 
-// Wedges clockwise starting at top (6 unique sections)
+// Hypercube faces represent conceptual dimensions of the experience
+// Read-only semantic lens - navigation and inspection only
 const wedgeConfig = [
-  { id: "presence" as CXDSectionId, label: "Presence\nTypes", index: 0 },
-  {
-    id: "realityPlanes" as CXDSectionId,
-    label: "Reality &\nSensory Stack",
-    index: 1,
-  },
-  { id: "stateMapping" as CXDSectionId, label: "State\nMapping", index: 2 },
-  { id: "traitMapping" as CXDSectionId, label: "Trait\nMapping", index: 3 },
+  { id: "realityPlanes" as CXDSectionId, label: "Reality\nPlanes", index: 0 },
+  { id: "sensoryDomains" as CXDSectionId, label: "Sensory\nDomains", index: 1 },
+  { id: "presence" as CXDSectionId, label: "Presence\nTypes", index: 2 },
+  { id: "stateMapping" as CXDSectionId, label: "State\nMapping", index: 3 },
+  { id: "traitMapping" as CXDSectionId, label: "Trait\nMapping", index: 4 },
   {
     id: "contextAndMeaning" as CXDSectionId,
     label: "Meaning\nArchitecture",
-    index: 4,
+    index: 5,
   },
-  { id: "desiredChange" as CXDSectionId, label: "Desired\nChange", index: 5 },
 ];
 
 // Get hexagon vertex at given index (0-5), starting from top, clockwise
@@ -105,25 +161,8 @@ export function HexagonView() {
     setCanvasPosition,
     canvasZoom,
     setCanvasZoom,
-    addCanvasElement,
-    updateCanvasElement,
-    removeCanvasElement,
-    duplicateCanvasElement,
-    activeBoardId,
-    activeSurface,
-    boardPath,
-    createBoard,
-    enterBoard,
-    navigateToBoardPath,
-    getCanvasElements,
-    undo,
-    redo,
-    canUndo,
-    canRedo,
   } = useCXDStore();
   const project = getCurrentProject();
-  // Get elements scoped to the active board and surface (hypercube)
-  const canvasElements = getCanvasElements();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
@@ -132,22 +171,58 @@ export function HexagonView() {
   const [selectedSection, setSelectedSection] = useState<CXDSectionId | null>(
     null,
   );
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(
-    null,
-  );
-  const [draggingElement, setDraggingElement] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [tooltipInfo, setTooltipInfo] = useState<{
+    position: { x: number; y: number };
+    constraints: Array<{ message: string; severity: 'warning' | 'info' }>;
+  } | null>(null);
+  
+  // Focused face state for cube rotation
+  const [focusedFaceIndex, setFocusedFaceIndex] = useState<number | null>(null);
+  const [cubeRotation, setCubeRotation] = useState({ x: 0, y: 0 });
+  const [isRotating, setIsRotating] = useState(false);
+  
+  // Related elements preview panel
+  const [showRelatedElements, setShowRelatedElements] = useState(false);
 
-  const handleWedgeClick = (sectionId: CXDSectionId) => {
-    setSelectedSection(sectionId);
+  // Handle face click - focus mode with rotation
+  const handleWedgeClick = (sectionId: CXDSectionId, wedgeIndex: number) => {
+    // If already focused on this face, open detail panel
+    if (focusedFaceIndex === wedgeIndex) {
+      setSelectedSection(sectionId);
+      return;
+    }
+    
+    // Focus on this face - rotate cube to bring it front-center
+    setIsRotating(true);
+    setFocusedFaceIndex(wedgeIndex);
+    setShowRelatedElements(true);
+    
+    // Calculate rotation to bring face to front
+    // Each face is 60° apart (360° / 6)
+    // Rotate so the selected face appears at the "front" (bottom-center)
+    const targetRotation = wedgeIndex * 60;
+    setCubeRotation({ x: 0, y: targetRotation });
+    
+    // Animation complete
+    setTimeout(() => setIsRotating(false), 800);
   };
 
   const handleCoreClick = () => {
+    // Reset rotation and show core panel
+    setFocusedFaceIndex(null);
+    setCubeRotation({ x: 0, y: 0 });
+    setShowRelatedElements(false);
     setSelectedSection("intentionCore" as CXDSectionId);
   };
 
   const handleClosePanel = () => {
     setSelectedSection(null);
+  };
+  
+  const handleCloseFocus = () => {
+    setFocusedFaceIndex(null);
+    setCubeRotation({ x: 0, y: 0 });
+    setShowRelatedElements(false);
   };
 
   const isPanelOpen = selectedSection !== null;
@@ -201,6 +276,21 @@ export function HexagonView() {
     }
   }, [handleWheel]);
 
+  // Escape key to close focus mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (selectedSection) {
+          handleClosePanel();
+        } else if (focusedFaceIndex !== null) {
+          handleCloseFocus();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedSection, focusedFaceIndex]);
+
   const handleZoomIn = () =>
     setCanvasZoom(Math.min(MAX_ZOOM, canvasZoom * 1.2));
   const handleZoomOut = () =>
@@ -216,136 +306,7 @@ export function HexagonView() {
     setCanvasZoom(0.95);
   };
 
-  // Handle placing elements on the hypercube canvas (board-scoped)
-  const handlePlaceElement = useCallback(
-    (
-      type: CanvasElementType,
-      position: { x: number; y: number },
-      options?: { shapeType?: ShapeType },
-    ) => {
-      if (!project) return;
-
-      const size = DEFAULT_ELEMENT_SIZES[type];
-      const maxZIndex = canvasElements.reduce(
-        (max, el) => Math.max(max, el.zIndex),
-        0,
-      );
-
-      const baseElement = {
-        id: uuidv4(),
-        type,
-        x: position.x - size.width / 2,
-        y: position.y - size.height / 2,
-        width: size.width,
-        height: size.height,
-        zIndex: maxZIndex + 1,
-        boardId: activeBoardId, // Scope to active board
-        surface: activeSurface, // Scope to active surface (canvas or hypercube)
-      };
-
-      let newElement: CanvasElement;
-
-      switch (type) {
-        case "freeform":
-          newElement = {
-            ...baseElement,
-            type: "freeform",
-            content: "",
-            style: { bgColor: "#fef3c7" },
-          };
-          break;
-        case "image":
-          newElement = {
-            ...baseElement,
-            type: "image",
-            src: "",
-            objectFit: "cover",
-          };
-          break;
-        case "shape":
-          newElement = {
-            ...baseElement,
-            type: "shape",
-            shapeType: options?.shapeType || "rectangle",
-          };
-          break;
-        case "container":
-          newElement = { ...baseElement, type: "container", label: "" };
-          break;
-        case "connector":
-          // Connectors are created via drag, not click placement
-          return;
-        case "text":
-          newElement = { ...baseElement, type: "text", content: "" };
-          break;
-        case "link":
-          newElement = {
-            ...baseElement,
-            type: "link",
-            url: "",
-            linkMode: "bookmark",
-          };
-          break;
-        case "board":
-          const newChildBoardId = createBoard("New Board");
-          newElement = {
-            ...baseElement,
-            type: "board",
-            childBoardId: newChildBoardId, // The board this node opens into
-            title: "New Board",
-          };
-          // Note: The board node's own placement boardId (where it appears) is set in baseElement
-          // childBoardId is the board it opens into
-          break;
-        default:
-          return;
-      }
-
-      addCanvasElement(newElement);
-    },
-    [
-      project,
-      canvasElements,
-      addCanvasElement,
-      createBoard,
-      activeBoardId,
-      activeSurface,
-    ],
-  );
-
-  // Handle entering a board node
-  const handleEnterBoard = useCallback(
-    (boardId: string, title: string) => {
-      enterBoard(boardId, title);
-    },
-    [enterBoard],
-  );
-
-  // Element drag handlers for persistence
-  const handleElementDragStart = useCallback(
-    (elementId: string, e: React.MouseEvent) => {
-      const element = canvasElements.find((el) => el.id === elementId);
-      if (!element) return;
-
-      setDraggingElement(elementId);
-      setSelectedElementId(elementId);
-
-      // Calculate offset from mouse to element position
-      const mouseX = (e.clientX - canvasPosition.x) / canvasZoom;
-      const mouseY = (e.clientY - canvasPosition.y) / canvasZoom;
-      setDragOffset({
-        x: mouseX - element.x,
-        y: mouseY - element.y,
-      });
-    },
-    [canvasElements, canvasPosition, canvasZoom],
-  );
-
-  const handleElementDragEnd = useCallback(() => {
-    setDraggingElement(null);
-  }, []);
-
-  // Handle mouse move for dragging elements
+  // Handle mouse move for panning only
   const handleCanvasMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (isPanning) {
@@ -356,36 +317,379 @@ export function HexagonView() {
           y: canvasPosition.y + dy,
         });
         setPanStart({ x: e.clientX, y: e.clientY });
-      } else if (draggingElement) {
-        const mouseX = (e.clientX - canvasPosition.x) / canvasZoom;
-        const mouseY = (e.clientY - canvasPosition.y) / canvasZoom;
-        const newX = mouseX - dragOffset.x;
-        const newY = mouseY - dragOffset.y;
-
-        // Update element position in store (persists to state)
-        updateCanvasElement(draggingElement, { x: newX, y: newY });
       }
     },
-    [
-      isPanning,
-      panStart,
-      canvasPosition,
-      setCanvasPosition,
-      draggingElement,
-      dragOffset,
-      canvasZoom,
-      updateCanvasElement,
-    ],
+    [isPanning, panStart, canvasPosition, setCanvasPosition],
   );
 
   const handleCanvasMouseUp = useCallback(() => {
     setIsPanning(false);
-    if (draggingElement) {
-      setDraggingElement(null);
-    }
-  }, [draggingElement]);
+  }, []);
 
   if (!project) return null;
+
+  // Get elements tagged to a specific face
+  const getTaggedElementsForFace = useMemo(() => {
+    const allElements = project.canvasElements || [];
+    return (faceTag: HypercubeFaceTag) => {
+      return allElements.filter((el) => el.hypercubeTags?.includes(faceTag));
+    };
+  }, [project.canvasElements]);
+
+  // Soft constraint checking - detect structural misalignments
+  // Returns constraint info with visual cues and optional tooltip
+  const detectConstraints = (sectionId: CXDSectionId) => {
+    const constraints: Array<{ message: string; severity: 'warning' | 'info' }> = [];
+    const faceTag = SECTION_TO_TAG[sectionId];
+    const taggedElements = faceTag ? getTaggedElementsForFace(faceTag) : [];
+
+    switch (sectionId) {
+      case "realityPlanes": {
+        // Active Reality Plane without Interface/Modality defined
+        const planesV2 = project.realityPlanesV2 || [];
+        const activePlanes = planesV2.filter((p) => p.enabled);
+        const missingInterface = activePlanes.filter(
+          (p) => !p.interfaceModality || p.interfaceModality.trim().length === 0,
+        );
+
+        if (missingInterface.length > 0) {
+          const planeNames = missingInterface.map((p) => p.code).join(', ');
+          constraints.push({
+            message: `${missingInterface.length} active plane${missingInterface.length > 1 ? 's' : ''} missing interface/modality (${planeNames})`,
+            severity: 'warning',
+          });
+        }
+
+        // Cognitive Reality active while Meaning Architecture is empty
+        const cognitiveActive = activePlanes.some((p) => p.code === 'CR');
+        const meaning = project.contextAndMeaning || {};
+        const hasWorld = meaning.world && meaning.world.trim().length > 0;
+        const hasStory = meaning.story && meaning.story.trim().length > 0;
+        const hasMagic = meaning.magic && meaning.magic.trim().length > 0;
+        const meaningEmpty = !hasWorld && !hasStory && !hasMagic;
+
+        if (cognitiveActive && meaningEmpty) {
+          constraints.push({
+            message: 'Cognitive Reality active but Meaning Architecture is empty',
+            severity: 'warning',
+          });
+        }
+
+        // Reality Plane active with no tagged artifacts
+        if (activePlanes.length > 0 && taggedElements.length === 0) {
+          constraints.push({
+            message: `${activePlanes.length} active plane${activePlanes.length > 1 ? 's' : ''} with no tagged canvas elements`,
+            severity: 'info',
+          });
+        }
+        break;
+      }
+
+      case "stateMapping": {
+        // States defined without corresponding Traits
+        const states = project.stateMapping || {};
+        const traits = project.traitMapping || {};
+        const stateValues = Object.values(states);
+        const traitValues = Object.values(traits);
+        const hasStates = stateValues.some((v) => v && v.trim().length > 0);
+        const hasTraits = traitValues.some((v) => v && v.trim().length > 0);
+
+        if (hasStates && !hasTraits) {
+          constraints.push({
+            message: 'States defined without corresponding Traits',
+            severity: 'info',
+          });
+        }
+
+        // States defined but no canvas elements tagged to State Mapping
+        if (hasStates && taggedElements.length === 0) {
+          constraints.push({
+            message: 'States defined but no canvas elements tagged',
+            severity: 'info',
+          });
+        }
+        break;
+      }
+
+      case "traitMapping": {
+        // Traits defined without corresponding States
+        const states = project.stateMapping || {};
+        const traits = project.traitMapping || {};
+        const stateValues = Object.values(states);
+        const traitValues = Object.values(traits);
+        const hasStates = stateValues.some((v) => v && v.trim().length > 0);
+        const hasTraits = traitValues.some((v) => v && v.trim().length > 0);
+
+        if (hasTraits && !hasStates) {
+          constraints.push({
+            message: 'Traits defined without corresponding States',
+            severity: 'info',
+          });
+        }
+
+        // Traits defined without supporting boards or cards
+        if (hasTraits && taggedElements.length === 0) {
+          constraints.push({
+            message: 'Traits defined without supporting canvas artifacts',
+            severity: 'info',
+          });
+        }
+        break;
+      }
+
+      case "sensoryDomains": {
+        // Active sensory domains with no tagged elements
+        const domains = project.sensoryDomains || {};
+        const activeDomains = Object.entries(domains).filter(([_, v]) => v > 0);
+        
+        if (activeDomains.length > 0 && taggedElements.length === 0) {
+          constraints.push({
+            message: `${activeDomains.length} active domain${activeDomains.length > 1 ? 's' : ''} with no tagged elements`,
+            severity: 'info',
+          });
+        }
+        break;
+      }
+
+      case "presence": {
+        // Active presence types with no tagged elements
+        const types = project.presenceTypes || {};
+        const activeTypes = Object.entries(types).filter(([_, v]) => v > 0);
+        
+        if (activeTypes.length > 0 && taggedElements.length === 0) {
+          constraints.push({
+            message: `${activeTypes.length} active presence type${activeTypes.length > 1 ? 's' : ''} with no tagged elements`,
+            severity: 'info',
+          });
+        }
+        break;
+      }
+
+      case "desiredChange": {
+        // Objectives defined but Experience Flow is empty
+        const desired = project.desiredChange || {};
+        const hasObjectives =
+          (desired.insights && desired.insights.length > 0) ||
+          (desired.feelings && desired.feelings.length > 0) ||
+          (desired.states && desired.states.length > 0) ||
+          (desired.knowledge && desired.knowledge.length > 0);
+
+        const flowStages = project.experienceFlowStages || [];
+        const flowEmpty = flowStages.length === 0;
+
+        if (hasObjectives && flowEmpty) {
+          constraints.push({
+            message: 'Desired outcomes defined but Experience Flow is empty',
+            severity: 'info',
+          });
+        }
+        break;
+      }
+
+      case "contextAndMeaning": {
+        // Cognitive Reality active while Meaning Architecture is empty
+        const planesV2 = project.realityPlanesV2 || [];
+        const cognitiveActive = planesV2.some((p) => p.enabled && p.code === 'CR');
+        const meaning = project.contextAndMeaning || {};
+        const hasWorld = meaning.world && meaning.world.trim().length > 0;
+        const hasStory = meaning.story && meaning.story.trim().length > 0;
+        const hasMagic = meaning.magic && meaning.magic.trim().length > 0;
+        const meaningEmpty = !hasWorld && !hasStory && !hasMagic;
+        const hasMeaning = hasWorld || hasStory || hasMagic;
+
+        if (cognitiveActive && meaningEmpty) {
+          constraints.push({
+            message: 'Cognitive Reality active but this architecture is undefined',
+            severity: 'warning',
+          });
+        }
+
+        // Meaning architecture defined but no tagged elements
+        if (hasMeaning && taggedElements.length === 0) {
+          constraints.push({
+            message: 'Meaning architecture defined but no canvas elements tagged',
+            severity: 'info',
+          });
+        }
+        break;
+      }
+    }
+
+    return constraints;
+  };
+
+  // Calculate visual intensity for each face based on experience structure
+  // Returns { opacity: 0-1, glow: 0-1, saturation: 0-1, tint: optional color }
+  const calculateFaceIntensity = (sectionId: CXDSectionId) => {
+    const baseIntensity = { opacity: 0.4, glow: 0.2, saturation: 0.25 };
+    const faceTag = SECTION_TO_TAG[sectionId];
+    const taggedElements = faceTag ? getTaggedElementsForFace(faceTag) : [];
+    const hasTaggedElements = taggedElements.length > 0;
+    
+    // Factor for reducing glow when content exists but no tags
+    const tagBonus = hasTaggedElements ? 1.0 : 0.7;
+
+    switch (sectionId) {
+      case "realityPlanes": {
+        // More active planes → brighter face
+        // Active planes missing Interface/Modality → reduced brightness
+        const planesV2 = project.realityPlanesV2 || [];
+        const activePlanes = planesV2.filter((p) => p.enabled);
+        const totalActive = activePlanes.length;
+        const wellDefined = activePlanes.filter(
+          (p) => p.interfaceModality && p.interfaceModality.trim().length > 0,
+        ).length;
+
+        const activityRatio = totalActive / 7; // 7 total planes
+        const completionRatio = totalActive > 0 ? wellDefined / totalActive : 0;
+
+        // Dimmed edge glow when active but no tagged artifacts
+        const glowMultiplier = (totalActive > 0 && !hasTaggedElements) ? 0.5 : tagBonus;
+
+        return {
+          opacity: 0.3 + activityRatio * 0.5, // 0.3 to 0.8
+          glow: activityRatio * completionRatio * 0.6 * glowMultiplier, // Bright when active, well-defined, and tagged
+          saturation: 0.2 + activityRatio * 0.3,
+        };
+      }
+
+      case "sensoryDomains": {
+        // Similar to reality planes - more active domains → brighter
+        const domains = project.sensoryDomains || {};
+        const values = Object.values(domains);
+        const activeCount = values.filter((v) => v > 0).length;
+        const avgValue = values.reduce((sum, v) => sum + v, 0) / values.length;
+
+        // Dimmed when active but no tagged elements
+        const glowMultiplier = (activeCount > 0 && !hasTaggedElements) ? 0.6 : tagBonus;
+
+        return {
+          opacity: 0.3 + (activeCount / 5) * 0.4,
+          glow: (avgValue / 100) * 0.5 * glowMultiplier,
+          saturation: 0.2 + (activeCount / 5) * 0.25,
+        };
+      }
+
+      case "presence": {
+        // Balanced distribution → stable, even glow
+        // One presence dominating → asymmetric highlight (show via increased glow)
+        const types = project.presenceTypes || {};
+        const values = Object.values(types).filter((v) => v > 0);
+        if (values.length === 0)
+          return { ...baseIntensity, opacity: 0.25 };
+
+        const maxValue = Math.max(...values);
+        const avgValue = values.reduce((sum, v) => sum + v, 0) / values.length;
+        const variance =
+          values.reduce((sum, v) => sum + Math.pow(v - avgValue, 2), 0) /
+          values.length;
+        const balance = 1 - Math.min(variance / 1000, 1); // 0 = imbalanced, 1 = balanced
+
+        // Dimmed when active but no tagged elements
+        const glowMultiplier = (values.length > 0 && !hasTaggedElements) ? 0.6 : tagBonus;
+        const baseGlow = balance > 0.6 ? 0.4 : 0.15 + (maxValue / 100) * 0.4;
+
+        return {
+          opacity: 0.3 + (values.length / 6) * 0.4,
+          glow: baseGlow * glowMultiplier, // Stable glow when balanced
+          saturation: 0.2 + (values.length / 6) * 0.3,
+        };
+      }
+
+      case "stateMapping": {
+        // States without Traits → subtle amber tint
+        const states = project.stateMapping || {};
+        const traits = project.traitMapping || {};
+        const stateValues = Object.values(states);
+        const traitValues = Object.values(traits);
+        const hasStates = stateValues.some((v) => v && v.trim().length > 0);
+        const hasTraits = traitValues.some((v) => v && v.trim().length > 0);
+
+        if (!hasStates) return { ...baseIntensity, opacity: 0.2 };
+
+        // Muted face when states exist but no tagged elements
+        const tagDimmer = hasTaggedElements ? 1.0 : 0.65;
+
+        // Amber tint when states exist but no traits
+        if (hasStates && !hasTraits) {
+          return {
+            opacity: 0.45 * tagDimmer,
+            glow: 0.15 * tagDimmer,
+            saturation: 0.35 * tagDimmer,
+            tint: "hsl(35 70% 50%)", // Subtle amber
+          };
+        }
+
+        return {
+          opacity: 0.5,
+          glow: 0.35 * tagDimmer,
+          saturation: 0.3,
+        };
+      }
+
+      case "traitMapping": {
+        // Traits without States → muted face appearance
+        const states = project.stateMapping || {};
+        const traits = project.traitMapping || {};
+        const stateValues = Object.values(states);
+        const traitValues = Object.values(traits);
+        const hasStates = stateValues.some((v) => v && v.trim().length > 0);
+        const hasTraits = traitValues.some((v) => v && v.trim().length > 0);
+
+        if (!hasTraits) return { ...baseIntensity, opacity: 0.2 };
+
+        // Further muted when no tagged elements support the traits
+        const tagDimmer = hasTaggedElements ? 1.0 : 0.6;
+
+        // Muted when traits exist but no states
+        if (hasTraits && !hasStates) {
+          return {
+            opacity: 0.35 * tagDimmer,
+            glow: 0.1 * tagDimmer,
+            saturation: 0.15,
+          };
+        }
+
+        return {
+          opacity: 0.5,
+          glow: 0.35 * tagDimmer,
+          saturation: 0.3,
+        };
+      }
+
+      case "contextAndMeaning": {
+        // Empty → desaturated face
+        // Structured → clear glow
+        const meaning = project.contextAndMeaning || {};
+        const hasWorld = meaning.world && meaning.world.trim().length > 0;
+        const hasStory = meaning.story && meaning.story.trim().length > 0;
+        const hasMagic = meaning.magic && meaning.magic.trim().length > 0;
+        const structuredCount = [hasWorld, hasStory, hasMagic].filter(
+          Boolean,
+        ).length;
+
+        if (structuredCount === 0) {
+          return {
+            opacity: 0.25,
+            glow: 0.05,
+            saturation: 0.1, // Desaturated
+          };
+        }
+
+        // Dimmed glow when structured but no tagged elements
+        const tagDimmer = hasTaggedElements ? 1.0 : 0.6;
+
+        return {
+          opacity: 0.3 + (structuredCount / 3) * 0.4,
+          glow: (structuredCount / 3) * 0.5 * tagDimmer, // Clear glow when structured and tagged
+          saturation: 0.15 + (structuredCount / 3) * 0.25,
+        };
+      }
+
+      default:
+        return baseIntensity;
+    }
+  };
 
   const outerRadius = 300;
   const innerRadius = 100;
@@ -410,6 +714,58 @@ export function HexagonView() {
     "hsl(270 30% 29%)",
   ];
 
+  // Get tagged elements for the focused face
+  const focusedFaceTag = focusedFaceIndex !== null ? SECTION_TO_TAG[wedgeConfig[focusedFaceIndex].id] : null;
+  const focusedTaggedElements = focusedFaceTag ? getTaggedElementsForFace(focusedFaceTag) : [];
+  const focusedGroupedElements = groupElementsByType(focusedTaggedElements);
+
+  // 3D Cube View - new implementation
+  if (USE_3D_CUBE) {
+    return (
+      <div className="fixed inset-0 top-16 overflow-hidden">
+        {/* Dot grid background */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `radial-gradient(circle, hsl(270 30% 25% / 0.3) 1px, transparent 1px)`,
+            backgroundSize: '30px 30px',
+          }}
+        />
+
+        {/* 3D Hypercube - handles its own zoom and drag internally */}
+        <Hypercube3D
+          project={project}
+          onSelectSection={(sectionId) => setSelectedSection(sectionId)}
+          onCoreClick={handleCoreClick}
+          selectedSection={selectedSection}
+        />
+
+        {/* Scrim overlay when panel is open */}
+        {isPanelOpen && (
+          <div
+            className="fixed inset-0 top-16 bg-black/20 z-30 pointer-events-none"
+            aria-hidden="true"
+          />
+        )}
+
+        {/* Right side: Details Panel */}
+        <div
+          className={`fixed top-16 right-0 h-[calc(100vh-4rem)] w-[420px] min-w-[360px] max-w-[480px] bg-card/95 backdrop-blur-xl border-l border-border shadow-2xl z-40 transition-transform duration-200 ease-out ${
+            isPanelOpen ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          {selectedSection && (
+            <HexagonDetailPanel
+              sectionId={selectedSection}
+              onClose={handleClosePanel}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Original 2D Hexagon View (fallback)
   return (
     <div className="fixed inset-0 top-16 overflow-hidden">
       {/* Hexagon canvas area - fixed, never shifts */}
@@ -433,7 +789,7 @@ export function HexagonView() {
             backgroundPosition: `${canvasPosition.x % (30 * canvasZoom)}px ${canvasPosition.y % (30 * canvasZoom)}px`,
           }}
         />
-        {/* Canvas content with transform */}
+        {/* Canvas content with transform - includes cube rotation */}
         <div
           className="absolute will-change-transform"
           style={{
@@ -441,6 +797,8 @@ export function HexagonView() {
             transformOrigin: "0 0",
             left: "calc(50% - 400px)",
             top: "calc(50% - 400px)",
+            // Apply 3D perspective for cube effect
+            perspective: "1200px",
           }}
         >
           <svg width="800" height="800" className="overflow-visible">
@@ -510,21 +868,47 @@ export function HexagonView() {
                 .core-pulse {
                   animation: coreShimmer 8s ease-in-out infinite;
                 }
+                @keyframes focusedFaceGlow {
+                  0%, 100% { filter: drop-shadow(0 0 15px hsl(180 80% 60%)); }
+                  50% { filter: drop-shadow(0 0 25px hsl(180 80% 70%)); }
+                }
+                .focused-face {
+                  animation: focusedFaceGlow 3s ease-in-out infinite;
+                }
               `}
               </style>
             </defs>
 
+            {/* SVG wrapper with rotation transform */}
+            <g
+              style={{
+                transformOrigin: `${centerX}px ${centerY}px`,
+                transform: `rotateZ(${cubeRotation.y}deg)`,
+                transition: isRotating ? 'transform 0.8s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+              }}
+            >
             {/* Outer hexagon border */}
             <polygon
               points={hexagonPoints(centerX, centerY, outerRadius)}
               fill="none"
               stroke="hsl(270 30% 40%)"
               strokeWidth="3"
+              style={{
+                opacity: focusedFaceIndex !== null ? 0.5 : 1,
+                transition: 'opacity 0.5s ease',
+              }}
             />
 
             {/* 6 Wedge segments with labels */}
             {wedgeConfig.map((wedge, i) => {
               const isHovered = hoveredWedge === i;
+              const isFocused = focusedFaceIndex === i;
+              const isDimmed = focusedFaceIndex !== null && focusedFaceIndex !== i;
+              const intensity = calculateFaceIntensity(wedge.id);
+              const constraints = detectConstraints(wedge.id);
+              const hasConstraints = constraints.length > 0;
+              const hasWarning = constraints.some((c) => c.severity === 'warning');
+
               const wedgePath = getWedgePath(
                 centerX,
                 centerY,
@@ -543,20 +927,133 @@ export function HexagonView() {
               const lineHeight = 14;
               const startY = center.y - ((lines.length - 1) * lineHeight) / 2;
               const clipId = `clip-wedge-${wedge.id}`;
+              const filterId = `glow-${wedge.id}`;
+              const pulseId = `pulse-${wedge.id}`;
+
+              // Apply constraint visual adjustments
+              // Warning: slight amber shift, reduced opacity, gentle pulse
+              // Info: slight desaturation, no pulse
+              let baseLightness = isHovered ? 32 : 25;
+              let saturation = 25 + intensity.saturation * 40;
+              let hue = 270; // Purple base
+
+              if (hasConstraints) {
+                if (hasWarning) {
+                  hue = 35; // Shift to amber
+                  baseLightness -= 3; // Slightly dimmer
+                  saturation = Math.max(20, saturation - 10); // Less saturated
+                } else {
+                  saturation = Math.max(15, saturation - 15); // More desaturated for info
+                  baseLightness -= 2;
+                }
+              }
+              
+              // Focused face gets cyan tint
+              if (isFocused) {
+                hue = 180; // Cyan
+                baseLightness += 10;
+                saturation = 50;
+              }
+
+              const lightness = baseLightness + intensity.opacity * 15;
+              const baseColor = `hsl(${hue} ${saturation}% ${lightness}%)`;
+              
+              // Calculate opacity with dimming for non-focused faces
+              const dimmedOpacity = isDimmed ? intensity.opacity * 0.4 : intensity.opacity;
+              const focusScale = isFocused ? 1.05 : 1;
 
               return (
                 <g key={wedge.id}>
-                  {/* Wedge shape */}
+                  {/* Define glow filter for this wedge */}
+                  <defs>
+                    <filter
+                      id={filterId}
+                      x="-50%"
+                      y="-50%"
+                      width="200%"
+                      height="200%"
+                    >
+                      <feGaussianBlur
+                        stdDeviation={5 + intensity.glow * 10}
+                        result="blur"
+                      />
+                      <feFlood
+                        floodColor={intensity.tint || `hsl(${hue} 80% 60%)`}
+                        floodOpacity={intensity.glow}
+                        result="color"
+                      />
+                      <feComposite
+                        in="color"
+                        in2="blur"
+                        operator="in"
+                        result="glow"
+                      />
+                      <feMerge>
+                        <feMergeNode in="glow" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                    {/* Pulse animation for warnings */}
+                    {hasWarning && (
+                      <style>
+                        {`
+                          @keyframes ${pulseId} {
+                            0%, 100% { opacity: ${intensity.opacity * 0.9}; }
+                            50% { opacity: ${intensity.opacity * 0.7}; }
+                          }
+                          .${pulseId} {
+                            animation: ${pulseId} 3s ease-in-out infinite;
+                          }
+                        `}
+                      </style>
+                    )}
+                  </defs>
+
+                  {/* Wedge shape with dynamic visual intensity */}
                   <path
                     d={wedgePath}
-                    fill={isHovered ? wedgeHoverColors[i] : wedgeColors[i]}
-                    stroke="hsl(270 30% 40%)"
-                    strokeWidth="1.5"
-                    className="hex-wedge cursor-pointer transition-colors duration-150"
-                    onMouseEnter={() => setHoveredWedge(i)}
-                    onMouseLeave={() => setHoveredWedge(null)}
-                    onClick={() => handleWedgeClick(wedge.id)}
+                    fill={baseColor}
+                    fillOpacity={dimmedOpacity}
+                    stroke={isFocused ? "hsl(180 60% 50%)" : hasWarning ? `hsl(${hue} 40% 45%)` : "hsl(270 30% 40%)"}
+                    strokeWidth={isFocused ? "2.5" : "1.5"}
+                    strokeOpacity={isDimmed ? 0.3 : 0.6 + intensity.opacity * 0.4}
+                    filter={intensity.glow > 0.1 && !isDimmed ? `url(#${filterId})` : undefined}
+                    className={`hex-wedge cursor-pointer transition-all duration-500 ${hasWarning && !isDimmed ? pulseId : ''} ${isFocused ? 'focused-face' : ''}`}
+                    style={{
+                      transformOrigin: `${center.x}px ${center.y}px`,
+                      transform: `scale(${focusScale})`,
+                      transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}
+                    onMouseEnter={(e) => {
+                      setHoveredWedge(i);
+                      if (hasConstraints && !isDimmed) {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setTooltipInfo({
+                          position: {
+                            x: rect.left + rect.width / 2,
+                            y: rect.top,
+                          },
+                          constraints,
+                        });
+                      }
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredWedge(null);
+                      setTooltipInfo(null);
+                    }}
+                    onClick={() => handleWedgeClick(wedge.id, i)}
                   />
+
+                  {/* Optional tint overlay for special states */}
+                  {intensity.tint && !hasConstraints && (
+                    <path
+                      d={wedgePath}
+                      fill={intensity.tint}
+                      fillOpacity={0.15}
+                      pointerEvents="none"
+                    />
+                  )}
+
                   {/* Clip path for label */}
                   <clipPath id={clipId}>
                     <path d={wedgePath} />
@@ -570,10 +1067,14 @@ export function HexagonView() {
                         y={startY + lineIndex * lineHeight}
                         textAnchor="middle"
                         dominantBaseline="middle"
-                        fill="hsl(0 0% 90%)"
-                        fontSize="11"
-                        fontWeight="600"
+                        fill={isFocused ? "hsl(180 80% 95%)" : "hsl(0 0% 90%)"}
+                        fillOpacity={isDimmed ? 0.3 : 0.7 + intensity.opacity * 0.3}
+                        fontSize={isFocused ? "12" : "11"}
+                        fontWeight={isFocused ? "700" : "600"}
                         className="uppercase tracking-wider"
+                        style={{
+                          transition: 'all 0.5s ease',
+                        }}
                       >
                         {line}
                       </text>
@@ -616,43 +1117,141 @@ export function HexagonView() {
             >
               CORE
             </text>
+            </g>
           </svg>
-
-          {/* Canvas Elements (freeform, images, shapes, etc.) */}
-          {canvasElements.map((element) => (
-            <CanvasElementRenderer
-              key={element.id}
-              element={element}
-              onUpdate={(updates) => updateCanvasElement(element.id, updates)}
-              onDelete={() => removeCanvasElement(element.id)}
-              onDuplicate={() => duplicateCanvasElement(element.id)}
-              onDragStart={(e) => handleElementDragStart(element.id, e)}
-              onDragEnd={handleElementDragEnd}
-              isDragging={draggingElement === element.id}
-              isSelected={selectedElementId === element.id}
-              onSelect={() => setSelectedElementId(element.id)}
-              canvasZoom={canvasZoom}
-              onEnterBoard={handleEnterBoard}
-            />
-          ))}
         </div>
-        {/* Zoom Controls */}
+        {/* Zoom Controls - Read-only navigation */}
         <NavigationToolkit
           canvasZoom={canvasZoom}
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onResetView={handleResetView}
           onFitAll={handleFitAll}
-          onUndo={() => {
-            if (canUndo()) undo();
-          }}
-          onRedo={() => {
-            if (canRedo()) redo();
-          }}
-          canUndo={canUndo()}
-          canRedo={canRedo()}
         />
+
+        {/* Constraint tooltip - appears on hover */}
+        {tooltipInfo && (
+          <div
+            className="fixed z-50 pointer-events-none"
+            style={{
+              left: tooltipInfo.position.x,
+              top: tooltipInfo.position.y - 10,
+              transform: 'translateX(-50%) translateY(-100%)',
+            }}
+          >
+            <div className="px-3 py-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl max-w-xs">
+              {tooltipInfo.constraints.map((constraint, idx) => (
+                <div
+                  key={idx}
+                  className={`text-sm ${idx > 0 ? 'mt-1 pt-1 border-t border-border/50' : ''}`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span
+                      className={`inline-block w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
+                        constraint.severity === 'warning'
+                          ? 'bg-amber-500'
+                          : 'bg-blue-400'
+                      }`}
+                    />
+                    <span className="text-muted-foreground leading-relaxed">
+                      {constraint.message}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+      {/* Related Elements Preview Panel - shown when face is focused */}
+      {showRelatedElements && focusedFaceIndex !== null && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 max-w-lg w-full mx-4"
+        >
+          <div className="bg-card/95 backdrop-blur-xl rounded-xl border border-cyan-500/30 shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                <span className="text-sm font-semibold text-foreground">
+                  {wedgeConfig[focusedFaceIndex].label.replace('\n', ' ')}
+                </span>
+                <span className="px-2 py-0.5 text-xs bg-cyan-500/20 text-cyan-400 rounded-full">
+                  {focusedTaggedElements.length} element{focusedTaggedElements.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedSection(wedgeConfig[focusedFaceIndex].id)}
+                  className="px-3 py-1 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded-md transition-colors"
+                >
+                  Open Details
+                </button>
+                <button
+                  onClick={handleCloseFocus}
+                  className="p-1 hover:bg-primary/20 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4 rotate-90" />
+                </button>
+              </div>
+            </div>
+            
+            {/* Content */}
+            <div className="px-4 py-3 max-h-48 overflow-y-auto">
+              {focusedTaggedElements.length === 0 ? (
+                <div className="text-center py-4">
+                  <div className="text-muted-foreground text-sm">
+                    No canvas elements tagged to this face
+                  </div>
+                  <p className="text-xs text-muted-foreground/70 mt-1">
+                    Use "Tag to Hypercube" in element context menu on canvas
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {Object.entries(focusedGroupedElements).map(([type, elements]) => {
+                    if (elements.length === 0) return null;
+                    
+                    const Icon = ELEMENT_TYPE_ICONS[type] || Box;
+                    const typeLabel = type === 'experienceBlock' 
+                      ? 'Experience Blocks' 
+                      : type === 'freeform'
+                      ? 'Cards'
+                      : `${type.charAt(0).toUpperCase() + type.slice(1)}s`;
+                    
+                    return (
+                      <div key={type} className="space-y-1">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider">
+                          <Icon className="w-3.5 h-3.5" />
+                          <span>{typeLabel}</span>
+                          <span className="text-muted-foreground/60">({elements.length})</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {elements.slice(0, 6).map((element) => (
+                            <div
+                              key={element.id}
+                              className="px-2.5 py-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-sm text-foreground truncate max-w-[150px]"
+                              title={getElementDisplayName(element)}
+                            >
+                              {getElementDisplayName(element)}
+                            </div>
+                          ))}
+                          {elements.length > 6 && (
+                            <div className="px-2.5 py-1.5 rounded-md bg-primary/10 text-sm text-muted-foreground">
+                              +{elements.length - 6} more
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scrim overlay when panel is open */}
       {isPanelOpen && (
         <div
@@ -673,39 +1272,6 @@ export function HexagonView() {
           />
         )}
       </div>
-      {/* Bottom Experience Flow Drawer */}
-      <ExperienceFlowDrawer />
-      {/* Breadcrumbs for board navigation */}
-      {boardPath.length > 0 && (
-        <div className="fixed top-20 left-6 z-30 flex items-center gap-1 px-3 py-2 rounded-lg bg-card/80 backdrop-blur border border-border text-sm">
-          <button
-            onClick={() => navigateToBoardPath(-1)}
-            className="flex items-center gap-1 hover:text-primary transition-colors"
-          >
-            <Home className="w-4 h-4" />
-            <span>Root</span>
-          </button>
-          {boardPath.map((board, index) => (
-            <div key={board.id} className="flex items-center">
-              <ChevronRight className="w-4 h-4 text-muted-foreground mx-1" />
-              <button
-                onClick={() => navigateToBoardPath(index)}
-                className={`hover:text-primary transition-colors ${index === boardPath.length - 1 ? "text-primary font-medium" : ""}`}
-              >
-                {board.title}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {/* Canvas Toolkit */}
-      <CanvasToolkit
-        onPlaceElement={handlePlaceElement}
-        canvasRef={containerRef}
-        canvasPosition={canvasPosition}
-        canvasZoom={canvasZoom}
-      />
-      {/* Zoom Controls */}
     </div>
   );
 }

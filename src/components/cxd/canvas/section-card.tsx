@@ -1,6 +1,6 @@
 'use client';
 
-import { CXDSection, CXDProject, REALITY_PLANES, SENSORY_DOMAINS, PRESENCE_TYPES, EXPERIENCE_FLOW_STAGES, STATE_QUADRANTS, TRAIT_QUADRANTS } from '@/types/cxd-schema';
+import { CXDSection, CXDProject, REALITY_PLANES, SENSORY_DOMAINS, PRESENCE_TYPES, EXPERIENCE_FLOW_STAGES, STATE_QUADRANTS, TRAIT_QUADRANTS, DEFAULT_REALITY_PLANES_V2 } from '@/types/cxd-schema';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -144,17 +144,27 @@ export function SectionCard({ section, project, position, onClick, onMouseDown, 
         );
 
       case 'realityPlanes':
+        const realityPlanesV2 = project.realityPlanesV2 || DEFAULT_REALITY_PLANES_V2;
+        const sortedPlanes = [...realityPlanesV2].sort((a, b) => a.priority - b.priority);
+        const enabledPlanes = sortedPlanes.filter(p => p.enabled);
         return (
           <div className="space-y-1">
-            {REALITY_PLANES.map((plane) => (
-              <div key={plane.code} className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground w-8">{plane.code}</span>
-                <Progress value={project.realityPlanes[plane.code]} className="h-1.5 flex-1" />
-                <span className="text-xs font-mono text-muted-foreground w-8">
-                  {project.realityPlanes[plane.code]}%
-                </span>
-              </div>
-            ))}
+            {enabledPlanes.length > 0 ? (
+              enabledPlanes.map((plane, idx) => {
+                const planeInfo = REALITY_PLANES.find(p => p.code === plane.code);
+                return (
+                  <div key={plane.code} className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-primary w-6">{idx + 1}</span>
+                    <span className="text-xs text-foreground">{plane.code}</span>
+                    <span className="text-xs text-muted-foreground flex-1 truncate">
+                      {plane.interfaceModality || planeInfo?.label || ''}
+                    </span>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="text-xs text-muted-foreground italic">No planes enabled</p>
+            )}
           </div>
         );
 

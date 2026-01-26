@@ -29,12 +29,12 @@ interface CXDReferencePanelProps {
 
 const REALITY_PLANE_LABELS: Record<string, string> = {
   PR: "Physical Reality",
-  AR: "Augmented Reality",
   VR: "Virtual Reality",
+  AR: "Augmented Reality",
   MR: "Mixed Reality",
-  GR: "Group Reality",
-  BR: "Brain Reality",
-  CR: "Consensus Reality",
+  GR: "Generative Reality",
+  BR: "Biological Reality",
+  CR: "Cognitive Reality",
 };
 
 const SENSORY_DOMAIN_LABELS: Record<string, string> = {
@@ -310,14 +310,26 @@ export function CXDReferencePanel({
             onExpand={() => onSectionClick?.("realityPlanes")}
           >
             <div className="space-y-1">
-              {Object.entries(project.realityPlanes || {}).map(([code, value]) => (
-                <SliderDisplay
-                  key={code}
-                  label={REALITY_PLANE_LABELS[code] || code}
-                  value={value}
-                  color="hsl(175 70% 45%)"
-                />
-              ))}
+              {(() => {
+                const planesV2 = project.realityPlanesV2 || [];
+                const sortedEnabled = [...planesV2]
+                  .filter(p => p.enabled)
+                  .sort((a, b) => a.priority - b.priority);
+                
+                if (sortedEnabled.length === 0) {
+                  return <p className="text-xs text-muted-foreground italic">No planes enabled</p>;
+                }
+                
+                return sortedEnabled.map((plane, idx) => (
+                  <div key={plane.code} className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-primary w-4">{idx + 1}</span>
+                    <span className="text-xs font-medium">{plane.code}</span>
+                    <span className="text-xs text-muted-foreground flex-1 truncate">
+                      {plane.interfaceModality || REALITY_PLANE_LABELS[plane.code]}
+                    </span>
+                  </div>
+                ));
+              })()}
             </div>
           </CollapsibleSection>
 

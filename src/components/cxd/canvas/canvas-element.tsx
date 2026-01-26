@@ -18,6 +18,8 @@ import {
   TEXT_GRADIENTS,
   FONT_FAMILIES,
   ShapeType,
+  HypercubeFaceTag,
+  HYPERCUBE_FACE_TAGS,
 } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,7 +28,12 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { useCXDStore } from "@/store/cxd-store";
-import { CXDProject } from "@/types/cxd-schema";
+import {
+  CXDProject,
+  REALITY_PLANES,
+  DEFAULT_REALITY_PLANES_V2,
+} from "@/types/cxd-schema";
+import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   GripVertical,
@@ -57,8 +64,27 @@ import {
   ArrowUp,
   ArrowDown,
   FileUp,
+  Lock,
+  Unlock,
+  X,
+  Minus,
+  Maximize2,
+  Crop,
+  FlipHorizontal,
+  FlipVertical,
+  RotateCcw,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
+
+// Hypercube tag icons mapping (defined at top for use in JSX)
+const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
+  "Reality Planes": "🌐",
+  "Sensory Domains": "👁️",
+  "Presence Types": "🧘",
+  "State Mapping": "🎭",
+  "Trait Mapping": "💫",
+  "Meaning Architecture": "🏛️",
+};
 
 interface CanvasElementRendererProps {
   element: CanvasElement;
@@ -70,6 +96,7 @@ interface CanvasElementRendererProps {
   isDragging: boolean;
   isSelected: boolean;
   isDropTarget?: boolean;
+  isHighlighted?: boolean;
   onSelect: (e?: React.MouseEvent) => void;
   canvasZoom: number;
   onEnterBoard?: (boardId: string, title: string) => void;
@@ -84,6 +111,8 @@ interface CanvasElementRendererProps {
   isConnecting?: boolean;
   isHoverTarget?: boolean;
   onOpenExperiencePanel?: (sectionId: InspectorSectionId) => void;
+  hoveredAnchor?: string | null;
+  onAnchorHover?: (anchor: string | null) => void;
 }
 
 export function CanvasElementRenderer({
@@ -96,6 +125,7 @@ export function CanvasElementRenderer({
   isDragging,
   isSelected,
   isDropTarget,
+  isHighlighted,
   onSelect,
   canvasZoom,
   onEnterBoard,
@@ -104,6 +134,8 @@ export function CanvasElementRenderer({
   isConnecting,
   isHoverTarget,
   onOpenExperiencePanel,
+  hoveredAnchor,
+  onAnchorHover,
 }: CanvasElementRendererProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -112,7 +144,37 @@ export function CanvasElementRenderer({
   const [showBoardIconPicker, setShowBoardIconPicker] = useState(false);
   const [showBoardColorPicker, setShowBoardColorPicker] = useState(false);
   const [showExperienceViewMenu, setShowExperienceViewMenu] = useState(false);
+  const [showTagMenu, setShowTagMenu] = useState(false);
   const elementRef = useRef<HTMLDivElement>(null);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
+
+  // Close all submenus when clicking outside
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      // Check if any menu is open
+      const anyMenuOpen = showColorPicker || showLinkViewMenu || showEmojiPicker ||
+                          showBoardIconPicker || showBoardColorPicker ||
+                          showExperienceViewMenu || showTagMenu;
+
+      if (!anyMenuOpen) return;
+
+      // Check if click is outside the element
+      if (elementRef.current && !elementRef.current.contains(e.target as Node)) {
+        // Close all menus
+        setShowColorPicker(false);
+        setShowLinkViewMenu(false);
+        setShowEmojiPicker(false);
+        setShowBoardIconPicker(false);
+        setShowBoardColorPicker(false);
+        setShowExperienceViewMenu(false);
+        setShowTagMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleGlobalClick);
+    return () => document.removeEventListener('mousedown', handleGlobalClick);
+  }, [showColorPicker, showLinkViewMenu, showEmojiPicker,
+      showBoardIconPicker, showBoardColorPicker, showExperienceViewMenu, showTagMenu]);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -123,7 +185,12 @@ export function CanvasElementRenderer({
       } else if (element.type === "experienceBlock" && onOpenExperiencePanel) {
         const expEl = element as ExperienceBlockElement;
         onOpenExperiencePanel(expEl.componentKey);
-      } else if (element.type !== "connector" && element.type !== "line" && element.type !== "shape" && element.type !== "experienceBlock") {
+      } else if (
+        element.type !== "connector" &&
+        element.type !== "line" &&
+        element.type !== "shape" &&
+        element.type !== "experienceBlock"
+      ) {
         // Don't auto-edit shapes, lines, or experience blocks on double-click
         setIsEditing(true);
       }
@@ -140,7 +207,7 @@ export function CanvasElementRenderer({
     if (element.type === "experienceBlock") {
       const expElement = element as ExperienceBlockElement;
       const viewMode = expElement.viewMode || "compact";
-      
+
       if (viewMode === "inline") {
         // Inline mode: larger size for editor
         if (element.width < 420 || element.height < 360) {
@@ -232,8 +299,7 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             onBlur={handleBlur}
             isSelected={isSelected}
-            // TODO: Wire from canvas drag state
-            isDropTarget={false}
+            isDropTarget={isDropTarget}
           />
         );
       case "text":
@@ -273,6 +339,7 @@ export function CanvasElementRenderer({
           <ExperienceBlockCard
             element={element as ExperienceBlockElement}
             onOpenPanel={onOpenExperiencePanel}
+            onUpdate={onUpdate}
           />
         );
       default:
@@ -290,27 +357,40 @@ export function CanvasElementRenderer({
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
         isDragging && "opacity-80 shadow-2xl cursor-grabbing",
+        // Highlight effect (from hypercube navigation)
+        isHighlighted &&
+          "ring-4 ring-cyan-400 shadow-[0_0_40px_rgba(34,211,238,0.6)] animate-pulse",
         // Selection ring for non-text elements (excluding lines which handle their own visualization)
         isSelected &&
+          !isHighlighted &&
           element.type !== "board" &&
           element.type !== "text" &&
           element.type !== "line" &&
           "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
         // Selection ring for boards only when drop target
         isSelected &&
+          !isHighlighted &&
           element.type === "board" &&
           isDropTarget &&
           "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
         // Glow when connector is hovering this element
         isHoverTarget &&
+          !isHighlighted &&
           "ring-2 ring-green-400 shadow-[0_0_30px_rgba(74,222,128,0.6)]",
         // Subtle glow for text when editing
         isEditing &&
           element.type === "text" &&
           "shadow-[0_0_12px_rgba(168,85,247,0.15)]",
         // Cursor styles
-        !isDragging && !isEditing && element.type !== "text" && element.type !== "line" && "cursor-grab",
-        !isDragging && !isEditing && element.type === "text" && "cursor-text",
+        !isDragging &&
+          !isEditing &&
+          element.type !== "text" &&
+          element.type !== "line" &&
+          "cursor-grab",
+        !isDragging &&
+          !isEditing &&
+          element.type === "text" &&
+          "cursor-text h-full",
       )}
       style={{
         left: element.x,
@@ -333,42 +413,52 @@ export function CanvasElementRenderer({
       onDoubleClick={handleDoubleClick}
     >
       {/* Connection anchors - shown when connecting or hovering (not for line elements) */}
-      {(isConnecting || isSelected) && onStartConnector && element.type !== "line" && (
-        <>
-          <ConnectionAnchor
-            position="top"
-            elementId={element.id}
-            onStartConnector={onStartConnector}
-            onEndConnector={onEndConnector}
-            isConnecting={isConnecting}
-            isHoverTarget={isHoverTarget}
-          />
-          <ConnectionAnchor
-            position="right"
-            elementId={element.id}
-            onStartConnector={onStartConnector}
-            onEndConnector={onEndConnector}
-            isConnecting={isConnecting}
-            isHoverTarget={isHoverTarget}
-          />
-          <ConnectionAnchor
-            position="bottom"
-            elementId={element.id}
-            onStartConnector={onStartConnector}
-            onEndConnector={onEndConnector}
-            isConnecting={isConnecting}
-            isHoverTarget={isHoverTarget}
-          />
-          <ConnectionAnchor
-            position="left"
-            elementId={element.id}
-            onStartConnector={onStartConnector}
-            onEndConnector={onEndConnector}
-            isConnecting={isConnecting}
-            isHoverTarget={isHoverTarget}
-          />
-        </>
-      )}
+      {(isConnecting || isSelected) &&
+        onStartConnector &&
+        element.type !== "line" && (
+          <>
+            <ConnectionAnchor
+              position="top"
+              elementId={element.id}
+              onStartConnector={onStartConnector}
+              onEndConnector={onEndConnector}
+              isConnecting={isConnecting}
+              isHoverTarget={isHoverTarget}
+              hoveredAnchor={hoveredAnchor}
+              onAnchorHover={onAnchorHover}
+            />
+            <ConnectionAnchor
+              position="right"
+              elementId={element.id}
+              onStartConnector={onStartConnector}
+              onEndConnector={onEndConnector}
+              isConnecting={isConnecting}
+              isHoverTarget={isHoverTarget}
+              hoveredAnchor={hoveredAnchor}
+              onAnchorHover={onAnchorHover}
+            />
+            <ConnectionAnchor
+              position="bottom"
+              elementId={element.id}
+              onStartConnector={onStartConnector}
+              onEndConnector={onEndConnector}
+              isConnecting={isConnecting}
+              isHoverTarget={isHoverTarget}
+              hoveredAnchor={hoveredAnchor}
+              onAnchorHover={onAnchorHover}
+            />
+            <ConnectionAnchor
+              position="left"
+              elementId={element.id}
+              onStartConnector={onStartConnector}
+              onEndConnector={onEndConnector}
+              isConnecting={isConnecting}
+              isHoverTarget={isHoverTarget}
+              hoveredAnchor={hoveredAnchor}
+              onAnchorHover={onAnchorHover}
+            />
+          </>
+        )}
       {/* Unified context menu (hidden for line elements as they have floating menu) */}
       {isSelected && !isDragging && element.type !== "line" && (
         <div
@@ -520,44 +610,47 @@ export function CanvasElementRenderer({
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
-          {element.type === "link" && (element as LinkElement).linkMode === "file" && (
-            <>
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowLinkViewMenu(!showLinkViewMenu);
-                  }}
-                  className={cn(
-                    "p-1.5 rounded text-muted-foreground hover:text-primary transition-colors",
-                    showLinkViewMenu
-                      ? "bg-primary/20 text-primary"
-                      : "hover:bg-primary/20",
-                  )}
-                  title="File View"
-                >
-                  {(element as LinkElement).fileViewMode === "preview" ? (
-                    <Code className="w-4 h-4" />
-                  ) : (
-                    <Bookmark className="w-4 h-4" />
-                  )}
-                </button>
-                {showLinkViewMenu && (
-                  <FileViewSubmenu
-                    currentMode={
-                      (element as LinkElement).fileViewMode || "bookmark"
-                    }
-                    onModeSelect={(mode) => {
-                      onUpdate({ fileViewMode: mode } as Partial<CanvasElement>);
-                      setShowLinkViewMenu(false);
+          {element.type === "link" &&
+            (element as LinkElement).linkMode === "file" && (
+              <>
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowLinkViewMenu(!showLinkViewMenu);
                     }}
-                    onClose={() => setShowLinkViewMenu(false)}
-                  />
-                )}
-              </div>
-              <div className="w-px h-4 bg-border/50 mx-0.5" />
-            </>
-          )}
+                    className={cn(
+                      "p-1.5 rounded text-muted-foreground hover:text-primary transition-colors",
+                      showLinkViewMenu
+                        ? "bg-primary/20 text-primary"
+                        : "hover:bg-primary/20",
+                    )}
+                    title="File View"
+                  >
+                    {(element as LinkElement).fileViewMode === "preview" ? (
+                      <Code className="w-4 h-4" />
+                    ) : (
+                      <Bookmark className="w-4 h-4" />
+                    )}
+                  </button>
+                  {showLinkViewMenu && (
+                    <FileViewSubmenu
+                      currentMode={
+                        (element as LinkElement).fileViewMode || "bookmark"
+                      }
+                      onModeSelect={(mode) => {
+                        onUpdate({
+                          fileViewMode: mode,
+                        } as Partial<CanvasElement>);
+                        setShowLinkViewMenu(false);
+                      }}
+                      onClose={() => setShowLinkViewMenu(false)}
+                    />
+                  )}
+                </div>
+                <div className="w-px h-4 bg-border/50 mx-0.5" />
+              </>
+            )}
           {element.type === "board" && (
             <>
               <div className="relative">
@@ -621,6 +714,37 @@ export function CanvasElementRenderer({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    e.preventDefault();
+                    setShowColorPicker(!showColorPicker);
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showColorPicker && "bg-primary/20 text-primary",
+                  )}
+                  title="Gradient"
+                >
+                  <Palette className="w-4 h-4" />
+                </button>
+                {showColorPicker && (
+                  <GradientPicker
+                    currentGradient={
+                      (element as ExperienceBlockElement).style?.bgColor ||
+                      "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)"
+                    }
+                    onGradientChange={(gradient) => {
+                      onUpdate({
+                        style: { ...(element.style || {}), bgColor: gradient },
+                      });
+                      setShowColorPicker(false);
+                    }}
+                    onClose={() => setShowColorPicker(false)}
+                  />
+                )}
+              </div>
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setShowExperienceViewMenu(!showExperienceViewMenu);
                   }}
                   className={cn(
@@ -679,6 +803,9 @@ export function CanvasElementRenderer({
                     strokeWidth={
                       (element as ContainerElement).style?.borderWidth
                     }
+                    strokeStyle={
+                      (element as ContainerElement).style?.borderStyle
+                    }
                     fillOpacity={
                       (element as ContainerElement).style?.fillOpacity
                     }
@@ -695,6 +822,11 @@ export function CanvasElementRenderer({
                         style: { ...element.style, borderWidth: width },
                       })
                     }
+                    onStrokeStyleChange={(style) =>
+                      onUpdate({
+                        style: { ...element.style, borderStyle: style },
+                      })
+                    }
                     onFillOpacityChange={(opacity) =>
                       onUpdate({
                         style: { ...element.style, fillOpacity: opacity },
@@ -704,6 +836,23 @@ export function CanvasElementRenderer({
                   />
                 )}
               </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUpdate({ locked: !element.locked });
+                }}
+                className={cn(
+                  "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                  element.locked && "bg-primary/20 text-primary",
+                )}
+                title={element.locked ? "Unlock Position" : "Lock Position"}
+              >
+                {element.locked ? (
+                  <Lock className="w-4 h-4" />
+                ) : (
+                  <Unlock className="w-4 h-4" />
+                )}
+              </button>
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
@@ -815,6 +964,53 @@ export function CanvasElementRenderer({
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
+          {/* Hypercube Tag - for taggable elements */}
+          {/* NOTE: experienceBlock is NOT taggable - they correspond to cube faces */}
+          {/* Cards (text, freeform), boards, containers, links, images ARE taggable */}
+          {(element.type === "board" ||
+            element.type === "container" ||
+            element.type === "text" ||
+            element.type === "freeform" ||
+            element.type === "link" ||
+            element.type === "image") && (
+            <>
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setShowTagMenu(!showTagMenu);
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showTagMenu && "bg-primary/20 text-primary",
+                    element.hypercubeTags &&
+                      element.hypercubeTags.length > 0 &&
+                      "text-cyan-400",
+                  )}
+                  title="Tag to Hypercube"
+                >
+                  <Box className="w-4 h-4" />
+                </button>
+                {showTagMenu && (
+                  <HypercubeTagPicker
+                    currentTags={element.hypercubeTags || []}
+                    onTagToggle={(tag) => {
+                      const currentTags = element.hypercubeTags || [];
+                      const newTags = currentTags.includes(tag)
+                        ? currentTags.filter((t) => t !== tag)
+                        : [...currentTags, tag];
+                      onUpdate({
+                        hypercubeTags: newTags,
+                      } as Partial<CanvasElement>);
+                    }}
+                    onClose={() => setShowTagMenu(false)}
+                  />
+                )}
+              </div>
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+            </>
+          )}
           {/* Universal actions */}
           <button
             onClick={(e) => {
@@ -858,37 +1054,59 @@ export function CanvasElementRenderer({
           </button>
         </div>
       )}
+      {/* Hypercube tag indicators */}
+      {element.hypercubeTags && element.hypercubeTags.length > 0 && (
+        <div
+          className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 px-1.5 rounded-full bg-card/90 backdrop-blur border border-cyan-500/30 shadow-sm z-10 bottom-[-33px] h-[30px] py-[5px] top-[-62px] w-fit"
+          style={{ transform: "translate(-50%, 50%)" }}
+        >
+          {element.hypercubeTags.slice(0, 3).map((tag) => (
+            <span key={tag} className="text-xs opacity-90" title={tag}>
+              {HYPERCUBE_TAG_ICONS[tag]}
+            </span>
+          ))}
+          {element.hypercubeTags.length > 3 && (
+            <span className="text-[10px] text-cyan-400/80 ml-0.5">
+              +{element.hypercubeTags.length - 3}
+            </span>
+          )}
+        </div>
+      )}
       {/* Element content */}
       {renderContent()}
       {/* Resize handles - shown when selected (not for boards, text, or line elements) */}
-      {isSelected && !isDragging && element.type !== "board" && element.type !== "text" && element.type !== "line" && (
-        <>
-          <ResizeHandle
-            position="se"
-            element={element}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-          />
-          <ResizeHandle
-            position="sw"
-            element={element}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-          />
-          <ResizeHandle
-            position="ne"
-            element={element}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-          />
-          <ResizeHandle
-            position="nw"
-            element={element}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-          />
-        </>
-      )}
+      {isSelected &&
+        !isDragging &&
+        element.type !== "board" &&
+        element.type !== "text" &&
+        element.type !== "line" && (
+          <>
+            <ResizeHandle
+              position="se"
+              element={element}
+              onUpdate={onUpdate}
+              canvasZoom={canvasZoom}
+            />
+            <ResizeHandle
+              position="sw"
+              element={element}
+              onUpdate={onUpdate}
+              canvasZoom={canvasZoom}
+            />
+            <ResizeHandle
+              position="ne"
+              element={element}
+              onUpdate={onUpdate}
+              canvasZoom={canvasZoom}
+            />
+            <ResizeHandle
+              position="nw"
+              element={element}
+              onUpdate={onUpdate}
+              canvasZoom={canvasZoom}
+            />
+          </>
+        )}
       {/* Text font-size resize handle - shown when text selected and not editing */}
       {isSelected && !isEditing && element.type === "text" && (
         <>
@@ -916,6 +1134,8 @@ function ConnectionAnchor({
   onEndConnector,
   isConnecting,
   isHoverTarget,
+  hoveredAnchor,
+  onAnchorHover,
 }: {
   position: "top" | "right" | "bottom" | "left";
   elementId: string;
@@ -929,6 +1149,8 @@ function ConnectionAnchor({
   ) => void;
   isConnecting?: boolean;
   isHoverTarget?: boolean;
+  hoveredAnchor?: string | null;
+  onAnchorHover?: (anchor: string | null) => void;
 }) {
   const positionStyles: Record<string, React.CSSProperties> = {
     top: { top: -6, left: "50%", transform: "translateX(-50%)" },
@@ -937,26 +1159,61 @@ function ConnectionAnchor({
     left: { left: -6, top: "50%", transform: "translateY(-50%)" },
   };
 
+  const anchorId = `${elementId}-${position}`;
+  const isThisAnchorHovered = hoveredAnchor === anchorId;
+  const showGlow = isConnecting && isHoverTarget && isThisAnchorHovered;
+
   return (
     <div
       className={cn(
         "absolute w-3 h-3 bg-primary/80 border-2 border-background rounded-full cursor-crosshair hover:bg-primary hover:scale-125 transition-all z-20 pointer-events-auto",
-        isConnecting && "bg-green-500 hover:bg-green-400",
-        isHoverTarget && "bg-green-400 scale-150 shadow-[0_0_20px_rgba(74,222,128,0.8)]",
+        // When connecting, all anchors on potential target elements glow subtly
+        isConnecting && isHoverTarget && "bg-green-500 animate-pulse",
+        // The specific anchor being hovered glows brightly
+        showGlow &&
+          "bg-green-400 scale-150 shadow-[0_0_20px_rgba(74,222,128,0.8)]",
       )}
       style={positionStyles[position]}
-      data-port-id={`${elementId}-${position}`}
+      data-port-id={anchorId}
       data-node-id={elementId}
       data-port={position}
+      onMouseEnter={() => {
+        if (isConnecting && onAnchorHover) {
+          onAnchorHover(anchorId);
+        }
+      }}
+      onMouseLeave={() => {
+        if (isConnecting && onAnchorHover) {
+          onAnchorHover(null);
+        }
+      }}
       onMouseDown={(e) => {
         e.stopPropagation();
-        console.log('[PORT] Mouse down on port:', elementId, position, 'isConnecting:', isConnecting);
+        console.log(
+          "[PORT] Mouse down on port:",
+          elementId,
+          position,
+          "isConnecting:",
+          isConnecting,
+        );
         if (isConnecting && onEndConnector) {
-          console.log('[PORT] Ending connector at:', elementId, position);
+          console.log("[PORT] Ending connector at:", elementId, position);
           onEndConnector(elementId, position);
         } else {
-          console.log('[PORT] Starting connector from:', elementId, position);
+          console.log("[PORT] Starting connector from:", elementId, position);
           onStartConnector(elementId, position);
+        }
+      }}
+      onMouseUp={(e) => {
+        // Allow mouseup on anchor to complete connection
+        if (isConnecting && onEndConnector) {
+          e.stopPropagation();
+          console.log(
+            "[PORT] Mouse up on port (completing):",
+            elementId,
+            position,
+          );
+          onEndConnector(elementId, position);
         }
       }}
     />
@@ -1100,10 +1357,10 @@ function TextFontSizeHandle({
     <div
       className={cn(
         "absolute bottom-0 right-0 w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-nwse-resize transition-all hover:scale-110",
-        isDragging && "scale-125 shadow-lg"
+        isDragging && "scale-125 shadow-lg",
       )}
       style={{
-        transform: 'translate(50%, 50%)',
+        transform: "translate(50%, 50%)",
       }}
       onMouseDown={handleMouseDown}
       title="Drag to resize text"
@@ -1163,10 +1420,10 @@ function TextWrapWidthHandle({
     <div
       className={cn(
         "absolute top-0 right-0 w-5 h-5 bg-accent/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-ew-resize transition-all hover:scale-110",
-        isDragging && "scale-125 shadow-lg"
+        isDragging && "scale-125 shadow-lg",
       )}
       style={{
-        transform: 'translate(50%, -50%)',
+        transform: "translate(50%, -50%)",
       }}
       onMouseDown={handleMouseDown}
       title="Drag to control text wrapping"
@@ -1257,106 +1514,152 @@ function ShapeColorPicker({
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
 
+  // Convert color to hex for color picker
+  const colorToHex = (color?: string): string => {
+    if (!color || color === "transparent") return "#000000";
+    if (color.startsWith("#")) return color;
+    // Handle HSL colors
+    if (color.startsWith("hsl")) {
+      try {
+        const match = color.match(/hsl\((\d+)\s+(\d+)%\s+(\d+)%\)/);
+        if (match) {
+          const [, h, s, l] = match;
+          return hslToHex(Number(h), Number(s), Number(l));
+        }
+      } catch (e) {
+        console.error("Error parsing HSL color:", e);
+      }
+    }
+    return "#A855F7";
+  };
+
+  const hslToHex = (h: number, s: number, l: number): string => {
+    l /= 100;
+    const a = (s * Math.min(l, 1 - l)) / 100;
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+      return Math.round(255 * color)
+        .toString(16)
+        .padStart(2, "0");
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+  };
+
+  const currentFillHex = colorToHex(fillColor);
+  const currentStrokeHex = colorToHex(strokeColor);
+
   return (
     <div
-      className="absolute mb-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[180px] pointer-events-auto left-[10px] bottom-[-254px]"
+      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Mode toggle */}
-      <div className="flex gap-1 mb-3 p-0.5 bg-muted/50 rounded-md">
+      {/* Compact single row layout */}
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        {/* Mode toggle buttons */}
         <button
           onClick={() => setMode("fill")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 py-1 px-2 text-xs rounded transition-colors",
-            mode === "fill"
-              ? "bg-primary text-primary-foreground"
-              : "hover:bg-muted",
+            "p-1.5 rounded hover:bg-primary/20 transition-colors",
+            mode === "fill" && "bg-primary/30 ring-1 ring-primary",
           )}
+          title="Fill"
         >
-          <Paintbrush className="w-3 h-3" />
-          Fill
+          <Paintbrush className="w-4 h-4" />
         </button>
         <button
           onClick={() => setMode("stroke")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 py-1 px-2 text-xs rounded transition-colors",
-            mode === "stroke"
-              ? "bg-primary text-primary-foreground"
-              : "hover:bg-muted",
+            "p-1.5 rounded hover:bg-primary/20 transition-colors",
+            mode === "stroke" && "bg-primary/30 ring-1 ring-primary",
           )}
+          title="Outline"
         >
-          <PenLine className="w-3 h-3" />
-          Outline
+          <PenLine className="w-4 h-4" />
+        </button>
+
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+        {/* Color picker */}
+        <input
+          type="color"
+          value={mode === "fill" ? currentFillHex : currentStrokeHex}
+          onChange={(e) => {
+            if (mode === "fill") {
+              onFillColorChange(e.target.value);
+            } else {
+              onStrokeColorChange(e.target.value);
+            }
+          }}
+          className="w-6 h-6 rounded cursor-pointer border-0"
+          title="Color"
+        />
+
+        {/* Transparent button for fill mode */}
+        {mode === "fill" && (
+          <>
+            <button
+              onClick={() => onFillColorChange("transparent")}
+              className={cn(
+                "w-6 h-6 rounded border-2 transition-all",
+                fillColor === "transparent"
+                  ? "border-primary"
+                  : "border-border",
+                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+              )}
+              title="Transparent"
+            />
+            <div className="w-px h-4 bg-border/50 mx-0.5" />
+          </>
+        )}
+
+        {/* Stroke width slider - only show when in stroke mode */}
+        {mode === "stroke" && (
+          <>
+            <input
+              type="range"
+              value={currentWidth}
+              onChange={(e) => onStrokeWidthChange(parseInt(e.target.value))}
+              min={1}
+              max={12}
+              step={1}
+              className="w-16 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+              title={`Width: ${currentWidth}px`}
+            />
+          </>
+        )}
+
+        {/* Fill opacity slider - only show when in fill mode */}
+        {mode === "fill" && (
+          <>
+            <span className="text-xs text-muted-foreground px-1">
+              {currentOpacity}%
+            </span>
+            <input
+              type="range"
+              value={currentOpacity}
+              onChange={(e) => onFillOpacityChange(parseInt(e.target.value))}
+              min={0}
+              max={100}
+              step={1}
+              className="w-20 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+              title={`Opacity: ${currentOpacity}%`}
+            />
+          </>
+        )}
+
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+          title="Close"
+        >
+          <X className="w-4 h-4" />
         </button>
       </div>
-      {/* Color grid */}
-      <div className="grid grid-cols-4 gap-1 mb-3">
-        {(mode === "fill" ? PRESET_COLORS : SOLID_STROKE_COLORS).map((color) => (
-          <button
-            key={color}
-            className={cn(
-              "w-6 h-6 rounded border-2 transition-transform hover:scale-110",
-              (mode === "fill" ? fillColor : strokeColor) === color
-                ? "border-primary"
-                : "border-transparent",
-              color === "transparent" &&
-                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
-            )}
-            style={{
-              background: color === "transparent" ? undefined : color,
-            }}
-            onClick={() => {
-              if (mode === "fill") {
-                onFillColorChange(color);
-              } else {
-                onStrokeColorChange(color);
-              }
-            }}
-          />
-        ))}
-      </div>
-      {/* Stroke width control - only show when in stroke mode */}
-      {mode === "stroke" && (
-        <div className="pt-2 border-t border-border/50">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-muted-foreground">Stroke Width</span>
-            <span className="text-xs font-mono">{currentWidth}px</span>
-          </div>
-          <Slider
-            value={[currentWidth]}
-            onValueChange={(value) => onStrokeWidthChange(value[0])}
-            min={1}
-            max={12}
-            step={1}
-            className="w-full"
-          />
-        </div>
-      )}
-      {/* Fill opacity control - only show when in fill mode */}
-      {mode === "fill" && (
-        <div className="pt-2 border-t border-border/50">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-muted-foreground">Opacity</span>
-            <span className="text-xs font-mono">{currentOpacity}%</span>
-          </div>
-          <Slider
-            value={[currentOpacity]}
-            onValueChange={(value) => onFillOpacityChange(value[0])}
-            min={0}
-            max={100}
-            step={1}
-            className="w-full"
-          />
-        </div>
-      )}
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        Done
-      </button>
     </div>
   );
 }
@@ -1366,131 +1669,235 @@ function ContainerStylePicker({
   fillColor,
   strokeColor,
   strokeWidth,
+  strokeStyle,
   fillOpacity,
   onFillColorChange,
   onStrokeColorChange,
   onStrokeWidthChange,
+  onStrokeStyleChange,
   onFillOpacityChange,
   onClose,
 }: {
   fillColor?: string;
   strokeColor?: string;
   strokeWidth?: number;
+  strokeStyle?: "solid" | "dashed" | "dotted";
   fillOpacity?: number;
   onFillColorChange: (color: string) => void;
   onStrokeColorChange: (color: string) => void;
   onStrokeWidthChange: (width: number) => void;
+  onStrokeStyleChange: (style: "solid" | "dashed" | "dotted") => void;
   onFillOpacityChange: (opacity: number) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"fill" | "stroke">("fill");
   const currentWidth = strokeWidth || 2;
+  const currentStyle = strokeStyle || "dashed";
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 20;
+
+  // Convert color to hex for color picker
+  const colorToHex = (color?: string): string => {
+    if (!color || color === "transparent") return "#000000";
+    if (color.startsWith("#")) return color;
+    // Handle HSL colors
+    if (color.startsWith("hsl")) {
+      try {
+        const match = color.match(/hsl\((\d+)\s+(\d+)%\s+(\d+)%\)/);
+        if (match) {
+          const [, h, s, l] = match;
+          return hslToHex(Number(h), Number(s), Number(l));
+        }
+      } catch (e) {
+        console.error("Error parsing HSL color:", e);
+      }
+    }
+    return "#A855F7";
+  };
+
+  const hslToHex = (h: number, s: number, l: number): string => {
+    l /= 100;
+    const a = (s * Math.min(l, 1 - l)) / 100;
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+      return Math.round(255 * color)
+        .toString(16)
+        .padStart(2, "0");
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+  };
+
+  const currentFillHex = colorToHex(fillColor);
+  const currentStrokeHex = colorToHex(strokeColor);
 
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[180px] pointer-events-auto"
+      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Mode toggle */}
-      <div className="flex gap-1 mb-3 p-0.5 bg-muted/50 rounded-md">
+      {/* Compact single row layout */}
+      <div className="flex items-center gap-1 px-2 py-1.5">
+        {/* Mode toggle buttons */}
         <button
           onClick={() => setMode("fill")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 py-1 px-2 text-xs rounded transition-colors",
-            mode === "fill"
-              ? "bg-primary text-primary-foreground"
-              : "hover:bg-muted",
+            "p-1.5 rounded hover:bg-primary/20 transition-colors",
+            mode === "fill" && "bg-primary/30 ring-1 ring-primary",
           )}
+          title="Fill"
         >
-          <Paintbrush className="w-3 h-3" />
-          Fill
+          <Paintbrush className="w-4 h-4" />
         </button>
         <button
           onClick={() => setMode("stroke")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 py-1 px-2 text-xs rounded transition-colors",
-            mode === "stroke"
-              ? "bg-primary text-primary-foreground"
-              : "hover:bg-muted",
+            "p-1.5 rounded hover:bg-primary/20 transition-colors",
+            mode === "stroke" && "bg-primary/30 ring-1 ring-primary",
           )}
+          title="Outline"
         >
-          <PenLine className="w-3 h-3" />
-          Outline
+          <PenLine className="w-4 h-4" />
+        </button>
+
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+        {/* Color picker */}
+        <input
+          type="color"
+          value={mode === "fill" ? currentFillHex : currentStrokeHex}
+          onChange={(e) => {
+            if (mode === "fill") {
+              onFillColorChange(e.target.value);
+            } else {
+              onStrokeColorChange(e.target.value);
+            }
+          }}
+          className="w-6 h-6 rounded cursor-pointer border-0"
+          title="Color"
+        />
+
+        {/* Transparent button for fill mode */}
+        {mode === "fill" && (
+          <>
+            <button
+              onClick={() => onFillColorChange("transparent")}
+              className={cn(
+                "w-6 h-6 rounded border-2 transition-all",
+                fillColor === "transparent"
+                  ? "border-primary"
+                  : "border-border",
+                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+              )}
+              title="Transparent"
+            />
+            <div className="w-px h-4 bg-border/50 mx-0.5" />
+          </>
+        )}
+
+        {/* Stroke width slider - only show when in stroke mode */}
+        {mode === "stroke" && (
+          <>
+            <input
+              type="range"
+              value={currentWidth}
+              onChange={(e) => onStrokeWidthChange(parseInt(e.target.value))}
+              min={1}
+              max={8}
+              step={1}
+              className="w-16 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+              title={`Width: ${currentWidth}px`}
+            />
+            <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+            {/* Line style buttons */}
+            <button
+              onClick={() => onStrokeStyleChange("solid")}
+              className={cn(
+                "p-1.5 rounded hover:bg-primary/20 transition-colors",
+                currentStyle === "solid" && "bg-primary/30 ring-1 ring-primary",
+              )}
+              title="Solid"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onStrokeStyleChange("dashed")}
+              className={cn(
+                "p-1.5 rounded hover:bg-primary/20 transition-colors",
+                currentStyle === "dashed" &&
+                  "bg-primary/30 ring-1 ring-primary",
+              )}
+              title="Dashed"
+            >
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <line x1="4" y1="12" x2="8" y2="12" />
+                <line x1="12" y1="12" x2="16" y2="12" />
+                <line x1="20" y1="12" x2="24" y2="12" />
+              </svg>
+            </button>
+            <button
+              onClick={() => onStrokeStyleChange("dotted")}
+              className={cn(
+                "p-1.5 rounded hover:bg-primary/20 transition-colors",
+                currentStyle === "dotted" &&
+                  "bg-primary/30 ring-1 ring-primary",
+              )}
+              title="Dotted"
+            >
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <circle cx="4" cy="12" r="1" fill="currentColor" />
+                <circle cx="10" cy="12" r="1" fill="currentColor" />
+                <circle cx="16" cy="12" r="1" fill="currentColor" />
+                <circle cx="22" cy="12" r="1" fill="currentColor" />
+              </svg>
+            </button>
+          </>
+        )}
+
+        {/* Fill opacity slider - only show when in fill mode */}
+        {mode === "fill" && (
+          <>
+            <span className="text-xs text-muted-foreground px-1">
+              {currentOpacity}%
+            </span>
+            <input
+              type="range"
+              value={currentOpacity}
+              onChange={(e) => onFillOpacityChange(parseInt(e.target.value))}
+              min={0}
+              max={100}
+              step={5}
+              className="w-20 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+              title={`Opacity: ${currentOpacity}%`}
+            />
+          </>
+        )}
+
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+          title="Close"
+        >
+          <X className="w-4 h-4" />
         </button>
       </div>
-      {/* Color options */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        {[
-          "transparent",
-          "hsl(var(--primary) / 0.1)",
-          "hsl(var(--primary) / 0.2)",
-        ].map((color) => (
-          <button
-            key={color}
-            className={cn(
-              "h-8 rounded border-2 transition-transform hover:scale-110",
-              (mode === "fill" ? fillColor : strokeColor) === color
-                ? "border-primary"
-                : "border-transparent",
-              color === "transparent" &&
-                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
-            )}
-            style={{
-              background: color === "transparent" ? undefined : color,
-            }}
-            onClick={() => {
-              if (mode === "fill") {
-                onFillColorChange(color);
-              } else {
-                onStrokeColorChange(color);
-              }
-            }}
-          />
-        ))}
-      </div>
-      {/* Stroke width control - only show when in stroke mode */}
-      {mode === "stroke" && (
-        <div className="pt-2 border-t border-border/50">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-muted-foreground">Stroke Width</span>
-            <span className="text-xs font-mono">{currentWidth}px</span>
-          </div>
-          <Slider
-            value={[currentWidth]}
-            onValueChange={(value) => onStrokeWidthChange(value[0])}
-            min={1}
-            max={6}
-            step={1}
-            className="w-full"
-          />
-        </div>
-      )}
-      {/* Fill opacity control - only show when in fill mode */}
-      {mode === "fill" && (
-        <div className="pt-2 border-t border-border/50">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-muted-foreground">Opacity</span>
-            <span className="text-xs font-mono">{currentOpacity}%</span>
-          </div>
-          <Slider
-            value={[currentOpacity]}
-            onValueChange={(value) => onFillOpacityChange(value[0])}
-            min={0}
-            max={100}
-            step={5}
-            className="w-full"
-          />
-        </div>
-      )}
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        Done
-      </button>
     </div>
   );
 }
@@ -1601,6 +2008,119 @@ function TextColorPicker({
         </div>
       )}
       {/* Close button */}
+      <button
+        onClick={onClose}
+        className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        Done
+      </button>
+    </div>
+  );
+}
+
+// Gradient picker for experience blocks
+function GradientPicker({
+  currentGradient,
+  onGradientChange,
+  onClose,
+}: {
+  currentGradient?: string;
+  onGradientChange: (gradient: string) => void;
+  onClose: () => void;
+}) {
+  const gradients = [
+    "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)", // 1 - Keep original
+    "linear-gradient(135deg, #5b21b6 0%, #4c1d95 30%, #3b0764 70%, #2d0552 100%)", // 2 - Darker purple
+    "linear-gradient(135deg, #7e22ce 0%, #6b21a8 30%, #581c87 70%, #4c1d95 100%)", // 3 - Darker violet
+    "linear-gradient(135deg, #a21caf 0%, #86198f 30%, #701a75 70%, #581c87 100%)", // 4 - Darker pink/purple
+    "linear-gradient(135deg, #0891b2 0%, #0e7490 30%, #155e75 70%, #164e63 100%)", // 5 - Darker cyan
+    "linear-gradient(135deg, #0f766e 0%, #115e59 30%, #134e4a 70%, #0f3d3b 100%)", // 6 - Darker teal
+    "linear-gradient(135deg, #4f46e5 0%, #4338ca 30%, #3730a3 70%, #312e81 100%)", // 7 - Darker indigo
+    "linear-gradient(135deg, #7c3aed 0%, #6d28d9 30%, #5b21b6 70%, #4c1d95 100%)", // 8 - Darker lavender
+    "linear-gradient(135deg, #1e40af 0%, #1e3a8a 30%, #1e293b 70%, #0f172a 100%)", // 9 - Keep original
+    "linear-gradient(135deg, #6b21a8 0%, #581c87 30%, #4c1d95 70%, #3b0764 100%)", // 10 - Keep original
+    "linear-gradient(135deg, #b45309 0%, #92400e 30%, #78350f 70%, #451a03 100%)", // 11 - Darker orange
+    "linear-gradient(135deg, #15803d 0%, #166534 30%, #14532d 70%, #052e16 100%)", // 12 - Darker green
+  ];
+
+  return (
+    <div
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[260px] pointer-events-auto"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="text-xs font-medium text-muted-foreground mb-2">
+        Choose Gradient
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {gradients.map((gradient, index) => (
+          <button
+            key={index}
+            onClick={() => {
+              onGradientChange(gradient);
+              onClose();
+            }}
+            className={cn(
+              "h-12 rounded-md border-2 transition-all hover:scale-105",
+              currentGradient === gradient
+                ? "border-foreground shadow-lg ring-2 ring-primary"
+                : "border-border/50 hover:border-border",
+            )}
+            style={{ background: gradient }}
+            title={`Gradient ${index + 1}`}
+          />
+        ))}
+      </div>
+      <button
+        onClick={onClose}
+        className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        Done
+      </button>
+    </div>
+  );
+}
+
+// Hypercube tag picker component
+function HypercubeTagPicker({
+  currentTags,
+  onTagToggle,
+  onClose,
+}: {
+  currentTags: HypercubeFaceTag[];
+  onTagToggle: (tag: HypercubeFaceTag) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[220px] pointer-events-auto"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="text-xs font-medium text-muted-foreground mb-2">
+        Tag to Hypercube
+      </div>
+      <div className="flex flex-col gap-1">
+        {HYPERCUBE_FACE_TAGS.map((tag) => {
+          const isSelected = currentTags.includes(tag);
+          return (
+            <button
+              key={tag}
+              onClick={() => onTagToggle(tag)}
+              className={cn(
+                "flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-all text-left",
+                isSelected
+                  ? "bg-primary/20 text-primary"
+                  : "hover:bg-primary/10 text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <span className="text-base">{HYPERCUBE_TAG_ICONS[tag]}</span>
+              <span className="flex-1">{tag}</span>
+              {isSelected && <span className="text-primary">✓</span>}
+            </button>
+          );
+        })}
+      </div>
       <button
         onClick={onClose}
         className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -1798,7 +2318,7 @@ function BoardColorPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[180px]"
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px] h-[156px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -1806,10 +2326,10 @@ function BoardColorPicker({
         <button
           key={id}
           className={cn(
-            "w-14 h-14 rounded-lg transition-all hover:scale-110 border-2",
+            "rounded-lg transition-all hover:scale-110 border-2",
             currentColor === gradient
               ? "border-white ring-2 ring-primary"
-              : "border-transparent",
+              : "border-transparent w-[30px] h-[30px]",
           )}
           style={{ background: gradient }}
           onClick={() => {
@@ -2026,7 +2546,9 @@ function FreeformCard({
       } else {
         // Normal newline
         const newValue =
-          value.substring(0, selectionEnd) + "\n" + value.substring(selectionEnd);
+          value.substring(0, selectionEnd) +
+          "\n" +
+          value.substring(selectionEnd);
         onUpdate({ content: newValue });
         setTimeout(() => {
           textarea.setSelectionRange(selectionEnd + 1, selectionEnd + 1);
@@ -2088,7 +2610,10 @@ function FreeformCard({
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos, lineStartPos);
         }, 0);
-      } else if (todoMatch && selectionStart === lineStartPos + currentLine.length) {
+      } else if (
+        todoMatch &&
+        selectionStart === lineStartPos + currentLine.length
+      ) {
         e.preventDefault();
         // Remove the todo marker
         const newValue =
@@ -2143,7 +2668,7 @@ function FreeformCard({
                     "w-4 h-4 mt-[2px] rounded border flex items-center justify-center cursor-pointer transition-colors",
                     isChecked
                       ? "bg-primary/40 border-primary"
-                      : "border-white/40 hover:border-white/60"
+                      : "border-white/40 hover:border-white/60",
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2152,7 +2677,10 @@ function FreeformCard({
                       .split("\n")
                       .map((l, i) => {
                         if (i === idx) {
-                          return l.replace(/\[([ x])\]/, isChecked ? "[ ]" : "[x]");
+                          return l.replace(
+                            /\[([ x])\]/,
+                            isChecked ? "[ ]" : "[x]",
+                          );
                         }
                         return l;
                       })
@@ -2176,11 +2704,7 @@ function FreeformCard({
                     </svg>
                   )}
                 </div>
-                <span
-                  className={cn(
-                    isChecked && "line-through opacity-60"
-                  )}
-                >
+                <span className={cn(isChecked && "line-through opacity-60")}>
                   {text}
                 </span>
               </div>
@@ -2188,9 +2712,7 @@ function FreeformCard({
           }
 
           // Regular text
-          return (
-            <div key={idx}>{line || <br />}</div>
-          );
+          return <div key={idx}>{line || <br />}</div>;
         })}
       </div>
     );
@@ -2260,7 +2782,20 @@ function ImageCard({
 }) {
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [isCropping, setIsCropping] = useState(false);
+  const [cropBox, setCropBox] = useState(
+    element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 }
+  );
+  const [dragState, setDragState] = useState<{
+    active: boolean;
+    handle: 'tl' | 'tr' | 'bl' | 'br' | 'top' | 'right' | 'bottom' | 'left' | 'move' | null;
+    startX: number;
+    startY: number;
+    startCrop: typeof cropBox;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageContainerRef = useRef<HTMLDivElement>(null);
 
   const compressAndUploadImage = async (file: File) => {
     setIsUploading(true);
@@ -2367,6 +2902,164 @@ function ImageCard({
     }
   }, [hasImage, handlePaste]);
 
+  // Handle crop box dragging
+  const handleCropMouseDown = (
+    e: React.MouseEvent,
+    handle: 'tl' | 'tr' | 'bl' | 'br' | 'top' | 'right' | 'bottom' | 'left' | 'move'
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = imageContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    setDragState({
+      active: true,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      startCrop: { ...cropBox },
+    });
+  };
+
+  useEffect(() => {
+    if (!dragState?.active) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragState || !imageContainerRef.current) return;
+
+      const rect = imageContainerRef.current.getBoundingClientRect();
+      const deltaXPct = ((e.clientX - dragState.startX) / rect.width) * 100;
+      const deltaYPct = ((e.clientY - dragState.startY) / rect.height) * 100;
+
+      let newCrop = { ...dragState.startCrop };
+
+      switch (dragState.handle) {
+        case 'move':
+          newCrop.x = Math.max(0, Math.min(100 - newCrop.width, dragState.startCrop.x + deltaXPct));
+          newCrop.y = Math.max(0, Math.min(100 - newCrop.height, dragState.startCrop.y + deltaYPct));
+          break;
+        case 'tl':
+          const maxDxTl = dragState.startCrop.width - 5;
+          const maxDyTl = dragState.startCrop.height - 5;
+          const dxTl = Math.max(-dragState.startCrop.x, Math.min(maxDxTl, deltaXPct));
+          const dyTl = Math.max(-dragState.startCrop.y, Math.min(maxDyTl, deltaYPct));
+          newCrop.x = dragState.startCrop.x + dxTl;
+          newCrop.y = dragState.startCrop.y + dyTl;
+          newCrop.width = dragState.startCrop.width - dxTl;
+          newCrop.height = dragState.startCrop.height - dyTl;
+          break;
+        case 'tr':
+          const maxDyTr = dragState.startCrop.height - 5;
+          const maxDxTr = 100 - dragState.startCrop.x - dragState.startCrop.width;
+          const dxTr = Math.min(maxDxTr, Math.max(-dragState.startCrop.width + 5, deltaXPct));
+          const dyTr = Math.max(-dragState.startCrop.y, Math.min(maxDyTr, deltaYPct));
+          newCrop.y = dragState.startCrop.y + dyTr;
+          newCrop.width = dragState.startCrop.width + dxTr;
+          newCrop.height = dragState.startCrop.height - dyTr;
+          break;
+        case 'bl':
+          const maxDxBl = dragState.startCrop.width - 5;
+          const maxDyBl = 100 - dragState.startCrop.y - dragState.startCrop.height;
+          const dxBl = Math.max(-dragState.startCrop.x, Math.min(maxDxBl, deltaXPct));
+          const dyBl = Math.min(maxDyBl, Math.max(-dragState.startCrop.height + 5, deltaYPct));
+          newCrop.x = dragState.startCrop.x + dxBl;
+          newCrop.width = dragState.startCrop.width - dxBl;
+          newCrop.height = dragState.startCrop.height + dyBl;
+          break;
+        case 'br':
+          const maxDxBr = 100 - dragState.startCrop.x - dragState.startCrop.width;
+          const maxDyBr = 100 - dragState.startCrop.y - dragState.startCrop.height;
+          const dxBr = Math.min(maxDxBr, Math.max(-dragState.startCrop.width + 5, deltaXPct));
+          const dyBr = Math.min(maxDyBr, Math.max(-dragState.startCrop.height + 5, deltaYPct));
+          newCrop.width = dragState.startCrop.width + dxBr;
+          newCrop.height = dragState.startCrop.height + dyBr;
+          break;
+        case 'top':
+          const maxDyTop = dragState.startCrop.height - 5;
+          const dyTop = Math.max(-dragState.startCrop.y, Math.min(maxDyTop, deltaYPct));
+          newCrop.y = dragState.startCrop.y + dyTop;
+          newCrop.height = dragState.startCrop.height - dyTop;
+          break;
+        case 'bottom':
+          const maxDyBottom = 100 - dragState.startCrop.y - dragState.startCrop.height;
+          const dyBottom = Math.min(maxDyBottom, Math.max(-dragState.startCrop.height + 5, deltaYPct));
+          newCrop.height = dragState.startCrop.height + dyBottom;
+          break;
+        case 'left':
+          const maxDxLeft = dragState.startCrop.width - 5;
+          const dxLeft = Math.max(-dragState.startCrop.x, Math.min(maxDxLeft, deltaXPct));
+          newCrop.x = dragState.startCrop.x + dxLeft;
+          newCrop.width = dragState.startCrop.width - dxLeft;
+          break;
+        case 'right':
+          const maxDxRight = 100 - dragState.startCrop.x - dragState.startCrop.width;
+          const dxRight = Math.min(maxDxRight, Math.max(-dragState.startCrop.width + 5, deltaXPct));
+          newCrop.width = dragState.startCrop.width + dxRight;
+          break;
+      }
+
+      // Ensure crop stays in bounds
+      newCrop.x = Math.max(0, Math.min(100 - newCrop.width, newCrop.x));
+      newCrop.y = Math.max(0, Math.min(100 - newCrop.height, newCrop.y));
+      newCrop.width = Math.max(5, Math.min(100 - newCrop.x, newCrop.width));
+      newCrop.height = Math.max(5, Math.min(100 - newCrop.y, newCrop.height));
+
+      setCropBox(newCrop);
+    };
+
+    const handleMouseUp = () => {
+      setDragState(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragState, cropBox]);
+
+  const applyCrop = () => {
+    onUpdate({
+      imageEdits: {
+        ...element.imageEdits,
+        crop: cropBox,
+      },
+    });
+    setIsCropping(false);
+    setIsEditMode(false);
+  };
+
+  const cancelCrop = () => {
+    setCropBox(element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 });
+    setIsCropping(false);
+  };
+
+  const toggleFlipH = () => {
+    onUpdate({
+      imageEdits: {
+        ...element.imageEdits,
+        flipH: !element.imageEdits?.flipH,
+      },
+    });
+  };
+
+  const toggleFlipV = () => {
+    onUpdate({
+      imageEdits: {
+        ...element.imageEdits,
+        flipV: !element.imageEdits?.flipV,
+      },
+    });
+  };
+
+  const resetImage = () => {
+    onUpdate({ imageEdits: undefined });
+    setCropBox({ x: 0, y: 0, width: 100, height: 100 });
+    setIsEditMode(false);
+  };
+
   // Show upload UI when no image
   if (!element.src) {
     return (
@@ -2408,23 +3101,215 @@ function ImageCard({
     );
   }
 
+  // Get current edits
+  const crop = element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 };
+  const flipH = element.imageEdits?.flipH || false;
+  const flipV = element.imageEdits?.flipV || false;
+  const hasEdits = crop.x !== 0 || crop.y !== 0 || crop.width !== 100 || crop.height !== 100 || flipH || flipV;
+
   // Image is loaded - show clean media tile
   return (
-    <div
-      className={cn(
-        "w-full h-full overflow-hidden rounded-lg transition-all",
-        isSelected ? "ring-0" : "", // Selection ring is handled by parent
+    <div className="w-full h-full relative" data-crop-mode={isCropping ? "true" : undefined}>
+      <div
+        ref={imageContainerRef}
+        className={cn(
+          "w-full h-full overflow-hidden rounded-lg transition-all relative",
+          isSelected ? "ring-0" : "", // Selection ring is handled by parent
+          isCropping && "ring-2 ring-cyan-400"
+        )}
+      >
+        <div
+          className="w-full h-full"
+          style={{
+            clipPath: `inset(${crop.y}% ${100 - crop.x - crop.width}% ${100 - crop.y - crop.height}% ${crop.x}%)`,
+          }}
+        >
+          <img
+            src={element.src}
+            alt={element.alt || ""}
+            className="w-full h-full"
+            style={{
+              objectFit: element.objectFit || "cover",
+              transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+            }}
+            onError={() => setHasImage(false)}
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+          />
+        </div>
+
+        {/* Crop overlay */}
+        {isCropping && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{ pointerEvents: 'none' }}
+          >
+            {/* Darkened areas outside crop */}
+            <div className="absolute inset-0 bg-black/60" style={{ pointerEvents: 'none' }} />
+            
+            {/* Crop box */}
+            <div
+              className="absolute border-2 border-cyan-400 bg-transparent"
+              style={{
+                left: `${cropBox.x}%`,
+                top: `${cropBox.y}%`,
+                width: `${cropBox.width}%`,
+                height: `${cropBox.height}%`,
+                pointerEvents: 'auto',
+              }}
+              onMouseDown={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const edge = 8;
+                
+                // Check if near edges/corners
+                if (x < edge && y < edge) return;
+                if (x > rect.width - edge && y < edge) return;
+                if (x < edge && y > rect.height - edge) return;
+                if (x > rect.width - edge && y > rect.height - edge) return;
+                if (y < edge || y > rect.height - edge || x < edge || x > rect.width - edge) return;
+                
+                handleCropMouseDown(e, 'move');
+              }}
+            >
+              {/* Corner handles */}
+              <div
+                className="absolute w-3 h-3 bg-cyan-400 rounded-full -left-1.5 -top-1.5 cursor-nwse-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'tl')}
+              />
+              <div
+                className="absolute w-3 h-3 bg-cyan-400 rounded-full -right-1.5 -top-1.5 cursor-nesw-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'tr')}
+              />
+              <div
+                className="absolute w-3 h-3 bg-cyan-400 rounded-full -left-1.5 -bottom-1.5 cursor-nesw-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'bl')}
+              />
+              <div
+                className="absolute w-3 h-3 bg-cyan-400 rounded-full -right-1.5 -bottom-1.5 cursor-nwse-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'br')}
+              />
+              
+              {/* Edge handles */}
+              <div
+                className="absolute w-full h-2 -top-1 left-0 cursor-ns-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'top')}
+              />
+              <div
+                className="absolute w-full h-2 -bottom-1 left-0 cursor-ns-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'bottom')}
+              />
+              <div
+                className="absolute w-2 h-full -left-1 top-0 cursor-ew-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'left')}
+              />
+              <div
+                className="absolute w-2 h-full -right-1 top-0 cursor-ew-resize"
+                onMouseDown={(e) => handleCropMouseDown(e, 'right')}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Edit toolbar - shown when selected */}
+      {isSelected && !isCropping && (
+        <div
+          className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => setIsEditMode(!isEditMode)}
+            className={cn(
+              "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+              isEditMode && "bg-primary/20 text-primary"
+            )}
+            title="Edit Image"
+          >
+            <Crop className="w-4 h-4" />
+          </button>
+          {hasEdits && (
+            <button
+              onClick={resetImage}
+              className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+              title="Reset Image"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       )}
-    >
-      <img
-        src={element.src}
-        alt={element.alt || ""}
-        className="w-full h-full"
-        style={{ objectFit: element.objectFit || "cover" }}
-        onError={() => setHasImage(false)}
-        draggable={false}
-        onDragStart={(e) => e.preventDefault()}
-      />
+
+      {/* Edit panel */}
+      {isEditMode && isSelected && !isCropping && (
+        <div
+          className="absolute -bottom-24 left-1/2 -translate-x-1/2 flex flex-col gap-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10 min-w-[200px]"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="text-xs font-medium text-muted-foreground mb-1">
+            Image Edits
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setIsCropping(true);
+                setCropBox(crop);
+              }}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-primary/10 hover:bg-primary/20 text-sm transition-colors"
+            >
+              <Crop className="w-3.5 h-3.5" />
+              Crop
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={toggleFlipH}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
+                flipH ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20"
+              )}
+            >
+              <FlipHorizontal className="w-3.5 h-3.5" />
+              Flip H
+            </button>
+            <button
+              onClick={toggleFlipV}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
+                flipV ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20"
+              )}
+            >
+              <FlipVertical className="w-3.5 h-3.5" />
+              Flip V
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Crop controls */}
+      {isCropping && (
+        <div
+          className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/95 backdrop-blur border border-cyan-500/50 shadow-lg z-10"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={applyCrop}
+            className="px-3 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition-colors"
+          >
+            Apply Crop
+          </button>
+          <button
+            onClick={cancelCrop}
+            className="px-3 py-1 rounded bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground text-sm transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2456,14 +3341,14 @@ function ShapeCard({
     }
     // Convert percentage to 0-1
     const alpha = opacity / 100;
-    
+
     // Handle gradients
     if (color.includes("gradient")) {
       // For gradients, we need to wrap in a container with opacity or modify each color
       // For now, return as-is and handle via fillOpacity on the SVG element
       return color;
     }
-    
+
     // Handle HSL colors
     if (color.startsWith("hsl")) {
       return color.replace("hsl(", `hsla(`).replace(")", `, ${alpha})`);
@@ -2479,7 +3364,9 @@ function ShapeCard({
   };
 
   const renderSVGShape = () => {
-    const fill = bgColor.includes("gradient") ? `url(#gradient-${element.id})` : getBackgroundWithOpacity(bgColor, fillOpacity);
+    const fill = bgColor.includes("gradient")
+      ? `url(#gradient-${element.id})`
+      : getBackgroundWithOpacity(bgColor, fillOpacity);
     const stroke = borderColor;
     const strokeWidth = borderWidth;
     const opacity = bgColor.includes("gradient") ? fillOpacity / 100 : 1;
@@ -2493,12 +3380,31 @@ function ShapeCard({
             viewBox="0 0 100 100"
             className="absolute inset-0"
             preserveAspectRatio="none"
+            style={{ overflow: "visible" }}
           >
             {bgColor.includes("gradient") && (
               <defs>
-                <linearGradient id={`gradient-${element.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: extractGradientColor(bgColor, 0), stopOpacity: 1 }} />
-                  <stop offset="100%" style={{ stopColor: extractGradientColor(bgColor, 1), stopOpacity: 1 }} />
+                <linearGradient
+                  id={`gradient-${element.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop
+                    offset="0%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 0),
+                      stopOpacity: 1,
+                    }}
+                  />
+                  <stop
+                    offset="100%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 1),
+                      stopOpacity: 1,
+                    }}
+                  />
                 </linearGradient>
               </defs>
             )}
@@ -2521,12 +3427,31 @@ function ShapeCard({
             viewBox="0 0 100 100"
             className="absolute inset-0"
             preserveAspectRatio="none"
+            style={{ overflow: "visible" }}
           >
             {bgColor.includes("gradient") && (
               <defs>
-                <linearGradient id={`gradient-${element.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: extractGradientColor(bgColor, 0), stopOpacity: 1 }} />
-                  <stop offset="100%" style={{ stopColor: extractGradientColor(bgColor, 1), stopOpacity: 1 }} />
+                <linearGradient
+                  id={`gradient-${element.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop
+                    offset="0%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 0),
+                      stopOpacity: 1,
+                    }}
+                  />
+                  <stop
+                    offset="100%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 1),
+                      stopOpacity: 1,
+                    }}
+                  />
                 </linearGradient>
               </defs>
             )}
@@ -2547,12 +3472,31 @@ function ShapeCard({
             viewBox="0 0 100 100"
             className="absolute inset-0"
             preserveAspectRatio="none"
+            style={{ overflow: "visible" }}
           >
             {bgColor.includes("gradient") && (
               <defs>
-                <linearGradient id={`gradient-${element.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: extractGradientColor(bgColor, 0), stopOpacity: 1 }} />
-                  <stop offset="100%" style={{ stopColor: extractGradientColor(bgColor, 1), stopOpacity: 1 }} />
+                <linearGradient
+                  id={`gradient-${element.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop
+                    offset="0%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 0),
+                      stopOpacity: 1,
+                    }}
+                  />
+                  <stop
+                    offset="100%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 1),
+                      stopOpacity: 1,
+                    }}
+                  />
                 </linearGradient>
               </defs>
             )}
@@ -2573,12 +3517,31 @@ function ShapeCard({
             viewBox="0 0 100 100"
             className="absolute inset-0"
             preserveAspectRatio="none"
+            style={{ overflow: "visible" }}
           >
             {bgColor.includes("gradient") && (
               <defs>
-                <linearGradient id={`gradient-${element.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: extractGradientColor(bgColor, 0), stopOpacity: 1 }} />
-                  <stop offset="100%" style={{ stopColor: extractGradientColor(bgColor, 1), stopOpacity: 1 }} />
+                <linearGradient
+                  id={`gradient-${element.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop
+                    offset="0%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 0),
+                      stopOpacity: 1,
+                    }}
+                  />
+                  <stop
+                    offset="100%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 1),
+                      stopOpacity: 1,
+                    }}
+                  />
                 </linearGradient>
               </defs>
             )}
@@ -2599,12 +3562,31 @@ function ShapeCard({
             viewBox="0 0 100 100"
             className="absolute inset-0"
             preserveAspectRatio="none"
+            style={{ overflow: "visible" }}
           >
             {bgColor.includes("gradient") && (
               <defs>
-                <linearGradient id={`gradient-${element.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: extractGradientColor(bgColor, 0), stopOpacity: 1 }} />
-                  <stop offset="100%" style={{ stopColor: extractGradientColor(bgColor, 1), stopOpacity: 1 }} />
+                <linearGradient
+                  id={`gradient-${element.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop
+                    offset="0%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 0),
+                      stopOpacity: 1,
+                    }}
+                  />
+                  <stop
+                    offset="100%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 1),
+                      stopOpacity: 1,
+                    }}
+                  />
                 </linearGradient>
               </defs>
             )}
@@ -2625,12 +3607,31 @@ function ShapeCard({
             viewBox="0 0 100 100"
             className="absolute inset-0"
             preserveAspectRatio="none"
+            style={{ overflow: "visible" }}
           >
             {bgColor.includes("gradient") && (
               <defs>
-                <linearGradient id={`gradient-${element.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" style={{ stopColor: extractGradientColor(bgColor, 0), stopOpacity: 1 }} />
-                  <stop offset="100%" style={{ stopColor: extractGradientColor(bgColor, 1), stopOpacity: 1 }} />
+                <linearGradient
+                  id={`gradient-${element.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop
+                    offset="0%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 0),
+                      stopOpacity: 1,
+                    }}
+                  />
+                  <stop
+                    offset="100%"
+                    style={{
+                      stopColor: extractGradientColor(bgColor, 1),
+                      stopOpacity: 1,
+                    }}
+                  />
                 </linearGradient>
               </defs>
             )}
@@ -2649,7 +3650,7 @@ function ShapeCard({
         );
     }
   };
-  
+
   // Helper to extract colors from gradient strings
   const extractGradientColor = (gradient: string, position: number): string => {
     // Extract colors from linear-gradient string
@@ -2661,7 +3662,7 @@ function ShapeCard({
   };
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center">
+    <div className="relative w-full h-full flex items-center justify-center overflow-visible">
       {renderSVGShape()}
       <div className="relative z-10 text-center px-2">
         {isEditing ? (
@@ -2713,6 +3714,7 @@ function ContainerCard({
   const bgColor = element.style?.bgColor || "transparent";
   const borderColor = element.style?.borderColor || "hsl(var(--primary) / 0.4)";
   const strokeWidth = element.style?.borderWidth || 2;
+  const borderStyle = element.style?.borderStyle || "dashed";
   const fillOpacity =
     element.style?.fillOpacity !== undefined ? element.style.fillOpacity : 20;
 
@@ -2725,7 +3727,7 @@ function ContainerCard({
   return (
     <div
       className={cn(
-        "w-full h-full rounded-lg border-dashed backdrop-blur transition-all",
+        "w-full h-full rounded-lg backdrop-blur transition-all",
         isDropTarget &&
           "border-primary shadow-lg shadow-primary/20 brightness-110",
       )}
@@ -2733,6 +3735,7 @@ function ContainerCard({
         backgroundColor: backgroundWithOpacity,
         borderColor: borderColor,
         borderWidth: `${strokeWidth}px`,
+        borderStyle: borderStyle,
         boxShadow: isDropTarget
           ? "0 0 20px rgba(168, 85, 247, 0.5), inset 0 0 10px rgba(168, 85, 247, 0.2)"
           : undefined,
@@ -2740,10 +3743,9 @@ function ContainerCard({
     >
       {/* Container label */}
       <div
-        className="px-3 py-2 border-b border-dashed"
+        className="px-3 py-2"
         style={{
-          borderColor: borderColor,
-          borderWidth: `${Math.max(1, strokeWidth - 1)}px`,
+          borderBottom: `${strokeWidth}px ${borderStyle} ${borderColor}`,
         }}
       >
         {isEditing ? (
@@ -2804,9 +3806,42 @@ function TextCard({
     }
   }, [isEditing]);
 
+  // Auto-grow textarea height while editing
+  const autoGrowTextarea = useCallback(() => {
+    if (textareaRef.current) {
+      const textarea = textareaRef.current;
+      // Reset height to auto to get accurate scrollHeight
+      textarea.style.height = "0px";
+      // Set height to scrollHeight to show all content
+      const newHeight = Math.max(30, textarea.scrollHeight);
+      textarea.style.height = newHeight + "px";
+
+      // Update element height to match (plus padding)
+      const totalHeight = newHeight + 16;
+      if (Math.abs(element.height - totalHeight) > 2) {
+        onUpdate({ height: totalHeight });
+      }
+    }
+  }, [element.height, onUpdate]);
+
+  // Auto-grow on mount (enter edit mode) and content change
+  useEffect(() => {
+    if (isEditing) {
+      // Small delay to ensure textarea is rendered
+      requestAnimationFrame(() => {
+        autoGrowTextarea();
+        // Focus and select all on edit start
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.select();
+        }
+      });
+    }
+  }, [isEditing, autoGrowTextarea]);
+
   // Auto-size height based on content (width controlled by wrapWidth or auto)
   useEffect(() => {
-    if (measureRef.current && element.content) {
+    if (!isEditing && measureRef.current && element.content) {
       const measured = measureRef.current.getBoundingClientRect();
 
       // Width: use wrapWidth if set, otherwise auto-size to content
@@ -2825,30 +3860,17 @@ function TextCard({
         onUpdate({ width: newWidth, height: newHeight });
       }
     }
-  }, [element.content, fontSize, fontWeight, fontFamily, wrapWidth]);
+  }, [
+    element.content,
+    fontSize,
+    fontWeight,
+    fontFamily,
+    wrapWidth,
+    isEditing,
+    onUpdate,
+  ]);
 
-  // Handle click outside to commit changes
-  useEffect(() => {
-    if (!isEditing) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      // Check if click is outside the textarea
-      if (textareaRef.current && !textareaRef.current.contains(target)) {
-        onBlur();
-      }
-    };
-
-    // Add listener after a short delay to avoid immediate trigger
-    const timeoutId = setTimeout(() => {
-      document.addEventListener("mousedown", handleClickOutside);
-    }, 100);
-
-    return () => {
-      clearTimeout(timeoutId);
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [isEditing, onBlur]);
+  // Removed automatic click-outside blur - user must click outside or press Escape to exit editing
 
   // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -2872,12 +3894,28 @@ function TextCard({
     }
   };
 
+  // Handle content change with auto-grow
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onUpdate({ content: e.target.value });
+    // Auto-grow after content update
+    requestAnimationFrame(autoGrowTextarea);
+  };
+
   // Determine text style (solid color or gradient)
   // CRITICAL: Apply gradient directly to text span, not container
   const hasGradient = gradient?.startsWith("linear-gradient");
 
+  // Get the effective width for the text
+  const effectiveWidth = wrapWidth || element.width;
+
   return (
-    <div className="w-full h-full flex items-center justify-center p-2">
+    <div
+      className="w-full h-full flex items-start justify-center p-2"
+      style={{
+        // Allow overflow when editing so text isn't clipped
+        overflow: isEditing ? "visible" : "hidden",
+      }}
+    >
       {/* Hidden measurement element - respects wrapWidth */}
       {!isEditing && element.content && (
         <div
@@ -2889,35 +3927,41 @@ function TextCard({
             fontFamily,
             textAlign,
             maxWidth: wrapWidth ? `${wrapWidth - 16}px` : undefined,
-            width: wrapWidth ? `${wrapWidth - 16}px` : 'auto',
+            width: wrapWidth ? `${wrapWidth - 16}px` : "auto",
           }}
         >
           {element.content}
         </div>
       )}
-
       {/* Text content */}
       {isEditing ? (
         <textarea
           ref={textareaRef}
-          autoFocus
           value={element.content}
-          onChange={(e) => onUpdate({ content: e.target.value })}
+          onChange={handleContentChange}
           onKeyDown={handleKeyDown}
-          className="w-full h-full resize-none border-0 bg-transparent p-0 focus:outline-none overflow-hidden"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          autoFocus
+          className="resize-none border-0 bg-transparent p-0 focus:outline-none"
           style={{
             fontSize,
             fontWeight,
             fontFamily,
             textAlign,
             color: textColor,
+            width: effectiveWidth - 16,
+            minHeight: 24,
+            overflow: "hidden", // Hide scrollbar, we auto-grow instead
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
           }}
           placeholder="Type text..."
           data-no-drag
         />
       ) : (
         <div
-          className="w-full h-full whitespace-pre-wrap flex items-center justify-center"
+          className="w-full whitespace-pre-wrap"
           style={{
             fontSize,
             fontWeight,
@@ -2967,7 +4011,9 @@ function LinkCard({
 }) {
   // Local draft state to prevent element from disappearing during edits
   const [draftUrl, setDraftUrl] = useState(element.url || "");
-  const [isEditing, setIsEditing] = useState(!element.url && element.linkMode !== "file");
+  const [isEditing, setIsEditing] = useState(
+    !element.url && element.linkMode !== "file",
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [embedError, setEmbedError] = useState(false);
@@ -3171,7 +4217,9 @@ function LinkCard({
           {isUploading ? (
             <>
               <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm text-muted-foreground">Uploading...</span>
+              <span className="text-sm text-muted-foreground">
+                Uploading...
+              </span>
             </>
           ) : (
             <>
@@ -3199,7 +4247,9 @@ function LinkCard({
               <p className="text-xs text-muted-foreground">
                 or drag & drop a file here
               </p>
-              {urlError && <p className="text-xs text-destructive">{urlError}</p>}
+              {urlError && (
+                <p className="text-xs text-destructive">{urlError}</p>
+              )}
             </>
           )}
         </div>
@@ -3599,7 +4649,7 @@ function BoardCard({
     <div
       className={cn(
         "flex items-center justify-center transition-all relative",
-        isDropTarget && "scale-105",
+        isDropTarget && "scale-105 w-fit h-fit",
       )}
     >
       {/* Drop target glow overlay */}
@@ -3615,7 +4665,7 @@ function BoardCard({
         />
       )}
       {/* Hexagon badge container with 3D effect */}
-      <div className="relative flex flex-col items-center gap-3 w-full h-full justify-center">
+      <div className="relative flex flex-col items-center gap-3 justify-center w-fit h-fit gap-y-[3.5px]">
         {/* Hexagon icon container */}
         <div className="relative w-32 h-32 flex items-center justify-center">
           {/* Isometric cube shape with 3D gradient and glow */}
@@ -3673,7 +4723,6 @@ function BoardCard({
               {element.title || "New Board"}
             </button>
           )}
-          <span className="text-xs text-white/50">Double-click to enter</span>
         </div>
       </div>
     </div>
@@ -3684,9 +4733,11 @@ function BoardCard({
 function ExperienceBlockCard({
   element,
   onOpenPanel,
+  onUpdate,
 }: {
   element: ExperienceBlockElement;
   onOpenPanel?: (sectionId: InspectorSectionId) => void;
+  onUpdate: (updates: Partial<ExperienceBlockElement>) => void;
 }) {
   // Import the icons from experience-inspector
   const {
@@ -3700,7 +4751,11 @@ function ExperienceBlockCard({
     Brain,
     Heart,
     ExternalLink: ExternalLinkIcon,
+    Palette,
   } = require("lucide-react");
+
+  // Get the update function from the store
+  const updateCanvasElement = useCXDStore((state) => state.updateCanvasElement);
 
   const iconMap: Record<InspectorSectionId, React.ReactNode> = {
     intentionCore: <Target className="w-6 h-6" />,
@@ -3735,7 +4790,6 @@ function ExperienceBlockCard({
     updateContextWorld,
     updateContextStory,
     updateContextMagic,
-    updateRealityPlane,
     updateSensoryDomain,
     updatePresenceType,
     updateStateMapping,
@@ -3744,13 +4798,17 @@ function ExperienceBlockCard({
 
   if (!project) return null;
 
+  const gradient =
+    element.style?.bgColor ||
+    "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
+
   // Compact view (default)
   if (viewMode === "compact") {
     return (
       <div
-        className="w-full h-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-all"
+        className="w-full h-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-all relative group"
         style={{
-          background: "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
+          background: gradient,
           borderColor: "rgba(168, 85, 247, 0.3)",
           boxShadow: "0 4px 16px rgba(168, 85, 247, 0.2)",
         }}
@@ -3759,13 +4817,14 @@ function ExperienceBlockCard({
         <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-primary/20">
           {icon}
         </div>
-
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-white truncate">
             {element.title}
           </div>
-          <div className="text-xs text-white/50 mt-0.5">Double-click to open</div>
+          <div className="text-xs text-white/50 mt-0.5">
+            Double-click to open
+          </div>
         </div>
       </div>
     );
@@ -3774,9 +4833,9 @@ function ExperienceBlockCard({
   // Inline editor view
   return (
     <div
-      className="w-full h-full rounded-lg border overflow-hidden flex flex-col"
+      className="w-full h-full rounded-lg border overflow-hidden flex flex-col relative group bg-ring"
       style={{
-        background: "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
+        background: gradient,
         borderColor: "rgba(168, 85, 247, 0.3)",
         boxShadow: "0 4px 16px rgba(168, 85, 247, 0.2)",
       }}
@@ -3793,6 +4852,26 @@ function ExperienceBlockCard({
         <button
           onClick={(e) => {
             e.stopPropagation();
+            // Auto-expand to fit content - measure the ScrollArea content
+            const scrollContent = e.currentTarget
+              .closest(".group")
+              ?.querySelector("[data-no-drag]");
+            if (scrollContent) {
+              const contentHeight = scrollContent.scrollHeight;
+              const newHeight = Math.min(contentHeight + 80, 800); // 80px for header, max 800px
+              const newWidth = Math.max(element.width, 500); // Min 500px width
+              onUpdate({ width: newWidth, height: newHeight });
+            }
+          }}
+          className="flex-shrink-0 p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+          title="Expand to fit content"
+          data-no-drag
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
             onOpenPanel?.(element.componentKey);
           }}
           className="flex-shrink-0 p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
@@ -3802,14 +4881,19 @@ function ExperienceBlockCard({
           <ExternalLinkIcon className="w-4 h-4" />
         </button>
       </div>
-
       {/* Body - scrollable editor */}
-      <ScrollArea className="flex-1 overflow-auto" onClick={(e) => e.stopPropagation()}>
+      <ScrollArea
+        className="flex-1 overflow-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-4 space-y-4" data-no-drag>
           {element.componentKey === "intentionCore" && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="projectName" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="projectName"
+                  className="text-sm font-medium text-white"
+                >
                   Project Name
                 </Label>
                 <Input
@@ -3822,7 +4906,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="mainConcept" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="mainConcept"
+                  className="text-sm font-medium text-white"
+                >
                   Main Concept
                 </Label>
                 <Textarea
@@ -3835,7 +4922,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="coreMessage" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="coreMessage"
+                  className="text-sm font-medium text-white"
+                >
                   Core Message
                 </Label>
                 <Textarea
@@ -3853,7 +4943,10 @@ function ExperienceBlockCard({
           {element.componentKey === "desiredChange" && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="insights" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="insights"
+                  className="text-sm font-medium text-white"
+                >
                   Insights
                 </Label>
                 <Textarea
@@ -3866,7 +4959,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="feelings" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="feelings"
+                  className="text-sm font-medium text-white"
+                >
                   Feelings
                 </Label>
                 <Textarea
@@ -3879,7 +4975,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="states" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="states"
+                  className="text-sm font-medium text-white"
+                >
                   States
                 </Label>
                 <Textarea
@@ -3892,7 +4991,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="knowledge" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="knowledge"
+                  className="text-sm font-medium text-white"
+                >
                   Knowledge
                 </Label>
                 <Textarea
@@ -3910,7 +5012,10 @@ function ExperienceBlockCard({
           {element.componentKey === "humanContext" && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="audienceNeeds" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="audienceNeeds"
+                  className="text-sm font-medium text-white"
+                >
                   Audience Needs
                 </Label>
                 <Textarea
@@ -3923,7 +5028,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="audienceDesires" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="audienceDesires"
+                  className="text-sm font-medium text-white"
+                >
                   Audience Desires
                 </Label>
                 <Textarea
@@ -3936,7 +5044,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="userRole" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="userRole"
+                  className="text-sm font-medium text-white"
+                >
                   User Role
                 </Label>
                 <Input
@@ -3954,7 +5065,10 @@ function ExperienceBlockCard({
           {element.componentKey === "contextAndMeaning" && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="world" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="world"
+                  className="text-sm font-medium text-white"
+                >
                   World
                 </Label>
                 <Textarea
@@ -3967,7 +5081,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="story" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="story"
+                  className="text-sm font-medium text-white"
+                >
                   Story
                 </Label>
                 <Textarea
@@ -3980,7 +5097,10 @@ function ExperienceBlockCard({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="magic" className="text-sm font-medium text-white">
+                <Label
+                  htmlFor="magic"
+                  className="text-sm font-medium text-white"
+                >
                   Magic/Mechanism
                 </Label>
                 <Textarea
@@ -3996,96 +5116,91 @@ function ExperienceBlockCard({
           )}
 
           {element.componentKey === "realityPlanes" && (
-            <div className="space-y-3">
-              {Object.entries(project.realityPlanes || {}).map(([key, value]) => (
-                <div key={key} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium text-white capitalize">
-                      {key.replace(/([A-Z])/g, ' $1').trim()}
-                    </Label>
-                    <span className="text-xs text-white/70">{value}%</span>
-                  </div>
-                  <Slider
-                    value={[value]}
-                    onValueChange={([v]) => updateRealityPlane(key as any, v)}
-                    max={100}
-                    step={1}
-                    className="w-full"
-                    data-no-drag
-                  />
-                </div>
-              ))}
+            <div className="space-y-3" data-no-drag>
+              <RealityPlanesEditor compact />
             </div>
           )}
 
           {element.componentKey === "sensoryDomains" && (
             <div className="space-y-3">
-              {Object.entries(project.sensoryDomains || {}).map(([key, value]) => (
-                <div key={key} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium text-white capitalize">
-                      {key}
-                    </Label>
-                    <span className="text-xs text-white/70">{value}%</span>
+              {Object.entries(project.sensoryDomains || {}).map(
+                ([key, value]) => (
+                  <div key={key} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium text-white capitalize">
+                        {key}
+                      </Label>
+                      <span className="text-xs text-white/70">{value}%</span>
+                    </div>
+                    <Slider
+                      value={[value]}
+                      onValueChange={([v]) =>
+                        updateSensoryDomain(key as any, v)
+                      }
+                      max={100}
+                      step={1}
+                      className="w-full"
+                      data-no-drag
+                    />
                   </div>
-                  <Slider
-                    value={[value]}
-                    onValueChange={([v]) => updateSensoryDomain(key as any, v)}
-                    max={100}
-                    step={1}
-                    className="w-full"
-                    data-no-drag
-                  />
-                </div>
-              ))}
+                ),
+              )}
             </div>
           )}
 
           {element.componentKey === "presenceTypes" && (
             <div className="space-y-3">
-              {Object.entries(project.presenceTypes || {}).map(([key, value]) => (
-                <div key={key} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium text-white capitalize">
-                      {key.replace(/([A-Z])/g, ' $1').trim()}
-                    </Label>
-                    <span className="text-xs text-white/70">{value}%</span>
+              {Object.entries(project.presenceTypes || {}).map(
+                ([key, value]) => (
+                  <div key={key} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium text-white capitalize">
+                        {key.replace(/([A-Z])/g, " $1").trim()}
+                      </Label>
+                      <span className="text-xs text-white/70">{value}%</span>
+                    </div>
+                    <Slider
+                      value={[value]}
+                      onValueChange={([v]) => updatePresenceType(key as any, v)}
+                      max={100}
+                      step={1}
+                      className="w-full"
+                      data-no-drag
+                    />
                   </div>
-                  <Slider
-                    value={[value]}
-                    onValueChange={([v]) => updatePresenceType(key as any, v)}
-                    max={100}
-                    step={1}
-                    className="w-full"
-                    data-no-drag
-                  />
-                </div>
-              ))}
+                ),
+              )}
             </div>
           )}
 
           {element.componentKey === "stateMapping" && (
             <div className="grid grid-cols-2 gap-3">
-              {(["cognition", "emotion", "soma", "relational"] as const).map((quadrant) => (
-                <div key={quadrant} className="space-y-2">
-                  <Label className="text-sm font-medium text-white capitalize">
-                    {quadrant}
-                  </Label>
-                  <Textarea
-                    placeholder={`${quadrant} state...`}
-                    value={(project.stateMapping as any)?.[quadrant] || ""}
-                    onChange={(e) => updateStateMapping(quadrant as any, e.target.value)}
-                    className="bg-secondary/50 border-border/50 text-white min-h-[60px] text-xs"
-                    data-no-drag
-                  />
-                </div>
-              ))}
+              {(["cognition", "emotion", "soma", "relational"] as const).map(
+                (quadrant) => (
+                  <div key={quadrant} className="space-y-2">
+                    <Label className="text-sm font-medium text-white capitalize">
+                      {quadrant}
+                    </Label>
+                    <Textarea
+                      placeholder={`${quadrant} state...`}
+                      value={(project.stateMapping as any)?.[quadrant] || ""}
+                      onChange={(e) =>
+                        updateStateMapping(quadrant as any, e.target.value)
+                      }
+                      className="bg-secondary/50 border-border/50 text-white min-h-[60px] text-xs"
+                      data-no-drag
+                    />
+                  </div>
+                ),
+              )}
             </div>
           )}
 
           {element.componentKey === "traitMapping" && (
             <div className="grid grid-cols-2 gap-3">
-              {(["cognitive", "emotional", "somatic", "relational"] as const).map((quadrant) => (
+              {(
+                ["cognitive", "emotional", "somatic", "relational"] as const
+              ).map((quadrant) => (
                 <div key={quadrant} className="space-y-2">
                   <Label className="text-sm font-medium text-white capitalize">
                     {quadrant}
@@ -4093,7 +5208,9 @@ function ExperienceBlockCard({
                   <Textarea
                     placeholder={`${quadrant} trait...`}
                     value={project.traitMapping?.[quadrant] || ""}
-                    onChange={(e) => updateTraitMapping(quadrant, e.target.value)}
+                    onChange={(e) =>
+                      updateTraitMapping(quadrant, e.target.value)
+                    }
                     className="bg-secondary/50 border-border/50 text-white min-h-[60px] text-xs"
                     data-no-drag
                   />

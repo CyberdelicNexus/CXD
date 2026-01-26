@@ -4,12 +4,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import {
   WIZARD_STEPS,
-  REALITY_PLANES,
   SENSORY_DOMAINS,
   PRESENCE_TYPES,
   STATE_QUADRANTS,
   TRAIT_QUADRANTS,
 } from "@/types/cxd-schema";
+import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -83,7 +83,6 @@ export function CXDWizard() {
     updateHumanAudienceNeeds,
     updateHumanAudienceDesires,
     updateHumanUserRole,
-    updateRealityPlane,
     updateSensoryDomain,
     updatePresenceType,
     updateStateMapping,
@@ -342,38 +341,11 @@ export function CXDWizard() {
       );
     }
 
-    // Reality Planes step (sliders)
+    // Reality Planes step (toggles with drag-and-drop reordering)
     if (step.sectionId === "realityPlanes") {
       return (
         <div className="space-y-6 w-full">
-          {REALITY_PLANES.map((plane) => (
-            <div key={plane.code} className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">{plane.label}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {plane.description}
-                  </p>
-                </div>
-                <span className="text-sm font-mono text-primary">
-                  {project.realityPlanes[plane.code]}%
-                </span>
-              </div>
-              <Slider
-                value={[project.realityPlanes[plane.code]]}
-                onValueChange={([value]) =>
-                  updateRealityPlane(plane.code, value)
-                }
-                max={100}
-                step={1}
-                className="w-full"
-              />
-            </div>
-          ))}
-          <p className="text-xs text-muted-foreground italic">
-            Note: These values are descriptive, not prescriptive. There is no
-            requirement for them to sum to 100%.
-          </p>
+          <RealityPlanesEditor />
         </div>
       );
     }

@@ -2,10 +2,10 @@
 
 import { useCXDStore } from '@/store/cxd-store';
 import { Button } from '@/components/ui/button';
-import { 
-  Wand2, 
-  Share2, 
-  Download, 
+import {
+  Wand2,
+  Share2,
+  Download,
   ChevronLeft,
   Sparkles,
   LayoutDashboard,
@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
+import { ShortcutsGuide } from './shortcuts-guide';
 
 export function CXDNavbar() {
   const router = useRouter();
@@ -133,6 +134,9 @@ export function CXDNavbar() {
 
         {/* Right section */}
         <div className="flex items-center gap-2">
+          {/* Shortcuts Guide - Always visible */}
+          <ShortcutsGuide />
+
           {project && viewMode !== 'home' && (
             <>
               {/* Wizard button - styled like Share */}

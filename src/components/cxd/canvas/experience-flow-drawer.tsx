@@ -500,14 +500,16 @@ export function ExperienceFlowDrawer() {
                               {distribution[level.code]}%
                             </span>
                           </div>
-                          <Slider
-                            value={[distribution[level.code]]}
-                            onValueChange={([value]) =>
-                              handleDistributionChange(level.code, value)
+                          <input
+                            type="range"
+                            value={distribution[level.code]}
+                            onChange={(e) =>
+                              handleDistributionChange(level.code, parseInt(e.target.value))
                             }
                             max={100}
+                            min={0}
                             step={1}
-                            className="w-full"
+                            className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
                             aria-label={`${level.label} engagement level`}
                           />
                         </div>

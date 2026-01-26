@@ -4,13 +4,21 @@
 export const CXD_SCHEMA_VERSION = '1.0.0';
 
 // Reality Planes - The 7 planes of reality
-export type RealityPlaneCode = 'PR' | 'AR' | 'VR' | 'MR' | 'GR' | 'BR' | 'CR';
+export type RealityPlaneCode = 'PR' | 'VR' | 'AR' | 'MR' | 'GR' | 'BR' | 'CR';
 
 export interface RealityPlane {
   code: RealityPlaneCode;
   label: string;
   description: string;
-  percent: number; // 0-100, no sum constraint
+  percent: number; // 0-100, no sum constraint (legacy)
+}
+
+// New V2 Reality Plane structure with toggle, interface/modality, and priority
+export interface RealityPlaneV2 {
+  code: RealityPlaneCode;
+  enabled: boolean;
+  interfaceModality: string; // Text field describing interface/modality
+  priority: number; // Order/priority (lower = higher priority)
 }
 
 export const REALITY_PLANES: Omit<RealityPlane, 'percent'>[] = [
@@ -21,6 +29,17 @@ export const REALITY_PLANES: Omit<RealityPlane, 'percent'>[] = [
   { code: 'GR', label: 'Generative Reality', description: 'AI, procedural or algorithmic content' },
   { code: 'BR', label: 'Biological Reality', description: 'Biometric feedback, neuro-interfaces, breath sensors' },
   { code: 'CR', label: 'Cognitive Reality', description: 'Imagination, emotions, dreams, meta-cognition' },
+];
+
+// Default V2 Reality Planes with toggles and priority ordering
+export const DEFAULT_REALITY_PLANES_V2: RealityPlaneV2[] = [
+  { code: 'PR', enabled: true, interfaceModality: '', priority: 0 },
+  { code: 'VR', enabled: false, interfaceModality: '', priority: 1 },
+  { code: 'AR', enabled: false, interfaceModality: '', priority: 2 },
+  { code: 'MR', enabled: false, interfaceModality: '', priority: 3 },
+  { code: 'GR', enabled: false, interfaceModality: '', priority: 4 },
+  { code: 'BR', enabled: false, interfaceModality: '', priority: 5 },
+  { code: 'CR', enabled: false, interfaceModality: '', priority: 6 },
 ];
 
 // Sensory Domains - The 5 external senses (no interoception)
@@ -268,7 +287,8 @@ export interface CXDProject {
   desiredChange: DesiredChange;
   humanContext: HumanContext;
   contextAndMeaning: ContextAndMeaning;
-  realityPlanes: Record<RealityPlaneCode, number>;
+  realityPlanes: Record<RealityPlaneCode, number>; // Legacy percentage-based
+  realityPlanesV2?: RealityPlaneV2[]; // New toggle-based with interface/modality and priority
   sensoryDomains: Record<SensoryDomainCode, number>;
   presenceTypes: Record<PresenceTypeCode, number>;
   experienceFlow: Record<ExperienceFlowStageCode, ExperienceFlowStage>;
@@ -336,6 +356,15 @@ export function createDefaultProject(id: string, name: string, ownerId: string):
       BR: 0,
       CR: 0,
     },
+    realityPlanesV2: [
+      { code: 'PR', enabled: true, interfaceModality: '', priority: 0 },
+      { code: 'VR', enabled: false, interfaceModality: '', priority: 1 },
+      { code: 'AR', enabled: false, interfaceModality: '', priority: 2 },
+      { code: 'MR', enabled: false, interfaceModality: '', priority: 3 },
+      { code: 'GR', enabled: false, interfaceModality: '', priority: 4 },
+      { code: 'BR', enabled: false, interfaceModality: '', priority: 5 },
+      { code: 'CR', enabled: false, interfaceModality: '', priority: 6 },
+    ],
     sensoryDomains: {
       visual: 50,
       auditory: 50,

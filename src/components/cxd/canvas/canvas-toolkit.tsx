@@ -20,6 +20,11 @@ interface CanvasToolkitProps {
   canvasRef: React.RefObject<HTMLDivElement | null>;
   canvasPosition: { x: number; y: number };
   canvasZoom: number;
+  // Line tool state - lifted to parent for LineLayer integration
+  activeTool?: CanvasElementType | null;
+  onActiveToolChange?: (tool: CanvasElementType | null) => void;
+  // Canvas origin offset for hypercube view (where content is centered)
+  canvasOriginOffset?: { x: number; y: number };
 }
 
 // Define tools inline to avoid any import issues
@@ -28,41 +33,49 @@ const TOOLKIT_TOOLS = [
     type: "freeform" as CanvasElementType,
     label: "Card",
     IconComponent: LucideIcons.StickyNote,
+    shortcut: "C",
   },
   {
     type: "image" as CanvasElementType,
     label: "Image",
     IconComponent: LucideIcons.Image,
+    shortcut: "I",
   },
   {
     type: "shape" as CanvasElementType,
     label: "Shape",
     IconComponent: LucideIcons.Layers,
+    shortcut: "F",
   },
   {
     type: "container" as CanvasElementType,
     label: "Container",
     IconComponent: LucideIcons.FolderOpen,
+    shortcut: "O",
   },
   {
     type: "line" as CanvasElementType,
     label: "Line",
     IconComponent: LucideIcons.Slash,
+    shortcut: "L",
   },
   {
     type: "text" as CanvasElementType,
     label: "Text",
     IconComponent: LucideIcons.Type,
+    shortcut: "T",
   },
   {
     type: "link" as CanvasElementType,
     label: "Link",
     IconComponent: LucideIcons.Link2,
+    shortcut: "E",
   },
   {
     type: "board" as CanvasElementType,
     label: "Board",
     IconComponent: LucideIcons.LayoutGrid,
+    shortcut: "B",
   },
 ];
 
@@ -118,8 +131,14 @@ export function CanvasToolkit({
   canvasRef,
   canvasPosition,
   canvasZoom,
+  activeTool: controlledActiveTool,
+  onActiveToolChange,
+  canvasOriginOffset = { x: 0, y: 0 },
 }: CanvasToolkitProps) {
-  const [activeTool, setActiveTool] = useState<CanvasElementType | null>(null);
+  // Use controlled state if provided, otherwise use internal state
+  const [internalActiveTool, setInternalActiveTool] = useState<CanvasElementType | null>(null);
+  const activeTool = controlledActiveTool !== undefined ? controlledActiveTool : internalActiveTool;
+  const setActiveTool = onActiveToolChange || setInternalActiveTool;
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState<CanvasElementType | null>(null);
   const [dragPreview, setDragPreview] = useState<{
@@ -133,11 +152,6 @@ export function CanvasToolkit({
   const [selectedLinkMode, setSelectedLinkMode] =
     useState<LinkMode>("bookmark");
   const toolbarRef = useRef<HTMLDivElement>(null);
-  
-  // Line drawing state
-  const [isDrawingLine, setIsDrawingLine] = useState(false);
-  const [lineDrawStart, setLineDrawStart] = useState<{ x: number; y: number } | null>(null);
-  const [lineDrawEnd, setLineDrawEnd] = useState<{ x: number; y: number } | null>(null);
 
   // Handle Escape key to cancel placement mode
   useEffect(() => {
@@ -146,14 +160,11 @@ export function CanvasToolkit({
         setActiveTool(null);
         setShowShapePalette(false);
         setShowLinkPalette(false);
-        setIsDrawingLine(false);
-        setLineDrawStart(null);
-        setLineDrawEnd(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [setActiveTool]);
 
   // Handle click placement when tool is active (except for line which uses drag)
   useEffect(() => {
@@ -168,8 +179,9 @@ export function CanvasToolkit({
         target === canvasRef.current
       ) {
         const rect = canvasRef.current!.getBoundingClientRect();
-        const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-        const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+        // Account for canvas origin offset (used in hypercube view where content is centered)
+        const x = (e.clientX - rect.left - canvasPosition.x - canvasOriginOffset.x) / canvasZoom;
+        const y = (e.clientY - rect.top - canvasPosition.y - canvasOriginOffset.y) / canvasZoom;
 
         const options = activeTool === "shape"
           ? { shapeType: selectedShapeType }
@@ -193,83 +205,11 @@ export function CanvasToolkit({
     onPlaceElement,
     selectedShapeType,
     selectedLinkMode,
+    canvasOriginOffset,
   ]);
 
-  // Handle line drawing drag interaction
-  useEffect(() => {
-    if (activeTool !== "line" || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    
-    const handleMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      // Only start drawing on background
-      if (
-        target.classList.contains("canvas-background") ||
-        target.classList.contains("dot-grid") ||
-        target === canvasRef.current
-      ) {
-        const rect = canvas.getBoundingClientRect();
-        const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-        const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
-        
-        setIsDrawingLine(true);
-        setLineDrawStart({ x, y });
-        setLineDrawEnd({ x, y });
-      }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDrawingLine || !lineDrawStart) return;
-      
-      const rect = canvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-      const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
-      
-      setLineDrawEnd({ x, y });
-    };
-
-    const handleMouseUp = (e: MouseEvent) => {
-      if (!isDrawingLine || !lineDrawStart || !lineDrawEnd) {
-        setIsDrawingLine(false);
-        return;
-      }
-
-      // Calculate distance to avoid zero-length lines
-      const dx = lineDrawEnd.x - lineDrawStart.x;
-      const dy = lineDrawEnd.y - lineDrawStart.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance > 5) { // Minimum 5px distance
-        // Pass line creation data via custom event
-        const lineData = {
-          startX: lineDrawStart.x,
-          startY: lineDrawStart.y,
-          endX: lineDrawEnd.x,
-          endY: lineDrawEnd.y,
-        };
-        
-        const customEvent = new CustomEvent('createLine', { detail: lineData });
-        canvas.dispatchEvent(customEvent);
-      }
-
-      // Reset and exit line draw mode
-      setIsDrawingLine(false);
-      setLineDrawStart(null);
-      setLineDrawEnd(null);
-      setActiveTool(null);
-    };
-
-    canvas.addEventListener("mousedown", handleMouseDown);
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      canvas.removeEventListener("mousedown", handleMouseDown);
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      canvas.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [activeTool, canvasRef, canvasPosition, canvasZoom, isDrawingLine, lineDrawStart, lineDrawEnd]);
+  // NOTE: Line drawing is now handled by LineLayer component
+  // The line tool state is lifted to the parent and passed via props
 
   // Update cursor when tool is active
   useEffect(() => {
@@ -375,8 +315,9 @@ export function CanvasToolkit({
         e.clientY >= rect.top &&
         e.clientY <= rect.bottom
       ) {
-        const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-        const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+        // Account for canvas origin offset (used in hypercube view where content is centered)
+        const x = (e.clientX - rect.left - canvasPosition.x - canvasOriginOffset.x) / canvasZoom;
+        const y = (e.clientY - rect.top - canvasPosition.y - canvasOriginOffset.y) / canvasZoom;
 
         const options = dragType === "shape"
           ? { shapeType: selectedShapeType }
@@ -399,6 +340,7 @@ export function CanvasToolkit({
       onPlaceElement,
       selectedShapeType,
       selectedLinkMode,
+      canvasOriginOffset,
     ],
   );
 
@@ -428,7 +370,7 @@ export function CanvasToolkit({
                 onDragStart={(e) => handleDragStart(e, tool.type)}
                 onDrag={handleDrag}
                 onDragEnd={handleDragEnd}
-                title={`${tool.label}${isActive ? " (Active - Click to place, Esc to cancel)" : " (Click to activate or drag to place)"}`}
+                title={`${tool.label} (${tool.shortcut})${isActive ? " - Active: Click to place, Esc to cancel" : " - Click to activate or drag to place"}`}
                 className={cn(
                   "flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200",
                   "hover:bg-primary/20 hover:scale-105",
@@ -518,29 +460,7 @@ export function CanvasToolkit({
           • Esc to cancel
         </div>
       )}
-      {/* Line drawing preview */}
-      {isDrawingLine && lineDrawStart && lineDrawEnd && canvasRef.current && (
-        <svg
-          className="fixed inset-0 pointer-events-none z-[25]"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-          }}
-        >
-          <line
-            x1={lineDrawStart.x * canvasZoom + canvasPosition.x}
-            y1={lineDrawStart.y * canvasZoom + canvasPosition.y}
-            x2={lineDrawEnd.x * canvasZoom + canvasPosition.x}
-            y2={lineDrawEnd.y * canvasZoom + canvasPosition.y}
-            stroke="hsl(180 100% 50% / 0.6)"
-            strokeWidth={2}
-            strokeDasharray="5,5"
-          />
-        </svg>
-      )}
+      {/* Line drawing preview is now handled by LineLayer component */}
     </>
   );
 }

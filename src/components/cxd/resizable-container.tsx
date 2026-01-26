@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface ResizableContainerProps {
@@ -30,6 +30,7 @@ export function ResizableContainer({
   });
   const [isResizing, setIsResizing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const resizeDirectionRef = useRef<string>("");
 
   const handleResizeStart = useCallback(
@@ -86,6 +87,32 @@ export function ResizableContainer({
     [dimensions, minWidth, minHeight, maxWidth, maxHeight],
   );
 
+  // Auto-expand when content gets larger
+  useEffect(() => {
+    if (!contentRef.current) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        
+        // Add padding (4 * 4px = 16px for p-4)
+        const neededWidth = width + 32;
+        const neededHeight = height + 32;
+
+        setDimensions((prev) => ({
+          width: Math.max(prev.width, Math.min(maxWidth, neededWidth)),
+          height: Math.max(prev.height, Math.min(maxHeight, neededHeight)),
+        }));
+      }
+    });
+
+    resizeObserver.observe(contentRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [maxWidth, maxHeight]);
+
   return (
     <div
       ref={containerRef}
@@ -100,7 +127,7 @@ export function ResizableContainer({
       }}
     >
       {/* Content */}
-      <div className="w-full h-full overflow-auto p-4">{children}</div>
+      <div ref={contentRef} className="w-full h-full overflow-auto p-4">{children}</div>
 
       {/* Resize handles */}
       {/* Corners */}
