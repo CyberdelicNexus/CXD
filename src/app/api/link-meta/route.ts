@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 // Simple in-memory cache (in production, use Redis or database)
 const metadataCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_DURATION = 1000 * 60 * 60 * 24; // 24 hours
