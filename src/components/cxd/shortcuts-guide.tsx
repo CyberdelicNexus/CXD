@@ -78,7 +78,6 @@ export function ShortcutsGuide() {
       >
         <Keyboard className="w-5 h-5" />
       </Button>
-
       {/* Modal Overlay */}
       {isOpen && (
         <div
@@ -87,7 +86,7 @@ export function ShortcutsGuide() {
         >
           {/* Modal Content */}
           <div
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+            className="fixed left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl max-h-[85vh] overflow-y-auto top-[473.6px]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="bg-card border border-border rounded-lg shadow-2xl">
@@ -98,7 +97,9 @@ export function ShortcutsGuide() {
                     <Keyboard className="w-5 h-5 text-primary" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-semibold">Keyboard Shortcuts</h2>
+                    <h2 className="text-xl font-semibold">
+                      Keyboard Shortcuts
+                    </h2>
                     <p className="text-sm text-muted-foreground">
                       Speed up your workflow
                     </p>
@@ -142,7 +143,7 @@ export function ShortcutsGuide() {
                                   <kbd
                                     className={cn(
                                       "px-2 py-1 text-xs font-mono rounded border border-border bg-muted/50 text-foreground min-w-[2rem] text-center",
-                                      key.length > 1 && "min-w-[3rem]"
+                                      key.length > 1 && "min-w-[3rem]",
                                     )}
                                   >
                                     {key}
@@ -161,7 +162,11 @@ export function ShortcutsGuide() {
               {/* Footer */}
               <div className="px-6 py-4 border-t border-border bg-secondary/20">
                 <p className="text-xs text-muted-foreground text-center">
-                  Press <kbd className="px-1.5 py-0.5 text-xs font-mono rounded border border-border bg-muted/50">Esc</kbd> to close this guide
+                  Press{" "}
+                  <kbd className="px-1.5 py-0.5 text-xs font-mono rounded border border-border bg-muted/50">
+                    Esc
+                  </kbd>{" "}
+                  to close this guide
                 </p>
               </div>
             </div>

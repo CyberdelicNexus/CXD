@@ -1,11 +1,19 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useCXDStore } from '@/store/cxd-store';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { useState, useEffect } from "react";
+import { useCXDStore } from "@/store/cxd-store";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -13,19 +21,34 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog';
-import { 
-  Plus, 
-  Sparkles, 
-  Layout, 
-  Wand2, 
-  Share2, 
+} from "@/components/ui/dialog";
+import {
+  Plus,
+  Sparkles,
   Trash2,
   Clock,
-  FolderOpen
-} from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { fetchUserProjects, ensureUserProfile } from '@/lib/supabase-projects';
+  FolderOpen,
+  User,
+  Mail,
+  Lock,
+  CreditCard,
+  Receipt,
+  HelpCircle,
+  Bug,
+  FileText,
+  PlayCircle,
+  ExternalLink,
+  Settings,
+  BarChart3,
+  Layers,
+  TrendingUp,
+  Calendar,
+  ArrowRight,
+  ChevronRight,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { fetchUserProjects, ensureUserProfile } from "@/lib/supabase-projects";
+import Image from "next/image";
 
 interface DashboardContentProps {
   userId: string;
@@ -34,10 +57,22 @@ interface DashboardContentProps {
 
 export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const router = useRouter();
-  const { projects, createProject, loadProject, deleteProject, setProjects } = useCXDStore();
-  const [newProjectName, setNewProjectName] = useState('');
+  const { projects, createProject, loadProject, deleteProject, setProjects } =
+    useCXDStore();
+  const [newProjectName, setNewProjectName] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("projects");
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [isChangeEmailOpen, setIsChangeEmailOpen] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isBugReportOpen, setIsBugReportOpen] = useState(false);
+
+  // Extract user name from email
+  const userName = userEmail
+    .split("@")[0]
+    .replace(/[._]/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase());
 
   useEffect(() => {
     const loadUserAndProjects = async () => {
@@ -48,91 +83,48 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       }
       setIsLoading(false);
     };
-    
+
     loadUserAndProjects();
   }, [userId, userEmail, setProjects]);
 
   const handleCreateProject = () => {
     if (newProjectName.trim()) {
       createProject(newProjectName.trim(), userId);
-      setNewProjectName('');
+      setNewProjectName("");
       setIsDialogOpen(false);
-      router.push('/cxd');
+      router.push("/cxd");
     }
   };
 
   const handleOpenProject = (projectId: string) => {
     loadProject(projectId);
-    router.push('/cxd');
+    router.push("/cxd");
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+    return new Date(dateString).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
   };
 
+  // Get recent projects (last 3)
+  const recentProjects = projects.slice(0, 3);
+  const totalProjects = projects.length;
+
   return (
-    <main className="w-full min-h-screen">
-      <div className="container mx-auto px-4 py-8 flex flex-col gap-8 max-w-6xl">
-        {/* Hero Section */}
-        <div className="text-center mb-4">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl gradient-border mb-4 glow-purple">
-            <Sparkles className="w-8 h-8 text-primary" />
+    <main className="w-full min-h-screen bg-gradient-radial">
+      <div className="container mx-auto px-4 py-6 max-w-7xl">
+        {/* Header with Welcome & Quick Stats */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-3xl font-bold mb-1">
+              <span className="text-gradient">My Dashboard</span>
+            </h1>
+            <p className="text-muted-foreground">Welcome back, {userName}</p>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold mb-2">
-            <span className="text-gradient">Your CXD Dashboard</span>
-          </h1>
-          <p className="text-muted-foreground max-w-xl mx-auto">
-            Manage your Cyberdelic Experience Design projects
-          </p>
-        </div>
-
-        {/* Features Grid */}
-        <div className="grid md:grid-cols-3 gap-4 mb-6">
-          <Card className="gradient-border bg-card/50 backdrop-blur">
-            <CardHeader className="pb-3">
-              <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center mb-2">
-                <Wand2 className="w-5 h-5 text-primary" />
-              </div>
-              <CardTitle className="text-base">Initiation Wizard</CardTitle>
-              <CardDescription className="text-sm">
-                Guided questions for structured design
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card className="gradient-border bg-card/50 backdrop-blur">
-            <CardHeader className="pb-3">
-              <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center mb-2">
-                <Layout className="w-5 h-5 text-accent" />
-              </div>
-              <CardTitle className="text-base">Infinite Canvas</CardTitle>
-              <CardDescription className="text-sm">
-                Spatial visualization with focus mode
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card className="gradient-border bg-card/50 backdrop-blur">
-            <CardHeader className="pb-3">
-              <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center mb-2">
-                <Share2 className="w-5 h-5 text-primary" />
-              </div>
-              <CardTitle className="text-base">Live Share</CardTitle>
-              <CardDescription className="text-sm">
-                Share with collaborators and stakeholders
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </div>
-
-        {/* Projects Section */}
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-semibold">Your CXD Maps</h2>
+          <div className="flex items-center gap-3">
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="glow-teal">
@@ -155,12 +147,14 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                       placeholder="My Cyberdelic Experience"
                       value={newProjectName}
                       onChange={(e) => setNewProjectName(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && handleCreateProject()
+                      }
                       className="bg-input border-border"
                     />
                   </div>
-                  <Button 
-                    onClick={handleCreateProject} 
+                  <Button
+                    onClick={handleCreateProject}
                     className="w-full glow-teal"
                     disabled={!newProjectName.trim()}
                   >
@@ -171,76 +165,491 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
               </DialogContent>
             </Dialog>
           </div>
+        </div>
 
-          {/* Loading State */}
-          {isLoading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-pulse text-muted-foreground">Loading your projects...</div>
+        {/* Main Grid Layout */}
+        <div className="grid grid-cols-12 gap-6 h-fit">
+          {/* Left Column - Main Content */}
+          <div className="col-span-12 lg:col-span-8 space-y-6 h-fit">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="gradient-border bg-card/50 backdrop-blur">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        Total Maps
+                      </p>
+                      <p className="text-2xl font-bold">{totalProjects}</p>
+                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                      <Layers className="w-5 h-5 text-primary" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="gradient-border bg-card/50 backdrop-blur">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        Active
+                      </p>
+                      <p className="text-2xl font-bold">
+                        {
+                          projects.filter(
+                            (p) =>
+                              new Date(p.updatedAt) >
+                              new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+                          ).length
+                        }
+                      </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center">
+                      <TrendingUp className="w-5 h-5 text-accent" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="gradient-border bg-card/50 backdrop-blur">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        This Month
+                      </p>
+                      <p className="text-2xl font-bold">
+                        {
+                          projects.filter(
+                            (p) =>
+                              new Date(p.createdAt).getMonth() ===
+                              new Date().getMonth(),
+                          ).length
+                        }
+                      </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                      <Calendar className="w-5 h-5 text-purple-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="gradient-border bg-card/50 backdrop-blur">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        Analytics
+                      </p>
+                      <p className="text-2xl font-bold">—</p>
+                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-teal-500/20 flex items-center justify-center">
+                      <BarChart3 className="w-5 h-5 text-teal-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          )}
 
-          {/* Empty State */}
-          {!isLoading && projects.length === 0 && (
-            <Card className="gradient-border bg-card/50 backdrop-blur">
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-                  <FolderOpen className="w-8 h-8 text-muted-foreground" />
+            {/* Experience Maps Section */}
+            <Card className="gradient-border bg-card/50 backdrop-blur h-fit">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">
+                    Your Experience Maps
+                  </CardTitle>
+                  <Badge variant="outline" className="text-muted-foreground">
+                    {totalProjects} total
+                  </Badge>
                 </div>
-                <h3 className="text-lg font-medium mb-2">No projects yet</h3>
-                <p className="text-muted-foreground text-center mb-4 max-w-md">
-                  Create your first CXD map to start designing transformational experiences.
-                </p>
-                <Button onClick={() => setIsDialogOpen(true)} className="glow-teal">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Your First Map
+              </CardHeader>
+              <CardContent>
+                {/* Loading State */}
+                {isLoading && (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-pulse text-muted-foreground">
+                      Loading your projects...
+                    </div>
+                  </div>
+                )}
+
+                {/* Empty State */}
+                {!isLoading && projects.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                      <FolderOpen className="w-8 h-8 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-lg font-medium mb-2">
+                      No projects yet
+                    </h3>
+                    <p className="text-muted-foreground text-center mb-4 max-w-md">
+                      Create your first CXD map to start designing
+                      transformational experiences.
+                    </p>
+                    <Button
+                      onClick={() => setIsDialogOpen(true)}
+                      className="glow-teal"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Your First Map
+                    </Button>
+                  </div>
+                )}
+
+                {/* Projects List */}
+                {!isLoading && projects.length > 0 && (
+                  <div className="space-y-3">
+                    {projects.map((project) => (
+                      <div
+                        key={project.id}
+                        className="flex items-center justify-between p-4 rounded-lg bg-background/50 hover:bg-background/80 transition-colors cursor-pointer group border border-border/50"
+                        onClick={() => handleOpenProject(project.id)}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                            <Sparkles className="w-6 h-6 text-primary" />
+                          </div>
+                          <div>
+                            <h4 className="font-medium">{project.name}</h4>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Clock className="w-3 h-3" />
+                              <span>
+                                Updated {formatDate(project.updatedAt)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteProject(project.id);
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                          <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Column - Sidebar */}
+          <div className="col-span-12 lg:col-span-4 space-y-6 h-fit">
+            {/* Account Card */}
+            <Card className="gradient-border bg-card/50 backdrop-blur h-fit">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white font-bold text-lg">
+                    {userName.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">{userName}</CardTitle>
+                    <CardDescription className="text-xs truncate max-w-[180px]">
+                      {userEmail}
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Tabs defaultValue="account" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2 bg-background/50">
+                    <TabsTrigger value="account" className="text-xs">
+                      Account
+                    </TabsTrigger>
+                    <TabsTrigger value="billing" className="text-xs">
+                      Billing
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="account" className="space-y-2 mt-3">
+                    <button 
+                      className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-background/50 transition-colors text-left"
+                      onClick={() => setIsEditProfileOpen(true)}
+                    >
+                      <User className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">Edit Profile</span>
+                    </button>
+                    <button 
+                      className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-background/50 transition-colors text-left"
+                      onClick={() => setIsChangeEmailOpen(true)}
+                    >
+                      <Mail className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">Change Email</span>
+                    </button>
+                    <button
+                      className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-background/50 transition-colors text-left"
+                      onClick={() => router.push("/dashboard/reset-password")}
+                    >
+                      <Lock className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">Change Password</span>
+                    </button>
+                  </TabsContent>
+                  <TabsContent value="billing" className="space-y-2 mt-3">
+                    <div className="p-3 rounded-lg bg-background/50 border border-border/50 mb-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-muted-foreground">
+                          Current Plan
+                        </span>
+                        <Badge className="bg-primary/20 text-primary border-0">
+                          Free
+                        </Badge>
+                      </div>
+                      <p className="text-sm font-medium">Starter</p>
+                    </div>
+                    <button className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-background/50 transition-colors text-left">
+                      <CreditCard className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">Upgrade Plan</span>
+                    </button>
+                    <button className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-background/50 transition-colors text-left">
+                      <Receipt className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">Billing History</span>
+                    </button>
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+
+            {/* Quick Actions */}
+            <Card className="gradient-border bg-card/50 backdrop-blur h-fit">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-auto py-3 flex-col gap-1 bg-background/50 border-border/50 hover:bg-background/80"
+                  onClick={() => setIsSupportOpen(true)}
+                >
+                  <HelpCircle className="w-4 h-4 text-primary" />
+                  <span className="text-xs">Support</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-auto py-3 flex-col gap-1 bg-background/50 border-border/50 hover:bg-background/80"
+                  onClick={() => setIsBugReportOpen(true)}
+                >
+                  <Bug className="w-4 h-4 text-accent" />
+                  <span className="text-xs">Bug Report</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-auto py-3 flex-col gap-1 bg-background/50 border-border/50 hover:bg-background/80"
+                  onClick={() => router.push('/dashboard/docs')}
+                >
+                  <FileText className="w-4 h-4 text-purple-400" />
+                  <span className="text-xs">Docs</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-auto py-3 flex-col gap-1 bg-background/50 border-border/50 hover:bg-background/80"
+                  onClick={() => router.push('/dashboard/tutorials')}
+                >
+                  <PlayCircle className="w-4 h-4 text-teal-400" />
+                  <span className="text-xs">Tutorials</span>
                 </Button>
               </CardContent>
             </Card>
-          )}
 
-          {/* Projects Grid */}
-          {!isLoading && projects.length > 0 && (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {projects.map((project) => (
-                <Card 
-                  key={project.id} 
-                  className="gradient-border bg-card/50 backdrop-blur hover:bg-card/70 transition-colors cursor-pointer group"
-                  onClick={() => handleOpenProject(project.id)}
+            {/* Resources */}
+            <Card className="gradient-border bg-card/50 backdrop-blur h-fit">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Resources</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <button 
+                  onClick={() => router.push('/dashboard/docs')}
+                  className="flex items-center justify-between p-2 rounded-lg hover:bg-background/50 transition-colors group w-full text-left"
                 >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <CardTitle className="text-lg truncate">{project.name}</CardTitle>
-                        <CardDescription className="flex items-center gap-1 mt-1">
-                          <Clock className="w-3 h-3" />
-                          {formatDate(project.updatedAt)}
-                        </CardDescription>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteProject(project.id);
-                        }}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {project.description || 'No description'}
-                    </p>
-                    {/* Progress status removed - wizardStep no longer exists */}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm">CXD Methodology Guide</span>
+                  </div>
+                  <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+                <button 
+                  onClick={() => router.push('/dashboard/tutorials')}
+                  className="flex items-center justify-between p-2 rounded-lg hover:bg-background/50 transition-colors group w-full text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <PlayCircle className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm">Video Tutorials</span>
+                  </div>
+                  <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+                <button 
+                  onClick={() => setIsSupportOpen(true)}
+                  className="flex items-center justify-between p-2 rounded-lg hover:bg-background/50 transition-colors group w-full text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <HelpCircle className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm">FAQ & Help Center</span>
+                  </div>
+                  <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={isEditProfileOpen} onOpenChange={setIsEditProfileOpen}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Edit Profile</DialogTitle>
+            <DialogDescription>
+              Update your profile information
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                defaultValue={userName}
+                className="bg-input border-border"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bio">Bio</Label>
+              <Input
+                id="bio"
+                placeholder="Tell us about yourself"
+                className="bg-input border-border"
+              />
+            </div>
+            <Button className="w-full glow-teal">
+              Save Changes
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Email Dialog */}
+      <Dialog open={isChangeEmailOpen} onOpenChange={setIsChangeEmailOpen}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Change Email</DialogTitle>
+            <DialogDescription>
+              Update your email address
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="current-email">Current Email</Label>
+              <Input
+                id="current-email"
+                value={userEmail}
+                disabled
+                className="bg-input border-border"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-email">New Email</Label>
+              <Input
+                id="new-email"
+                type="email"
+                placeholder="your.new@email.com"
+                className="bg-input border-border"
+              />
+            </div>
+            <Button className="w-full glow-teal">
+              Update Email
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Support Dialog */}
+      <Dialog open={isSupportOpen} onOpenChange={setIsSupportOpen}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Contact Support</DialogTitle>
+            <DialogDescription>
+              How can we help you today?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="subject">Subject</Label>
+              <Input
+                id="subject"
+                placeholder="What do you need help with?"
+                className="bg-input border-border"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="message">Message</Label>
+              <textarea
+                id="message"
+                rows={5}
+                placeholder="Describe your issue in detail..."
+                className="w-full px-3 py-2 bg-input border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <Button className="w-full glow-teal">
+              Send Message
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bug Report Dialog */}
+      <Dialog open={isBugReportOpen} onOpenChange={setIsBugReportOpen}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Report a Bug</DialogTitle>
+            <DialogDescription>
+              Help us improve by reporting bugs
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="bug-title">Bug Title</Label>
+              <Input
+                id="bug-title"
+                placeholder="Brief description of the bug"
+                className="bg-input border-border"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bug-description">Description</Label>
+              <textarea
+                id="bug-description"
+                rows={5}
+                placeholder="What happened? What did you expect to happen?"
+                className="w-full px-3 py-2 bg-input border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bug-steps">Steps to Reproduce</Label>
+              <textarea
+                id="bug-steps"
+                rows={3}
+                placeholder="1. Go to...&#10;2. Click on...&#10;3. See error"
+                className="w-full px-3 py-2 bg-input border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <Button className="w-full glow-teal">
+              Submit Bug Report
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

@@ -8,7 +8,11 @@ import React, {
   useRef,
 } from "react";
 import { CXDSectionId } from "@/types/cxd-schema";
-import { HypercubeFaceTag, CanvasElement, BoardElement } from "@/types/canvas-elements";
+import {
+  HypercubeFaceTag,
+  CanvasElement,
+  BoardElement,
+} from "@/types/canvas-elements";
 import {
   ChevronRight,
   Layout,
@@ -227,7 +231,10 @@ interface ElementPreview {
   url?: string; // For links
 }
 
-function getElementPreview(element: CanvasElement, project?: any): ElementPreview {
+function getElementPreview(
+  element: CanvasElement,
+  project?: any,
+): ElementPreview {
   const base = { id: element.id, type: element.type, isEmpty: false };
 
   switch (element.type) {
@@ -267,20 +274,23 @@ function getElementPreview(element: CanvasElement, project?: any): ElementPrevie
       const boardId = (element as BoardElement).childBoardId;
       const allElements = project?.canvasElements || [];
       // Filter to elements in this board, exclude lines and connectors
-      const boardElements = allElements.filter((el: any) => 
-        el.boardId === boardId && el.type !== 'line' && el.type !== 'connector'
+      const boardElements = allElements.filter(
+        (el: any) =>
+          el.boardId === boardId &&
+          el.type !== "line" &&
+          el.type !== "connector",
       );
       const elementCount = boardElements.length;
-      
-      console.log('[Hypercube Board Count]', {
+
+      console.log("[Hypercube Board Count]", {
         elementId: element.id,
         boardId,
         totalProjectElements: allElements.length,
         elementCount,
         boardTitle: name,
-        elementTypes: boardElements.map((el: any) => el.type)
+        elementTypes: boardElements.map((el: any) => el.type),
       });
-      
+
       return {
         ...base,
         title: name,
@@ -533,6 +543,9 @@ export function Hypercube3D({
   const [hoveredArrowFace, setHoveredArrowFace] = useState<number | null>(null);
   const [hoveredFace, setHoveredFace] = useState<number | null>(null);
 
+  // Zoom level for explore mode (1.0 = default, can zoom in/out)
+  const [exploreZoom, setExploreZoom] = useState(DEFAULT_ZOOM);
+
   // Auto-rotation for overview mode
   const autoRotationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
@@ -681,7 +694,8 @@ export function Hypercube3D({
     if (!isAnimating) return;
 
     startRotationRef.current = cubeRotation;
-    const startTime = typeof performance !== "undefined" ? performance.now() : 0;
+    const startTime =
+      typeof performance !== "undefined" ? performance.now() : 0;
     const duration = 600;
 
     const animate = (currentTime: number) => {
@@ -776,7 +790,22 @@ export function Hypercube3D({
     setInteractionMode("default");
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
+    setExploreZoom(1.0); // Reset zoom when exiting explore mode
   }, []);
+
+  // Wheel handler for zoom in explore mode
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (interactionMode !== "explore") return;
+
+      e.preventDefault();
+      const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;
+      setExploreZoom((prev) =>
+        Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev + zoomDelta)),
+      );
+    },
+    [interactionMode],
+  );
 
   // Arrow navigation - rotates cube 90 degrees in the specified direction
   // These are TRUE rotations that change which face is front
@@ -1161,7 +1190,9 @@ export function Hypercube3D({
 
   // Generate rich previews for tagged elements
   const focusedElementPreviews = useMemo(() => {
-    return focusedTaggedElements.map((el: any) => getElementPreview(el, project));
+    return focusedTaggedElements.map((el: any) =>
+      getElementPreview(el, project),
+    );
   }, [focusedTaggedElements, project]);
 
   // Generate face summary
@@ -1184,8 +1215,12 @@ export function Hypercube3D({
       return { scale: 0.4, x: "calc(100% - 180px)", y: "140px" };
     }
     // Center position for default (no selection) and explore mode
-    return { scale: 0.85, x: "50%", y: "50%" };
-  }, [interactionMode, focusedFaceIndex, isCoreSelected]);
+    // In explore mode, apply zoom level
+    const baseScale = 0.85;
+    const scale =
+      interactionMode === "explore" ? baseScale * exploreZoom : baseScale;
+    return { scale, x: "50%", y: "50%" };
+  }, [interactionMode, focusedFaceIndex, isCoreSelected, exploreZoom]);
 
   return (
     <div className="relative w-full h-full bg-background overflow-hidden">
@@ -1215,6 +1250,7 @@ export function Hypercube3D({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       >
         {/* SVG for 3D wireframe - Position changes based on mode */}
         <svg
@@ -1311,7 +1347,7 @@ export function Hypercube3D({
             );
           })}
 
-          {/* Inner cube edges - always visible, glow electric purple when Core is selected */}
+          {/* Inner cube edges - always visible, glow electric purple when Core is selected, cyan when face is selected */}
           {cubeEdges.map(([i, j], idx) => {
             const midPoint = {
               x: (innerCorners[i].x + innerCorners[j].x) / 2,
@@ -1320,9 +1356,13 @@ export function Hypercube3D({
             };
 
             // When Core is selected, inner cube glows electric purple
-            const coreGlowColor = isCoreSelected
+            // When a face is selected, inner cube glows cyan (like the selection indicator)
+            const hasFaceSelected = focusedFaceIndex !== null;
+            const glowColor = isCoreSelected
               ? "hsl(270 80% 70%)"
-              : undefined;
+              : hasFaceSelected
+                ? "hsl(185 70% 55%)" // Cyan glow when any face is selected
+                : undefined;
 
             let faceHue = 270;
             if (midPoint.z > 20) faceHue = 280;
@@ -1332,10 +1372,13 @@ export function Hypercube3D({
             else if (midPoint.y < -20) faceHue = 320;
             else if (midPoint.y > 20) faceHue = 195;
 
-            // Make inner cube more visible in minimap mode
+            // Make inner cube more visible in minimap mode or when face is selected
             const isMinimapMode =
               (focusedFaceIndex !== null || isCoreSelected) &&
               interactionMode === "default";
+
+            // Enhanced visibility when a face is selected (shows inner cube outline)
+            const isHighlighted = isCoreSelected || hasFaceSelected;
 
             return (
               <line
@@ -1344,17 +1387,20 @@ export function Hypercube3D({
                 y1={innerCorners[i].y}
                 x2={innerCorners[j].x}
                 y2={innerCorners[j].y}
-                stroke={coreGlowColor || `hsl(${faceHue} 30% 50%)`}
-                strokeWidth={isCoreSelected ? "3.5" : "2.5"}
+                stroke={glowColor || `hsl(${faceHue} 30% 50%)`}
+                strokeWidth={isHighlighted ? "3" : "2.5"}
                 strokeLinecap="round"
                 filter={
                   isCoreSelected ? "url(#glow-pulsing)" : "url(#glow-stable)"
                 }
-                opacity={isCoreSelected ? 1 : isMinimapMode ? 0.8 : 0.7}
+                opacity={isHighlighted ? 0.9 : isMinimapMode ? 0.8 : 0.7}
                 style={{
-                  transition: "all 0.4s ease",
-                  filter: isCoreSelected
-                    ? "drop-shadow(0 0 8px hsl(270 80% 60%))"
+                  transition:
+                    "stroke 0.4s ease, stroke-width 0.4s ease, opacity 0.4s ease, filter 0.4s ease",
+                  filter: isHighlighted
+                    ? isCoreSelected
+                      ? "drop-shadow(0 0 8px hsl(270 80% 60%))"
+                      : "drop-shadow(0 0 6px hsl(185 70% 50%))"
                     : undefined,
                 }}
               />
@@ -1503,7 +1549,8 @@ export function Hypercube3D({
                       : ""
                   }
                   style={{
-                    transition: "all 0.4s ease",
+                    transition:
+                      "fill 0.4s ease, fill-opacity 0.4s ease, stroke 0.4s ease, stroke-width 0.4s ease, stroke-opacity 0.4s ease",
                     pointerEvents: "none",
                   }}
                 />
@@ -1513,71 +1560,55 @@ export function Hypercube3D({
           })}
         </svg>
 
-        {/* Top Navigation Bar */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2 z-20 items-center">
-          {/* Mode indicator with toggle */}
-          <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                "px-3 py-2 rounded-lg text-[10px] uppercase tracking-wider font-medium transition-all",
-                interactionMode === "default" &&
-                  "bg-purple-500/20 text-purple-300 border border-purple-400/30",
-                interactionMode === "explore" &&
-                  "bg-amber-500/20 text-amber-300 border border-amber-400/30",
-              )}
-            >
-              <div className="flex items-center gap-1.5">
-                <div
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    interactionMode === "default" &&
-                      focusedFaceIndex === null &&
-                      !isCoreSelected &&
-                      "bg-purple-400 animate-pulse",
-                    interactionMode === "default" &&
-                      (focusedFaceIndex !== null || isCoreSelected) &&
-                      "bg-cyan-400",
-                    interactionMode === "explore" &&
-                      "bg-amber-400 animate-pulse",
-                  )}
-                />
-                <span>
-                  {interactionMode === "default" &&
-                    (focusedFaceIndex !== null || isCoreSelected) &&
-                    "Sensemaking"}
-                  {interactionMode === "default" &&
+        {/* Top Navigation Bar - Upgraded Hypercube Faces Menu */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 items-center p-2 rounded-xl">
+          {/* Mode indicator */}
+          <div
+            className={cn(
+              "w-[88px] h-[72px] rounded-lg flex items-center justify-center transition-all duration-300 cursor-default relative overflow-hidden group",
+              interactionMode === "default" &&
+                "bg-gradient-to-br from-purple-900/60 via-purple-950/80 to-indigo-950/60 border border-purple-500/30",
+              interactionMode === "explore" &&
+                "bg-gradient-to-br from-amber-900/60 via-amber-950/80 to-orange-950/60 border border-amber-500/30",
+            )}
+          >
+            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+            <div className="flex flex-col items-center gap-1 relative z-10">
+              <div
+                className={cn(
+                  "w-2 h-2 rounded-full",
+                  interactionMode === "default" &&
                     focusedFaceIndex === null &&
                     !isCoreSelected &&
-                    "Default"}
-                  {interactionMode === "explore" && "Explore"}
-                </span>
-              </div>
+                    "bg-purple-400 animate-pulse shadow-lg shadow-purple-400/50",
+                  interactionMode === "default" &&
+                    (focusedFaceIndex !== null || isCoreSelected) &&
+                    "bg-cyan-400 shadow-lg shadow-cyan-400/50",
+                  interactionMode === "explore" &&
+                    "bg-amber-400 animate-pulse shadow-lg shadow-amber-400/50",
+                )}
+              />
+              <span
+                className={cn(
+                  "text-[11px] font-bold uppercase tracking-wide",
+                  interactionMode === "default"
+                    ? "text-purple-300"
+                    : "text-amber-300",
+                )}
+              >
+                {interactionMode === "default" &&
+                  (focusedFaceIndex !== null || isCoreSelected) &&
+                  "Active"}
+                {interactionMode === "default" &&
+                  focusedFaceIndex === null &&
+                  !isCoreSelected &&
+                  "Default"}
+                {interactionMode === "explore" && "Explore"}
+              </span>
             </div>
-
-            {/* Explore mode toggle - explicit activation required */}
-            {interactionMode !== "explore" ? (
-              <button
-                onClick={enterExploreMode}
-                className="px-3 py-2 rounded-lg text-[10px] uppercase tracking-wider font-medium bg-card/70 border border-border/50 text-muted-foreground hover:bg-card/90 hover:text-foreground transition-all flex items-center gap-1.5"
-                title="Enter explore mode to rotate the cube freely"
-              >
-                <Compass className="w-3.5 h-3.5" />
-                <span>Explore</span>
-              </button>
-            ) : (
-              <button
-                onClick={exitExploreMode}
-                className="px-3 py-2 rounded-lg text-[10px] uppercase tracking-wider font-medium bg-amber-500/20 border border-amber-400/30 text-amber-300 hover:bg-amber-500/30 transition-all flex items-center gap-1.5"
-                title="Exit explore mode (Esc)"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Exit</span>
-              </button>
-            )}
           </div>
 
-          <div className="w-px h-6 bg-border" />
-
+          {/* Face buttons */}
           {CUBE_FACES.map((face, index) => {
             const isFocused = focusedFaceIndex === index;
             const isDimmed =
@@ -1587,12 +1618,13 @@ export function Hypercube3D({
             const { hue, satBase, lightBase } = face.tint;
             const saturation = satBase + intensity.completion * 20;
             const lightness = lightBase + intensity.glowIntensity * 15;
-            const baseColor = `hsl(${hue} ${saturation}% ${lightness}%)`;
-            const glowColor = `hsl(${hue} ${saturation + 10}% ${lightness + 10}%)`;
 
-            // Improved colors for better contrast
-            const buttonBgColor = `hsl(${hue} ${saturation}% ${Math.min(lightness + 5, 35)}%)`;
-            const buttonGlowColor = `hsl(${hue} ${Math.min(saturation + 15, 60)}% ${Math.min(lightness + 25, 70)}%)`;
+            // Dark gradient colors for the button
+            const gradientStart = `hsl(${hue} ${Math.min(saturation + 10, 50)}% 12%)`;
+            const gradientMid = `hsl(${hue} ${Math.min(saturation + 5, 45)}% 8%)`;
+            const gradientEnd = `hsl(${hue} ${saturation}% 5%)`;
+            const glowColor = `hsl(${hue} ${Math.min(saturation + 20, 70)}% ${Math.min(lightness + 30, 65)}%)`;
+            const textColor = `hsl(${hue} ${Math.min(saturation + 25, 80)}% ${Math.min(lightness + 35, 75)}%)`;
 
             return (
               <button
@@ -1601,66 +1633,83 @@ export function Hypercube3D({
                   e.stopPropagation();
                   if (hasDragged) return;
                   if (focusedFaceIndex === index) {
-                    // Double-click: open detail panel
                     onSelectSection(face.id);
                   } else {
-                    // First click: progressive focus
                     selectFace(index);
                   }
                 }}
                 className={cn(
-                  "group relative w-[72px] h-[72px] rounded-lg backdrop-blur-sm border-2 transition-all duration-300 flex flex-col items-center justify-center gap-1",
-                  isFocused && "scale-110 ring-2 ring-white/30",
-                  isDimmed && "opacity-50",
+                  "group relative w-[88px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center",
+                  isFocused && "scale-105 z-10",
+                  isDimmed && "opacity-40 scale-95",
+                  !isFocused &&
+                    !isDimmed &&
+                    "hover:scale-105 hover:z-10 overflow-visible",
                 )}
                 style={{
-                  backgroundColor: `${buttonBgColor}40`,
+                  background: `linear-gradient(135deg, ${gradientStart} 0%, ${gradientMid} 50%, ${gradientEnd} 100%)`,
                   borderColor: isFocused
-                    ? buttonGlowColor
-                    : `${buttonBgColor}60`,
+                    ? glowColor
+                    : `hsl(${hue} ${saturation}% 25%)`,
                   boxShadow: isFocused
-                    ? `0 0 20px ${buttonGlowColor}60, inset 0 0 10px ${buttonGlowColor}20`
-                    : intensity.glowIntensity > 0.3 && !isDimmed
-                      ? `0 0 ${intensity.glowIntensity * 12}px ${buttonGlowColor}30`
-                      : "none",
+                    ? `0 0 25px ${glowColor}80, 0 0 50px ${glowColor}40, inset 0 1px 1px ${glowColor}30`
+                    : isDimmed
+                      ? "none"
+                      : `inset 0 1px 1px hsl(${hue} ${saturation}% 20% / 0.3)`,
                 }}
                 title={`${face.label} - ${face.semanticRole}`}
               >
-                <svg width="32" height="32" viewBox="0 0 40 40">
-                  <path
-                    d={face.glyph}
-                    fill="none"
-                    stroke={buttonGlowColor}
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+                {/* Hover glow overlay */}
+                <div
+                  className={cn(
+                    "absolute inset-0 opacity-0 transition-opacity duration-300",
+                    !isFocused && !isDimmed && "group-hover:opacity-100",
+                  )}
+                  style={{
+                    background: `radial-gradient(circle at center, ${glowColor}20 0%, transparent 70%)`,
+                  }}
+                />
+                {/* Bottom glow accent */}
+                <div
+                  className="absolute inset-x-0 bottom-0 h-1/2 opacity-30"
+                  style={{
+                    background: `linear-gradient(to top, ${glowColor}15, transparent)`,
+                  }}
+                />
+                {/* Text */}
                 <span
-                  className="text-[9px] uppercase tracking-wider font-bold whitespace-nowrap"
-                  style={{ color: buttonGlowColor }}
+                  className={cn(
+                    "relative z-10 text-[13px] font-bold uppercase tracking-wide transition-all duration-300",
+                    !isFocused && !isDimmed && "group-hover:scale-110",
+                  )}
+                  style={{
+                    color: isFocused ? glowColor : textColor,
+                    textShadow: isFocused
+                      ? `0 0 20px ${glowColor}`
+                      : `0 0 10px ${glowColor}50`,
+                  }}
                 >
                   {face.shortLabel}
                 </span>
-                {Number.isFinite(intensity.elementCount) && intensity.elementCount > 0 && (
-                  <div
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-lg"
-                    style={{
-                      backgroundColor: buttonGlowColor,
-                      color: "#000",
-                      border: `2px solid ${buttonBgColor}`,
-                    }}
-                  >
-                    {intensity.elementCount}
-                  </div>
-                )}
+                {/* Count badge */}
+                {Number.isFinite(intensity.elementCount) &&
+                  intensity.elementCount > 0 && (
+                    <div
+                      className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-lg z-20"
+                      style={{
+                        backgroundColor: glowColor,
+                        color: "#000",
+                        boxShadow: `0 0 10px ${glowColor}`,
+                      }}
+                    >
+                      {intensity.elementCount}
+                    </div>
+                  )}
               </button>
             );
           })}
 
-          <div className="w-px h-6 bg-border" />
-
-          {/* Core button with glyph - matched sizing with face buttons */}
+          {/* Core button */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1668,40 +1717,147 @@ export function Hypercube3D({
               focusCore();
             }}
             className={cn(
-              "w-[72px] h-[72px] rounded-lg backdrop-blur-sm border-2 transition-all flex flex-col items-center justify-center gap-1",
-              isCoreSelected
-                ? "bg-violet-500/30 border-violet-400/60 scale-110 ring-2 ring-white/30"
-                : "bg-purple-900/40 border-purple-500/40 hover:bg-purple-800/50 hover:border-purple-400/50",
+              "group relative w-[88px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center overflow-hidden",
+              isCoreSelected && "scale-105 z-10",
+              !isCoreSelected && "hover:scale-105 hover:z-10",
             )}
             style={{
+              background: isCoreSelected
+                ? "linear-gradient(135deg, hsl(270 60% 15%) 0%, hsl(270 50% 10%) 50%, hsl(270 40% 5%) 100%)"
+                : "linear-gradient(135deg, hsl(270 40% 12%) 0%, hsl(270 35% 8%) 50%, hsl(270 30% 5%) 100%)",
+              borderColor: isCoreSelected
+                ? "hsl(270 80% 65%)"
+                : "hsl(270 40% 25%)",
               boxShadow: isCoreSelected
-                ? "0 0 20px hsl(270 80% 60% / 0.5), inset 0 0 10px hsl(270 80% 70% / 0.2)"
-                : undefined,
+                ? "0 0 25px hsl(270 80% 60% / 0.6), 0 0 50px hsl(270 80% 60% / 0.3), inset 0 1px 1px hsl(270 80% 70% / 0.3)"
+                : "inset 0 1px 1px hsl(270 40% 20% / 0.3)",
             }}
             title="Focus Core - The inner experience structure"
           >
-            <svg width="32" height="32" viewBox="0 0 40 40">
-              <path
-                d={GLYPHS.core}
-                fill="none"
-                stroke={
-                  isCoreSelected ? "hsl(270 80% 75%)" : "hsl(270 50% 70%)"
-                }
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-
-            <span
-              className="text-[9px] uppercase tracking-wider font-bold whitespace-nowrap"
+            {/* Hover glow overlay */}
+            <div
+              className={cn(
+                "absolute inset-0 opacity-0 transition-opacity duration-300",
+                !isCoreSelected && "group-hover:opacity-100",
+              )}
               style={{
-                color: isCoreSelected ? "hsl(270 80% 75%)" : "hsl(270 50% 70%)",
+                background:
+                  "radial-gradient(circle at center, hsl(270 80% 60% / 0.2) 0%, transparent 70%)",
+              }}
+            />
+            {/* Bottom glow accent */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-1/2 opacity-30"
+              style={{
+                background:
+                  "linear-gradient(to top, hsl(270 80% 60% / 0.15), transparent)",
+              }}
+            />
+            <span
+              className={cn(
+                "relative z-10 text-[13px] font-bold uppercase tracking-wide transition-all duration-300",
+                !isCoreSelected && "group-hover:scale-110",
+              )}
+              style={{
+                color: isCoreSelected ? "hsl(270 80% 75%)" : "hsl(270 60% 70%)",
+                textShadow: isCoreSelected
+                  ? "0 0 20px hsl(270 80% 60%)"
+                  : "0 0 10px hsl(270 60% 60% / 0.5)",
               }}
             >
-              CORE
+              Core
             </span>
           </button>
+
+          {/* Explore mode toggle - moved to end */}
+          {interactionMode !== "explore" ? (
+            <button
+              onClick={enterExploreMode}
+              className="group relative w-[88px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center overflow-hidden hover:scale-105 hover:z-10"
+              style={{
+                background:
+                  "linear-gradient(135deg, hsl(35 40% 12%) 0%, hsl(35 35% 8%) 50%, hsl(35 30% 5%) 100%)",
+                borderColor: "hsl(35 40% 25%)",
+                boxShadow: "inset 0 1px 1px hsl(35 40% 20% / 0.3)",
+              }}
+              title="Enter explore mode to rotate the cube freely"
+            >
+              {/* Hover glow overlay */}
+              <div
+                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                style={{
+                  background:
+                    "radial-gradient(circle at center, hsl(35 80% 50% / 0.2) 0%, transparent 70%)",
+                }}
+              />
+              {/* Bottom glow accent */}
+              <div
+                className="absolute inset-x-0 bottom-0 h-1/2 opacity-30"
+                style={{
+                  background:
+                    "linear-gradient(to top, hsl(35 80% 50% / 0.15), transparent)",
+                }}
+              />
+              <div className="relative z-10 flex flex-col items-center gap-1">
+                <Compass className="w-4 h-4 text-amber-400/70 group-hover:text-amber-300 transition-colors" />
+                <span
+                  className="text-[11px] font-bold uppercase tracking-wide text-amber-400/70 group-hover:text-amber-300 group-hover:scale-110 transition-all duration-300"
+                  style={{
+                    textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
+                  }}
+                >
+                  Explore
+                </span>
+              </div>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={exitExploreMode}
+                className="group relative w-[72px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center overflow-hidden hover:scale-105"
+                style={{
+                  background:
+                    "linear-gradient(135deg, hsl(35 50% 15%) 0%, hsl(35 45% 10%) 50%, hsl(35 40% 6%) 100%)",
+                  borderColor: "hsl(35 70% 50%)",
+                  boxShadow:
+                    "0 0 15px hsl(35 70% 50% / 0.4), inset 0 1px 1px hsl(35 70% 60% / 0.3)",
+                }}
+                title="Exit explore mode (Esc)"
+              >
+                <div className="relative z-10 flex flex-col items-center gap-1">
+                  <X className="w-4 h-4 text-amber-300" />
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-amber-300">
+                    Exit
+                  </span>
+                </div>
+              </button>
+
+              {/* Zoom controls */}
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() =>
+                    setExploreZoom((prev) => Math.min(MAX_ZOOM, prev + 0.2))
+                  }
+                  className="p-1.5 rounded bg-amber-500/20 border border-amber-400/30 text-amber-300 hover:bg-amber-500/30 hover:scale-110 transition-all"
+                  title="Zoom in"
+                >
+                  <ZoomIn className="w-3 h-3" />
+                </button>
+                <span className="text-[9px] text-amber-300/70 text-center font-medium">
+                  {Math.round(exploreZoom * 100)}%
+                </span>
+                <button
+                  onClick={() =>
+                    setExploreZoom((prev) => Math.max(MIN_ZOOM, prev - 0.2))
+                  }
+                  className="p-1.5 rounded bg-amber-500/20 border border-amber-400/30 text-amber-300 hover:bg-amber-500/30 hover:scale-110 transition-all"
+                  title="Zoom out"
+                >
+                  <ZoomOut className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Directional Navigation Arrows - TRUE 90° cube rotations */}
@@ -1773,6 +1929,8 @@ export function Hypercube3D({
                 <span className="text-amber-400/70">🔄 Explore Mode</span>
                 <span className="text-muted-foreground/40">|</span>
                 <span>Drag to rotate</span>
+                <span className="text-muted-foreground/40">|</span>
+                <span>Scroll to zoom ({Math.round(exploreZoom * 100)}%)</span>
                 <span className="text-muted-foreground/40">|</span>
                 <span>
                   <kbd className="px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground text-[10px]">

@@ -1,6 +1,6 @@
 import { resetPasswordAction } from "@/app/actions";
 import { FormMessage, Message } from "@/components/form-message";
-import Navbar from "@/components/navbar";
+import DashboardNavbar from "@/components/dashboard-navbar";
 import { SubmitButton } from "@/components/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,9 +19,24 @@ export default async function ResetPassword(props: {
 
   return (
     <>
-      <Navbar />
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-8">
-        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-sm">
+      <DashboardNavbar />
+      <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-8 overflow-hidden">
+        {/* Dot grid background */}
+        <div
+          className="fixed inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `radial-gradient(circle, hsl(270 30% 25% / 0.4) 1px, transparent 1px)`,
+            backgroundSize: '30px 30px',
+            backgroundPosition: '0 0',
+          }}
+        />
+        
+        {/* Purple glowing box */}
+        <div className="w-full max-w-md rounded-lg border border-purple-500/50 bg-card p-6 shadow-sm relative z-10"
+          style={{
+            boxShadow: '0 0 20px rgba(168, 85, 247, 0.4), 0 0 40px rgba(168, 85, 247, 0.2), inset 0 0 10px rgba(168, 85, 247, 0.1)',
+          }}
+        >
           <form className="flex flex-col space-y-6">
             <div className="space-y-2 text-center">
               <h1 className="text-3xl font-semibold tracking-tight">Reset password</h1>
