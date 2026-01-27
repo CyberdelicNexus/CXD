@@ -67,7 +67,7 @@ function groupElementsByType(elements: CanvasElement[]) {
 function getElementDisplayName(element: CanvasElement): string {
   switch (element.type) {
     case 'board':
-      return (element as any).name || 'Untitled Board';
+      return (element as any).title || 'Untitled Board';
     case 'container':
       return (element as any).title || 'Untitled Container';
     case 'text':

@@ -1193,6 +1193,66 @@ export const useCXDStore = create<CXDState>()(
       updateCanvasElement: (elementId, updates) => {
         const currentProject = get().getCurrentProject();
         if (currentProject) {
+          const elements = currentProject.canvasElements || [];
+          const element = elements.find(el => el.id === elementId);
+          
+          // If element has a container, check if we need to expand the container
+          if (element?.containerId) {
+            const container = elements.find(el => el.id === element.containerId);
+            if (container && container.type === 'container') {
+              // Calculate the new bounds of the child element
+              const newX = updates.x !== undefined ? updates.x : element.x;
+              const newY = updates.y !== undefined ? updates.y : element.y;
+              const newWidth = updates.width !== undefined ? updates.width : element.width;
+              const newHeight = updates.height !== undefined ? updates.height : element.height;
+              
+              const padding = 20;
+              const headerHeight = 40;
+              
+              // Calculate required container size
+              const neededWidth = Math.max(
+                container.width,
+                newX + newWidth - container.x + padding
+              );
+              const neededHeight = Math.max(
+                container.height,
+                newY + newHeight - container.y + padding + headerHeight
+              );
+              
+              // Update both the element and container if expansion is needed
+              set((state) => ({
+                projects: state.projects.map((p) =>
+                  p.id === currentProject.id
+                    ? {
+                        ...p,
+                        canvasElements: (p.canvasElements || []).map((el) => {
+                          if (el.id === elementId) {
+                            return { ...el, ...updates } as typeof el;
+                          }
+                          if (el.id === element.containerId && 
+                              (neededWidth > container.width || neededHeight > container.height)) {
+                            return { 
+                              ...el, 
+                              width: neededWidth,
+                              height: neededHeight 
+                            };
+                          }
+                          return el;
+                        }),
+                        updatedAt: new Date().toISOString()
+                      }
+                    : p
+                ),
+              }));
+              return;
+            }
+          }
+          
+          // Check if this is a board element with a title update - sync title to the board object
+          const isBoardElement = element?.type === 'board';
+          const isTitleUpdate = updates.hasOwnProperty('title');
+          
+          // Normal update without container logic
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1201,6 +1261,14 @@ export const useCXDStore = create<CXDState>()(
                     canvasElements: (p.canvasElements || []).map((el) =>
                       el.id === elementId ? { ...el, ...updates } as typeof el : el
                     ),
+                    // If board element title changed, sync to the corresponding board
+                    canvasBoards: isBoardElement && isTitleUpdate && element.type === 'board'
+                      ? (p.canvasBoards || []).map((board) =>
+                          board.id === (element as any).childBoardId
+                            ? { ...board, title: (updates as any).title }
+                            : board
+                        )
+                      : p.canvasBoards,
                     updatedAt: new Date().toISOString()
                   }
                 : p

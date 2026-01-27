@@ -43,6 +43,7 @@ import {
   Link2,
   Upload,
   ExternalLink,
+  ExternalLink as ExternalLinkIcon,
   Globe,
   Code,
   Bookmark,
@@ -240,6 +241,12 @@ export function CanvasElementRenderer({
   // Handle drag from element body (not just the handle)
   const handleBodyMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      // Don't drag locked elements
+      if (element.locked) {
+        e.stopPropagation();
+        return;
+      }
+
       // Don't start drag if clicking on interactive elements
       const target = e.target as HTMLElement;
       const isInteractive = target.closest(
@@ -357,6 +364,8 @@ export function CanvasElementRenderer({
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
         isDragging && "opacity-80 shadow-2xl cursor-grabbing",
+        // Locked state indicator
+        element.locked && "opacity-60 cursor-not-allowed",
         // Highlight effect (from hypercube navigation)
         isHighlighted &&
           "ring-4 ring-cyan-400 shadow-[0_0_40px_rgba(34,211,238,0.6)] animate-pulse",
@@ -384,12 +393,14 @@ export function CanvasElementRenderer({
         // Cursor styles
         !isDragging &&
           !isEditing &&
+          !element.locked &&
           element.type !== "text" &&
           element.type !== "line" &&
           "cursor-grab",
         !isDragging &&
           !isEditing &&
           element.type === "text" &&
+          !element.locked &&
           "cursor-text h-full",
       )}
       style={{
@@ -1031,6 +1042,20 @@ export function CanvasElementRenderer({
             title="Send Backward"
           >
             <ArrowDown className="w-4 h-4" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onUpdate({ locked: !element.locked });
+            }}
+            className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            title={element.locked ? "Unlock" : "Lock"}
+          >
+            {element.locked ? (
+              <Lock className="w-4 h-4" />
+            ) : (
+              <Unlock className="w-4 h-4" />
+            )}
           </button>
           <button
             onClick={(e) => {
@@ -3789,6 +3814,7 @@ function TextCard({
 }) {
   const measureRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [originalContent, setOriginalContent] = useState("");
 
   const fontSize = element.style?.fontSize || 16;
@@ -3805,6 +3831,27 @@ function TextCard({
       setOriginalContent(element.content);
     }
   }, [isEditing]);
+
+  // Click outside to deselect/exit edit mode
+  useEffect(() => {
+    if (!isEditing) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onBlur();
+      }
+    };
+
+    // Small delay to avoid immediate trigger
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isEditing, onBlur]);
 
   // Auto-grow textarea height while editing
   const autoGrowTextarea = useCallback(() => {
@@ -3828,16 +3875,18 @@ function TextCard({
   useEffect(() => {
     if (isEditing) {
       // Small delay to ensure textarea is rendered
-      requestAnimationFrame(() => {
-        autoGrowTextarea();
-        // Focus WITHOUT selecting all - normal typing behavior
-        if (textareaRef.current) {
-          textareaRef.current.focus();
-          // Move cursor to end of text
-          const length = textareaRef.current.value.length;
-          textareaRef.current.setSelectionRange(length, length);
-        }
-      });
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          autoGrowTextarea();
+          // Focus WITHOUT selecting all - normal typing behavior
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            // Move cursor to end of text
+            const length = textareaRef.current.value.length;
+            textareaRef.current.setSelectionRange(length, length);
+          }
+        });
+      }
     }
   }, [isEditing, autoGrowTextarea]);
 
@@ -3879,10 +3928,9 @@ function TextCard({
     // Prevent ALL canvas shortcuts from triggering while editing
     e.stopPropagation();
 
-    // Escape cancels edit (revert changes)
+    // Escape exits edit mode WITHOUT reverting changes
     if (e.key === "Escape") {
       e.preventDefault();
-      onUpdate({ content: originalContent });
       onBlur();
     }
 
@@ -3894,7 +3942,9 @@ function TextCard({
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     onUpdate({ content: e.target.value });
     // Auto-grow after content update
-    requestAnimationFrame(autoGrowTextarea);
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(autoGrowTextarea);
+    }
   };
 
   // Determine text style (solid color or gradient)
@@ -3906,10 +3956,11 @@ function TextCard({
 
   return (
     <div
+      ref={containerRef}
       className="w-full h-full flex items-start justify-center p-2"
       style={{
         // Allow overflow when editing so text isn't clipped
-        overflow: isEditing ? "visible" : "hidden",
+        overflow: "visible", // Changed from conditional to always visible to prevent clipping at zoom
       }}
     >
       {/* Hidden measurement element - respects wrapWidth */}
@@ -3964,6 +4015,7 @@ function TextCard({
             fontFamily,
             textAlign,
             maxWidth: wrapWidth ? `${wrapWidth - 16}px` : undefined,
+            overflow: "visible", // Prevent text clipping
           }}
         >
           {element.content ? (
@@ -4641,6 +4693,14 @@ function BoardCard({
   const selectedIcon = BOARD_ICONS.find((i) => i.id === iconId);
   const IconComponent = selectedIcon?.Icon || LayoutGrid;
 
+  // Count elements in this board
+  const project = (window as any).__currentProject;
+  const allElements = project?.canvasElements || [];
+  const boardElements = allElements.filter((el: any) => 
+    el.boardId === element.childBoardId && el.type !== 'line' && el.type !== 'connector'
+  );
+  const elementCount = boardElements.length;
+
   return (
     <div
       className={cn(
@@ -4719,6 +4779,10 @@ function BoardCard({
               {element.title || "New Board"}
             </button>
           )}
+          {/* Item count */}
+          <p className="text-xs text-purple-400 font-medium">
+            {elementCount} {elementCount === 1 ? "Item" : "Items"}
+          </p>
         </div>
       </div>
     </div>

@@ -605,6 +605,8 @@ function LineContextMenu({
   const menuStyle: React.CSSProperties = {
     position: "absolute",
     zIndex: 100,
+    pointerEvents: "auto", // Ensure menu is interactive but doesn't block drag
+    touchAction: "none", // Prevent touch conflicts
     ...(isHorizontal
       ? { top: midScreen.y + 16, left: midScreen.x - 100 }
       : { top: midScreen.y - 20, left: midScreen.x + 16 }),

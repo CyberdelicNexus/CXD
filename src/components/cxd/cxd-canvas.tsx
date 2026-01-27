@@ -265,7 +265,7 @@ export function CXDCanvas() {
           return;
         }
 
-        // Deselect element when clicking on background
+        // GLOBAL RULE: Clicking background deselects all elements and closes all menus
         setSelectedElementId(null);
         setSelectedElementIds(new Set());
         setSelectedEdgeId(null); // Also deselect connector/edge
@@ -278,7 +278,7 @@ export function CXDCanvas() {
         e.preventDefault();
       }
     },
-    [canvasPosition, canvasZoom],
+    [canvasPosition, canvasZoom, setSelectedElementId],
   );
 
   const handleCanvasMouseMove = useCallback(
@@ -1170,6 +1170,31 @@ export function CXDCanvas() {
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
+  // Global click handler to deselect text elements when clicking outside and close all menus
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      
+      // Don't interfere with clicks on UI controls, menus, or interactive elements
+      const isUIControl = target.closest('button, input, textarea, select, [role="menu"], [role="dialog"]');
+      if (isUIControl) return;
+      
+      // Check if click is outside any element (on canvas background or navigation areas)
+      const clickedElement = target.closest('[data-element-id]');
+      const isCanvasArea = target.closest('.canvas-container, .dot-grid');
+      
+      if (!clickedElement && isCanvasArea) {
+        // Clicked on canvas background - deselect all
+        setSelectedElementId(null);
+        setSelectedElementIds(new Set());
+        setSelectedEdgeId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleGlobalClick, { capture: true });
+    return () => document.removeEventListener('mousedown', handleGlobalClick, { capture: true });
+  }, []);
+
   // Check if user is in an editing context
   const isEditingContext = useCallback(() => {
     const target = document.activeElement as HTMLElement;
@@ -1185,18 +1210,6 @@ export function CXDCanvas() {
   // Global keyboard shortcut system
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // ESCAPE - Always cancels current mode/closes menus
-      if (e.key === "Escape") {
-        setIsConnecting(false);
-        setConnectingFrom(null);
-        setConnectorPreview(null);
-        setSelectedElementIds(new Set());
-        setSelectedElementId(null);
-        setHoveredAnchor(null);
-        setSelectedEdgeId(null);
-        return;
-      }
-
       // Don't run shortcuts while editing text or in special editing modes
       const target = e.target as HTMLElement;
       const isEditingText =
@@ -1205,8 +1218,25 @@ export function CXDCanvas() {
         target.contentEditable === "true" ||
         target.classList.contains("resize-none"); // TextElement textarea
       
+      // ESCAPE - Always cancels current mode/closes menus/deselects elements
+      // BUT don't interfere with text editing - let text component handle it
+      if (e.key === "Escape") {
+        if (!isEditingText) {
+          e.preventDefault();
+          setIsConnecting(false);
+          setConnectingFrom(null);
+          setConnectorPreview(null);
+          setSelectedElementIds(new Set());
+          setSelectedElementId(null);
+          setHoveredAnchor(null);
+          setSelectedEdgeId(null);
+        }
+        // If editing text, let the text element's own handler deal with it
+        return;
+      }
+      
       // Allow only Escape while editing text
-      if (isEditingText && e.key !== "Escape") {
+      if (isEditingText) {
         return; // Let normal text editing work
       }
 
@@ -2032,10 +2062,11 @@ export function CXDCanvas() {
 
           return (
             <div
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-lg"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-lg pointer-events-auto"
               style={{
                 position: "absolute",
                 zIndex: 1001,
+                pointerEvents: "auto", // Allow interaction with menu
                 ...(isHorizontal
                   ? { top: midScreenY + 16, left: midScreenX - 100 }
                   : { top: midScreenY - 20, left: midScreenX + 16 }),

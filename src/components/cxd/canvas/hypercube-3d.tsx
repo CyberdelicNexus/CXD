@@ -8,7 +8,7 @@ import React, {
   useRef,
 } from "react";
 import { CXDSectionId } from "@/types/cxd-schema";
-import { HypercubeFaceTag, CanvasElement } from "@/types/canvas-elements";
+import { HypercubeFaceTag, CanvasElement, BoardElement } from "@/types/canvas-elements";
 import {
   ChevronRight,
   Layout,
@@ -38,6 +38,18 @@ import { generateDiagnostics } from "@/utils/diagnostic-engine";
 // Interaction modes - Two distinct modes per specification
 // DEFAULT MODE: Cube auto-rotates, NOT interactive, face buttons are PRIMARY interaction
 // EXPLORE MODE: Click-drag rotation enabled, explicit toggle required
+//
+// ROTATION BEHAVIOR:
+// - All elements (faces, edges, inner cube) rotate together as a unified object
+// - No independent face glow during rotation - only front-facing face highlights when selected
+// - Arrow navigation rotates in 90° steps (left, right, up, down) with proper looping
+// - Selection always highlights only the front-facing face after rotation completes
+//
+// MINIMAP BEHAVIOR (when face/core selected):
+// - Inner cube always visible
+// - Active face always positioned front-facing
+// - When Core selected: highlight only inner cube, no face highlights
+// - Rotation, highlighting, and minimap state always consistent
 type InteractionMode = "default" | "explore";
 
 // Visual constants
@@ -181,7 +193,7 @@ const ELEMENT_TYPE_ICONS: Record<
 function getElementDisplayName(element: CanvasElement): string {
   switch (element.type) {
     case "board":
-      return (element as any).name || "Untitled Board";
+      return (element as any).title || "Untitled Board";
     case "container":
       return (element as any).title || "Untitled Container";
     case "text":
@@ -215,14 +227,16 @@ interface ElementPreview {
   url?: string; // For links
 }
 
-function getElementPreview(element: CanvasElement): ElementPreview {
+function getElementPreview(element: CanvasElement, project?: any): ElementPreview {
   const base = { id: element.id, type: element.type, isEmpty: false };
 
   switch (element.type) {
     case "text":
     case "freeform": {
       const content = (element as any).content || "";
-      const lines = content.split("\n").filter((l: string) => l.trim().length > 0);
+      const lines = content
+        .split("\n")
+        .filter((l: string) => l.trim().length > 0);
       const title = lines[0]?.slice(0, 60) || "Text Card";
       const excerpt = lines.slice(1).join(" ").slice(0, 120);
       return {
@@ -247,12 +261,30 @@ function getElementPreview(element: CanvasElement): ElementPreview {
       return { ...base, title: alt, thumbnail: src, isEmpty: !src };
     }
     case "board": {
-      const name = (element as any).name || "Untitled Board";
-      const children = (element as any).children || [];
+      const name = (element as any).title || "Untitled Board";
+      // Count elements by filtering canvasElements where boardId matches
+      // Elements are stored flat in canvasElements with a boardId property
+      const boardId = (element as BoardElement).childBoardId;
+      const allElements = project?.canvasElements || [];
+      // Filter to elements in this board, exclude lines and connectors
+      const boardElements = allElements.filter((el: any) => 
+        el.boardId === boardId && el.type !== 'line' && el.type !== 'connector'
+      );
+      const elementCount = boardElements.length;
+      
+      console.log('[Hypercube Board Count]', {
+        elementId: element.id,
+        boardId,
+        totalProjectElements: allElements.length,
+        elementCount,
+        boardTitle: name,
+        elementTypes: boardElements.map((el: any) => el.type)
+      });
+      
       return {
         ...base,
         title: name,
-        elementCount: children.length,
+        elementCount,
         isEmpty: !name,
       };
     }
@@ -419,8 +451,8 @@ function getFrontFaceFromRotation(rotX: number, rotY: number): number {
 
   // For side faces, use Y rotation
   // Face 0 (Reality) at y=0, Face 1 (Sensory) at y=90, Face 2 (Presence) at y=180, Face 3 (States) at y=270
-  if (normY >= 315 || normY < 45) return 0;  // Reality (front)
-  if (normY >= 45 && normY < 135) return 3;  // States (left becomes front when rotated right)
+  if (normY >= 315 || normY < 45) return 0; // Reality (front)
+  if (normY >= 45 && normY < 135) return 3; // States (left becomes front when rotated right)
   if (normY >= 135 && normY < 225) return 2; // Presence (back)
   if (normY >= 225 && normY < 315) return 1; // Sensory (right becomes front when rotated left)
 
@@ -430,13 +462,20 @@ function getFrontFaceFromRotation(rotX: number, rotY: number): number {
 // Calculate rotation needed to bring a specific face to front
 function getRotationForFace(faceIndex: number): { x: number; y: number } {
   switch (faceIndex) {
-    case 0: return { x: 0, y: 0 };     // Reality - Front
-    case 1: return { x: 0, y: -90 };   // Sensory - Right (rotate left to bring to front)
-    case 2: return { x: 0, y: 180 };   // Presence - Back
-    case 3: return { x: 0, y: 90 };    // States - Left (rotate right to bring to front)
-    case 4: return { x: -90, y: 0 };   // Traits - Top (rotate down to bring to front)
-    case 5: return { x: 90, y: 0 };    // Meaning - Bottom (rotate up to bring to front)
-    default: return { x: 0, y: 0 };
+    case 0:
+      return { x: 0, y: 0 }; // Reality - Front
+    case 1:
+      return { x: 0, y: -90 }; // Sensory - Right (rotate left to bring to front)
+    case 2:
+      return { x: 0, y: 180 }; // Presence - Back
+    case 3:
+      return { x: 0, y: 90 }; // States - Left (rotate right to bring to front)
+    case 4:
+      return { x: -90, y: 0 }; // Traits - Top (rotate down to bring to front)
+    case 5:
+      return { x: 90, y: 0 }; // Meaning - Bottom (rotate up to bring to front)
+    default:
+      return { x: 0, y: 0 };
   }
 }
 
@@ -465,6 +504,13 @@ export function Hypercube3D({
   onNavigateToElement,
   onPreviewElement,
 }: Hypercube3DProps) {
+  // Store project reference globally for categorizeElement
+  // Guard for SSR / restricted environments
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (window as any).__currentProject = project;
+  }, [project]);
+
   const [cubeRotation, setCubeRotation] = useState({ x: -25, y: -35 });
   const [targetRotation, setTargetRotation] = useState({ x: -25, y: -35 });
   const [isAnimating, setIsAnimating] = useState(false);
@@ -525,14 +571,18 @@ export function Hypercube3D({
         y: prev.y + AUTO_ROTATION_SPEED * deltaTime,
       }));
 
-      autoRotationRef.current = requestAnimationFrame(animate);
+      if (typeof window !== "undefined") {
+        autoRotationRef.current = window.requestAnimationFrame(animate);
+      }
     };
 
-    autoRotationRef.current = requestAnimationFrame(animate);
+    if (typeof window !== "undefined") {
+      autoRotationRef.current = window.requestAnimationFrame(animate);
+    }
 
     return () => {
-      if (autoRotationRef.current) {
-        cancelAnimationFrame(autoRotationRef.current);
+      if (autoRotationRef.current && typeof window !== "undefined") {
+        window.cancelAnimationFrame(autoRotationRef.current);
       }
       lastTimeRef.current = 0;
     };
@@ -631,7 +681,7 @@ export function Hypercube3D({
     if (!isAnimating) return;
 
     startRotationRef.current = cubeRotation;
-    const startTime = performance.now();
+    const startTime = typeof performance !== "undefined" ? performance.now() : 0;
     const duration = 600;
 
     const animate = (currentTime: number) => {
@@ -649,43 +699,49 @@ export function Hypercube3D({
       setCubeRotation({ x: newX, y: newY });
 
       if (progress < 1) {
-        animationRef.current = requestAnimationFrame(animate);
+        if (typeof window !== "undefined") {
+          animationRef.current = window.requestAnimationFrame(animate);
+        }
       } else {
+        // Ensure final rotation exactly matches target to avoid floating-point drift
+        setCubeRotation({ x: targetRotation.x, y: targetRotation.y });
         setIsAnimating(false);
         animationRef.current = null;
-        console.log('[Hypercube] Animation complete - Cube transform:', { x: newX, y: newY });
+        console.log(
+          "[Hypercube] Animation complete - Cube transform:",
+          targetRotation,
+        );
       }
     };
 
-    animationRef.current = requestAnimationFrame(animate);
+    if (typeof window !== "undefined") {
+      animationRef.current = window.requestAnimationFrame(animate);
+    }
 
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      if (animationRef.current && typeof window !== "undefined") {
+        window.cancelAnimationFrame(animationRef.current);
       }
     };
   }, [isAnimating, targetRotation]);
 
-  const selectFace = useCallback(
-    (index: number) => {
-      const face = CUBE_FACES[index];
-      if (!face) return;
+  const selectFace = useCallback((index: number) => {
+    const face = CUBE_FACES[index];
+    if (!face) return;
 
-      console.log('[Hypercube] Selecting face:', index, face.shortLabel);
-      
-      // Set focused face and clear core
-      setFocusedFaceIndex(index);
-      setIsCoreSelected(false);
+    console.log("[Hypercube] Selecting face:", index, face.shortLabel);
 
-      // Rotate cube to bring selected face to FRONT
-      const targetRot = getRotationForFace(index);
-      console.log('[Hypercube] Target rotation:', targetRot);
-      
-      setTargetRotation(targetRot);
-      setIsAnimating(true);
-    },
-    [],
-  );
+    // Set focused face and clear core
+    setFocusedFaceIndex(index);
+    setIsCoreSelected(false);
+
+    // Rotate cube to bring selected face to FRONT
+    const targetRot = getRotationForFace(index);
+    console.log("[Hypercube] Target rotation:", targetRot);
+
+    setTargetRotation(targetRot);
+    setIsAnimating(true);
+  }, []);
 
   const focusCore = useCallback(() => {
     // Stay in default mode, show core panel
@@ -695,7 +751,7 @@ export function Hypercube3D({
     setIsCoreSelected(true);
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
-    console.log('[Hypercube] Core selected - showing core panel');
+    console.log("[Hypercube] Core selected - showing core panel");
   }, []);
 
   const returnToDefault = useCallback(() => {
@@ -727,50 +783,78 @@ export function Hypercube3D({
   const rotateLeft = useCallback(() => {
     // Rotate cube 90 degrees around Y axis (clockwise from above)
     // This brings the RIGHT face to FRONT
-    const newY = Math.round(cubeRotation.y / 90) * 90 + 90;
-    setTargetRotation({ x: cubeRotation.x, y: newY });
+    const currentX = targetRotation.x;
+    const currentY = targetRotation.y;
+    const newY = Math.round(currentY / 90) * 90 + 90;
+    setTargetRotation({ x: currentX, y: newY });
     setIsAnimating(true);
-    const newFrontFace = getFrontFaceFromRotation(cubeRotation.x, newY);
+    const newFrontFace = getFrontFaceFromRotation(currentX, newY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log('[Hypercube] Rotate Left -> Y:', newY, 'New front face:', newFrontFace);
-  }, [cubeRotation]);
+    console.log(
+      "[Hypercube] Rotate Left -> Y:",
+      newY,
+      "New front face:",
+      newFrontFace,
+    );
+  }, [targetRotation]);
 
   const rotateRight = useCallback(() => {
     // Rotate cube 90 degrees around Y axis (counter-clockwise from above)
     // This brings the LEFT face to FRONT
-    const newY = Math.round(cubeRotation.y / 90) * 90 - 90;
-    setTargetRotation({ x: cubeRotation.x, y: newY });
+    const currentX = targetRotation.x;
+    const currentY = targetRotation.y;
+    const newY = Math.round(currentY / 90) * 90 - 90;
+    setTargetRotation({ x: currentX, y: newY });
     setIsAnimating(true);
-    const newFrontFace = getFrontFaceFromRotation(cubeRotation.x, newY);
+    const newFrontFace = getFrontFaceFromRotation(currentX, newY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log('[Hypercube] Rotate Right -> Y:', newY, 'New front face:', newFrontFace);
-  }, [cubeRotation]);
+    console.log(
+      "[Hypercube] Rotate Right -> Y:",
+      newY,
+      "New front face:",
+      newFrontFace,
+    );
+  }, [targetRotation]);
 
   const rotateUp = useCallback(() => {
     // Rotate cube 90 degrees around X axis
     // This brings the BOTTOM face to FRONT
-    const newX = Math.round(cubeRotation.x / 90) * 90 + 90;
-    setTargetRotation({ x: newX, y: cubeRotation.y });
+    const currentX = targetRotation.x;
+    const currentY = targetRotation.y;
+    const newX = Math.round(currentX / 90) * 90 + 90;
+    setTargetRotation({ x: newX, y: currentY });
     setIsAnimating(true);
-    const newFrontFace = getFrontFaceFromRotation(newX, cubeRotation.y);
+    const newFrontFace = getFrontFaceFromRotation(newX, currentY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log('[Hypercube] Rotate Up -> X:', newX, 'New front face:', newFrontFace);
-  }, [cubeRotation]);
+    console.log(
+      "[Hypercube] Rotate Up -> X:",
+      newX,
+      "New front face:",
+      newFrontFace,
+    );
+  }, [targetRotation]);
 
   const rotateDown = useCallback(() => {
     // Rotate cube 90 degrees around X axis (opposite)
     // This brings the TOP face to FRONT
-    const newX = Math.round(cubeRotation.x / 90) * 90 - 90;
-    setTargetRotation({ x: newX, y: cubeRotation.y });
+    const currentX = targetRotation.x;
+    const currentY = targetRotation.y;
+    const newX = Math.round(currentX / 90) * 90 - 90;
+    setTargetRotation({ x: newX, y: currentY });
     setIsAnimating(true);
-    const newFrontFace = getFrontFaceFromRotation(newX, cubeRotation.y);
+    const newFrontFace = getFrontFaceFromRotation(newX, currentY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log('[Hypercube] Rotate Down -> X:', newX, 'New front face:', newFrontFace);
-  }, [cubeRotation]);
+    console.log(
+      "[Hypercube] Rotate Down -> X:",
+      newX,
+      "New front face:",
+      newFrontFace,
+    );
+  }, [targetRotation]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -859,6 +943,9 @@ export function Hypercube3D({
         return;
       }
     };
+
+    // Guard for SSR / environments without window
+    if (typeof window === "undefined") return;
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -1052,11 +1139,16 @@ export function Hypercube3D({
     const frontIndex = getFrontFaceFromRotation(cubeRotation.x, cubeRotation.y);
     return frontIndex;
   }, [cubeRotation.x, cubeRotation.y]);
-  
+
   // Log when activeFaceId changes
   useEffect(() => {
     if (focusedFaceIndex !== null) {
-      console.log('[Hypercube] activeFaceId:', CUBE_FACES[focusedFaceIndex]?.id, 'index:', focusedFaceIndex);
+      console.log(
+        "[Hypercube] activeFaceId:",
+        CUBE_FACES[focusedFaceIndex]?.id,
+        "index:",
+        focusedFaceIndex,
+      );
     }
   }, [focusedFaceIndex]);
 
@@ -1069,8 +1161,8 @@ export function Hypercube3D({
 
   // Generate rich previews for tagged elements
   const focusedElementPreviews = useMemo(() => {
-    return focusedTaggedElements.map(getElementPreview);
-  }, [focusedTaggedElements]);
+    return focusedTaggedElements.map(el => getElementPreview(el, project));
+  }, [focusedTaggedElements, project]);
 
   // Generate face summary
   const faceSummary = useMemo(() => {
@@ -1126,7 +1218,7 @@ export function Hypercube3D({
       >
         {/* SVG for 3D wireframe - Position changes based on mode */}
         <svg
-          className="absolute transition-all duration-500 ease-out"
+          className="absolute transition-all duration-500 ease-out left-[1199px] top-[-38px]"
           style={{
             left: cubePosition.x,
             top: cubePosition.y,
@@ -1219,7 +1311,7 @@ export function Hypercube3D({
             );
           })}
 
-          {/* Inner cube edges - glow electric purple when Core is selected */}
+          {/* Inner cube edges - always visible, glow electric purple when Core is selected */}
           {cubeEdges.map(([i, j], idx) => {
             const midPoint = {
               x: (innerCorners[i].x + innerCorners[j].x) / 2,
@@ -1228,7 +1320,9 @@ export function Hypercube3D({
             };
 
             // When Core is selected, inner cube glows electric purple
-            const coreGlowColor = isCoreSelected ? "hsl(270 80% 70%)" : undefined;
+            const coreGlowColor = isCoreSelected
+              ? "hsl(270 80% 70%)"
+              : undefined;
 
             let faceHue = 270;
             if (midPoint.z > 20) faceHue = 280;
@@ -1237,6 +1331,11 @@ export function Hypercube3D({
             else if (midPoint.x < -20) faceHue = 260;
             else if (midPoint.y < -20) faceHue = 320;
             else if (midPoint.y > 20) faceHue = 195;
+
+            // Make inner cube more visible in minimap mode
+            const isMinimapMode =
+              (focusedFaceIndex !== null || isCoreSelected) &&
+              interactionMode === "default";
 
             return (
               <line
@@ -1248,11 +1347,15 @@ export function Hypercube3D({
                 stroke={coreGlowColor || `hsl(${faceHue} 30% 50%)`}
                 strokeWidth={isCoreSelected ? "3.5" : "2.5"}
                 strokeLinecap="round"
-                filter={isCoreSelected ? "url(#glow-pulsing)" : "url(#glow-stable)"}
-                opacity={isCoreSelected ? 1 : 0.7}
+                filter={
+                  isCoreSelected ? "url(#glow-pulsing)" : "url(#glow-stable)"
+                }
+                opacity={isCoreSelected ? 1 : isMinimapMode ? 0.8 : 0.7}
                 style={{
                   transition: "all 0.4s ease",
-                  filter: isCoreSelected ? "drop-shadow(0 0 8px hsl(270 80% 60%))" : undefined
+                  filter: isCoreSelected
+                    ? "drop-shadow(0 0 8px hsl(270 80% 60%))"
+                    : undefined,
                 }}
               />
             );
@@ -1312,9 +1415,14 @@ export function Hypercube3D({
             const isFocused = focusedFaceIndex === faceIndex;
             const isHovered = hoveredFace === faceIndex;
             // Dim non-front faces when we have a focused face
-            const isDimmed = focusedFaceIndex !== null && !isFocused && !isFrontFace;
-            // The active face is either the front face or the focused face
-            const isActive = isFrontFace || isFocused;
+            const isDimmed =
+              focusedFaceIndex !== null && !isFocused && !isFrontFace;
+            // In default mode with selection, only highlight the front-facing face
+            // When Core is selected, no faces should be active/highlighted
+            const isActive =
+              !isCoreSelected && focusedFaceIndex !== null
+                ? isFrontFace
+                : false;
 
             // Calculate face center and corners based on face index
             // Front (0), Right (1), Back (2), Left (3), Bottom (4), Top (5)
@@ -1372,13 +1480,15 @@ export function Hypercube3D({
             const depthFactor = Math.max(0.3, 1 - (centerZ + 200) / 400);
             const faceOpacity = isActive
               ? 0.5 // Active/front face - strong visibility
-              : isDimmed
-                ? 0.15 // Non-active when something is focused
-                : depthFactor * 0.35; // Normal depth-based fading
+              : isCoreSelected
+                ? 0.1 // Very dim when Core is selected - inner cube should be focus
+                : isDimmed
+                  ? 0.15 // Non-active when something is focused
+                  : depthFactor * 0.35; // Normal depth-based fading
 
             return (
               <g key={`face-${faceIndex}`}>
-                {/* Face plane with flat tint - full face glow on front face */}
+                {/* Face plane with flat tint - only front face glows when focused */}
                 <path
                   d={pathData}
                   fill={baseColor}
@@ -1388,7 +1498,9 @@ export function Hypercube3D({
                   strokeOpacity={isActive ? 1 : 0.5}
                   filter={isActive ? filterUrl : undefined}
                   className={
-                    intensity.glowPattern === "pulsing" && isActive ? "glow-pulsing" : ""
+                    intensity.glowPattern === "pulsing" && isActive
+                      ? "glow-pulsing"
+                      : ""
                   }
                   style={{
                     transition: "all 0.4s ease",
@@ -1503,7 +1615,9 @@ export function Hypercube3D({
                 )}
                 style={{
                   backgroundColor: `${buttonBgColor}40`,
-                  borderColor: isFocused ? buttonGlowColor : `${buttonBgColor}60`,
+                  borderColor: isFocused
+                    ? buttonGlowColor
+                    : `${buttonBgColor}60`,
                   boxShadow: isFocused
                     ? `0 0 20px ${buttonGlowColor}60, inset 0 0 10px ${buttonGlowColor}20`
                     : intensity.glowIntensity > 0.3 && !isDimmed
@@ -1528,7 +1642,7 @@ export function Hypercube3D({
                 >
                   {face.shortLabel}
                 </span>
-                {intensity.elementCount > 0 && (
+                {Number.isFinite(intensity.elementCount) && intensity.elementCount > 0 && (
                   <div
                     className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-lg"
                     style={{
@@ -1562,7 +1676,7 @@ export function Hypercube3D({
             style={{
               boxShadow: isCoreSelected
                 ? "0 0 20px hsl(270 80% 60% / 0.5), inset 0 0 10px hsl(270 80% 70% / 0.2)"
-                : undefined
+                : undefined,
             }}
             title="Focus Core - The inner experience structure"
           >
@@ -1594,6 +1708,8 @@ export function Hypercube3D({
         {interactionMode === "default" &&
           (focusedFaceIndex !== null || isCoreSelected) && (
             <div className="absolute right-4 w-[320px] pointer-events-none z-15 top-[10px]">
+              {/* Face label below minimap */}
+
               <div className="relative w-full h-[280px] flex items-center justify-center">
                 {/* Arrow Up - rotates cube to bring TOP face to front */}
                 <button
@@ -1630,6 +1746,21 @@ export function Hypercube3D({
                 >
                   <ChevronRight className="w-5 h-5 text-foreground/80" />
                 </button>
+              </div>
+              <div
+                className={
+                  "text-center mb-2 pointer-events-none py-[0px] absolute top-[205px] text-indigo-500 w-[189.1125px] left-[63px]"
+                }
+              >
+                <p
+                  className={
+                    "text-xs font-semibold text-foreground/90 text-dark-primary"
+                  }
+                >
+                  {focusedFaceIndex !== null
+                    ? CUBE_FACES[focusedFaceIndex]?.label
+                    : "Hypercube"}
+                </p>
               </div>
             </div>
           )}
@@ -1771,7 +1902,9 @@ export function Hypercube3D({
                       {focusedElementPreviews.map((preview: ElementPreview) => {
                         const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
                         // Find the actual element for callbacks
-                        const element = focusedTaggedElements.find((el: CanvasElement) => el.id === preview.id);
+                        const element = focusedTaggedElements.find(
+                          (el: CanvasElement) => el.id === preview.id,
+                        );
 
                         return (
                           <div
@@ -1806,7 +1939,10 @@ export function Hypercube3D({
                                   )}
                                   {preview.elementCount !== undefined && (
                                     <span className="text-[10px] text-muted-foreground/70 px-1.5 py-0.5 bg-white/5 rounded">
-                                      {preview.elementCount} {preview.elementCount === 1 ? 'item' : 'items'}
+                                      {preview.elementCount}{" "}
+                                      {preview.elementCount === 1
+                                        ? "item"
+                                        : "items"}
                                     </span>
                                   )}
                                 </div>
@@ -1846,7 +1982,7 @@ export function Hypercube3D({
                                       View on Canvas
                                     </button>
                                   )}
-                                  {preview.type === 'link' && preview.url && (
+                                  {preview.type === "link" && preview.url && (
                                     <a
                                       href={preview.url}
                                       target="_blank"

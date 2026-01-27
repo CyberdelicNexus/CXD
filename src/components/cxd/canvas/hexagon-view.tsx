@@ -8,6 +8,7 @@ import { ChevronRight, Home, Layout, Box, Type, Link2, Image, Layers, ExternalLi
 import { HexagonDetailPanel } from "./hexagon-detail-panel";
 import { NavigationToolkit } from "./navigation-toolkit";
 import { Hypercube3D } from "./hypercube-3d";
+import { QuickViewModal } from "./quick-view-modal";
 
 // Feature toggle - set to true to use 3D cube view instead of 2D hexagon
 const USE_3D_CUBE = true;
@@ -37,7 +38,7 @@ const ELEMENT_TYPE_ICONS: Record<string, React.ComponentType<{ className?: strin
 function getElementDisplayName(element: CanvasElement): string {
   switch (element.type) {
     case 'board':
-      return (element as any).name || 'Untitled Board';
+      return (element as any).title || 'Untitled Board';
     case 'container':
       return (element as any).title || 'Untitled Container';
     case 'text':
@@ -161,8 +162,14 @@ export function HexagonView() {
     setCanvasPosition,
     canvasZoom,
     setCanvasZoom,
+    updateCanvasElement,
+    setCanvasViewMode,
+    navigateToBoardPath,
+    setActiveBoardId,
   } = useCXDStore();
   const project = getCurrentProject();
+  const canvasElements = project?.canvasElements || [];
+  const boards = project?.canvasBoards || [];
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
@@ -183,6 +190,9 @@ export function HexagonView() {
   
   // Related elements preview panel
   const [showRelatedElements, setShowRelatedElements] = useState(false);
+
+  // Quick view modal state
+  const [quickViewElement, setQuickViewElement] = useState<CanvasElement | null>(null);
 
   // Handle face click - focus mode with rotation
   const handleWedgeClick = (sectionId: CXDSectionId, wedgeIndex: number) => {
@@ -224,6 +234,100 @@ export function HexagonView() {
     setCubeRotation({ x: 0, y: 0 });
     setShowRelatedElements(false);
   };
+
+  // Navigate to element on canvas
+  const handleNavigateToElement = useCallback((elementId: string) => {
+    console.log('handleNavigateToElement called with:', elementId);
+    
+    // canvasElements can be undefined during initial load/hydration or if store state changes
+    const safeElements = Array.isArray(canvasElements) ? canvasElements : [];
+    const element = safeElements.find((el: CanvasElement) => el.id === elementId);
+    
+    console.log('Found element:', element);
+    console.log('All elements:', safeElements);
+    
+    if (!element) {
+      console.warn('Element not found:', elementId);
+      return;
+    }
+
+    // Find the board path to this element
+    const elementBoardId = element.boardId;
+    
+    // If element is in a board, navigate to that board first
+    if (elementBoardId) {
+      console.log('Element is in board:', elementBoardId);
+      
+      // Build the path to the board
+      const buildBoardPath = (targetBoardId: string): { id: string; title: string }[] => {
+        const path: { id: string; title: string }[] = [];
+        let currentBoardId: string | null = targetBoardId;
+        
+        while (currentBoardId) {
+          const board = boards.find(b => b.id === currentBoardId);
+          if (!board) break;
+          
+          path.unshift({ id: board.id, title: board.title });
+          currentBoardId = board.parentBoardId;
+        }
+        
+        return path;
+      };
+      
+      const boardPath = buildBoardPath(elementBoardId);
+      console.log('Board path:', boardPath);
+      
+      // Set the board path in the store first
+      if (boardPath.length > 0) {
+        // We need to set the board path manually before calling navigateToBoardPath
+        useCXDStore.setState({
+          boardPath,
+          activeBoardId: elementBoardId,
+          currentBoardId: elementBoardId,
+        });
+      }
+    } else {
+      // Element is on root canvas, navigate to root
+      console.log('Element is on root canvas');
+      navigateToBoardPath(-1); // -1 navigates to root
+    }
+
+    // Center canvas on element
+    const elementCenterX = element.x + (element.width || 200) / 2;
+    const elementCenterY = element.y + (element.height || 100) / 2;
+    
+    // Calculate new canvas position to center the element
+    const viewportCenterX = window.innerWidth / 2;
+    const viewportCenterY = (window.innerHeight - 64) / 2; // Account for navbar
+    
+    const targetPosition = {
+      x: viewportCenterX - elementCenterX * canvasZoom,
+      y: viewportCenterY - elementCenterY * canvasZoom,
+    };
+    
+    console.log('Switching to canvas view mode, target position:', targetPosition);
+    
+    // Switch to canvas view mode - this should trigger a re-render and show CXDCanvas
+    setCanvasViewMode('canvas');
+    
+    // Set position AFTER switching modes (on next tick) to avoid being overridden by restoreViewport
+    setTimeout(() => {
+      console.log('Setting canvas position after mode switch');
+      setCanvasPosition(targetPosition);
+      
+      // Briefly highlight element (flash effect)
+      const originalElement = { ...element };
+      updateCanvasElement(elementId, { ...element, highlighted: true } as any);
+      setTimeout(() => {
+        updateCanvasElement(elementId, originalElement);
+      }, 1000);
+    }, 100); // Increased timeout to ensure view mode switch completes
+  }, [canvasElements, boards, canvasZoom, setCanvasPosition, updateCanvasElement, setCanvasViewMode, navigateToBoardPath]);
+
+  // Show quick view modal
+  const handlePreviewElement = useCallback((element: CanvasElement) => {
+    setQuickViewElement(element);
+  }, []);
 
   const isPanelOpen = selectedSection !== null;
 
@@ -738,6 +842,8 @@ export function HexagonView() {
           onSelectSection={(sectionId) => setSelectedSection(sectionId)}
           onCoreClick={handleCoreClick}
           selectedSection={selectedSection}
+          onNavigateToElement={handleNavigateToElement}
+          onPreviewElement={handlePreviewElement}
         />
 
         {/* Scrim overlay when panel is open */}
@@ -761,6 +867,18 @@ export function HexagonView() {
             />
           )}
         </div>
+
+        {/* Quick View Modal */}
+        {quickViewElement && (
+          <QuickViewModal
+            element={quickViewElement}
+            onClose={() => setQuickViewElement(null)}
+            onNavigateToCanvas={() => {
+              handleNavigateToElement(quickViewElement.id);
+              setQuickViewElement(null);
+            }}
+          />
+        )}
       </div>
     );
   }
