@@ -1161,7 +1161,7 @@ export function Hypercube3D({
 
   // Generate rich previews for tagged elements
   const focusedElementPreviews = useMemo(() => {
-    return focusedTaggedElements.map(el => getElementPreview(el, project));
+    return focusedTaggedElements.map((el: any) => getElementPreview(el, project));
   }, [focusedTaggedElements, project]);
 
   // Generate face summary
