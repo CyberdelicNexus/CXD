@@ -77,8 +77,8 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
   // Filter edges for current board
   const visibleEdges = useMemo(() => {
     return canvasEdges.filter((edge) => {
-      const fromEl = canvasElements.find((el) => el.id === edge.from);
-      const toEl = canvasElements.find((el) => el.id === edge.to);
+      const fromEl = canvasElements.find((el) => el.id === edge.fromNodeId);
+      const toEl = canvasElements.find((el) => el.id === edge.toNodeId);
       return fromEl?.boardId === currentBoardId && toEl?.boardId === currentBoardId;
     });
   }, [canvasEdges, canvasElements, currentBoardId]);
@@ -148,10 +148,10 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
 
     const bounds = allElements.reduce(
       (acc, el) => ({
-        minX: Math.min(acc.minX, el.position.x),
-        minY: Math.min(acc.minY, el.position.y),
-        maxX: Math.max(acc.maxX, el.position.x + (el.size?.width || 0)),
-        maxY: Math.max(acc.maxY, el.position.y + (el.size?.height || 0)),
+        minX: Math.min(acc.minX, el.x),
+        minY: Math.min(acc.minY, el.y),
+        maxX: Math.max(acc.maxX, el.x + (el.width || 0)),
+        maxY: Math.max(acc.maxY, el.y + (el.height || 0)),
       }),
       { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
     );
@@ -178,13 +178,10 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
   }, [visibleElements]);
 
   // Board navigation (read-only)
-  const handleElementDoubleClick = useCallback((elementId: string) => {
-    const element = canvasElements.find((el) => el.id === elementId);
-    if (element?.type === "board") {
-      setBoardPath([...boardPath, { id: element.id, title: element.content || "Board" }]);
-      setCurrentBoardId(element.id);
-    }
-  }, [canvasElements, boardPath]);
+  const handleEnterBoard = useCallback((boardId: string, title: string) => {
+    setBoardPath([...boardPath, { id: boardId, title: title || "Board" }]);
+    setCurrentBoardId(boardId);
+  }, [boardPath]);
 
   const navigateToBoardPath = useCallback((index: number) => {
     if (index === -1) {
@@ -256,8 +253,7 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
               onDragStart={() => {}}
               onDragEnd={() => {}}
               onSelect={() => {}}
-              onDoubleClick={() => handleElementDoubleClick(element.id)}
-              onEnterBoard={handleElementDoubleClick}
+              onEnterBoard={handleEnterBoard}
               isReadOnly={true}
             />
           ))}

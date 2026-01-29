@@ -370,7 +370,7 @@ export function CXDNavbar() {
                       <div
                         key={notification.id}
                         className={`p-4 hover:bg-accent/50 cursor-pointer transition-colors ${
-                          !notification.read ? 'bg-accent/20' : ''
+                          !notification.is_read ? 'bg-accent/20' : ''
                         }`}
                         onClick={() => markAsRead(notification.id)}
                       >
@@ -383,7 +383,7 @@ export function CXDNavbar() {
                               <p className="text-sm font-medium text-foreground">
                                 {notification.title}
                               </p>
-                              {!notification.read && (
+                              {!notification.is_read && (
                                 <div className="w-2 h-2 bg-gradient-to-r from-purple-500 to-teal-500 rounded-full flex-shrink-0 mt-1" />
                               )}
                             </div>
@@ -394,7 +394,7 @@ export function CXDNavbar() {
                               <span className="text-xs text-muted-foreground">
                                 {formatTimeAgo(notification.created_at)}
                               </span>
-                              {notification.read && (
+                              {notification.is_read && (
                                 <Check className="w-3 h-3 text-muted-foreground" />
                               )}
                             </div>

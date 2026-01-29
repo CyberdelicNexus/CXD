@@ -94,8 +94,8 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     const elements: CanvasElement[] = [...(project.canvasLayout?.elements || [])];
     
     // Include elements from all boards
-    if (project.boards) {
-      project.boards.forEach(board => {
+    if (project.canvasLayout?.boards) {
+      project.canvasLayout.boards.forEach(board => {
         elements.push(...board.nodes);
       });
     }

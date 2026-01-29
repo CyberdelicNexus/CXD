@@ -28,7 +28,7 @@ export const Cxd = {
           navLayout={"after"}
           pagedNavigation={true}
           role={"application"}
-          weekStartsOn={"1"}
+          weekStartsOn={1}
           initialFocus={true}
         />
       </div>

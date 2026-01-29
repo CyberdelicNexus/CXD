@@ -275,13 +275,13 @@ export function CXDShareSummary({ project }: CXDShareSummaryProps) {
         </CollapsibleSection>
 
         {/* 8. Experience Flow */}
-        {project.experienceFlowV2 && project.experienceFlowV2.length > 0 && (
+        {project.experienceFlowStages && project.experienceFlowStages.length > 0 && (
           <CollapsibleSection
             title="Experience Flow"
             icon={<Radio className="w-5 h-5 text-primary" />}
           >
             <div className="space-y-4">
-              {project.experienceFlowV2.map((stage, index) => (
+              {project.experienceFlowStages.map((stage, index) => (
                 <div key={stage.id} className="p-4 rounded-lg bg-primary/5 space-y-3">
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="font-mono">

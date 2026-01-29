@@ -229,7 +229,7 @@ export function CXDCanvas() {
     if (project?.canvasLayout?.sectionPositions) {
       setLocalPositions((prev) => ({
         ...DEFAULT_SECTION_POSITIONS,
-        ...project.canvasLayout.sectionPositions,
+        ...project.canvasLayout?.sectionPositions,
       }));
     }
   }, [project?.id]);

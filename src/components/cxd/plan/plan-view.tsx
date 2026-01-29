@@ -59,6 +59,7 @@ export function PlanView() {
       y: 100 + Math.random() * 200,
       width: 300,
       height: 100,
+      zIndex: Date.now(), // Use timestamp for unique high z-index
       content: taskContent,
       taskMetadata: {
         isActionable: true,
