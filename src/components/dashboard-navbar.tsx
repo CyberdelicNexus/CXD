@@ -57,7 +57,7 @@ function formatTimeAgo(dateString: string): string {
 export default function DashboardNavbar() {
   const supabase = createClient()
   const router = useRouter()
-  const { notifications, unreadCount, loading, markAsRead, markAllAsRead } = useNotifications()
+  const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll } = useNotifications()
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -179,6 +179,22 @@ export default function DashboardNavbar() {
                   </div>
                 )}
               </ScrollArea>
+              {notifications.length > 0 && (
+                <div className="border-t border-border p-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      clearAll();
+                    }}
+                  >
+                    Clear All
+                  </Button>
+                </div>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
 

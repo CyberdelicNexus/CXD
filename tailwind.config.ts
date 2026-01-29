@@ -51,7 +51,7 @@ const config = {
         },
 
         accent: {
-          DEFAULT: "hsl(var(--accent))",
+          DEFAULT: "#7457ff",
           foreground: "hsl(var(--accent-foreground))",
         },
 

@@ -7,6 +7,7 @@ import { CXDCanvas } from "@/components/cxd/cxd-canvas";
 import { CXDFocusMode } from "@/components/cxd/cxd-focus-mode";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
 import { HexagonView } from "@/components/cxd/canvas/hexagon-view";
+import { PlanView } from "@/components/cxd/plan/plan-view";
 import { useProjectSync } from "@/hooks/use-project-sync";
 import { fetchUserProjects } from "@/lib/supabase-projects";
 import { createClient } from "../../../supabase/client";
@@ -90,8 +91,11 @@ export default function CXDPage() {
             {viewMode === "canvas" && canvasViewMode === "canvas" && (
               <CXDCanvas />
             )}
-            {viewMode === "canvas" && canvasViewMode === "hexagon" && (
+            {viewMode === "canvas" && canvasViewMode === "hypercube" && (
               <HexagonView />
+            )}
+            {viewMode === "canvas" && canvasViewMode === "plan" && (
+              <PlanView />
             )}
             {viewMode === "focus" && focusedSection && (
               <CXDFocusMode sectionId={focusedSection} />

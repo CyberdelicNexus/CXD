@@ -1,6 +1,6 @@
 'use client';
 
-import { createClient } from '../../supabase/client';
+import { createClient } from '@/supabase/client';
 import { CXDProject } from '@/types/cxd-schema';
 
 export interface DbCXDProject {
@@ -9,6 +9,7 @@ export interface DbCXDProject {
   name: string;
   description: string;
   project_data: CXDProject;
+  share_token: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +38,7 @@ export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
       ownerId: row.owner_id,
       name: row.name,
       description: row.description,
+      shareToken: row.share_token || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     } as CXDProject;
@@ -74,10 +76,18 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
       name: project.name,
       description: project.description,
       project_data: project, // Full CXDProject object
+      share_token: project.shareToken || null, // Persist share token
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
 
   if (error) {
+    // In Tempo preview / blocked-network scenarios, Supabase calls can throw "TypeError: Failed to fetch".
+    // Avoid spamming the console and keep the app usable by degrading gracefully.
+    const msg = String((error as any)?.message ?? '');
+    const details = String((error as any)?.details ?? '');
+    if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
+      return false;
+    }
     console.error('Error saving project:', error);
     return false;
   }
@@ -132,9 +142,59 @@ export async function fetchProjectById(projectId: string): Promise<CXDProject | 
     ownerId: row.owner_id,
     name: row.name,
     description: row.description,
+    shareToken: row.share_token || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   } as CXDProject;
+}
+
+export async function fetchProjectByShareToken(shareToken: string): Promise<CXDProject | null> {
+  if (!shareToken) {
+    return null;
+  }
+  
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('cxd_projects')
+    .select('*')
+    .eq('share_token', shareToken)
+    .single();
+
+  if (error || !data) {
+    console.error('Error fetching shared project:', error);
+    return null;
+  }
+
+  const row = data as DbCXDProject;
+  const projectData = row.project_data || {};
+  return {
+    ...projectData,
+    id: row.id,
+    ownerId: row.owner_id,
+    name: row.name,
+    description: row.description,
+    shareToken: row.share_token || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  } as CXDProject;
+}
+
+export async function updateProjectShareToken(projectId: string, shareToken: string): Promise<boolean> {
+  if (!projectId || !isValidUUID(projectId)) {
+    return false;
+  }
+  
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('cxd_projects')
+    .update({ share_token: shareToken, updated_at: new Date().toISOString() })
+    .eq('id', projectId);
+
+  if (error) {
+    console.error('Error updating share token:', error);
+    return false;
+  }
+  return true;
 }
 
 export async function ensureUserProfile(userId: string, email: string): Promise<boolean> {

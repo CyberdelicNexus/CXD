@@ -23,7 +23,7 @@ import {
   DEFAULT_STAGE_PRESENCE_TYPES,
 } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
-import { saveProject, deleteProjectFromDb } from '@/lib/supabase-projects';
+import { saveProject, deleteProjectFromDb, updateProjectShareToken } from '@/lib/supabase-projects';
 
 export type ViewMode = 'home' | 'wizard' | 'canvas' | 'focus' | 'share';
 
@@ -52,7 +52,7 @@ interface CXDState {
   // Current view state
   viewMode: ViewMode;
   focusedSection: CXDSectionId | null;
-  canvasViewMode: 'canvas' | 'hexagon';
+  canvasViewMode: 'canvas' | 'hexagon' | 'hypercube' | 'plan';
   
   // Active surface state - determines which surface (canvas vs hypercube) elements are created in
   activeSurface: 'canvas' | 'hypercube';
@@ -79,7 +79,7 @@ interface CXDState {
   // Actions - View
   setViewMode: (mode: ViewMode) => void;
   setFocusedSection: (section: CXDSectionId | null) => void;
-  setCanvasViewMode: (mode: 'canvas' | 'hexagon') => void;
+  setCanvasViewMode: (mode: 'canvas' | 'hexagon' | 'hypercube' | 'plan') => void;
   setActiveSurface: (surface: 'canvas' | 'hypercube') => void;
   setHighlightedElementId: (elementId: string | null) => void;
   highlightElementBriefly: (elementId: string, durationMs?: number) => void;
@@ -1645,6 +1645,8 @@ export const useCXDStore = create<CXDState>()(
                 : p
             ),
           }));
+          // Save share token to database
+          updateProjectShareToken(currentProject.id, token);
           return token;
         }
         return '';

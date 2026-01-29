@@ -88,7 +88,7 @@ export function CXDHome() {
               <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center mb-2">
                 <Wand2 className="w-5 h-5 text-primary" />
               </div>
-              <CardTitle className="text-lg">Initiation Wizard</CardTitle>
+              <CardTitle className="text-lg">Initiation Framing</CardTitle>
               <CardDescription>
                 Guided questions mapped 1:1 to CXD sections for structured design.
               </CardDescription>

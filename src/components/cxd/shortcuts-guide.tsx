@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Keyboard, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -66,6 +66,17 @@ const SHORTCUTS: ShortcutItem[] = [
 export function ShortcutsGuide() {
   const [isOpen, setIsOpen] = useState(false);
 
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isOpen) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [isOpen]);
+
   return (
     <>
       {/* Trigger Button */}
@@ -81,15 +92,15 @@ export function ShortcutsGuide() {
       {/* Modal Overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
+          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm h-screen"
           onClick={() => setIsOpen(false)}
         >
           {/* Modal Content */}
           <div
-            className="fixed left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl max-h-[85vh] overflow-y-auto top-[473.6px]"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl overflow-y-auto max-h-[80vh] rounded-xl shadow-[0_0_30px_rgba(168,85,247,0.4)] outline outline-2 outline-purple-500/50"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="bg-card border border-border rounded-lg shadow-2xl">
+            <div className="bg-card border border-border rounded-lg shadow-2xl h-fit">
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-border">
                 <div className="flex items-center gap-3">
@@ -116,7 +127,7 @@ export function ShortcutsGuide() {
               </div>
 
               {/* Shortcuts List */}
-              <div className="px-6 py-4 space-y-6">
+              <div className="px-6 py-4 space-y-6 h-fit">
                 {SHORTCUTS.map((category, idx) => (
                   <div key={idx}>
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">

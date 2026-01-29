@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '../../supabase/client';
+import { createClient } from '@/supabase/client';
 import { 
   fetchNotifications, 
   markAsRead, 
   markAllAsRead, 
   getUnreadCount,
+  clearAllNotifications,
   Notification 
 } from '@/lib/notifications';
 
@@ -74,12 +75,21 @@ export function useNotifications() {
     }
   };
 
+  const handleClearAll = async () => {
+    const success = await clearAllNotifications();
+    if (success) {
+      setNotifications([]);
+      setUnreadCount(0);
+    }
+  };
+
   return {
     notifications,
     unreadCount,
     loading,
     markAsRead: handleMarkAsRead,
     markAllAsRead: handleMarkAllAsRead,
+    clearAll: handleClearAll,
     refresh: loadNotifications,
   };
 }

@@ -194,7 +194,7 @@ export function CXDCanvas() {
   const handleCreateLine = useCallback(
     (lineData: Omit<LineElement, "id" | "zIndex" | "boardId" | "surface">) => {
       const maxZIndex = canvasElements.reduce(
-        (max, el) => Math.max(max, el.zIndex),
+        (max, el) => Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0),
         0,
       );
 
@@ -700,11 +700,12 @@ export function CXDCanvas() {
       options?: {
         shapeType?: ShapeType;
         linkMode?: "bookmark" | "embed" | "file";
+        cardType?: "note" | "task";
       },
     ) => {
       const size = DEFAULT_ELEMENT_SIZES[type];
       const maxZIndex = canvasElements.reduce(
-        (max, el) => Math.max(max, el.zIndex),
+        (max, el) => Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0),
         0,
       );
 
@@ -724,15 +725,22 @@ export function CXDCanvas() {
 
       switch (type) {
         case "freeform":
+          const isTaskCard = options?.cardType === "task";
+          const isNoteCard = options?.cardType === "note";
           newElement = {
             ...baseElement,
             type: "freeform",
-            content: "",
+            content: isTaskCard ? "Task Title" : "",
+            emoji: isTaskCard ? "✅" : isNoteCard ? "📌" : undefined,
             style: {
               bgColor:
                 "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
               textColor: "#ffffff",
             },
+            taskMetadata: isTaskCard ? { 
+              isActionable: true,
+              subtasks: []
+            } : undefined,
           };
           break;
         case "image":
@@ -753,7 +761,8 @@ export function CXDCanvas() {
         case "container":
           // Containers should always be at the back, so use a lower z-index
           const minZIndex = canvasElements.reduce(
-            (min, el) => Math.min(min, el.zIndex),
+            (min, el) =>
+              Math.min(min, Number.isFinite(el.zIndex) ? el.zIndex : 0),
             0,
           );
           newElement = {

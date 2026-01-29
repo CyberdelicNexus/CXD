@@ -74,6 +74,9 @@ import {
   FlipHorizontal,
   FlipVertical,
   RotateCcw,
+  CheckCircle2,
+  Plus,
+  ArrowUpRight,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 
@@ -114,6 +117,7 @@ interface CanvasElementRendererProps {
   onOpenExperiencePanel?: (sectionId: InspectorSectionId) => void;
   hoveredAnchor?: string | null;
   onAnchorHover?: (anchor: string | null) => void;
+  isReadOnly?: boolean;
 }
 
 export function CanvasElementRenderer({
@@ -137,6 +141,7 @@ export function CanvasElementRenderer({
   onOpenExperiencePanel,
   hoveredAnchor,
   onAnchorHover,
+  isReadOnly = false,
 }: CanvasElementRendererProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -153,14 +158,22 @@ export function CanvasElementRenderer({
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
       // Check if any menu is open
-      const anyMenuOpen = showColorPicker || showLinkViewMenu || showEmojiPicker ||
-                          showBoardIconPicker || showBoardColorPicker ||
-                          showExperienceViewMenu || showTagMenu;
+      const anyMenuOpen =
+        showColorPicker ||
+        showLinkViewMenu ||
+        showEmojiPicker ||
+        showBoardIconPicker ||
+        showBoardColorPicker ||
+        showExperienceViewMenu ||
+        showTagMenu;
 
       if (!anyMenuOpen) return;
 
       // Check if click is outside the element
-      if (elementRef.current && !elementRef.current.contains(e.target as Node)) {
+      if (
+        elementRef.current &&
+        !elementRef.current.contains(e.target as Node)
+      ) {
         // Close all menus
         setShowColorPicker(false);
         setShowLinkViewMenu(false);
@@ -172,10 +185,17 @@ export function CanvasElementRenderer({
       }
     };
 
-    document.addEventListener('mousedown', handleGlobalClick);
-    return () => document.removeEventListener('mousedown', handleGlobalClick);
-  }, [showColorPicker, showLinkViewMenu, showEmojiPicker,
-      showBoardIconPicker, showBoardColorPicker, showExperienceViewMenu, showTagMenu]);
+    document.addEventListener("mousedown", handleGlobalClick);
+    return () => document.removeEventListener("mousedown", handleGlobalClick);
+  }, [
+    showColorPicker,
+    showLinkViewMenu,
+    showEmojiPicker,
+    showBoardIconPicker,
+    showBoardColorPicker,
+    showExperienceViewMenu,
+    showTagMenu,
+  ]);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -194,40 +214,80 @@ export function CanvasElementRenderer({
       ) {
         // Don't auto-edit shapes, lines, or experience blocks on double-click
         setIsEditing(true);
+        
+        // For task cards, clear placeholder on double-click if it's still the default
+        if (element.type === "freeform" && element.taskMetadata && element.content === "Task Title") {
+          onUpdate({ content: "" });
+        }
       }
     },
-    [element, onEnterBoard, onOpenExperiencePanel],
+    [element, onEnterBoard, onOpenExperiencePanel, onUpdate],
   );
 
-  const handleBlur = useCallback(() => {
+  const handleBlur = useCallback((e: React.FocusEvent) => {
+    // Don't close editing if we're focusing another input in the same element
+    const relatedTarget = e.relatedTarget as HTMLElement;
+    if (relatedTarget && elementRef.current?.contains(relatedTarget)) {
+      return;
+    }
     setIsEditing(false);
   }, []);
 
-  // Auto-resize experience blocks when view mode changes
+  // Close editing when clicking outside the element
   useEffect(() => {
-    if (element.type === "experienceBlock") {
-      const expElement = element as ExperienceBlockElement;
-      const viewMode = expElement.viewMode || "compact";
+    if (!isEditing) return;
 
-      if (viewMode === "inline") {
-        // Inline mode: larger size for editor
-        if (element.width < 420 || element.height < 360) {
-          onUpdate({
-            width: 420,
-            height: 360,
-          });
-        }
-      } else {
-        // Compact mode: small size
-        if (element.width > 220 || element.height > 100) {
-          onUpdate({
-            width: 220,
-            height: 100,
-          });
-        }
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        elementRef.current &&
+        !elementRef.current.contains(e.target as Node)
+      ) {
+        setIsEditing(false);
       }
-    }
-  }, [element.type, (element as ExperienceBlockElement).viewMode]);
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isEditing]);
+
+  // Auto-resize experience blocks when view mode changes
+  // NOTE: Avoid calling onUpdate during render (can trigger "Cannot update a component while rendering").
+  useEffect(() => {
+    if (element.type !== "experienceBlock") return;
+
+    const expElement = element as ExperienceBlockElement;
+    const viewMode = expElement.viewMode || "compact";
+
+    const nextSize =
+      viewMode === "inline"
+        ? { width: 420, height: 360 }
+        : { width: 220, height: 100 };
+
+    // Only update if size differs
+    const needsUpdate =
+      element.width !== nextSize.width || element.height !== nextSize.height;
+
+    if (!needsUpdate) return;
+
+    // Defer to next tick and re-check against the latest element size to avoid render-phase updates
+    const t = window.setTimeout(() => {
+      if (
+        element.width !== nextSize.width ||
+        element.height !== nextSize.height
+      ) {
+        onUpdate(nextSize);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(t);
+  }, [
+    element,
+    element.type,
+    (element as ExperienceBlockElement).viewMode,
+    element.width,
+    element.height,
+    onUpdate,
+  ]);
 
   // Z-index management helpers
   const handleBringForward = useCallback(() => {
@@ -279,6 +339,7 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isEditing={isEditing}
             onBlur={handleBlur}
+            className=" h-full"
           />
         );
       case "image":
@@ -375,7 +436,13 @@ export function CanvasElementRenderer({
           element.type !== "board" &&
           element.type !== "text" &&
           element.type !== "line" &&
+          element.type !== "freeform" &&
           "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
+        // Selection ring for freeform cards - rounded
+        isSelected &&
+          !isHighlighted &&
+          element.type === "freeform" &&
+          "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
         // Selection ring for boards only when drop target
         isSelected &&
           !isHighlighted &&
@@ -407,8 +474,10 @@ export function CanvasElementRenderer({
         left: element.x,
         top: element.y,
         width: element.width,
-        height: element.height,
-        zIndex: element.zIndex,
+        minWidth: element.type === "freeform" ? "250px" : undefined,
+        height: element.type === "freeform" ? "auto" : element.height,
+        minHeight: element.type === "freeform" ? "300px" : undefined,
+        zIndex: Number.isFinite(element.zIndex) ? element.zIndex : 0,
         transform: element.rotation
           ? `rotate(${element.rotation}deg)`
           : undefined,
@@ -471,7 +540,7 @@ export function CanvasElementRenderer({
           </>
         )}
       {/* Unified context menu (hidden for line elements as they have floating menu) */}
-      {isSelected && !isDragging && element.type !== "line" && (
+      {isSelected && !isDragging && element.type !== "line" && !isReadOnly && (
         <div
           className={cn(
             "absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-lg",
@@ -617,6 +686,32 @@ export function CanvasElementRenderer({
                 title="Bold"
               >
                 <Bold className="w-4 h-4" />
+              </button>
+              {/* Mark as Task button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const isCurrentlyActionable = (element as FreeformElement)
+                    .taskMetadata?.isActionable;
+                  onUpdate({
+                    taskMetadata: {
+                      ...(element as FreeformElement).taskMetadata,
+                      isActionable: !isCurrentlyActionable,
+                    },
+                  });
+                }}
+                className={cn(
+                  "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                  (element as FreeformElement).taskMetadata?.isActionable &&
+                    "bg-purple-500/20 text-purple-400",
+                )}
+                title={
+                  (element as FreeformElement).taskMetadata?.isActionable
+                    ? "Unmark as Task"
+                    : "Mark as Task"
+                }
+              >
+                <CheckCircle2 className="w-4 h-4" />
               </button>
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
@@ -1106,34 +1201,54 @@ export function CanvasElementRenderer({
         element.type !== "text" &&
         element.type !== "line" && (
           <>
-            <ResizeHandle
-              position="se"
-              element={element}
-              onUpdate={onUpdate}
-              canvasZoom={canvasZoom}
-            />
-            <ResizeHandle
-              position="sw"
-              element={element}
-              onUpdate={onUpdate}
-              canvasZoom={canvasZoom}
-            />
-            <ResizeHandle
-              position="ne"
-              element={element}
-              onUpdate={onUpdate}
-              canvasZoom={canvasZoom}
-            />
-            <ResizeHandle
-              position="nw"
-              element={element}
-              onUpdate={onUpdate}
-              canvasZoom={canvasZoom}
-            />
+            {/* For freeform cards, only show horizontal (left/right) resize handles */}
+            {element.type === "freeform" ? (
+              <>
+                <ResizeHandle
+                  position="e"
+                  element={element}
+                  onUpdate={onUpdate}
+                  canvasZoom={canvasZoom}
+                />
+                <ResizeHandle
+                  position="w"
+                  element={element}
+                  onUpdate={onUpdate}
+                  canvasZoom={canvasZoom}
+                />
+              </>
+            ) : (
+              <>
+                <ResizeHandle
+                  position="se"
+                  element={element}
+                  onUpdate={onUpdate}
+                  canvasZoom={canvasZoom}
+                />
+                <ResizeHandle
+                  position="sw"
+                  element={element}
+                  onUpdate={onUpdate}
+                  canvasZoom={canvasZoom}
+                />
+                <ResizeHandle
+                  position="ne"
+                  element={element}
+                  onUpdate={onUpdate}
+                  canvasZoom={canvasZoom}
+                />
+                <ResizeHandle
+                  position="nw"
+                  element={element}
+                  onUpdate={onUpdate}
+                  canvasZoom={canvasZoom}
+                />
+              </>
+            )}
           </>
         )}
       {/* Text font-size resize handle - shown when text selected and not editing */}
-      {isSelected && !isEditing && element.type === "text" && (
+      {isSelected && !isEditing && element.type === "text" && !isReadOnly && (
         <>
           <TextFontSizeHandle
             element={element as TextElement}
@@ -1252,7 +1367,7 @@ function ResizeHandle({
   onUpdate,
   canvasZoom,
 }: {
-  position: "nw" | "ne" | "sw" | "se";
+  position: "nw" | "ne" | "sw" | "se" | "e" | "w";
   element: CanvasElement;
   onUpdate: (updates: Partial<CanvasElement>) => void;
   canvasZoom: number;
@@ -1278,19 +1393,27 @@ function ResizeHandle({
         let newX = startPosX;
         let newY = startPosY;
 
+        // Determine minimum sizes based on element type
+        const minWidth = element.type === "freeform" ? 250 : 50;
+        const minHeight = element.type === "freeform" ? 300 : 30;
+        
         if (position.includes("e")) {
-          newWidth = Math.max(50, startWidth + deltaX);
+          newWidth = Math.max(minWidth, startWidth + deltaX);
         }
         if (position.includes("w")) {
-          newWidth = Math.max(50, startWidth - deltaX);
+          newWidth = Math.max(minWidth, startWidth - deltaX);
           newX = startPosX + (startWidth - newWidth);
         }
-        if (position.includes("s")) {
-          newHeight = Math.max(30, startHeight + deltaY);
-        }
-        if (position.includes("n")) {
-          newHeight = Math.max(30, startHeight - deltaY);
-          newY = startPosY + (startHeight - newHeight);
+        
+        // For freeform cards, don't allow height resizing - height is content-based
+        if (element.type !== "freeform") {
+          if (position.includes("s")) {
+            newHeight = Math.max(minHeight, startHeight + deltaY);
+          }
+          if (position.includes("n")) {
+            newHeight = Math.max(minHeight, startHeight - deltaY);
+            newY = startPosY + (startHeight - newHeight);
+          }
         }
 
         onUpdate({ width: newWidth, height: newHeight, x: newX, y: newY });
@@ -1312,6 +1435,8 @@ function ResizeHandle({
     ne: { top: -4, right: -4, cursor: "ne-resize" },
     sw: { bottom: -4, left: -4, cursor: "sw-resize" },
     se: { bottom: -4, right: -4, cursor: "se-resize" },
+    e: { top: "50%", right: -4, transform: "translateY(-50%)", cursor: "ew-resize" },
+    w: { top: "50%", left: -4, transform: "translateY(-50%)", cursor: "ew-resize" },
   };
 
   return (
@@ -2482,17 +2607,37 @@ function FreeformCard({
   element: FreeformElement;
   onUpdate: (updates: Partial<FreeformElement>) => void;
   isEditing: boolean;
-  onBlur: () => void;
+  onBlur: (e?: React.FocusEvent) => void;
 }) {
+  // Use the passed-in onBlur handler (from the parent renderer) to avoid undefined refs.
+  const handleBlur = onBlur;
   const bgColor =
     element.style?.bgColor ||
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
   const textColor = element.style?.textColor || "#ffffff"; // Default white for dark backgrounds
   const fontWeight = element.style?.fontWeight || "normal";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
-  // Handle markdown-like triggers
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  // Get the store methods for navigation
+  const setCanvasViewMode = useCXDStore((state) => state.setCanvasViewMode);
+  const setViewMode = useCXDStore((state) => state.setViewMode);
+
+  // Handle description key events - allow normal line breaks
+  const handleDescriptionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Prevent backspace/delete from deleting the card element
+    if (e.key === "Backspace" || e.key === "Delete") {
+      e.stopPropagation();
+    }
+    
+    // Allow Enter to work normally for line breaks
+    if (e.key === "Enter") {
+      e.stopPropagation(); // Just stop propagation, don't prevent default
+    }
+  };
+
+  // Handle markdown-like triggers for title
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Prevent backspace/delete from deleting the card element
     if (e.key === "Backspace" || e.key === "Delete") {
       e.stopPropagation();
@@ -2658,9 +2803,28 @@ function FreeformCard({
     }
 
     const lines = content.split("\n");
+    let titleRendered = false;
+
     return (
       <div className="space-y-1">
         {lines.map((line, idx) => {
+          // First non-empty line becomes the title (larger text, no markdown)
+          if (
+            !titleRendered &&
+            line.trim() !== "" &&
+            !line.match(/^(\s*)(- |\[[ x]\] )/)
+          ) {
+            titleRendered = true;
+            return (
+              <div
+                key={idx}
+                className="text-2xl font-bold mb-3 pb-2 border-b border-white/10"
+              >
+                {line}
+              </div>
+            );
+          }
+
           // Check for bullet list
           const bulletMatch = line.match(/^(\s*)- (.*)$/);
           if (bulletMatch) {
@@ -2743,16 +2907,32 @@ function FreeformCard({
     );
   };
 
+  // Check if this card is actionable (task metadata or markdown tasks or hypercube tags)
+  const isActionable =
+    element.taskMetadata?.isActionable ||
+    element.content?.includes("[ ]") ||
+    element.content?.includes("[x]") ||
+    (element.hypercubeTags && element.hypercubeTags.length > 0);
+
   return (
     <div
-      className="w-full h-full rounded-lg shadow-md overflow-hidden flex flex-col relative"
+      className="w-full rounded-lg shadow-md overflow-visible flex flex-col relative"
       style={{
         background: bgColor,
         border: "1px solid rgba(255, 255, 255, 0.1)",
         boxShadow:
           "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
+        minWidth: "250px",
+        minHeight: "300px",
       }}
     >
+      {/* Task indicator - subtle corner badge */}
+      {isActionable && (
+        <div
+          className="absolute top-2 right-2 w-2 h-2 rounded-full bg-purple-400 ring-2 ring-purple-400/30 z-10"
+          title="Actionable task"
+        />
+      )}
       {/* Emoji display (top-left) */}
       {element.emoji && (
         <div className="top-2 text-lg leading-none z-10 right-[auto] left-[50%] static w-full text-center py-[7px]">
@@ -2761,36 +2941,369 @@ function FreeformCard({
       )}
       {/* Content */}
       <div
-        className={`flex-1 p-3 overflow-hidden ${element.emoji ? "" : " pt-[0]"}`}
+        className={`p-3 flex flex-col gap-2 ${element.emoji ? "" : " pt-[0]"}`}
       >
         {isEditing ? (
-          <Textarea
-            ref={textareaRef}
-            autoFocus
-            value={element.content}
-            onChange={(e) => onUpdate({ content: e.target.value })}
-            onBlur={onBlur}
-            onKeyDown={handleKeyDown}
-            className="w-full h-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white placeholder:text-white/40"
-            style={{
-              color: textColor,
-              fontWeight: fontWeight,
-            }}
-            placeholder="Enter content..."
-            data-no-drag
-          />
+          <>
+            {/* Title Input */}
+            <Textarea
+              ref={textareaRef}
+              autoFocus
+              value={element.content}
+              onChange={(e) => onUpdate({ content: e.target.value })}
+              onBlur={handleBlur}
+              onKeyDown={handleTitleKeyDown}
+              onFocus={(e) => {
+                // Select all text when focused if it's still the default placeholder
+                if (element.content === "Task Title") {
+                  e.target.select();
+                }
+              }}
+              className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white placeholder:text-white/40 text-xl font-bold"
+              style={{
+                color: textColor,
+                fontWeight: "bold",
+                fontSize: "1.25rem",
+                lineHeight: "1.75rem",
+                minHeight: "1.75rem",
+                height: "auto",
+                wordWrap: "break-word",
+                overflowWrap: "break-word",
+              }}
+              placeholder="Enter title..."
+              data-no-drag
+              rows={1}
+            />
+
+            {/* Description Input */}
+            <Textarea
+              ref={descriptionRef}
+              value={element.taskMetadata?.description || ""}
+              onChange={(e) => {
+                onUpdate({
+                  taskMetadata: {
+                    ...element.taskMetadata,
+                    description: e.target.value,
+                  },
+                });
+                // Auto-expand textarea
+                e.target.style.height = 'auto';
+                e.target.style.height = e.target.scrollHeight + 'px';
+              }}
+              onBlur={handleBlur}
+              onKeyDown={handleDescriptionKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => {
+                e.stopPropagation();
+                // Ensure proper height on focus
+                e.target.style.height = 'auto';
+                e.target.style.height = e.target.scrollHeight + 'px';
+              }}
+              placeholder="Add description..."
+              className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white/70 placeholder:text-white/30 text-sm"
+              style={{
+                color: textColor,
+                opacity: 0.7,
+                minHeight: "3rem",
+                height: "auto",
+                wordWrap: "break-word",
+                overflowWrap: "break-word",
+              }}
+              data-no-drag
+              rows={2}
+            />
+          </>
         ) : (
+          <>
+            {/* Title Display */}
+            <div
+              className="w-full text-xl font-bold break-words whitespace-pre-wrap flex-shrink-0"
+              style={{
+                color: textColor,
+                wordWrap: "break-word",
+                overflowWrap: "break-word",
+              }}
+            >
+              {element.content || "Untitled"}
+            </div>
+
+            {/* Description Display */}
+            {element.taskMetadata?.description && (
+              <div
+                className="w-full text-sm opacity-70 break-words whitespace-pre-wrap"
+                style={{
+                  color: textColor,
+                  wordWrap: "break-word",
+                  overflowWrap: "break-word",
+                }}
+              >
+                {element.taskMetadata.description}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Subtasks section - only for actionable cards with taskMetadata */}
+        {isActionable && element.taskMetadata && (
           <div
-            className="w-full h-full text-sm overflow-auto"
-            style={{
-              color: textColor,
-              fontWeight: fontWeight,
-            }}
+            className="mt-2 pt-2 border-t border-white/10 space-y-2"
+            data-no-drag
           >
-            {renderContent(element.content)}
+            {/* Existing subtasks */}
+            {element.taskMetadata.subtasks &&
+              element.taskMetadata.subtasks.length > 0 && (
+                <div className="space-y-1.5">
+                  {element.taskMetadata.subtasks
+                    .sort((a, b) => a.order - b.order)
+                    .map((subtask, index) => (
+                      <div
+                        key={subtask.id}
+                        draggable
+                        onDragStart={(e) => {
+                          e.stopPropagation();
+                          e.dataTransfer.setData("subtask-id", subtask.id);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const draggedId =
+                            e.dataTransfer.getData("subtask-id");
+                          if (draggedId && draggedId !== subtask.id) {
+                            const updatedSubtasks = [
+                              ...(element.taskMetadata?.subtasks || []),
+                            ];
+                            const draggedIndex = updatedSubtasks.findIndex(
+                              (st) => st.id === draggedId,
+                            );
+                            const targetIndex = updatedSubtasks.findIndex(
+                              (st) => st.id === subtask.id,
+                            );
+
+                            if (draggedIndex !== -1 && targetIndex !== -1) {
+                              const [draggedItem] = updatedSubtasks.splice(
+                                draggedIndex,
+                                1,
+                              );
+                              updatedSubtasks.splice(
+                                targetIndex,
+                                0,
+                                draggedItem,
+                              );
+
+                              // Update order numbers
+                              updatedSubtasks.forEach((st, idx) => {
+                                st.order = idx;
+                              });
+
+                              onUpdate({
+                                taskMetadata: {
+                                  ...element.taskMetadata,
+                                  subtasks: updatedSubtasks,
+                                },
+                              });
+                            }
+                          }
+                        }}
+                        className="flex items-center gap-2 group cursor-move hover:bg-white/5 p-1.5 rounded"
+                      >
+                        <GripVertical className="w-3 h-3 text-white/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const updatedSubtasks =
+                              element.taskMetadata?.subtasks?.map((st) =>
+                                st.id === subtask.id
+                                  ? { ...st, isCompleted: !st.isCompleted }
+                                  : st,
+                              ) || [];
+                            onUpdate({
+                              taskMetadata: {
+                                ...element.taskMetadata,
+                                subtasks: updatedSubtasks,
+                              },
+                            });
+                          }}
+                          className="w-4 h-4 rounded border border-white/30 flex items-center justify-center cursor-pointer hover:border-purple-400 transition-colors"
+                        >
+                          {subtask.isCompleted && (
+                            <svg
+                              className="w-3 h-3 text-purple-400"
+                              fill="none"
+                              strokeWidth="2"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={subtask.text}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            const updatedSubtasks =
+                              element.taskMetadata?.subtasks?.map((st) =>
+                                st.id === subtask.id
+                                  ? { ...st, text: e.target.value }
+                                  : st,
+                              ) || [];
+                            onUpdate({
+                              taskMetadata: {
+                                ...element.taskMetadata,
+                                subtasks: updatedSubtasks,
+                              },
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "text-xs flex-1 bg-transparent border-0 outline-none focus:outline-none text-white p-0",
+                            subtask.isCompleted && "line-through opacity-60",
+                          )}
+                        />
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const updatedSubtasks =
+                              element.taskMetadata?.subtasks?.filter(
+                                (st) => st.id !== subtask.id,
+                              ) || [];
+                            onUpdate({
+                              taskMetadata: {
+                                ...element.taskMetadata,
+                                subtasks: updatedSubtasks,
+                              },
+                            });
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-300"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              )}
+
+            {/* Add new subtask */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const newSubtask: import("@/types/canvas-elements").Subtask = {
+                  id: `subtask-${Date.now()}`,
+                  text: "New subtask",
+                  isCompleted: false,
+                  order: element.taskMetadata?.subtasks?.length || 0,
+                };
+                onUpdate({
+                  taskMetadata: {
+                    ...element.taskMetadata,
+                    subtasks: [
+                      ...(element.taskMetadata?.subtasks || []),
+                      newSubtask,
+                    ],
+                  },
+                });
+              }}
+              className="flex items-center gap-2 text-xs text-white/50 hover:text-white/80 transition-colors w-full"
+            >
+              <Plus className="w-3 h-3" />
+              Add subtask
+            </button>
           </div>
         )}
       </div>
+      {/* Task Properties Display - only show for actionable cards */}
+      {isActionable && element.taskMetadata && (
+        <div className="px-3 pb-3 pt-1 border-t border-white/10 space-y-1.5">
+          {element.taskMetadata.status && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-white/50">Status:</span>
+              <span className="px-2 py-0.5 rounded bg-white/10 capitalize">
+                {element.taskMetadata.status.replace("_", " ")}
+              </span>
+            </div>
+          )}
+          {element.taskMetadata.priority && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-white/50">Priority:</span>
+              <span
+                className={cn("px-2 py-0.5 rounded capitalize", {
+                  "bg-red-500/20 text-red-400":
+                    element.taskMetadata.priority === "urgent",
+                  "bg-orange-500/20 text-orange-400":
+                    element.taskMetadata.priority === "high",
+                  "bg-yellow-500/20 text-yellow-400":
+                    element.taskMetadata.priority === "medium",
+                  "bg-blue-500/20 text-blue-400":
+                    element.taskMetadata.priority === "low",
+                })}
+              >
+                {element.taskMetadata.priority}
+              </span>
+            </div>
+          )}
+          {element.taskMetadata.dueDate && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-white/50">Due:</span>
+              <span className="text-white/70">
+                {new Date(element.taskMetadata.dueDate).toLocaleDateString()}
+              </span>
+            </div>
+          )}
+          {element.taskMetadata.assignee && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-white/50">Assigned:</span>
+              <span className="text-white/70">
+                {element.taskMetadata.assignee}
+              </span>
+            </div>
+          )}
+          {element.taskMetadata.customProperties &&
+            Object.keys(element.taskMetadata.customProperties).length > 0 && (
+              <div className="mt-2 pt-2 border-t border-white/5">
+                <div className="text-xs text-white/50 mb-1">
+                  Custom Properties:
+                </div>
+                {Object.entries(element.taskMetadata.customProperties).map(
+                  ([key, value]) => (
+                    <div key={key} className="flex items-center gap-2 text-xs">
+                      <span className="text-white/50">{key}:</span>
+                      <span className="text-white/70">{String(value)}</span>
+                    </div>
+                  ),
+                )}
+              </div>
+            )}
+        </div>
+      )}
+      {/* View in Plan button - only for actionable cards */}
+      {isActionable && (
+        <div className="absolute bottom-3 right-3">
+          <button
+            title="View in Plan"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Navigate to plan view using store methods
+              setViewMode("canvas");
+              setCanvasViewMode("plan");
+            }}
+            className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-500 hover:to-purple-700 flex items-center justify-center shadow-lg transition-all hover:scale-110"
+            style={{
+              boxShadow: "0 4px 12px rgba(168, 85, 247, 0.3)",
+            }}
+          >
+            <LayoutGrid className="w-4 h-4 text-white" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2810,11 +3323,21 @@ function ImageCard({
   const [isEditMode, setIsEditMode] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
   const [cropBox, setCropBox] = useState(
-    element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 }
+    element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 },
   );
   const [dragState, setDragState] = useState<{
     active: boolean;
-    handle: 'tl' | 'tr' | 'bl' | 'br' | 'top' | 'right' | 'bottom' | 'left' | 'move' | null;
+    handle:
+      | "tl"
+      | "tr"
+      | "bl"
+      | "br"
+      | "top"
+      | "right"
+      | "bottom"
+      | "left"
+      | "move"
+      | null;
     startX: number;
     startY: number;
     startCrop: typeof cropBox;
@@ -2930,13 +3453,22 @@ function ImageCard({
   // Handle crop box dragging
   const handleCropMouseDown = (
     e: React.MouseEvent,
-    handle: 'tl' | 'tr' | 'bl' | 'br' | 'top' | 'right' | 'bottom' | 'left' | 'move'
+    handle:
+      | "tl"
+      | "tr"
+      | "bl"
+      | "br"
+      | "top"
+      | "right"
+      | "bottom"
+      | "left"
+      | "move",
   ) => {
     e.preventDefault();
     e.stopPropagation();
     const rect = imageContainerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    
+
     setDragState({
       active: true,
       handle,
@@ -2959,66 +3491,114 @@ function ImageCard({
       let newCrop = { ...dragState.startCrop };
 
       switch (dragState.handle) {
-        case 'move':
-          newCrop.x = Math.max(0, Math.min(100 - newCrop.width, dragState.startCrop.x + deltaXPct));
-          newCrop.y = Math.max(0, Math.min(100 - newCrop.height, dragState.startCrop.y + deltaYPct));
+        case "move":
+          newCrop.x = Math.max(
+            0,
+            Math.min(100 - newCrop.width, dragState.startCrop.x + deltaXPct),
+          );
+          newCrop.y = Math.max(
+            0,
+            Math.min(100 - newCrop.height, dragState.startCrop.y + deltaYPct),
+          );
           break;
-        case 'tl':
+        case "tl":
           const maxDxTl = dragState.startCrop.width - 5;
           const maxDyTl = dragState.startCrop.height - 5;
-          const dxTl = Math.max(-dragState.startCrop.x, Math.min(maxDxTl, deltaXPct));
-          const dyTl = Math.max(-dragState.startCrop.y, Math.min(maxDyTl, deltaYPct));
+          const dxTl = Math.max(
+            -dragState.startCrop.x,
+            Math.min(maxDxTl, deltaXPct),
+          );
+          const dyTl = Math.max(
+            -dragState.startCrop.y,
+            Math.min(maxDyTl, deltaYPct),
+          );
           newCrop.x = dragState.startCrop.x + dxTl;
           newCrop.y = dragState.startCrop.y + dyTl;
           newCrop.width = dragState.startCrop.width - dxTl;
           newCrop.height = dragState.startCrop.height - dyTl;
           break;
-        case 'tr':
+        case "tr":
           const maxDyTr = dragState.startCrop.height - 5;
-          const maxDxTr = 100 - dragState.startCrop.x - dragState.startCrop.width;
-          const dxTr = Math.min(maxDxTr, Math.max(-dragState.startCrop.width + 5, deltaXPct));
-          const dyTr = Math.max(-dragState.startCrop.y, Math.min(maxDyTr, deltaYPct));
+          const maxDxTr =
+            100 - dragState.startCrop.x - dragState.startCrop.width;
+          const dxTr = Math.min(
+            maxDxTr,
+            Math.max(-dragState.startCrop.width + 5, deltaXPct),
+          );
+          const dyTr = Math.max(
+            -dragState.startCrop.y,
+            Math.min(maxDyTr, deltaYPct),
+          );
           newCrop.y = dragState.startCrop.y + dyTr;
           newCrop.width = dragState.startCrop.width + dxTr;
           newCrop.height = dragState.startCrop.height - dyTr;
           break;
-        case 'bl':
+        case "bl":
           const maxDxBl = dragState.startCrop.width - 5;
-          const maxDyBl = 100 - dragState.startCrop.y - dragState.startCrop.height;
-          const dxBl = Math.max(-dragState.startCrop.x, Math.min(maxDxBl, deltaXPct));
-          const dyBl = Math.min(maxDyBl, Math.max(-dragState.startCrop.height + 5, deltaYPct));
+          const maxDyBl =
+            100 - dragState.startCrop.y - dragState.startCrop.height;
+          const dxBl = Math.max(
+            -dragState.startCrop.x,
+            Math.min(maxDxBl, deltaXPct),
+          );
+          const dyBl = Math.min(
+            maxDyBl,
+            Math.max(-dragState.startCrop.height + 5, deltaYPct),
+          );
           newCrop.x = dragState.startCrop.x + dxBl;
           newCrop.width = dragState.startCrop.width - dxBl;
           newCrop.height = dragState.startCrop.height + dyBl;
           break;
-        case 'br':
-          const maxDxBr = 100 - dragState.startCrop.x - dragState.startCrop.width;
-          const maxDyBr = 100 - dragState.startCrop.y - dragState.startCrop.height;
-          const dxBr = Math.min(maxDxBr, Math.max(-dragState.startCrop.width + 5, deltaXPct));
-          const dyBr = Math.min(maxDyBr, Math.max(-dragState.startCrop.height + 5, deltaYPct));
+        case "br":
+          const maxDxBr =
+            100 - dragState.startCrop.x - dragState.startCrop.width;
+          const maxDyBr =
+            100 - dragState.startCrop.y - dragState.startCrop.height;
+          const dxBr = Math.min(
+            maxDxBr,
+            Math.max(-dragState.startCrop.width + 5, deltaXPct),
+          );
+          const dyBr = Math.min(
+            maxDyBr,
+            Math.max(-dragState.startCrop.height + 5, deltaYPct),
+          );
           newCrop.width = dragState.startCrop.width + dxBr;
           newCrop.height = dragState.startCrop.height + dyBr;
           break;
-        case 'top':
+        case "top":
           const maxDyTop = dragState.startCrop.height - 5;
-          const dyTop = Math.max(-dragState.startCrop.y, Math.min(maxDyTop, deltaYPct));
+          const dyTop = Math.max(
+            -dragState.startCrop.y,
+            Math.min(maxDyTop, deltaYPct),
+          );
           newCrop.y = dragState.startCrop.y + dyTop;
           newCrop.height = dragState.startCrop.height - dyTop;
           break;
-        case 'bottom':
-          const maxDyBottom = 100 - dragState.startCrop.y - dragState.startCrop.height;
-          const dyBottom = Math.min(maxDyBottom, Math.max(-dragState.startCrop.height + 5, deltaYPct));
+        case "bottom":
+          const maxDyBottom =
+            100 - dragState.startCrop.y - dragState.startCrop.height;
+          const dyBottom = Math.min(
+            maxDyBottom,
+            Math.max(-dragState.startCrop.height + 5, deltaYPct),
+          );
           newCrop.height = dragState.startCrop.height + dyBottom;
           break;
-        case 'left':
+        case "left":
           const maxDxLeft = dragState.startCrop.width - 5;
-          const dxLeft = Math.max(-dragState.startCrop.x, Math.min(maxDxLeft, deltaXPct));
+          const dxLeft = Math.max(
+            -dragState.startCrop.x,
+            Math.min(maxDxLeft, deltaXPct),
+          );
           newCrop.x = dragState.startCrop.x + dxLeft;
           newCrop.width = dragState.startCrop.width - dxLeft;
           break;
-        case 'right':
-          const maxDxRight = 100 - dragState.startCrop.x - dragState.startCrop.width;
-          const dxRight = Math.min(maxDxRight, Math.max(-dragState.startCrop.width + 5, deltaXPct));
+        case "right":
+          const maxDxRight =
+            100 - dragState.startCrop.x - dragState.startCrop.width;
+          const dxRight = Math.min(
+            maxDxRight,
+            Math.max(-dragState.startCrop.width + 5, deltaXPct),
+          );
           newCrop.width = dragState.startCrop.width + dxRight;
           break;
       }
@@ -3036,12 +3616,12 @@ function ImageCard({
       setDragState(null);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [dragState, cropBox]);
 
@@ -3057,7 +3637,9 @@ function ImageCard({
   };
 
   const cancelCrop = () => {
-    setCropBox(element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 });
+    setCropBox(
+      element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 },
+    );
     setIsCropping(false);
   };
 
@@ -3127,20 +3709,34 @@ function ImageCard({
   }
 
   // Get current edits
-  const crop = element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 };
+  const crop = element.imageEdits?.crop || {
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+  };
   const flipH = element.imageEdits?.flipH || false;
   const flipV = element.imageEdits?.flipV || false;
-  const hasEdits = crop.x !== 0 || crop.y !== 0 || crop.width !== 100 || crop.height !== 100 || flipH || flipV;
+  const hasEdits =
+    crop.x !== 0 ||
+    crop.y !== 0 ||
+    crop.width !== 100 ||
+    crop.height !== 100 ||
+    flipH ||
+    flipV;
 
   // Image is loaded - show clean media tile
   return (
-    <div className="w-full h-full relative" data-crop-mode={isCropping ? "true" : undefined}>
+    <div
+      className="w-full h-full relative"
+      data-crop-mode={isCropping ? "true" : undefined}
+    >
       <div
         ref={imageContainerRef}
         className={cn(
           "w-full h-full overflow-hidden rounded-lg transition-all relative",
           isSelected ? "ring-0" : "", // Selection ring is handled by parent
-          isCropping && "ring-2 ring-cyan-400"
+          isCropping && "ring-2 ring-cyan-400",
         )}
       >
         <div
@@ -3167,11 +3763,14 @@ function ImageCard({
         {isCropping && (
           <div
             className="absolute inset-0 pointer-events-none"
-            style={{ pointerEvents: 'none' }}
+            style={{ pointerEvents: "none" }}
           >
             {/* Darkened areas outside crop */}
-            <div className="absolute inset-0 bg-black/60" style={{ pointerEvents: 'none' }} />
-            
+            <div
+              className="absolute inset-0 bg-black/60"
+              style={{ pointerEvents: "none" }}
+            />
+
             {/* Crop box */}
             <div
               className="absolute border-2 border-cyan-400 bg-transparent"
@@ -3180,66 +3779,71 @@ function ImageCard({
                 top: `${cropBox.y}%`,
                 width: `${cropBox.width}%`,
                 height: `${cropBox.height}%`,
-                pointerEvents: 'auto',
+                pointerEvents: "auto",
               }}
               onMouseDown={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 const edge = 8;
-                
+
                 // Check if near edges/corners
                 if (x < edge && y < edge) return;
                 if (x > rect.width - edge && y < edge) return;
                 if (x < edge && y > rect.height - edge) return;
                 if (x > rect.width - edge && y > rect.height - edge) return;
-                if (y < edge || y > rect.height - edge || x < edge || x > rect.width - edge) return;
-                
-                handleCropMouseDown(e, 'move');
+                if (
+                  y < edge ||
+                  y > rect.height - edge ||
+                  x < edge ||
+                  x > rect.width - edge
+                )
+                  return;
+
+                handleCropMouseDown(e, "move");
               }}
             >
               {/* Corner handles */}
               <div
                 className="absolute w-3 h-3 bg-cyan-400 rounded-full -left-1.5 -top-1.5 cursor-nwse-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'tl')}
+                onMouseDown={(e) => handleCropMouseDown(e, "tl")}
               />
               <div
                 className="absolute w-3 h-3 bg-cyan-400 rounded-full -right-1.5 -top-1.5 cursor-nesw-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'tr')}
+                onMouseDown={(e) => handleCropMouseDown(e, "tr")}
               />
               <div
                 className="absolute w-3 h-3 bg-cyan-400 rounded-full -left-1.5 -bottom-1.5 cursor-nesw-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'bl')}
+                onMouseDown={(e) => handleCropMouseDown(e, "bl")}
               />
               <div
                 className="absolute w-3 h-3 bg-cyan-400 rounded-full -right-1.5 -bottom-1.5 cursor-nwse-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'br')}
+                onMouseDown={(e) => handleCropMouseDown(e, "br")}
               />
-              
+
               {/* Edge handles */}
               <div
                 className="absolute w-full h-2 -top-1 left-0 cursor-ns-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'top')}
+                onMouseDown={(e) => handleCropMouseDown(e, "top")}
               />
               <div
                 className="absolute w-full h-2 -bottom-1 left-0 cursor-ns-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'bottom')}
+                onMouseDown={(e) => handleCropMouseDown(e, "bottom")}
               />
               <div
                 className="absolute w-2 h-full -left-1 top-0 cursor-ew-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'left')}
+                onMouseDown={(e) => handleCropMouseDown(e, "left")}
               />
               <div
                 className="absolute w-2 h-full -right-1 top-0 cursor-ew-resize"
-                onMouseDown={(e) => handleCropMouseDown(e, 'right')}
+                onMouseDown={(e) => handleCropMouseDown(e, "right")}
               />
             </div>
           </div>
         )}
       </div>
-
       {/* Edit toolbar - shown when selected */}
-      {isSelected && !isCropping && (
+      {isSelected && !isCropping && !isReadOnly && (
         <div
           className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10"
           onClick={(e) => e.stopPropagation()}
@@ -3249,7 +3853,7 @@ function ImageCard({
             onClick={() => setIsEditMode(!isEditMode)}
             className={cn(
               "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-              isEditMode && "bg-primary/20 text-primary"
+              isEditMode && "bg-primary/20 text-primary",
             )}
             title="Edit Image"
           >
@@ -3266,9 +3870,8 @@ function ImageCard({
           )}
         </div>
       )}
-
       {/* Edit panel */}
-      {isEditMode && isSelected && !isCropping && (
+      {isEditMode && isSelected && !isCropping && !isReadOnly && (
         <div
           className="absolute -bottom-24 left-1/2 -translate-x-1/2 flex flex-col gap-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10 min-w-[200px]"
           onClick={(e) => e.stopPropagation()}
@@ -3294,7 +3897,9 @@ function ImageCard({
               onClick={toggleFlipH}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
-                flipH ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20"
+                flipH
+                  ? "bg-primary/20 text-primary"
+                  : "bg-primary/10 hover:bg-primary/20",
               )}
             >
               <FlipHorizontal className="w-3.5 h-3.5" />
@@ -3304,7 +3909,9 @@ function ImageCard({
               onClick={toggleFlipV}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
-                flipV ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20"
+                flipV
+                  ? "bg-primary/20 text-primary"
+                  : "bg-primary/10 hover:bg-primary/20",
               )}
             >
               <FlipVertical className="w-3.5 h-3.5" />
@@ -3313,7 +3920,6 @@ function ImageCard({
           </div>
         </div>
       )}
-
       {/* Crop controls */}
       {isCropping && (
         <div
@@ -3349,7 +3955,7 @@ function ShapeCard({
   element: ShapeElement;
   onUpdate: (updates: Partial<ShapeElement>) => void;
   isEditing: boolean;
-  onBlur: () => void;
+  onBlur: (e?: React.FocusEvent) => void;
 }) {
   const bgColor = element.style?.bgColor || "hsl(var(--primary) / 0.3)";
   const borderColor = element.style?.borderColor || "hsl(var(--primary))";
@@ -3686,8 +4292,22 @@ function ShapeCard({
     return "#a855f7"; // fallback
   };
 
+  // Check if this shape is actionable
+  const isActionable =
+    element.taskMetadata?.isActionable ||
+    element.content?.includes("[ ]") ||
+    element.content?.includes("[x]") ||
+    (element.hypercubeTags && element.hypercubeTags.length > 0);
+
   return (
     <div className="relative w-full h-full flex items-center justify-center overflow-visible">
+      {/* Task indicator */}
+      {isActionable && (
+        <div
+          className="absolute top-2 right-2 w-2 h-2 rounded-full bg-purple-400 ring-2 ring-purple-400/30 z-20"
+          title="Actionable task"
+        />
+      )}
       {renderSVGShape()}
       <div className="relative z-10 text-center px-2">
         {isEditing ? (
@@ -3732,7 +4352,7 @@ function ContainerCard({
   element: ContainerElement;
   isEditing: boolean;
   onUpdate: (updates: Partial<ContainerElement>) => void;
-  onBlur: () => void;
+  onBlur: (e?: React.FocusEvent) => void;
   isSelected: boolean;
   isDropTarget?: boolean;
 }) {
@@ -3810,7 +4430,7 @@ function TextCard({
   element: TextElement;
   onUpdate: (updates: Partial<TextElement>) => void;
   isEditing: boolean;
-  onBlur: () => void;
+  onBlur: (e?: React.FocusEvent) => void;
 }) {
   const measureRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -3837,19 +4457,22 @@ function TextCard({
     if (!isEditing) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         onBlur();
       }
     };
 
     // Small delay to avoid immediate trigger
     const timer = setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener("mousedown", handleClickOutside);
     }, 100);
 
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isEditing, onBlur]);
 
@@ -3954,15 +4577,29 @@ function TextCard({
   // Get the effective width for the text
   const effectiveWidth = wrapWidth || element.width;
 
+  // Check if this text is actionable
+  const isActionable =
+    element.taskMetadata?.isActionable ||
+    element.content?.includes("[ ]") ||
+    element.content?.includes("[x]") ||
+    (element.hypercubeTags && element.hypercubeTags.length > 0);
+
   return (
     <div
       ref={containerRef}
-      className="w-full h-full flex items-start justify-center p-2"
+      className="w-full h-full flex items-start justify-center p-2 relative"
       style={{
         // Allow overflow when editing so text isn't clipped
         overflow: "visible", // Changed from conditional to always visible to prevent clipping at zoom
       }}
     >
+      {/* Task indicator */}
+      {isActionable && (
+        <div
+          className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-purple-400 ring-2 ring-purple-400/30 z-20"
+          title="Actionable task"
+        />
+      )}
       {/* Hidden measurement element - respects wrapWidth */}
       {!isEditing && element.content && (
         <div
@@ -4452,7 +5089,7 @@ function LinkCard({
         <p className="text-xs text-muted-foreground/60 text-center">
           Double-click to open
         </p>
-        {isSelected && (
+        {isSelected && !isReadOnly && (
           <div className="mt-2 flex gap-2">
             <a
               href={element.url}
@@ -4576,7 +5213,7 @@ function LinkCard({
           </div>
         </div>
         {/* Edit button - only shown when selected */}
-        {isSelected && (
+        {isSelected && !isReadOnly && (
           <div className="px-3 pb-2 pt-1 border-t border-border/50 bg-card/50">
             <button
               onClick={(e) => {
@@ -4650,7 +5287,7 @@ function LinkCard({
         )}
       </div>
       {/* Edit button - only shown when selected */}
-      {isSelected && (
+      {isSelected && !isReadOnly && (
         <div className="px-3 py-2 border-t border-border bg-card/80">
           <button
             onClick={(e) => {
@@ -4681,7 +5318,7 @@ function BoardCard({
   element: BoardElement;
   onUpdate: (updates: Partial<BoardElement>) => void;
   isEditing: boolean;
-  onBlur: () => void;
+  onBlur: (e?: React.FocusEvent) => void;
   isDropTarget?: boolean;
   showIconPicker: boolean;
   setShowIconPicker: (show: boolean) => void;
@@ -4696,8 +5333,11 @@ function BoardCard({
   // Count elements in this board
   const project = (window as any).__currentProject;
   const allElements = project?.canvasElements || [];
-  const boardElements = allElements.filter((el: any) => 
-    el.boardId === element.childBoardId && el.type !== 'line' && el.type !== 'connector'
+  const boardElements = allElements.filter(
+    (el: any) =>
+      el.boardId === element.childBoardId &&
+      el.type !== "line" &&
+      el.type !== "connector",
   );
   const elementCount = boardElements.length;
 

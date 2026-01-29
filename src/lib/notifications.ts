@@ -1,4 +1,4 @@
-import { createClient } from '../../supabase/client';
+import { createClient } from '@/supabase/client';
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'announcement' | 'update' | 'project';
 
@@ -21,15 +21,51 @@ export const NOTIFICATION_EVENTS = {
   PROJECT_CREATED: { type: 'project' as NotificationType, title: 'Project Created' },
   PROJECT_SAVED: { type: 'success' as NotificationType, title: 'Project Saved' },
   PROJECT_SHARED: { type: 'info' as NotificationType, title: 'Project Shared' },
+  PROJECT_UPDATED: { type: 'project' as NotificationType, title: 'Project Updated' },
+  PROJECT_DELETED: { type: 'warning' as NotificationType, title: 'Project Deleted' },
+  
+  // Wizard & Design Flow
+  WIZARD_COMPLETED: { type: 'success' as NotificationType, title: 'Wizard Completed' },
+  CANVAS_INITIALIZED: { type: 'info' as NotificationType, title: 'Canvas Ready' },
+  FOCUS_MODE_ENTERED: { type: 'info' as NotificationType, title: 'Focus Mode Activated' },
+  
+  // Experience Flow
+  EXPERIENCE_FLOW_UPDATED: { type: 'project' as NotificationType, title: 'Experience Flow Updated' },
+  STATE_TRAIT_ALIGNED: { type: 'success' as NotificationType, title: 'State-Trait Alignment Verified' },
+  STATE_TRAIT_WARNING: { type: 'warning' as NotificationType, title: 'Alignment Warning' },
+  
+  // Reality Planes & Sensory
+  REALITY_PLANES_CONFIGURED: { type: 'project' as NotificationType, title: 'Reality Planes Configured' },
+  SENSORY_DOMAINS_UPDATED: { type: 'project' as NotificationType, title: 'Sensory Domains Updated' },
+  PRESENCE_TYPES_ADJUSTED: { type: 'project' as NotificationType, title: 'Presence Types Adjusted' },
+  
+  // Share & Collaboration
+  SHARE_LINK_GENERATED: { type: 'success' as NotificationType, title: 'Share Link Created' },
+  PROJECT_VIEWED: { type: 'info' as NotificationType, title: 'Project Viewed' },
+  COLLABORATION_INVITED: { type: 'info' as NotificationType, title: 'Collaboration Invitation' },
+  
+  // Export & Data
+  EXPORT_COMPLETE: { type: 'success' as NotificationType, title: 'Export Complete' },
+  EXPORT_FAILED: { type: 'warning' as NotificationType, title: 'Export Failed' },
+  DATA_SYNC_SUCCESS: { type: 'success' as NotificationType, title: 'Data Synced' },
+  DATA_SYNC_FAILED: { type: 'warning' as NotificationType, title: 'Sync Failed' },
+  
+  // Validation & Errors
+  VALIDATION_ERROR: { type: 'warning' as NotificationType, title: 'Validation Error' },
+  AUTOSAVE_SUCCESS: { type: 'success' as NotificationType, title: 'Auto-saved' },
+  AUTOSAVE_FAILED: { type: 'warning' as NotificationType, title: 'Auto-save Failed' },
+  DRAFT_RECOVERED: { type: 'info' as NotificationType, title: 'Draft Recovered' },
   
   // System announcements (admin-triggered)
   SYSTEM_ANNOUNCEMENT: { type: 'announcement' as NotificationType, title: 'Announcement' },
   FEATURE_UPDATE: { type: 'update' as NotificationType, title: 'New Feature' },
   MAINTENANCE_NOTICE: { type: 'warning' as NotificationType, title: 'Maintenance Notice' },
+  SYSTEM_UPGRADE: { type: 'update' as NotificationType, title: 'System Upgrade' },
   
   // User activity
   WELCOME_MESSAGE: { type: 'info' as NotificationType, title: 'Welcome to CXD Canvas!' },
-  EXPORT_COMPLETE: { type: 'success' as NotificationType, title: 'Export Complete' },
+  FIRST_PROJECT_MILESTONE: { type: 'success' as NotificationType, title: 'First Project Created!' },
+  TUTORIAL_COMPLETED: { type: 'success' as NotificationType, title: 'Tutorial Completed' },
 } as const;
 
 /**
@@ -39,8 +75,8 @@ export const NOTIFICATION_EVENTS = {
 export async function fetchNotifications(limit = 20): Promise<Notification[]> {
   const supabase = createClient();
   
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) return [];
 
   const { data, error } = await supabase
     .from('notifications')
@@ -79,8 +115,8 @@ export async function markAsRead(notificationId: string): Promise<boolean> {
 export async function markAllAsRead(): Promise<boolean> {
   const supabase = createClient();
   
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) return false;
 
   const { error } = await supabase
     .from('notifications')
@@ -119,6 +155,11 @@ export async function createNotification(
     });
 
   if (error) {
+    const msg = String((error as any)?.message ?? '');
+    const details = String((error as any)?.details ?? '');
+    if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
+      return false;
+    }
     console.error('Error creating notification:', error);
     return false;
   }
@@ -153,6 +194,11 @@ export async function createGlobalAnnouncement(
     });
 
   if (error) {
+    const msg = String((error as any)?.message ?? '');
+    const details = String((error as any)?.details ?? '');
+    if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
+      return false;
+    }
     console.error('Error creating global announcement:', error);
     return false;
   }
@@ -165,8 +211,9 @@ export async function createGlobalAnnouncement(
 export async function getUnreadCount(): Promise<number> {
   const supabase = createClient();
   
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return 0;
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  // In preview / blocked-network scenarios, auth.getUser can effectively be unavailable.
+  if (userError || !user) return 0;
 
   const { count, error } = await supabase
     .from('notifications')
@@ -175,9 +222,39 @@ export async function getUnreadCount(): Promise<number> {
     .eq('is_read', false);
 
   if (error) {
+    const msg = String((error as any)?.message ?? '');
+    const details = String((error as any)?.details ?? '');
+    if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
+      return 0;
+    }
     console.error('Error getting unread count:', error);
     return 0;
   }
 
   return count || 0;
+}
+
+/**
+ * Clear all notifications for current user
+ */
+export async function clearAllNotifications(): Promise<boolean> {
+  const supabase = createClient();
+  
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) return false;
+
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', user.id);
+
+  if (error) {
+    const msg = String((error as any)?.message ?? '');
+    const details = String((error as any)?.details ?? '');
+    if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
+      return false;
+    }
+  }
+
+  return !error;
 }

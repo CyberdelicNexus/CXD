@@ -22,6 +22,7 @@ export type Database = {
           name: string
           owner_id: string
           project_data: Json
+          share_token: string | null
           updated_at: string
         }
         Insert: {
@@ -31,6 +32,7 @@ export type Database = {
           name: string
           owner_id: string
           project_data?: Json
+          share_token?: string | null
           updated_at?: string
         }
         Update: {
@@ -40,6 +42,7 @@ export type Database = {
           name?: string
           owner_id?: string
           project_data?: Json
+          share_token?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -104,36 +107,45 @@ export type Database = {
       users: {
         Row: {
           avatar_url: string | null
+          cover_image: string | null
+          cover_image_position: Json | null
           created_at: string
           email: string | null
           full_name: string | null
           id: string
           image: string | null
           name: string | null
+          profile_picture: string | null
           token_identifier: string
           updated_at: string | null
           user_id: string | null
         }
         Insert: {
           avatar_url?: string | null
+          cover_image?: string | null
+          cover_image_position?: Json | null
           created_at?: string
           email?: string | null
           full_name?: string | null
           id: string
           image?: string | null
           name?: string | null
+          profile_picture?: string | null
           token_identifier: string
           updated_at?: string | null
           user_id?: string | null
         }
         Update: {
           avatar_url?: string | null
+          cover_image?: string | null
+          cover_image_position?: Json | null
           created_at?: string
           email?: string | null
           full_name?: string | null
           id?: string
           image?: string | null
           name?: string | null
+          profile_picture?: string | null
           token_identifier?: string
           updated_at?: string | null
           user_id?: string | null

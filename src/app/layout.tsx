@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import "react-day-picker/dist/style.css";
 import "./globals.css";
 import Script from "next/script";
 import { TempoInit } from "@/components/tempo-init";
@@ -19,7 +20,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      
       <body className={inter.className}>
         <ThemeProvider
           attribute="class"

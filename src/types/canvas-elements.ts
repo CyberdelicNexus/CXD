@@ -118,12 +118,40 @@ export interface CanvasElementBase {
   hypercubeTags?: HypercubeFaceTag[]; // Optional semantic face tags
 }
 
+// Task metadata extension for Plan Tab integration
+export type TaskType = 'Design' | 'Dev' | 'Admin' | 'Research' | 'Custom';
+
+export interface Subtask {
+  id: string;
+  text: string;
+  isCompleted: boolean;
+  order: number;
+}
+
+export interface TaskMetadata {
+  isActionable?: boolean;            // Explicit actionable marker
+  status?: 'not_started' | 'in_progress' | 'completed' | 'blocked';
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  taskType?: TaskType;               // Task categorization
+  description?: string;              // Task description
+  dueDate?: string;                  // ISO date string
+  startDate?: string;                // ISO date string
+  assignee?: string;
+  estimatedHours?: number;
+  actualHours?: number;
+  blockedReason?: string;
+  customTags?: string[];
+  customProperties?: Record<string, string | number | boolean>; // User-defined properties
+  subtasks?: Subtask[];              // Direct subtask storage (not markdown)
+}
+
 // Freeform Card (Post-it style)
 export interface FreeformElement extends CanvasElementBase {
   type: 'freeform';
   content: string;
   emoji?: string;
   style?: ElementStyle;
+  taskMetadata?: TaskMetadata;       // Plan Tab task extension
 }
 
 // Image element with upload support
@@ -157,6 +185,7 @@ export interface ShapeElement extends CanvasElementBase {
   shapeType: ShapeType;
   content?: string; // Text inside the shape
   style?: ElementStyle;
+  taskMetadata?: TaskMetadata;       // Plan Tab task extension
 }
 
 // Container element for grouping
@@ -200,6 +229,7 @@ export interface TextElement extends CanvasElementBase {
   style?: ElementStyle;
   textAlign?: 'left' | 'center' | 'right';
   wrapWidth?: number; // Custom width for text wrapping (defaults to auto if not set)
+  taskMetadata?: TaskMetadata;       // Plan Tab task extension
 }
 
 // Link element with bookmark/embed/file modes

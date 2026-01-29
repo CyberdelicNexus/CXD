@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,9 +45,24 @@ import {
   Calendar,
   ArrowRight,
   ChevronRight,
+  Camera,
+  Upload,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { fetchUserProjects, ensureUserProfile } from "@/lib/supabase-projects";
+import { createNotification } from "@/lib/notifications";
+import { createClient } from "../../supabase/client";
+import {
+  getUserProfile,
+  uploadProfileImage,
+  updateUserCoverImage,
+  updateUserCoverImagePosition,
+  updateUserProfilePicture,
+  removeUserCoverImage,
+  removeUserProfilePicture,
+  UserProfile,
+} from "@/lib/user-profile";
 import Image from "next/image";
 
 interface DashboardContentProps {
@@ -67,6 +82,16 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [isChangeEmailOpen, setIsChangeEmailOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
+
+  // Profile customization state
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [coverImagePosition, setCoverImagePosition] = useState({ x: 0, y: 0 });
+  const [isDraggingCover, setIsDraggingCover] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
+  const [isUploadingProfile, setIsUploadingProfile] = useState(false);
 
   // Extract user name from email
   const userName = userEmail
@@ -81,17 +106,34 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       if (userProjects.length > 0) {
         setProjects(userProjects);
       }
+
+      // Load user profile with images
+      const profile = await getUserProfile(userId);
+      if (profile) {
+        setUserProfile(profile);
+        setCoverImagePosition(profile.cover_image_position);
+      }
+
       setIsLoading(false);
     };
 
     loadUserAndProjects();
   }, [userId, userEmail, setProjects]);
 
-  const handleCreateProject = () => {
+  const handleCreateProject = async () => {
     if (newProjectName.trim()) {
-      createProject(newProjectName.trim(), userId);
+      const projectId = createProject(newProjectName.trim(), userId);
       setNewProjectName("");
       setIsDialogOpen(false);
+
+      // Create notification for project creation
+      await createNotification(
+        userId,
+        "PROJECT_CREATED",
+        `Your project "${newProjectName.trim()}" has been created successfully`,
+        { projectId, projectName: newProjectName.trim() },
+      );
+
       router.push("/cxd");
     }
   };
@@ -113,59 +155,261 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const recentProjects = projects.slice(0, 3);
   const totalProjects = projects.length;
 
+  // Cover image upload handler
+  const handleCoverImageUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingCover(true);
+    try {
+      const imageUrl = await uploadProfileImage(userId, file, "cover");
+      if (imageUrl) {
+        await updateUserCoverImage(userId, imageUrl);
+        setUserProfile((prev) =>
+          prev ? { ...prev, cover_image: imageUrl } : null,
+        );
+      }
+    } catch (error) {
+      console.error("Error uploading cover image:", error);
+    } finally {
+      setIsUploadingCover(false);
+    }
+  };
+
+  // Profile picture upload handler
+  const handleProfilePictureUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingProfile(true);
+    try {
+      const imageUrl = await uploadProfileImage(userId, file, "profile");
+      if (imageUrl) {
+        await updateUserProfilePicture(userId, imageUrl);
+        setUserProfile((prev) =>
+          prev ? { ...prev, profile_picture: imageUrl } : null,
+        );
+      }
+    } catch (error) {
+      console.error("Error uploading profile picture:", error);
+    } finally {
+      setIsUploadingProfile(false);
+    }
+  };
+
+  // Cover image repositioning handlers
+  const handleCoverMouseDown = (e: React.MouseEvent) => {
+    if (!userProfile?.cover_image) return;
+    setIsDraggingCover(true);
+    setDragStart({
+      x: e.clientX - coverImagePosition.x,
+      y: e.clientY - coverImagePosition.y,
+    });
+  };
+
+  const handleCoverMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingCover) return;
+    const newY = e.clientY - dragStart.y;
+    setCoverImagePosition((prev) => ({
+      ...prev,
+      y: Math.max(-200, Math.min(0, newY)),
+    }));
+  };
+
+  const handleCoverMouseUp = async () => {
+    if (!isDraggingCover) return;
+    setIsDraggingCover(false);
+    await updateUserCoverImagePosition(userId, coverImagePosition);
+  };
+
+  const handleRemoveCover = async () => {
+    await removeUserCoverImage(userId);
+    setUserProfile((prev) => (prev ? { ...prev, cover_image: null } : null));
+    setCoverImagePosition({ x: 0, y: 0 });
+  };
+
+  const handleRemoveProfilePicture = async () => {
+    await removeUserProfilePicture(userId);
+    setUserProfile((prev) =>
+      prev ? { ...prev, profile_picture: null } : null,
+    );
+  };
+
   return (
     <main className="w-full min-h-screen bg-gradient-radial">
       <div className="container mx-auto px-4 py-6 max-w-7xl">
-        {/* Header with Welcome & Quick Stats */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-3xl font-bold mb-1">
-              <span className="text-gradient">My Dashboard</span>
-            </h1>
-            <p className="text-muted-foreground">Welcome back, {userName}</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button className="glow-teal">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create New Map
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="bg-card border-border">
-                <DialogHeader>
-                  <DialogTitle>Create New CXD Map</DialogTitle>
-                  <DialogDescription>
-                    Give your experience design map a name to get started.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Project Name</Label>
-                    <Input
-                      id="name"
-                      placeholder="My Cyberdelic Experience"
-                      value={newProjectName}
-                      onChange={(e) => setNewProjectName(e.target.value)}
-                      onKeyDown={(e) =>
-                        e.key === "Enter" && handleCreateProject()
-                      }
-                      className="bg-input border-border"
-                    />
+        {/* Profile Header with Cover Image and Profile Picture */}
+        <div className="relative mb-8 rounded-2xl overflow-hidden shadow-2xl">
+          {/* Cover Image */}
+          <div
+            className="relative h-64 bg-gradient-to-br from-purple-900/20 via-blue-900/20 to-teal-900/20 overflow-hidden"
+            onMouseMove={handleCoverMouseMove}
+            onMouseUp={handleCoverMouseUp}
+            onMouseLeave={handleCoverMouseUp}
+          >
+            {userProfile?.cover_image ? (
+              <div
+                className={`absolute inset-0 ${isDraggingCover ? "cursor-grabbing" : "cursor-grab"}`}
+                onMouseDown={handleCoverMouseDown}
+              >
+                <Image
+                  src={userProfile.cover_image}
+                  alt="Cover"
+                  fill
+                  className="object-cover"
+                  style={{
+                    objectPosition: `50% ${50 + coverImagePosition.y / 4}%`,
+                  }}
+                />
+                {isDraggingCover && (
+                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                    <p className="text-white font-medium">
+                      Reposition Cover Image
+                    </p>
                   </div>
-                  <Button
-                    onClick={handleCreateProject}
-                    className="w-full glow-teal"
-                    disabled={!newProjectName.trim()}
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    Begin Initiation
-                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <Camera className="w-12 h-12 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    No cover image
+                  </p>
                 </div>
-              </DialogContent>
-            </Dialog>
+              </div>
+            )}
+
+            {/* Cover Image Actions */}
+            <div className="absolute top-4 right-4 flex gap-2">
+              <input
+                type="file"
+                id="cover-upload"
+                accept="image/*"
+                className="hidden"
+                onChange={handleCoverImageUpload}
+                disabled={isUploadingCover}
+              />
+              <label htmlFor="cover-upload">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="bg-black/50 hover:bg-black/70 backdrop-blur cursor-pointer"
+                  disabled={isUploadingCover}
+                  asChild
+                >
+                  <span>
+                    <Upload className="w-4 h-4 mr-2" />
+                    {isUploadingCover ? "Uploading..." : "Change Cover"}
+                  </span>
+                </Button>
+              </label>
+              {userProfile?.cover_image && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="bg-red-500/50 hover:bg-red-500/70 backdrop-blur"
+                  onClick={handleRemoveCover}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Profile Info Section */}
+          <div className="relative bg-card/80 backdrop-blur-sm border-t border-border px-8 pb-6">
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+              {/* Profile Picture */}
+              <div className="relative -mt-16">
+                <div className="relative">
+                  {userProfile?.profile_picture ? (
+                    <div className="relative w-32 h-32 rounded-full overflow-hidden border-4 border-card shadow-2xl">
+                      <Image
+                        src={userProfile.profile_picture}
+                        alt="Profile"
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-32 h-32 rounded-full border-4 border-card shadow-2xl bg-gradient-to-br from-purple-500/20 to-teal-500/20 flex items-center justify-center">
+                      <User className="w-16 h-16 text-muted-foreground" />
+                    </div>
+                  )}
+
+                  {/* Profile Picture Upload Button */}
+                  <div className="absolute bottom-0 right-0">
+                    <input
+                      type="file"
+                      id="profile-upload"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleProfilePictureUpload}
+                      disabled={isUploadingProfile}
+                    />
+                    <label htmlFor="profile-upload">
+                      <Button
+                        size="sm"
+                        className="rounded-full w-10 h-10 p-0 cursor-pointer"
+                        disabled={isUploadingProfile}
+                        asChild
+                      >
+                        <span>
+                          {isUploadingProfile ? (
+                            <span className="animate-spin">⏳</span>
+                          ) : (
+                            <Camera className="w-4 h-4" />
+                          )}
+                        </span>
+                      </Button>
+                    </label>
+                  </div>
+
+                  {userProfile?.profile_picture && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="absolute -top-2 -right-2 rounded-full w-8 h-8 p-0"
+                      onClick={handleRemoveProfilePicture}
+                    >
+                      <X className="w-3 h-3" />
+                    </Button>
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <h2 className="text-2xl font-bold">{userName}</h2>
+                  <p className="text-sm text-muted-foreground">{userEmail}</p>
+                </div>
+              </div>
+              {/* Quick Actions */}
+              <div className="flex items-center gap-2 mt-4 md:mt-0"></div>
+              <div className="flex gap-x-1">
+                <Button
+                  variant={"outline"}
+                  size={"sm"}
+                  className="justify-end items-center h-[42px]"
+                >
+                  <Settings className={"w-4 h-4 mr-2"}></Settings>Settings
+                </Button>
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button className={"glow-teal"}>
+                      <Plus className={"w-4 h-4 mr-2"} />
+                      Create New Map
+                    </Button>
+                  </DialogTrigger>
+                </Dialog>
+              </div>
+            </div>
           </div>
         </div>
+        {/* Header with Welcome & Quick Stats */}
 
         {/* Main Grid Layout */}
         <div className="grid grid-cols-12 gap-6 h-fit">
@@ -329,7 +573,8 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                             className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
                             onClick={(e) => {
                               e.stopPropagation();
-                              deleteProject(project.id);
+                              setProjectToDelete(project.id);
+                              setDeleteConfirmOpen(true);
                             }}
                           >
                             <Trash2 className="w-4 h-4" />
@@ -372,14 +617,14 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                     </TabsTrigger>
                   </TabsList>
                   <TabsContent value="account" className="space-y-2 mt-3">
-                    <button 
+                    <button
                       className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-background/50 transition-colors text-left"
                       onClick={() => setIsEditProfileOpen(true)}
                     >
                       <User className="w-4 h-4 text-muted-foreground" />
                       <span className="text-sm">Edit Profile</span>
                     </button>
-                    <button 
+                    <button
                       className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-background/50 transition-colors text-left"
                       onClick={() => setIsChangeEmailOpen(true)}
                     >
@@ -418,7 +663,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 </Tabs>
               </CardContent>
             </Card>
-
             {/* Quick Actions */}
             <Card className="gradient-border bg-card/50 backdrop-blur h-fit">
               <CardHeader className="pb-3">
@@ -447,7 +691,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   variant="outline"
                   size="sm"
                   className="h-auto py-3 flex-col gap-1 bg-background/50 border-border/50 hover:bg-background/80"
-                  onClick={() => router.push('/dashboard/docs')}
+                  onClick={() => router.push("/dashboard/docs")}
                 >
                   <FileText className="w-4 h-4 text-purple-400" />
                   <span className="text-xs">Docs</span>
@@ -456,56 +700,17 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   variant="outline"
                   size="sm"
                   className="h-auto py-3 flex-col gap-1 bg-background/50 border-border/50 hover:bg-background/80"
-                  onClick={() => router.push('/dashboard/tutorials')}
+                  onClick={() => router.push("/dashboard/tutorials")}
                 >
                   <PlayCircle className="w-4 h-4 text-teal-400" />
                   <span className="text-xs">Tutorials</span>
                 </Button>
               </CardContent>
             </Card>
-
             {/* Resources */}
-            <Card className="gradient-border bg-card/50 backdrop-blur h-fit">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Resources</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <button 
-                  onClick={() => router.push('/dashboard/docs')}
-                  className="flex items-center justify-between p-2 rounded-lg hover:bg-background/50 transition-colors group w-full text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm">CXD Methodology Guide</span>
-                  </div>
-                  <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
-                <button 
-                  onClick={() => router.push('/dashboard/tutorials')}
-                  className="flex items-center justify-between p-2 rounded-lg hover:bg-background/50 transition-colors group w-full text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <PlayCircle className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm">Video Tutorials</span>
-                  </div>
-                  <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
-                <button 
-                  onClick={() => setIsSupportOpen(true)}
-                  className="flex items-center justify-between p-2 rounded-lg hover:bg-background/50 transition-colors group w-full text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <HelpCircle className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm">FAQ & Help Center</span>
-                  </div>
-                  <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                </button>
-              </CardContent>
-            </Card>
           </div>
         </div>
       </div>
-
       {/* Edit Profile Dialog */}
       <Dialog open={isEditProfileOpen} onOpenChange={setIsEditProfileOpen}>
         <DialogContent className="bg-card border-border">
@@ -532,21 +737,16 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 className="bg-input border-border"
               />
             </div>
-            <Button className="w-full glow-teal">
-              Save Changes
-            </Button>
+            <Button className="w-full glow-teal">Save Changes</Button>
           </div>
         </DialogContent>
       </Dialog>
-
       {/* Change Email Dialog */}
       <Dialog open={isChangeEmailOpen} onOpenChange={setIsChangeEmailOpen}>
         <DialogContent className="bg-card border-border">
           <DialogHeader>
             <DialogTitle>Change Email</DialogTitle>
-            <DialogDescription>
-              Update your email address
-            </DialogDescription>
+            <DialogDescription>Update your email address</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -567,21 +767,16 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 className="bg-input border-border"
               />
             </div>
-            <Button className="w-full glow-teal">
-              Update Email
-            </Button>
+            <Button className="w-full glow-teal">Update Email</Button>
           </div>
         </DialogContent>
       </Dialog>
-
       {/* Support Dialog */}
       <Dialog open={isSupportOpen} onOpenChange={setIsSupportOpen}>
         <DialogContent className="bg-card border-border">
           <DialogHeader>
             <DialogTitle>Contact Support</DialogTitle>
-            <DialogDescription>
-              How can we help you today?
-            </DialogDescription>
+            <DialogDescription>How can we help you today?</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -601,13 +796,10 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 className="w-full px-3 py-2 bg-input border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
-            <Button className="w-full glow-teal">
-              Send Message
-            </Button>
+            <Button className="w-full glow-teal">Send Message</Button>
           </div>
         </DialogContent>
       </Dialog>
-
       {/* Bug Report Dialog */}
       <Dialog open={isBugReportOpen} onOpenChange={setIsBugReportOpen}>
         <DialogContent className="bg-card border-border">
@@ -644,8 +836,56 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 className="w-full px-3 py-2 bg-input border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
-            <Button className="w-full glow-teal">
-              Submit Bug Report
+            <Button className="w-full glow-teal">Submit Bug Report</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Delete Project</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this project? This action cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-3 justify-end py-4">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setDeleteConfirmOpen(false);
+                setProjectToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (projectToDelete) {
+                  // Get project name before deletion
+                  const projectToDeleteObj = projects.find(
+                    (p) => p.id === projectToDelete,
+                  );
+                  const projectName = projectToDeleteObj?.name || "Project";
+
+                  deleteProject(projectToDelete);
+
+                  // Create notification for project deletion
+                  await createNotification(
+                    userId,
+                    "PROJECT_DELETED",
+                    `Project "${projectName}" has been deleted`,
+                    { projectId: projectToDelete, projectName },
+                  );
+
+                  setDeleteConfirmOpen(false);
+                  setProjectToDelete(null);
+                }
+              }}
+            >
+              Delete Project
             </Button>
           </div>
         </DialogContent>

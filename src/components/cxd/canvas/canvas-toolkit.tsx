@@ -15,7 +15,7 @@ interface CanvasToolkitProps {
   onPlaceElement: (
     type: CanvasElementType,
     position: { x: number; y: number },
-    options?: { shapeType?: ShapeType; linkMode?: LinkMode },
+    options?: { shapeType?: ShapeType; linkMode?: LinkMode; cardType?: "note" | "task" },
   ) => void;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   canvasPosition: { x: number; y: number };
@@ -34,6 +34,7 @@ const TOOLKIT_TOOLS = [
     label: "Card",
     IconComponent: LucideIcons.StickyNote,
     shortcut: "C",
+    hasDropdown: true, // Indicates this tool has a dropdown menu
   },
   {
     type: "image" as CanvasElementType,
@@ -76,6 +77,21 @@ const TOOLKIT_TOOLS = [
     label: "Board",
     IconComponent: LucideIcons.LayoutGrid,
     shortcut: "B",
+  },
+];
+
+const CARD_TYPE_OPTIONS = [
+  {
+    type: "note" as const,
+    label: "Note Card",
+    icon: "📌",
+    description: "Regular note card",
+  },
+  {
+    type: "task" as const,
+    label: "Task Card",
+    icon: "✅",
+    description: "Task card with checkbox",
   },
 ];
 
@@ -151,6 +167,8 @@ export function CanvasToolkit({
   const [showLinkPalette, setShowLinkPalette] = useState(false);
   const [selectedLinkMode, setSelectedLinkMode] =
     useState<LinkMode>("bookmark");
+  const [showCardTypeMenu, setShowCardTypeMenu] = useState(false);
+  const [selectedCardType, setSelectedCardType] = useState<"note" | "task">("note");
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   // Handle Escape key to cancel placement mode
@@ -160,6 +178,7 @@ export function CanvasToolkit({
         setActiveTool(null);
         setShowShapePalette(false);
         setShowLinkPalette(false);
+        setShowCardTypeMenu(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -187,10 +206,13 @@ export function CanvasToolkit({
           ? { shapeType: selectedShapeType }
           : activeTool === "link"
           ? { linkMode: selectedLinkMode }
+          : activeTool === "freeform"
+          ? { cardType: selectedCardType }
           : undefined;
 
         onPlaceElement(activeTool, { x, y }, options);
         setActiveTool(null);
+        setShowCardTypeMenu(false);
       }
     };
 
@@ -205,6 +227,7 @@ export function CanvasToolkit({
     onPlaceElement,
     selectedShapeType,
     selectedLinkMode,
+    selectedCardType,
     canvasOriginOffset,
   ]);
 
@@ -229,21 +252,31 @@ export function CanvasToolkit({
 
   const handleToolClick = useCallback(
     (type: CanvasElementType) => {
-      if (type === "shape") {
+      if (type === "freeform") {
+        setShowCardTypeMenu(!showCardTypeMenu);
+        setShowShapePalette(false);
+        setShowLinkPalette(false);
+        if (!showCardTypeMenu) {
+          setActiveTool(null);
+        }
+      } else if (type === "shape") {
         setShowShapePalette(!showShapePalette);
         setShowLinkPalette(false);
+        setShowCardTypeMenu(false);
         if (!showShapePalette) {
           setActiveTool(null);
         }
       } else if (type === "link") {
         setShowLinkPalette(!showLinkPalette);
         setShowShapePalette(false);
+        setShowCardTypeMenu(false);
         if (!showLinkPalette) {
           setActiveTool(null);
         }
       } else {
         setShowShapePalette(false);
         setShowLinkPalette(false);
+        setShowCardTypeMenu(false);
         if (activeTool === type) {
           setActiveTool(null);
         } else {
@@ -251,8 +284,14 @@ export function CanvasToolkit({
         }
       }
     },
-    [activeTool, showShapePalette, showLinkPalette],
+    [activeTool, showShapePalette, showLinkPalette, showCardTypeMenu],
   );
+
+  const handleCardTypeSelect = useCallback((cardType: "note" | "task") => {
+    setSelectedCardType(cardType);
+    setShowCardTypeMenu(false);
+    setActiveTool("freeform");
+  }, []);
 
   const handleShapeSelect = useCallback((shapeType: ShapeType) => {
     setSelectedShapeType(shapeType);
@@ -419,6 +458,29 @@ export function CanvasToolkit({
                   })}
                 </div>
               )}
+              {/* Card type menu popover */}
+              {tool.type === "freeform" && showCardTypeMenu && (
+                <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 py-[8px] rounded-lg backdrop-blur border border-border shadow-xl z-50 flex flex-col gap-1 w-[160px] mt-[14.75px] bg-card opacity-100">
+                  {CARD_TYPE_OPTIONS.map((cardType) => {
+                    return (
+                      <button
+                        key={cardType.type}
+                        onClick={() => handleCardTypeSelect(cardType.type)}
+                        title={cardType.description}
+                        className={cn(
+                          "flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm",
+                          "hover:bg-primary/20",
+                          selectedCardType === cardType.type &&
+                            "bg-primary/30 ring-1 ring-primary",
+                        )}
+                      >
+                        <span className="text-lg">{cardType.icon}</span>
+                        <span>{cardType.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {/* Link mode palette popover */}
               {tool.type === "link" && showLinkPalette && (
                 <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 py-[8px] rounded-lg backdrop-blur border border-border shadow-xl z-50 flex flex-col gap-1 w-[110px] mt-[14.75px] bg-card opacity-100">
@@ -455,6 +517,8 @@ export function CanvasToolkit({
               ? SHAPE_PALETTE.find((s) => s.type === selectedShapeType)?.label
               : activeTool === "link"
               ? LINK_MODES.find((m) => m.mode === selectedLinkMode)?.label
+              : activeTool === "freeform"
+              ? CARD_TYPE_OPTIONS.find((c) => c.type === selectedCardType)?.label
               : TOOLKIT_TOOLS.find((t) => t.type === activeTool)?.label
           }`}{" "}
           • Esc to cancel
