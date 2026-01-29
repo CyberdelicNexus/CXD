@@ -38,7 +38,6 @@ import {
   FileText,
   PlayCircle,
   ExternalLink,
-  Settings,
   BarChart3,
   Layers,
   TrendingUp,
@@ -47,7 +46,6 @@ import {
   ChevronRight,
   Camera,
   Upload,
-  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { fetchUserProjects, ensureUserProfile } from "@/lib/supabase-projects";
@@ -294,6 +292,19 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 onChange={handleCoverImageUpload}
                 disabled={isUploadingCover}
               />
+              {userProfile?.cover_image && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="bg-black/50 hover:bg-black/70 backdrop-blur cursor-pointer"
+                  onClick={() => setIsDraggingCover(true)}
+                >
+                  <span className="flex items-center">
+                    <Camera className="w-4 h-4 mr-2" />
+                    Reposition
+                  </span>
+                </Button>
+              )}
               <label htmlFor="cover-upload">
                 <Button
                   size="sm"
@@ -308,16 +319,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   </span>
                 </Button>
               </label>
-              {userProfile?.cover_image && (
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="bg-red-500/50 hover:bg-red-500/70 backdrop-blur"
-                  onClick={handleRemoveCover}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              )}
             </div>
           </div>
 
@@ -369,17 +370,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                       </Button>
                     </label>
                   </div>
-
-                  {userProfile?.profile_picture && (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="absolute -top-2 -right-2 rounded-full w-8 h-8 p-0"
-                      onClick={handleRemoveProfilePicture}
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
-                  )}
                 </div>
 
                 <div className="mt-4">
@@ -388,15 +378,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 </div>
               </div>
               {/* Quick Actions */}
-              <div className="flex items-center gap-2 mt-4 md:mt-0"></div>
-              <div className="flex gap-x-1">
-                <Button
-                  variant={"outline"}
-                  size={"sm"}
-                  className="justify-end items-center h-[42px]"
-                >
-                  <Settings className={"w-4 h-4 mr-2"}></Settings>Settings
-                </Button>
+              <div className="flex items-center gap-2 mt-4 md:mt-0">
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                   <DialogTrigger asChild>
                     <Button className={"glow-teal"}>
