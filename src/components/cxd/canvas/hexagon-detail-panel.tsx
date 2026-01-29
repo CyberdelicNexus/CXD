@@ -129,7 +129,7 @@ export function HexagonDetailPanel({
 
   // Get tagged elements for this face
   const faceTag = SECTION_TO_TAG[sectionId];
-  const allElements = project.canvasElements || [];
+  const allElements = project.canvasLayout?.elements || [];
   const taggedElements = faceTag
     ? allElements.filter((el) => el.hypercubeTags?.includes(faceTag))
     : [];
