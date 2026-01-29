@@ -348,6 +348,7 @@ export function CanvasElementRenderer({
             element={element}
             onUpdate={onUpdate}
             isSelected={isSelected}
+            isReadOnly={isReadOnly}
           />
         );
       case "shape":
@@ -3315,10 +3316,12 @@ function ImageCard({
   element,
   onUpdate,
   isSelected,
+  isReadOnly = false,
 }: {
   element: ImageElement;
   onUpdate: (updates: Partial<ImageElement>) => void;
   isSelected: boolean;
+  isReadOnly?: boolean;
 }) {
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
