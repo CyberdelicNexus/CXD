@@ -1154,8 +1154,11 @@ export const useCXDStore = create<CXDState>()(
                 ? { 
                     ...p, 
                     canvasLayout: { 
-                      ...(p.canvasLayout || {}), 
-                      [elementId]: position 
+                      ...(p.canvasLayout || {}),
+                      sectionPositions: {
+                        ...(p.canvasLayout?.sectionPositions || {}),
+                        [elementId]: position
+                      }
                     }, 
                     updatedAt: new Date().toISOString() 
                   }
@@ -1181,7 +1184,10 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasElements: [...(p.canvasElements || []), elementWithBoardAndSurface],
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      elements: [...(p.canvasLayout?.elements || []), elementWithBoardAndSurface]
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
@@ -1225,20 +1231,23 @@ export const useCXDStore = create<CXDState>()(
                   p.id === currentProject.id
                     ? {
                         ...p,
-                        canvasElements: (p.canvasElements || []).map((el) => {
-                          if (el.id === elementId) {
-                            return { ...el, ...updates } as typeof el;
-                          }
-                          if (el.id === element.containerId && 
-                              (neededWidth > container.width || neededHeight > container.height)) {
-                            return { 
-                              ...el, 
-                              width: neededWidth,
-                              height: neededHeight 
-                            };
-                          }
-                          return el;
-                        }),
+                        canvasLayout: {
+                          ...(p.canvasLayout || {}),
+                          elements: (p.canvasLayout?.elements || []).map((el) => {
+                            if (el.id === elementId) {
+                              return { ...el, ...updates } as typeof el;
+                            }
+                            if (el.id === element.containerId && 
+                                (neededWidth > container.width || neededHeight > container.height)) {
+                              return { 
+                                ...el, 
+                                width: neededWidth,
+                                height: neededHeight 
+                              };
+                            }
+                            return el;
+                          })
+                        },
                         updatedAt: new Date().toISOString()
                       }
                     : p
@@ -1258,17 +1267,19 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? {
                     ...p,
-                    canvasElements: (p.canvasElements || []).map((el) =>
-                      el.id === elementId ? { ...el, ...updates } as typeof el : el
-                    ),
-                    // If board element title changed, sync to the corresponding board
-                    canvasBoards: isBoardElement && isTitleUpdate && element.type === 'board'
-                      ? (p.canvasBoards || []).map((board) =>
-                          board.id === (element as any).childBoardId
-                            ? { ...board, title: (updates as any).title }
-                            : board
-                        )
-                      : p.canvasBoards,
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      elements: (p.canvasLayout?.elements || []).map((el) =>
+                        el.id === elementId ? { ...el, ...updates } as typeof el : el
+                      ),
+                      boards: isBoardElement && isTitleUpdate && element.type === 'board'
+                        ? (p.canvasLayout?.boards || []).map((board) =>
+                            board.id === (element as any).childBoardId
+                              ? { ...board, title: (updates as any).title }
+                              : board
+                          )
+                        : p.canvasLayout?.boards
+                    },
                     updatedAt: new Date().toISOString()
                   }
                 : p
@@ -1285,7 +1296,10 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasElements: (p.canvasElements || []).filter((el) => el.id !== elementId),
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      elements: (p.canvasLayout?.elements || []).filter((el) => el.id !== elementId)
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
@@ -1298,7 +1312,7 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         const { activeBoardId, activeSurface } = get();
         // Filter elements to only show those belonging to the active board AND surface
-        const allElements = currentProject?.canvasElements || [];
+        const allElements = currentProject?.canvasLayout?.elements || [];
         return allElements.filter((el) => {
           // Handle migration: elements without boardId belong to root (null)
           const elementBoardId = el.boardId !== undefined ? el.boardId : null;
@@ -1311,7 +1325,7 @@ export const useCXDStore = create<CXDState>()(
       duplicateCanvasElement: (elementId) => {
         const currentProject = get().getCurrentProject();
         if (currentProject) {
-          const element = currentProject.canvasElements?.find(el => el.id === elementId);
+          const element = currentProject.canvasLayout?.elements?.find(el => el.id === elementId);
           if (element) {
             get().pushCanvasHistory(); // Save state before duplicating
             const newElement = {
@@ -1325,7 +1339,10 @@ export const useCXDStore = create<CXDState>()(
                 p.id === currentProject.id
                   ? { 
                       ...p, 
-                      canvasElements: [...(p.canvasElements || []), newElement],
+                      canvasLayout: {
+                        ...(p.canvasLayout || {}),
+                        elements: [...(p.canvasLayout?.elements || []), newElement]
+                      },
                       updatedAt: new Date().toISOString() 
                     }
                   : p
@@ -1359,7 +1376,10 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasEdges: [...(p.canvasEdges || []), edgeWithBoardAndSurface],
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      edges: [...(p.canvasLayout?.edges || []), edgeWithBoardAndSurface]
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
@@ -1368,7 +1388,7 @@ export const useCXDStore = create<CXDState>()(
           
           // Verify it was added
           const updatedProject = get().getCurrentProject();
-          console.log('[STORE] After add, edges in project:', updatedProject?.canvasEdges);
+          console.log('[STORE] After add, edges in project:', updatedProject?.canvasLayout?.edges);
         } else {
           console.error('[STORE] No current project found when adding edge');
         }
@@ -1382,9 +1402,12 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasEdges: (p.canvasEdges || []).map((edge) =>
-                      edge.id === edgeId ? { ...edge, ...updates } : edge
-                    ),
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      edges: (p.canvasLayout?.edges || []).map((edge) =>
+                        edge.id === edgeId ? { ...edge, ...updates } : edge
+                      )
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
@@ -1401,7 +1424,10 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasEdges: (p.canvasEdges || []).filter((edge) => edge.id !== edgeId),
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      edges: (p.canvasLayout?.edges || []).filter((edge) => edge.id !== edgeId)
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
@@ -1414,7 +1440,7 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         const { activeBoardId, activeSurface } = get();
         // Filter edges to only show those belonging to the active board AND surface
-        const allEdges = currentProject?.canvasEdges || [];
+        const allEdges = currentProject?.canvasLayout?.edges || [];
         console.log('[STORE] getCanvasEdges - All edges:', allEdges);
         console.log('[STORE] getCanvasEdges - Filtering for board:', activeBoardId, 'surface:', activeSurface);
         
@@ -1518,7 +1544,10 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasBoards: [...(p.canvasBoards || []), newBoard],
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      boards: [...(p.canvasLayout?.boards || []), newBoard]
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
@@ -1657,8 +1686,8 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
         
-        const elements = currentProject.canvasElements || [];
-        const edges = currentProject.canvasEdges || [];
+        const elements = currentProject.canvasLayout?.elements || [];
+        const edges = currentProject.canvasLayout?.edges || [];
         const { canvasHistory, canvasHistoryIndex } = get();
         
         // Create new history entry
@@ -1698,8 +1727,11 @@ export const useCXDStore = create<CXDState>()(
             p.id === currentProject.id
               ? {
                   ...p,
-                  canvasElements: previousState.elements,
-                  canvasEdges: previousState.edges,
+                  canvasLayout: {
+                    ...(p.canvasLayout || {}),
+                    elements: previousState.elements,
+                    edges: previousState.edges
+                  },
                   updatedAt: new Date().toISOString(),
                 }
               : p
@@ -1722,8 +1754,11 @@ export const useCXDStore = create<CXDState>()(
             p.id === currentProject.id
               ? {
                   ...p,
-                  canvasElements: nextState.elements,
-                  canvasEdges: nextState.edges,
+                  canvasLayout: {
+                    ...(p.canvasLayout || {}),
+                    elements: nextState.elements,
+                    edges: nextState.edges
+                  },
                   updatedAt: new Date().toISOString(),
                 }
               : p

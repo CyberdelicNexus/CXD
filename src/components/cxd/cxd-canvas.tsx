@@ -219,17 +219,17 @@ export function CXDCanvas() {
     if (!project) return DEFAULT_SECTION_POSITIONS;
     return {
       ...DEFAULT_SECTION_POSITIONS,
-      ...(project.canvasLayout || {}),
+      ...(project.canvasLayout?.sectionPositions || {}),
       ...localPositions,
     };
   }, [project, localPositions]);
 
   // Initialize local positions from project on mount
   useEffect(() => {
-    if (project?.canvasLayout) {
+    if (project?.canvasLayout?.sectionPositions) {
       setLocalPositions((prev) => ({
         ...DEFAULT_SECTION_POSITIONS,
-        ...project.canvasLayout,
+        ...project.canvasLayout.sectionPositions,
       }));
     }
   }, [project?.id]);

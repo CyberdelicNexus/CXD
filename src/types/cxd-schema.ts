@@ -297,17 +297,13 @@ export interface CXDProject {
   stateMapping: Record<StateQuadrantCode, string>;
   traitMapping: Record<TraitQuadrantCode, string>;
   
-  // Canvas layout positions (persisted per project)
-  canvasLayout?: Record<string, { x: number; y: number }>;
-  
-  // Canvas elements (freeform cards, images, shapes, etc.)
-  canvasElements?: import('./canvas-elements').CanvasElement[];
-  
-  // Canvas edges (connectors between nodes)
-  canvasEdges?: import('./canvas-elements').CanvasEdge[];
-  
-  // Nested boards for sub-canvases
-  canvasBoards?: import('./canvas-elements').CanvasBoard[];
+  // Canvas layout (persisted per project)
+  canvasLayout?: {
+    sectionPositions?: Record<string, { x: number; y: number }>;
+    elements?: import('./canvas-elements').CanvasElement[];
+    edges?: import('./canvas-elements').CanvasEdge[];
+    boards?: import('./canvas-elements').CanvasBoard[];
+  };
   
   // Wizard progress
   wizardCompleted: boolean;
