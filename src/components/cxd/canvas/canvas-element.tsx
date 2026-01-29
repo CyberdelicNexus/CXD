@@ -386,6 +386,7 @@ export function CanvasElementRenderer({
             element={element}
             onUpdate={onUpdate}
             isSelected={isSelected}
+            isReadOnly={isReadOnly}
           />
         );
       case "line":
@@ -4694,10 +4695,12 @@ function LinkCard({
   element,
   onUpdate,
   isSelected,
+  isReadOnly = false,
 }: {
   element: LinkElement;
   onUpdate: (updates: Partial<LinkElement>) => void;
   isSelected: boolean;
+  isReadOnly?: boolean;
 }) {
   // Local draft state to prevent element from disappearing during edits
   const [draftUrl, setDraftUrl] = useState(element.url || "");
