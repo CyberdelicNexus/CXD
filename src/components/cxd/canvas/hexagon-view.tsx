@@ -168,8 +168,8 @@ export function HexagonView() {
     setActiveBoardId,
   } = useCXDStore();
   const project = getCurrentProject();
-  const canvasElements = project?.canvasElements || [];
-  const boards = project?.canvasBoards || [];
+  const canvasElements = project?.canvasLayout?.elements || [];
+  const boards = project?.canvasLayout?.boards || [];
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
@@ -434,11 +434,11 @@ export function HexagonView() {
 
   // Get elements tagged to a specific face
   const getTaggedElementsForFace = useMemo(() => {
-    const allElements = project.canvasElements || [];
+    const allElements = project.canvasLayout?.elements || [];
     return (faceTag: HypercubeFaceTag) => {
       return allElements.filter((el) => el.hypercubeTags?.includes(faceTag));
     };
-  }, [project.canvasElements]);
+  }, [project.canvasLayout?.elements]);
 
   // Soft constraint checking - detect structural misalignments
   // Returns constraint info with visual cues and optional tooltip

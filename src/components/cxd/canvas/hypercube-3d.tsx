@@ -272,7 +272,7 @@ function getElementPreview(
       // Count elements by filtering canvasElements where boardId matches
       // Elements are stored flat in canvasElements with a boardId property
       const boardId = (element as BoardElement).childBoardId;
-      const allElements = project?.canvasElements || [];
+      const allElements = project?.canvasLayout?.elements || [];
       // Filter to elements in this board, exclude lines and connectors
       const boardElements = allElements.filter(
         (el: any) =>
@@ -603,7 +603,7 @@ export function Hypercube3D({
 
   // Generate real-time diagnostics
   const diagnostics = useMemo(() => {
-    return generateDiagnostics(project, project?.canvasElements || []);
+    return generateDiagnostics(project, project?.canvasLayout?.elements || []);
   }, [project]);
 
   const handleFaceReference = useCallback((faceId: string) => {
@@ -989,13 +989,13 @@ export function Hypercube3D({
   ]);
 
   const getTaggedElementsForFace = useMemo(() => {
-    const allElements = project?.canvasElements || [];
+    const allElements = project?.canvasLayout?.elements || [];
     return (faceTag: HypercubeFaceTag) => {
       return allElements.filter((el: CanvasElement) =>
         el.hypercubeTags?.includes(faceTag),
       );
     };
-  }, [project?.canvasElements]);
+  }, [project?.canvasLayout?.elements]);
 
   // Sensemaking Mode - Calculate face intensity and coherence
   // Returns visual parameters based on domain state without requiring interaction

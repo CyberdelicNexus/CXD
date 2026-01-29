@@ -124,7 +124,7 @@ export function QuickViewModal({ element, onClose, onNavigateToCanvas }: QuickVi
         // Get board data from global project reference (set by hypercube-3d)
         const project = (window as any).__currentProject;
         // Count elements by filtering canvasElements where boardId matches
-        const allElements = project?.canvasElements || [];
+        const allElements = project?.canvasLayout?.elements || [];
         const boardElements = allElements.filter((el: any) => 
           el.boardId === boardId && el.type !== 'line' && el.type !== 'connector'
         );

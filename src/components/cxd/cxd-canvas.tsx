@@ -187,7 +187,7 @@ export function CXDCanvas() {
     "Active surface:",
     activeSurface,
   );
-  console.log("[CANVAS] All edges in project:", project?.canvasEdges || []);
+  console.log("[CANVAS] All edges in project:", project?.canvasLayout?.edges || []);
   console.log("[CANVAS] Filtered edges for current view:", canvasEdges);
 
   // Line creation callback from LineLayer

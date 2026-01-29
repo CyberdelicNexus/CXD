@@ -91,7 +91,7 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   const allElements = useMemo(() => {
     if (!project) return [];
     
-    const elements: CanvasElement[] = [...(project.canvasElements || [])];
+    const elements: CanvasElement[] = [...(project.canvasLayout?.elements || [])];
     
     // Include elements from all boards
     if (project.boards) {

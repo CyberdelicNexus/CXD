@@ -5340,7 +5340,7 @@ function BoardCard({
 
   // Count elements in this board
   const project = (window as any).__currentProject;
-  const allElements = project?.canvasElements || [];
+  const allElements = project?.canvasLayout?.elements || [];
   const boardElements = allElements.filter(
     (el: any) =>
       el.boardId === element.childBoardId &&

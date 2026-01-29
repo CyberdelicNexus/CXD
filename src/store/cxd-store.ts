@@ -1199,7 +1199,7 @@ export const useCXDStore = create<CXDState>()(
       updateCanvasElement: (elementId, updates) => {
         const currentProject = get().getCurrentProject();
         if (currentProject) {
-          const elements = currentProject.canvasElements || [];
+          const elements = currentProject.canvasLayout?.elements || [];
           const element = elements.find(el => el.id === elementId);
           
           // If element has a container, check if we need to expand the container
@@ -1572,7 +1572,7 @@ export const useCXDStore = create<CXDState>()(
       addNodeToContainer: (nodeId, containerId) => {
         const currentProject = get().getCurrentProject();
         if (currentProject) {
-          const elements = currentProject.canvasElements || [];
+          const elements = currentProject.canvasLayout?.elements || [];
           const container = elements.find((el) => el.id === containerId);
           const node = elements.find((el) => el.id === nodeId);
           
@@ -1600,19 +1600,22 @@ export const useCXDStore = create<CXDState>()(
                 p.id === currentProject.id
                   ? { 
                       ...p, 
-                      canvasElements: (p.canvasElements || []).map((el) => {
-                        if (el.id === nodeId) {
-                          return { ...el, containerId };
-                        }
-                        if (el.id === containerId) {
-                          return { 
-                            ...el, 
-                            width: neededWidth,
-                            height: neededHeight 
-                          };
-                        }
-                        return el;
-                      }),
+                      canvasLayout: {
+                        ...(p.canvasLayout || {}),
+                        elements: (p.canvasLayout?.elements || []).map((el) => {
+                          if (el.id === nodeId) {
+                            return { ...el, containerId };
+                          }
+                          if (el.id === containerId) {
+                            return { 
+                              ...el, 
+                              width: neededWidth,
+                              height: neededHeight 
+                            };
+                          }
+                          return el;
+                        }),
+                      },
                       updatedAt: new Date().toISOString() 
                     }
                   : p
@@ -1630,9 +1633,12 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasElements: (p.canvasElements || []).map((el) =>
-                      el.id === nodeId ? { ...el, containerId: undefined } : el
-                    ),
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      elements: (p.canvasLayout?.elements || []).map((el) =>
+                        el.id === nodeId ? { ...el, containerId: undefined } : el
+                      ),
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
@@ -1649,11 +1655,14 @@ export const useCXDStore = create<CXDState>()(
               p.id === currentProject.id
                 ? { 
                     ...p, 
-                    canvasElements: (p.canvasElements || []).map((el) =>
-                      el.id === containerId || el.containerId === containerId
-                        ? { ...el, x: el.x + deltaX, y: el.y + deltaY }
-                        : el
-                    ),
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      elements: (p.canvasLayout?.elements || []).map((el) =>
+                        el.id === containerId || el.containerId === containerId
+                          ? { ...el, x: el.x + deltaX, y: el.y + deltaY }
+                          : el
+                      ),
+                    },
                     updatedAt: new Date().toISOString() 
                   }
                 : p
