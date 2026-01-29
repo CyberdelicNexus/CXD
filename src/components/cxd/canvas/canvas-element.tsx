@@ -2603,11 +2603,13 @@ function FreeformCard({
   onUpdate,
   isEditing,
   onBlur,
+  className,
 }: {
   element: FreeformElement;
   onUpdate: (updates: Partial<FreeformElement>) => void;
   isEditing: boolean;
   onBlur: (e?: React.FocusEvent) => void;
+  className?: string;
 }) {
   // Use the passed-in onBlur handler (from the parent renderer) to avoid undefined refs.
   const handleBlur = onBlur;
@@ -2916,7 +2918,7 @@ function FreeformCard({
 
   return (
     <div
-      className="w-full rounded-lg shadow-md overflow-visible flex flex-col relative"
+      className={cn("w-full rounded-lg shadow-md overflow-visible flex flex-col relative", className)}
       style={{
         background: bgColor,
         border: "1px solid rgba(255, 255, 255, 0.1)",
