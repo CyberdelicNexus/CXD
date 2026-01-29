@@ -224,9 +224,9 @@ export function CanvasElementRenderer({
     [element, onEnterBoard, onOpenExperiencePanel, onUpdate],
   );
 
-  const handleBlur = useCallback((e: React.FocusEvent) => {
+  const handleBlur = useCallback((e?: React.FocusEvent) => {
     // Don't close editing if we're focusing another input in the same element
-    const relatedTarget = e.relatedTarget as HTMLElement;
+    const relatedTarget = e?.relatedTarget as HTMLElement | undefined;
     if (relatedTarget && elementRef.current?.contains(relatedTarget)) {
       return;
     }
