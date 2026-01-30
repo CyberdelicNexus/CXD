@@ -493,6 +493,51 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                       Create New Map
                     </Button>
                   </DialogTrigger>
+                  <DialogContent className="bg-card border-border">
+                    <DialogHeader>
+                      <DialogTitle>Create New Experience Map</DialogTitle>
+                      <DialogDescription>
+                        Give your new CXD project a name to get started
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="project-name">Project Name</Label>
+                        <Input
+                          id="project-name"
+                          placeholder="Enter project name..."
+                          value={newProjectName}
+                          onChange={(e) => setNewProjectName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleCreateProject();
+                            }
+                          }}
+                          className="bg-input border-border"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="flex gap-3 justify-end">
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            setIsDialogOpen(false);
+                            setNewProjectName("");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleCreateProject}
+                          className="glow-teal"
+                          disabled={!newProjectName.trim()}
+                        >
+                          <Plus className="w-4 h-4 mr-2" />
+                          Create Map
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
                 </Dialog>
               </div>
             </div>
