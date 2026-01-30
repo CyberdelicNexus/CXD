@@ -8,8 +8,8 @@ import { CXDFocusMode } from "@/components/cxd/cxd-focus-mode";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
 import { HexagonView } from "@/components/cxd/canvas/hexagon-view";
 import { PlanView } from "@/components/cxd/plan/plan-view";
-import { useProjectSync } from "@/hooks/use-project-sync";
-import { fetchUserProjects } from "@/lib/supabase-projects";
+import { useProjectSync, getLocalBackup, clearLocalBackup } from "@/hooks/use-project-sync";
+import { fetchUserProjects, saveProject } from "@/lib/supabase-projects";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -46,6 +46,41 @@ export default function CXDPage() {
       // If we have a currentProjectId but no projects loaded, restore from database
       if (currentProjectId && projects.length === 0) {
         const userProjects = await fetchUserProjects(user.id);
+
+        // Check for localStorage backup before setting projects
+        const backup = getLocalBackup();
+        if (backup && backup.project && backup.project.id) {
+          const dbProject = userProjects.find(p => p.id === backup.project.id);
+          const oneHourAgo = Date.now() - (60 * 60 * 1000);
+
+          if (backup.timestamp > oneHourAgo) {
+            if (dbProject) {
+              const dbUpdated = new Date(dbProject.updatedAt).getTime();
+              // If backup is newer than database, use backup
+              if (backup.timestamp > dbUpdated) {
+                console.log('[CXD] Restoring from localStorage backup (newer than database)');
+                const mergedProjects = userProjects.map(p =>
+                  p.id === backup.project.id ? { ...backup.project, updatedAt: new Date().toISOString() } : p
+                );
+                setProjects(mergedProjects);
+                // Save backup to database
+                saveProject(backup.project).then(success => {
+                  if (success) {
+                    console.log('[CXD] Backup saved to database');
+                    clearLocalBackup();
+                  }
+                });
+                setIsRestoring(false);
+                return;
+              }
+            }
+            // Clear stale backup
+            clearLocalBackup();
+          } else {
+            clearLocalBackup();
+          }
+        }
+
         if (userProjects.length > 0) {
           setProjects(userProjects);
         }

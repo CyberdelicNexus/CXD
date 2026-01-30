@@ -48,9 +48,10 @@ import {
   Upload,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { fetchUserProjects, ensureUserProfile } from "@/lib/supabase-projects";
+import { fetchUserProjects, ensureUserProfile, saveProject } from "@/lib/supabase-projects";
 import { createNotification } from "@/lib/notifications";
 import { createClient } from "../../supabase/client";
+import { getLocalBackup, clearLocalBackup, flushPendingSave } from "@/hooks/use-project-sync";
 import {
   getUserProfile,
   uploadProfileImage,
@@ -101,9 +102,57 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
   useEffect(() => {
     const loadUserAndProjects = async () => {
+      // First, flush any pending saves to ensure we don't lose data
+      await flushPendingSave();
+
       await ensureUserProfile(userId, userEmail);
       const userProjects = await fetchUserProjects(userId);
-      if (userProjects.length > 0) {
+
+      // Check for localStorage backup before setting projects
+      const backup = getLocalBackup();
+      if (backup && backup.project && backup.project.id) {
+        const dbProject = userProjects.find(p => p.id === backup.project.id);
+        const oneHourAgo = Date.now() - (60 * 60 * 1000);
+
+        if (backup.timestamp > oneHourAgo) {
+          if (dbProject) {
+            const dbUpdated = new Date(dbProject.updatedAt).getTime();
+            // If backup is newer than database, merge it in
+            if (backup.timestamp > dbUpdated) {
+              console.log('[Dashboard] Restoring from localStorage backup (newer than database)');
+              const mergedProjects = userProjects.map(p =>
+                p.id === backup.project.id ? { ...backup.project, updatedAt: new Date().toISOString() } : p
+              );
+              setProjects(mergedProjects);
+              // Save backup to database
+              saveProject(backup.project).then(success => {
+                if (success) {
+                  console.log('[Dashboard] Backup saved to database');
+                  clearLocalBackup();
+                }
+              });
+            } else {
+              // Database is newer, clear stale backup
+              clearLocalBackup();
+              if (userProjects.length > 0) {
+                setProjects(userProjects);
+              }
+            }
+          } else {
+            // No matching project in database, clear backup
+            clearLocalBackup();
+            if (userProjects.length > 0) {
+              setProjects(userProjects);
+            }
+          }
+        } else {
+          // Backup is too old, clear it
+          clearLocalBackup();
+          if (userProjects.length > 0) {
+            setProjects(userProjects);
+          }
+        }
+      } else if (userProjects.length > 0) {
         setProjects(userProjects);
       }
 
