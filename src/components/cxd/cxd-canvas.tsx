@@ -675,6 +675,14 @@ export function CXDCanvas() {
 
     // DON'T clear dropTargetBoardId here - it gets cleared in handleElementDragEnd
     // setDropTargetBoardId(null);
+
+    // IMPORTANT: Always clear draggingElement on canvas mouse up to prevent
+    // the element from getting "stuck" to the cursor on quick click/release
+    if (draggingElement) {
+      setDraggingElement(null);
+      setDropTargetBoardId(null);
+      setDropTargetContainerId(null);
+    }
   }, [
     draggingSection,
     localPositions,
@@ -690,6 +698,7 @@ export function CXDCanvas() {
     activeBoardId,
     activeSurface,
     addCanvasEdge,
+    draggingElement,
   ]);
 
   // Handle element creation from toolkit (board-scoped)

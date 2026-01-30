@@ -252,11 +252,27 @@ export function CanvasElementRenderer({
 
   // Auto-resize experience blocks when view mode changes
   // NOTE: Avoid calling onUpdate during render (can trigger "Cannot update a component while rendering").
+  // NOTE: Skip auto-resize if user has manually resized the element.
+  const prevViewModeRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     if (element.type !== "experienceBlock") return;
 
     const expElement = element as ExperienceBlockElement;
     const viewMode = expElement.viewMode || "compact";
+
+    // Skip auto-resize if user has manually resized
+    if (expElement.manuallyResized) {
+      prevViewModeRef.current = viewMode;
+      return;
+    }
+
+    // Only auto-resize when viewMode actually changes, not on every render
+    const viewModeChanged = prevViewModeRef.current !== undefined && prevViewModeRef.current !== viewMode;
+    prevViewModeRef.current = viewMode;
+
+    // Skip if this is just the initial render (not a viewMode change)
+    if (!viewModeChanged && element.width > 0 && element.height > 0) return;
 
     const nextSize =
       viewMode === "inline"
@@ -281,9 +297,9 @@ export function CanvasElementRenderer({
 
     return () => window.clearTimeout(t);
   }, [
-    element,
     element.type,
     (element as ExperienceBlockElement).viewMode,
+    (element as ExperienceBlockElement).manuallyResized,
     element.width,
     element.height,
     onUpdate,
@@ -1418,7 +1434,12 @@ function ResizeHandle({
           }
         }
 
-        onUpdate({ width: newWidth, height: newHeight, x: newX, y: newY });
+        // For experience blocks, mark as manually resized to prevent auto-resize from overriding
+        const updates: Partial<CanvasElement> = { width: newWidth, height: newHeight, x: newX, y: newY };
+        if (element.type === "experienceBlock") {
+          (updates as any).manuallyResized = true;
+        }
+        onUpdate(updates);
       };
 
       const handleMouseUp = () => {
@@ -5568,7 +5589,8 @@ function ExperienceBlockCard({
               const contentHeight = scrollContent.scrollHeight;
               const newHeight = Math.min(contentHeight + 80, 800); // 80px for header, max 800px
               const newWidth = Math.max(element.width, 500); // Min 500px width
-              onUpdate({ width: newWidth, height: newHeight });
+              // Mark as manually resized since user intentionally adjusted size
+              onUpdate({ width: newWidth, height: newHeight, manuallyResized: true } as any);
             }
           }}
           className="flex-shrink-0 p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"

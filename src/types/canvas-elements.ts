@@ -277,6 +277,7 @@ export interface ExperienceBlockElement extends CanvasElementBase {
   title: string; // Display title
   viewMode?: 'compact' | 'inline'; // View mode for the block (default: compact)
   style?: ElementStyle; // Optional style for custom gradients
+  manuallyResized?: boolean; // True if user has manually resized the element
 }
 
 // Union type for all canvas elements
