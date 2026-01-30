@@ -86,6 +86,8 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   // Profile customization state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [coverImagePosition, setCoverImagePosition] = useState({ x: 0, y: 0 });
+  const [originalCoverPosition, setOriginalCoverPosition] = useState({ x: 0, y: 0 });
+  const [isRepositionMode, setIsRepositionMode] = useState(false);
   const [isDraggingCover, setIsDraggingCover] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isUploadingCover, setIsUploadingCover] = useState(false);
@@ -110,6 +112,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       if (profile) {
         setUserProfile(profile);
         setCoverImagePosition(profile.cover_image_position);
+        setOriginalCoverPosition(profile.cover_image_position);
       }
 
       setIsLoading(false);
@@ -164,10 +167,14 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     try {
       const imageUrl = await uploadProfileImage(userId, file, "cover");
       if (imageUrl) {
-        await updateUserCoverImage(userId, imageUrl);
-        setUserProfile((prev) =>
-          prev ? { ...prev, cover_image: imageUrl } : null,
-        );
+        const success = await updateUserCoverImage(userId, imageUrl);
+        if (success) {
+          setUserProfile((prev) =>
+            prev ? { ...prev, cover_image: imageUrl } : null,
+          );
+        } else {
+          console.error("Failed to save cover image to database");
+        }
       }
     } catch (error) {
       console.error("Error uploading cover image:", error);
@@ -187,10 +194,14 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     try {
       const imageUrl = await uploadProfileImage(userId, file, "profile");
       if (imageUrl) {
-        await updateUserProfilePicture(userId, imageUrl);
-        setUserProfile((prev) =>
-          prev ? { ...prev, profile_picture: imageUrl } : null,
-        );
+        const success = await updateUserProfilePicture(userId, imageUrl);
+        if (success) {
+          setUserProfile((prev) =>
+            prev ? { ...prev, profile_picture: imageUrl } : null,
+          );
+        } else {
+          console.error("Failed to save profile picture to database");
+        }
       }
     } catch (error) {
       console.error("Error uploading profile picture:", error);
@@ -200,28 +211,51 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   };
 
   // Cover image repositioning handlers
+  const enterRepositionMode = () => {
+    setOriginalCoverPosition(coverImagePosition);
+    setIsRepositionMode(true);
+  };
+
   const handleCoverMouseDown = (e: React.MouseEvent) => {
-    if (!userProfile?.cover_image) return;
+    if (!isRepositionMode || !userProfile?.cover_image) return;
+    e.preventDefault();
     setIsDraggingCover(true);
     setDragStart({
-      x: e.clientX - coverImagePosition.x,
+      x: e.clientX,
       y: e.clientY - coverImagePosition.y,
     });
   };
 
   const handleCoverMouseMove = (e: React.MouseEvent) => {
-    if (!isDraggingCover) return;
+    if (!isDraggingCover || !isRepositionMode) return;
     const newY = e.clientY - dragStart.y;
     setCoverImagePosition((prev) => ({
       ...prev,
-      y: Math.max(-200, Math.min(0, newY)),
+      y: Math.max(-200, Math.min(200, newY)),
     }));
   };
 
-  const handleCoverMouseUp = async () => {
+  const handleCoverMouseUp = () => {
     if (!isDraggingCover) return;
     setIsDraggingCover(false);
-    await updateUserCoverImagePosition(userId, coverImagePosition);
+  };
+
+  const saveRepositionAndExit = async () => {
+    const success = await updateUserCoverImagePosition(userId, coverImagePosition);
+    if (success) {
+      setOriginalCoverPosition(coverImagePosition);
+    } else {
+      console.error("Failed to save cover position");
+      setCoverImagePosition(originalCoverPosition);
+    }
+    setIsRepositionMode(false);
+    setIsDraggingCover(false);
+  };
+
+  const cancelReposition = () => {
+    setCoverImagePosition(originalCoverPosition);
+    setIsRepositionMode(false);
+    setIsDraggingCover(false);
   };
 
   const handleRemoveCover = async () => {
@@ -251,22 +285,23 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
           >
             {userProfile?.cover_image ? (
               <div
-                className={`absolute inset-0 ${isDraggingCover ? "cursor-grabbing" : "cursor-grab"}`}
+                className={`absolute inset-0 ${isRepositionMode ? (isDraggingCover ? "cursor-grabbing" : "cursor-grab") : ""}`}
                 onMouseDown={handleCoverMouseDown}
               >
                 <Image
                   src={userProfile.cover_image}
                   alt="Cover"
                   fill
-                  className="object-cover"
+                  className="object-cover select-none"
+                  draggable={false}
                   style={{
                     objectPosition: `50% ${50 + coverImagePosition.y / 4}%`,
                   }}
                 />
-                {isDraggingCover && (
-                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                    <p className="text-white font-medium">
-                      Reposition Cover Image
+                {isRepositionMode && (
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                    <p className="text-white font-medium text-lg">
+                      {isDraggingCover ? "Release to stop dragging" : "Click and drag to reposition"}
                     </p>
                   </div>
                 )}
@@ -290,35 +325,58 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 accept="image/*"
                 className="hidden"
                 onChange={handleCoverImageUpload}
-                disabled={isUploadingCover}
+                disabled={isUploadingCover || isRepositionMode}
               />
-              {userProfile?.cover_image && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="bg-black/50 hover:bg-black/70 backdrop-blur cursor-pointer"
-                  onClick={() => setIsDraggingCover(true)}
-                >
-                  <span className="flex items-center">
-                    <Camera className="w-4 h-4 mr-2" />
-                    Reposition
-                  </span>
-                </Button>
+              {isRepositionMode ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="bg-red-500/80 hover:bg-red-500 text-white backdrop-blur cursor-pointer"
+                    onClick={cancelReposition}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="bg-green-500/80 hover:bg-green-500 text-white backdrop-blur cursor-pointer"
+                    onClick={saveRepositionAndExit}
+                  >
+                    Done
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {userProfile?.cover_image && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="bg-black/50 hover:bg-black/70 backdrop-blur cursor-pointer"
+                      onClick={enterRepositionMode}
+                    >
+                      <span className="flex items-center">
+                        <Camera className="w-4 h-4 mr-2" />
+                        Reposition
+                      </span>
+                    </Button>
+                  )}
+                  <label htmlFor="cover-upload">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="bg-black/50 hover:bg-black/70 backdrop-blur cursor-pointer"
+                      disabled={isUploadingCover}
+                      asChild
+                    >
+                      <span>
+                        <Upload className="w-4 h-4 mr-2" />
+                        {isUploadingCover ? "Uploading..." : "Change Cover"}
+                      </span>
+                    </Button>
+                  </label>
+                </>
               )}
-              <label htmlFor="cover-upload">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="bg-black/50 hover:bg-black/70 backdrop-blur cursor-pointer"
-                  disabled={isUploadingCover}
-                  asChild
-                >
-                  <span>
-                    <Upload className="w-4 h-4 mr-2" />
-                    {isUploadingCover ? "Uploading..." : "Change Cover"}
-                  </span>
-                </Button>
-              </label>
             </div>
           </div>
 
