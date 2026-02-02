@@ -171,51 +171,12 @@ export function LandingPage() {
             </div>
 
             {/* Canvas preview */}
-            <div className="aspect-video bg-gradient-to-br from-black/50 to-black/80 relative">
-              {/* Simulated dot grid */}
-              <div
-                className="absolute inset-0"
-                style={{
-                  backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px)',
-                  backgroundSize: '30px 30px'
-                }}
+            <div className="aspect-video bg-gradient-to-br from-black/50 to-black/80 relative overflow-hidden">
+              <img
+                src="/images/canvas-screenshot.png"
+                alt="CXD Canvas - Experience Design Tool"
+                className="w-full h-full object-cover object-top"
               />
-
-              {/* Floating canvas elements */}
-              <div className="absolute top-1/4 left-1/4 glass-card p-4 rounded-xl w-44">
-                <div className="feature-icon w-10 h-10 mb-3">
-                  <Target className="w-5 h-5 text-violet-400" />
-                </div>
-                <p className="text-sm font-medium">Intention Core</p>
-                <p className="text-xs text-white/40 mt-1">Define your purpose</p>
-              </div>
-
-              <div className="absolute top-1/3 right-1/4 glass-card p-4 rounded-xl w-40">
-                <div className="feature-icon w-10 h-10 mb-3">
-                  <Brain className="w-5 h-5 text-cyan-400" />
-                </div>
-                <p className="text-sm font-medium">State Mapping</p>
-                <p className="text-xs text-white/40 mt-1">Map experiences</p>
-              </div>
-
-              <div className="absolute bottom-1/4 left-1/3 glass-card p-4 rounded-xl w-44">
-                <div className="feature-icon w-10 h-10 mb-3">
-                  <Layers className="w-5 h-5 text-violet-400" />
-                </div>
-                <p className="text-sm font-medium">Reality Planes</p>
-                <p className="text-xs text-white/40 mt-1">Physical to imaginal</p>
-              </div>
-
-              {/* Connection lines SVG */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                <line x1="35%" y1="35%" x2="60%" y2="40%" stroke="rgba(140, 69, 255, 0.3)" strokeWidth="1" strokeDasharray="4 4" />
-                <line x1="60%" y1="45%" x2="45%" y2="70%" stroke="rgba(0, 200, 255, 0.3)" strokeWidth="1" strokeDasharray="4 4" />
-              </svg>
-
-              {/* Center prompt */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <p className="text-white/30 text-sm">Add your screenshot at /public/images/canvas-screenshot.png</p>
-              </div>
             </div>
           </div>
         </div>
