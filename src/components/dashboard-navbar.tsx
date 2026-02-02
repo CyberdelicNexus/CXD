@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
 import { createClient } from '../../supabase/client'
+import { HypercubeLogo } from '@/components/icons/hypercube-logo'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,11 +13,11 @@ import {
 import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
 
-import { 
-  UserCircle, 
-  LogOut, 
-  Settings, 
-  HelpCircle, 
+import {
+  UserCircle,
+  LogOut,
+  Settings,
+  HelpCircle,
   Bell,
   FileText,
   PlayCircle,
@@ -46,7 +46,7 @@ function formatTimeAgo(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  
+
   if (seconds < 60) return 'Just now';
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
@@ -61,7 +61,7 @@ export default function DashboardNavbar() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
-    router.push('/sign-in')
+    router.push('/')
   }
 
   return (
@@ -69,13 +69,7 @@ export default function DashboardNavbar() {
       <div className="container mx-auto px-4 flex justify-between items-center max-w-7xl h-16">
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <Image
-              src="/images/CL Logo NL.png"
-              alt="CXD Logo"
-              width={32}
-              height={32}
-              className="w-8 h-8"
-            />
+            <HypercubeLogo size={28} />
             <span className="text-lg font-semibold text-gradient hidden sm:inline">CXD Canvas</span>
           </Link>
 
@@ -110,9 +104,9 @@ export default function DashboardNavbar() {
               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                 <span className="font-semibold text-sm">Notifications</span>
                 {unreadCount > 0 && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     className="text-xs h-6 px-2"
                     onClick={(e) => {
                       e.preventDefault();
@@ -230,7 +224,7 @@ export default function DashboardNavbar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="bg-card border-border w-48">
-              <DropdownMenuItem onClick={() => router.push('/dashboard')} className="cursor-pointer">
+              <DropdownMenuItem onClick={() => router.push('/dashboard/profile')} className="cursor-pointer">
                 <UserCircle className="w-4 h-4 mr-2" />
                 Profile
               </DropdownMenuItem>

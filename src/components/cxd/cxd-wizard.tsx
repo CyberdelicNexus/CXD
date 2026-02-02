@@ -21,7 +21,6 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import {
   ChevronRight,
@@ -350,45 +349,78 @@ export function CXDWizard() {
       );
     }
 
-    // Sensory Domains step
+    // Sensory Domains step - categorical scale
     if (step.sectionId === "sensoryDomains") {
+      const intensityLevels = [
+        { value: 0, label: "None" },
+        { value: 25, label: "Minimal" },
+        { value: 50, label: "Moderate" },
+        { value: 75, label: "Significant" },
+        { value: 100, label: "Primary" },
+      ];
+
+      const getClosestLevel = (value: number) => {
+        return intensityLevels.reduce((prev, curr) =>
+          Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+        ).value;
+      };
+
       return (
         <div className="space-y-6 w-full">
-          {SENSORY_DOMAINS.map((domain) => (
-            <div key={domain.code} className="space-y-2">
-              <div className="flex items-center justify-between">
+          {SENSORY_DOMAINS.map((domain) => {
+            const currentValue = getClosestLevel(project.sensoryDomains[domain.code]);
+            return (
+              <div key={domain.code} className="space-y-3">
                 <div>
                   <Label className="text-sm font-medium">{domain.label}</Label>
                   <p className="text-xs text-muted-foreground">
                     {domain.description}
                   </p>
                 </div>
-                <span className="text-sm font-mono text-primary">
-                  {project.sensoryDomains[domain.code]}%
-                </span>
+                <div className="flex gap-2">
+                  {intensityLevels.map((level) => (
+                    <button
+                      key={level.value}
+                      onClick={() => updateSensoryDomain(domain.code, level.value)}
+                      className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
+                        currentValue === level.value
+                          ? "bg-primary text-primary-foreground font-medium"
+                          : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {level.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <Slider
-                value={[project.sensoryDomains[domain.code]]}
-                onValueChange={([value]) =>
-                  updateSensoryDomain(domain.code, value)
-                }
-                max={100}
-                step={1}
-                className="w-full"
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
 
-    // Presence Types step
+    // Presence Types step - categorical scale
     if (step.sectionId === "presence") {
+      const presenceLevels = [
+        { value: 0, label: "None" },
+        { value: 25, label: "Minimal" },
+        { value: 50, label: "Moderate" },
+        { value: 75, label: "Significant" },
+        { value: 100, label: "Primary" },
+      ];
+
+      const getClosestLevel = (value: number) => {
+        return presenceLevels.reduce((prev, curr) =>
+          Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+        ).value;
+      };
+
       return (
         <div className="space-y-6 w-full">
-          {PRESENCE_TYPES.map((presence) => (
-            <div key={presence.code} className="space-y-2">
-              <div className="flex items-center justify-between">
+          {PRESENCE_TYPES.map((presence) => {
+            const currentValue = getClosestLevel(project.presenceTypes[presence.code]);
+            return (
+              <div key={presence.code} className="space-y-3">
                 <div>
                   <Label className="text-sm font-medium">
                     {presence.label}
@@ -397,27 +429,37 @@ export function CXDWizard() {
                     {presence.description}
                   </p>
                 </div>
-                <span className="text-sm font-mono text-primary">
-                  {project.presenceTypes[presence.code]}%
-                </span>
+                <div className="flex gap-2">
+                  {presenceLevels.map((level) => (
+                    <button
+                      key={level.value}
+                      onClick={() => updatePresenceType(presence.code, level.value)}
+                      className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
+                        currentValue === level.value
+                          ? "bg-primary text-primary-foreground font-medium"
+                          : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {level.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <Slider
-                value={[project.presenceTypes[presence.code]]}
-                onValueChange={([value]) =>
-                  updatePresenceType(presence.code, value)
-                }
-                max={100}
-                step={1}
-                className="w-full"
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
 
-    // State Mapping step
+    // State Mapping step - with examples
     if (step.sectionId === "stateMapping") {
+      const stateExamples: Record<string, string> = {
+        cognitive: "e.g., Heightened focus, expanded awareness, curiosity, clarity, creative thinking, pattern recognition...",
+        emotional: "e.g., Wonder, awe, joy, serenity, excitement, anticipation, gratitude, catharsis...",
+        somatic: "e.g., Relaxation, energization, groundedness, lightness, tingling, warmth, breath awareness...",
+        relational: "e.g., Connectedness, empathy, belonging, trust, vulnerability, presence with others...",
+      };
+
       return (
         <div className="grid grid-cols-2 gap-4 w-full">
           {STATE_QUADRANTS.map((quadrant) => (
@@ -427,7 +469,7 @@ export function CXDWizard() {
                 {quadrant.description}
               </p>
               <Textarea
-                placeholder={`Describe ${quadrant.label.toLowerCase()} states...`}
+                placeholder={stateExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} states...`}
                 value={project.stateMapping[quadrant.code]}
                 onChange={(e) =>
                   updateStateMapping(quadrant.code, e.target.value)

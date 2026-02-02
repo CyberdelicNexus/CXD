@@ -1213,14 +1213,13 @@ export function CXDCanvas() {
     return () => document.removeEventListener('mousedown', handleGlobalClick, { capture: true });
   }, []);
 
-  // Check if user is in an editing context
+  // Check if user is in an editing context (actual text editing, not just interactive elements)
   const isEditingContext = useCallback(() => {
     const target = document.activeElement as HTMLElement;
     return (
       target.tagName === "INPUT" ||
       target.tagName === "TEXTAREA" ||
       target.contentEditable === "true" ||
-      target.hasAttribute("data-no-drag") ||
       target.closest("[data-crop-mode]") !== null // Cropping mode
     );
   }, []);
