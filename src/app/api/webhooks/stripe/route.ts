@@ -1,15 +1,22 @@
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { stripe } from '@/lib/stripe';
-import { createClient } from '@supabase/supabase-js';
+import { getStripe } from '@/lib/stripe';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 
-// Use service role for webhook operations
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
+// Lazy initialization for Supabase admin client
+let supabaseAdminInstance: SupabaseClient | null = null;
+
+function getSupabaseAdmin(): SupabaseClient {
+  if (!supabaseAdminInstance) {
+    supabaseAdminInstance = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false } }
+    );
+  }
+  return supabaseAdminInstance;
+}
 
 export async function POST(request: Request) {
   const body = await request.text();
@@ -24,7 +31,7 @@ export async function POST(request: Request) {
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(
+    event = getStripe().webhooks.constructEvent(
       body,
       signature,
       process.env.STRIPE_WEBHOOK_SECRET!
@@ -98,7 +105,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   // Check if this is a one-time payment (lifetime) or subscription
   if (session.mode === 'payment') {
     // Lifetime purchase
-    const { error } = await supabaseAdmin
+    const { error } = await getSupabaseAdmin()
       .from('subscriptions')
       .upsert({
         user_id: userId,
@@ -129,7 +136,7 @@ async function handleSubscriptionChange(subscription: Stripe.Subscription) {
 
   if (!userId) {
     // Try to get from existing subscription record
-    const { data: existingSub } = await supabaseAdmin
+    const { data: existingSub } = await getSupabaseAdmin()
       .from('subscriptions')
       .select('user_id')
       .eq('stripe_customer_id', customerId)
@@ -150,7 +157,7 @@ async function handleSubscriptionChange(subscription: Stripe.Subscription) {
   // Map trial status
   const isTrialing = subscription.status === 'trialing';
 
-  const { error } = await supabaseAdmin
+  const { error } = await getSupabaseAdmin()
     .from('subscriptions')
     .upsert({
       user_id: userId,
@@ -186,7 +193,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string;
 
   // Downgrade to free plan
-  const { error } = await supabaseAdmin
+  const { error } = await getSupabaseAdmin()
     .from('subscriptions')
     .update({
       plan_id: 'free',
@@ -212,7 +219,7 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
   if (!subscriptionId) return; // One-time payments don't have subscription ID
 
   // Update subscription status to active
-  const { error } = await supabaseAdmin
+  const { error } = await getSupabaseAdmin()
     .from('subscriptions')
     .update({ status: 'active' })
     .eq('stripe_customer_id', customerId);
@@ -228,7 +235,7 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
   const customerId = invoice.customer as string;
 
   // Update subscription status
-  const { error } = await supabaseAdmin
+  const { error } = await getSupabaseAdmin()
     .from('subscriptions')
     .update({ status: 'past_due' })
     .eq('stripe_customer_id', customerId);
