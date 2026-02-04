@@ -134,7 +134,8 @@ export function useCollaboration(
 
     // Handle presence join
     channel.on('presence', { event: 'join' }, ({ key, newPresences }) => {
-      newPresences.forEach((presence: CollaboratorPresence) => {
+      newPresences.forEach((p) => {
+        const presence = p as unknown as CollaboratorPresence;
         if (presence.id !== currentUser.id) {
           options.onCollaboratorJoin?.(presence);
         }
@@ -143,7 +144,8 @@ export function useCollaboration(
 
     // Handle presence leave
     channel.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-      leftPresences.forEach((presence: CollaboratorPresence) => {
+      leftPresences.forEach((p) => {
+        const presence = p as unknown as CollaboratorPresence;
         options.onCollaboratorLeave?.(presence.id);
       });
     });

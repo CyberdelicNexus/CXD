@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ interface InviteState {
   currentEmail?: string;
 }
 
-export default function InvitePage() {
+function InvitePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
@@ -37,7 +37,7 @@ export default function InvitePage() {
 
         if (data.requiresAuth) {
           // Store token for after auth
-          sessionStorage.setItem('pendingInviteToken', token);
+          sessionStorage.setItem('pendingInviteToken', token!);
           setState({
             status: 'requiresAuth',
             canvasName: data.canvasName,
@@ -218,5 +218,24 @@ export default function InvitePage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function InvitePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-black">
+          <div className="w-full max-w-md rounded-lg border border-white/10 bg-white/5 p-8 text-center backdrop-blur-sm">
+            <Loader2 className="mx-auto h-12 w-12 animate-spin text-white/60" />
+            <h1 className="mt-4 text-xl font-semibold text-white">
+              Loading...
+            </h1>
+          </div>
+        </div>
+      }
+    >
+      <InvitePageContent />
+    </Suspense>
   );
 }
