@@ -4,11 +4,11 @@ import React, { useState, useEffect, useCallback } from "react";
 import { CXDProject } from "@/types/cxd-schema";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { useCXDStore } from "@/store/cxd-store";
+import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import {
   Target,
@@ -288,11 +288,21 @@ export function ExperienceInspectorPanel({
     updateContextStory,
     updateContextMagic,
     updateRealityPlane,
-    updateSensoryDomain,
-    updatePresenceType,
     updateStateMapping,
     updateTraitMapping,
   } = useCXDStore();
+
+  // Get collaboration sync functions for fields that need real-time sync
+  const {
+    syncSensoryDomain,
+    syncPresenceType,
+    syncStateMapping,
+    syncTraitMapping,
+    syncIntentionCore,
+    syncDesiredChange,
+    syncHumanContext,
+    syncContextMeaning,
+  } = useCollaborationContext();
 
   // Handle keyboard escape
   useEffect(() => {
@@ -547,71 +557,99 @@ export function ExperienceInspectorPanel({
           </div>
         );
 
-      case "sensoryDomains":
+      case "sensoryDomains": {
+        const intensityLevels = [
+          { value: 0, label: "None" },
+          { value: 25, label: "Minimal" },
+          { value: 50, label: "Moderate" },
+          { value: 75, label: "Significant" },
+          { value: 100, label: "Primary" },
+        ];
+        const getClosestLevel = (value: number) => {
+          return intensityLevels.reduce((prev, curr) =>
+            Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+          ).value;
+        };
         return (
           <div className="space-y-4">
-            {Object.entries(SENSORY_DOMAIN_LABELS).map(([code, label]) => (
-              <div key={code} className="space-y-2">
-                <div className="flex justify-between items-center">
+            {Object.entries(SENSORY_DOMAIN_LABELS).map(([code, label]) => {
+              const currentValue = getClosestLevel(
+                project.sensoryDomains?.[code as keyof typeof project.sensoryDomains] || 0
+              );
+              return (
+                <div key={code} className="space-y-2">
                   <Label className="text-sm font-medium">{label}</Label>
-                  <span className="text-sm text-muted-foreground">
-                    {project.sensoryDomains?.[
-                      code as keyof typeof project.sensoryDomains
-                    ] || 0}
-                    %
-                  </span>
+                  <div className="flex gap-1.5">
+                    {intensityLevels.map((level) => (
+                      <button
+                        key={level.value}
+                        onClick={() => {
+                          syncSensoryDomain(code as any, level.value);
+                          triggerSave();
+                        }}
+                        className={`flex-1 py-1.5 px-2 text-xs rounded-md transition-all ${
+                          currentValue === level.value
+                            ? "bg-primary text-primary-foreground font-medium"
+                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {level.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <Slider
-                  value={[
-                    project.sensoryDomains?.[
-                      code as keyof typeof project.sensoryDomains
-                    ] || 0,
-                  ]}
-                  onValueChange={([value]) => {
-                    updateSensoryDomain(code as any, value);
-                    triggerSave();
-                  }}
-                  max={100}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
+      }
 
-      case "presenceTypes":
+      case "presenceTypes": {
+        const presenceLevels = [
+          { value: 0, label: "None" },
+          { value: 25, label: "Minimal" },
+          { value: 50, label: "Moderate" },
+          { value: 75, label: "Significant" },
+          { value: 100, label: "Primary" },
+        ];
+        const getClosestPresenceLevel = (value: number) => {
+          return presenceLevels.reduce((prev, curr) =>
+            Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+          ).value;
+        };
         return (
           <div className="space-y-4">
-            {Object.entries(PRESENCE_TYPE_LABELS).map(([code, label]) => (
-              <div key={code} className="space-y-2">
-                <div className="flex justify-between items-center">
+            {Object.entries(PRESENCE_TYPE_LABELS).map(([code, label]) => {
+              const currentValue = getClosestPresenceLevel(
+                project.presenceTypes?.[code as keyof typeof project.presenceTypes] || 0
+              );
+              return (
+                <div key={code} className="space-y-2">
                   <Label className="text-sm font-medium">{label}</Label>
-                  <span className="text-sm text-muted-foreground">
-                    {project.presenceTypes?.[
-                      code as keyof typeof project.presenceTypes
-                    ] || 0}
-                    %
-                  </span>
+                  <div className="flex gap-1.5">
+                    {presenceLevels.map((level) => (
+                      <button
+                        key={level.value}
+                        onClick={() => {
+                          syncPresenceType(code as any, level.value);
+                          triggerSave();
+                        }}
+                        className={`flex-1 py-1.5 px-2 text-xs rounded-md transition-all ${
+                          currentValue === level.value
+                            ? "bg-primary text-primary-foreground font-medium"
+                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {level.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <Slider
-                  value={[
-                    project.presenceTypes?.[
-                      code as keyof typeof project.presenceTypes
-                    ] || 0,
-                  ]}
-                  onValueChange={([value]) => {
-                    updatePresenceType(code as any, value);
-                    triggerSave();
-                  }}
-                  max={100}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
+      }
 
       case "stateMapping":
         return (

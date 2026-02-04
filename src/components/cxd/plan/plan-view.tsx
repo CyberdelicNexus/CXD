@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { usePlanTasks } from '@/hooks/use-plan-tasks';
 import { useCXDStore } from '@/store/cxd-store';
+import { useCollaborationContext } from '@/contexts/collaboration-context';
 import type { PlanViewType, TaskFilter } from '@/types/plan-types';
 import { LayoutGrid, Table as TableIcon, Calendar, GanttChart, Filter, Settings, Plus } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
@@ -30,8 +31,8 @@ export function PlanView() {
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
   const [newTaskText, setNewTaskText] = useState('');
 
-  const addCanvasElement = useCXDStore(state => state.addCanvasElement);
   const project = useCXDStore(state => state.getCurrentProject());
+  const { syncAddElement } = useCollaborationContext();
 
   const {
     tasks,
@@ -67,7 +68,7 @@ export function PlanView() {
       },
     };
 
-    addCanvasElement(newElement);
+    syncAddElement(newElement as any);
     setNewTaskText('');
     setIsAddTaskOpen(false);
   };

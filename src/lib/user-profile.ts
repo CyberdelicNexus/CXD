@@ -40,7 +40,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 export async function uploadProfileImage(
   userId: string,
   file: File,
-  type: 'cover' | 'profile'
+  type: string
 ): Promise<string | null> {
   const supabase = createClient();
   

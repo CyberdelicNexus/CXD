@@ -28,11 +28,15 @@ import {
   Layers,
   TrendingUp,
   Calendar,
-  ChevronRight,
   Camera,
   Upload,
   Lock,
   UserPlus,
+  Pencil,
+  Users,
+  Crown,
+  ImagePlus,
+  Link2,
 } from "lucide-react";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { useRouter } from "next/navigation";
@@ -49,6 +53,7 @@ import {
 } from "@/lib/user-profile";
 import { useSubscription } from "@/hooks/use-subscription";
 import { UpgradeModal } from "@/components/upgrade-modal";
+import { CollaborationPanel } from "@/components/collaboration";
 import Image from "next/image";
 
 interface DashboardContentProps {
@@ -68,6 +73,12 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [inviteProject, setInviteProject] = useState<{ id: string; name: string } | null>(null);
+  const [renameProject, setRenameProject] = useState<{ id: string; name: string } | null>(null);
+  const [newRenameValue, setNewRenameValue] = useState("");
+  const [uploadingCoverFor, setUploadingCoverFor] = useState<string | null>(null);
+  const [coverImageProject, setCoverImageProject] = useState<{ id: string; name: string } | null>(null);
+  const [coverImageUrl, setCoverImageUrl] = useState("");
 
   // Subscription state
   const {
@@ -103,7 +114,20 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     const loadUserAndProjects = async () => {
       await flushPendingSave();
       await ensureUserProfile(userId, userEmail);
-      const userProjects = await fetchUserProjects(userId);
+
+      // Fetch projects via API route (uses admin client to bypass RLS)
+      let userProjects: any[] = [];
+      try {
+        const response = await fetch('/api/projects');
+        const data = await response.json();
+        if (data.projects) {
+          userProjects = data.projects;
+        }
+      } catch (error) {
+        console.error('Error fetching projects from API:', error);
+        // Fallback to client-side fetch
+        userProjects = await fetchUserProjects(userId);
+      }
 
       const backup = getLocalBackup();
       if (backup && backup.project && backup.project.id) {
@@ -265,6 +289,36 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     setCoverImagePosition(originalCoverPosition);
     setIsRepositionMode(false);
     setIsDraggingCover(false);
+  };
+
+  // Canvas cover image upload handler
+  const handleCanvasCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>, projectId: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingCoverFor(projectId);
+    try {
+      const imageUrl = await uploadProfileImage(userId, file, `canvas-cover-${projectId}`);
+      if (imageUrl) {
+        const project = projects.find(p => p.id === projectId);
+        if (project) {
+          const updatedProject = {
+            ...project,
+            coverImage: imageUrl,
+            updatedAt: new Date().toISOString()
+          };
+          const updatedProjects = projects.map(p =>
+            p.id === projectId ? updatedProject : p
+          );
+          setProjects(updatedProjects);
+          await saveProject(updatedProject);
+        }
+      }
+    } catch (error) {
+      console.error("Error uploading canvas cover:", error);
+    } finally {
+      setUploadingCoverFor(null);
+    }
   };
 
   // Get plan badge info
@@ -486,56 +540,139 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
               )}
 
               {!isLoading && projects.length > 0 && (
-                <div className="space-y-3">
-                  {projects.map((project) => (
-                    <div
-                      key={project.id}
-                      className="flex items-center justify-between p-4 rounded-lg bg-gradient-to-r from-violet-950/40 to-purple-950/30 hover:from-violet-900/50 hover:to-purple-900/40 transition-all cursor-pointer group border border-violet-500/10 hover:border-violet-500/30"
-                      onClick={() => handleOpenProject(project.id)}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-violet-600/30 to-purple-600/20 flex items-center justify-center border border-violet-500/20">
-                          <HypercubeLogo size={28} className="opacity-80" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {projects.map((project) => {
+                    const isOwner = project.ownerId === userId;
+                    const coverImage = (project as any).coverImage;
+                    const isUploading = uploadingCoverFor === project.id;
+
+                    return (
+                      <div
+                        key={project.id}
+                        className="relative aspect-square rounded-xl bg-gradient-to-br from-violet-900/60 via-purple-800/50 to-indigo-900/60 hover:from-violet-800/70 hover:via-purple-700/60 hover:to-indigo-800/70 transition-all cursor-pointer group border border-violet-500/20 hover:border-violet-400/40 overflow-hidden shadow-lg hover:shadow-violet-500/20"
+                        onClick={() => handleOpenProject(project.id)}
+                      >
+                        {/* Cover Image - using img tag to support any external URL */}
+                        {coverImage && (
+                          <div className="absolute inset-0">
+                            <img
+                              src={coverImage}
+                              alt={project.name}
+                              className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
+                            />
+                          </div>
+                        )}
+
+                        {/* Default Hypercube Logo - positioned above gradient */}
+                        {!coverImage && (
+                          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                            <div className="opacity-40 group-hover:opacity-60 transition-opacity">
+                              <Image
+                                src="/images/hypercube-logo.webp"
+                                alt="Hypercube"
+                                width={100}
+                                height={100}
+                                className="object-contain drop-shadow-lg"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Owner/Collaborator Badge */}
+                        <div className="absolute top-3 right-3">
+                          {isOwner ? (
+                            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-400 backdrop-blur-sm">
+                              <Crown className="w-3 h-3" />
+                              <span className="text-[10px] font-medium">Owner</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 backdrop-blur-sm">
+                              <Users className="w-3 h-3" />
+                              <span className="text-[10px] font-medium">Collaborator</span>
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <h4 className="font-medium text-white">{project.name}</h4>
-                          <div className="flex items-center gap-2 text-sm text-white/50">
+
+                        {/* Project Name - Top */}
+                        <div className="absolute top-3 left-3 right-16">
+                          <h4 className="font-semibold text-white text-lg truncate group-hover:text-violet-200 transition-colors drop-shadow-md">
+                            {project.name}
+                          </h4>
+                          <div className="flex items-center gap-1 text-xs text-white/50 mt-1">
                             <Clock className="w-3 h-3" />
-                            <span>Updated {formatDate(project.updatedAt)}</span>
+                            <span>{formatDate(project.updatedAt)}</span>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons - Bottom */}
+                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* Cover Image Button - Opens Dialog */}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="w-8 h-8 bg-white/10 hover:bg-emerald-500/30 text-white/70 hover:text-white border border-white/10 hover:border-emerald-500/30"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setCoverImageProject({ id: project.id, name: project.name });
+                                setCoverImageUrl("");
+                              }}
+                              title="Add Cover Image"
+                            >
+                              <ImagePlus className="w-4 h-4" />
+                            </Button>
+
+                            {isOwner && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-8 h-8 bg-white/10 hover:bg-violet-500/30 text-white/70 hover:text-white border border-white/10 hover:border-violet-500/30"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await saveProject(project);
+                                  setInviteProject({ id: project.id, name: project.name });
+                                }}
+                                title="Invite Collaborators"
+                              >
+                                <UserPlus className="w-4 h-4" />
+                              </Button>
+                            )}
+
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="w-8 h-8 bg-white/10 hover:bg-blue-500/30 text-white/70 hover:text-white border border-white/10 hover:border-blue-500/30"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRenameProject({ id: project.id, name: project.name });
+                                setNewRenameValue(project.name);
+                              }}
+                              title="Rename"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+
+                            {isOwner && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-8 h-8 bg-white/10 hover:bg-red-500/30 text-white/70 hover:text-red-400 border border-white/10 hover:border-red-500/30"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setProjectToDelete(project.id);
+                                  setDeleteConfirmOpen(true);
+                                }}
+                                title="Delete"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="opacity-0 group-hover:opacity-100 transition-opacity text-white/50 hover:text-violet-400"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // TODO: Implement share/invite functionality
-                            alert('Share & Invite coming soon!');
-                          }}
-                          title="Share & Invite"
-                        >
-                          <UserPlus className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="opacity-0 group-hover:opacity-100 transition-opacity text-white/50 hover:text-red-400"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setProjectToDelete(project.id);
-                            setDeleteConfirmOpen(true);
-                          }}
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                        <ChevronRight className="w-5 h-5 text-white/30 group-hover:text-white/60 transition-colors" />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -706,6 +843,178 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Rename Dialog */}
+      <Dialog open={!!renameProject} onOpenChange={(open) => { if (!open) { setRenameProject(null); setNewRenameValue(""); } }}>
+        <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle>Rename Project</DialogTitle>
+            <DialogDescription className="text-white/60">
+              Enter a new name for your project
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-white/70">Project Name</Label>
+              <Input
+                value={newRenameValue}
+                onChange={(e) => setNewRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newRenameValue.trim() && renameProject) {
+                    const updatedProjects = projects.map((p) =>
+                      p.id === renameProject.id
+                        ? { ...p, name: newRenameValue.trim(), updatedAt: new Date().toISOString() }
+                        : p
+                    );
+                    setProjects(updatedProjects);
+                    const updatedProject = updatedProjects.find((p) => p.id === renameProject.id);
+                    if (updatedProject) saveProject(updatedProject);
+                    setRenameProject(null);
+                    setNewRenameValue("");
+                  }
+                }}
+                placeholder="Enter project name..."
+                className="bg-white/5 border-white/10 text-white placeholder:text-white/30"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button variant="ghost" onClick={() => { setRenameProject(null); setNewRenameValue(""); }} className="text-white/60 hover:text-white">
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (newRenameValue.trim() && renameProject) {
+                    const updatedProjects = projects.map((p) =>
+                      p.id === renameProject.id
+                        ? { ...p, name: newRenameValue.trim(), updatedAt: new Date().toISOString() }
+                        : p
+                    );
+                    setProjects(updatedProjects);
+                    const updatedProject = updatedProjects.find((p) => p.id === renameProject.id);
+                    if (updatedProject) saveProject(updatedProject);
+                    setRenameProject(null);
+                    setNewRenameValue("");
+                  }
+                }}
+                className="btn-primary-glow"
+                disabled={!newRenameValue.trim()}
+              >
+                <Pencil className="w-4 h-4 mr-2" />
+                Rename
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cover Image Dialog */}
+      <Dialog open={!!coverImageProject} onOpenChange={(open) => { if (!open) { setCoverImageProject(null); setCoverImageUrl(""); } }}>
+        <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle>Add Cover Image</DialogTitle>
+            <DialogDescription className="text-white/60">
+              Upload an image or paste a URL for your canvas cover
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {/* Upload Option */}
+            <div className="space-y-2">
+              <Label className="text-white/70">Upload Image</Label>
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  id="canvas-cover-dialog-upload"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    if (coverImageProject) {
+                      await handleCanvasCoverUpload(e, coverImageProject.id);
+                      setCoverImageProject(null);
+                      setCoverImageUrl("");
+                    }
+                  }}
+                  disabled={uploadingCoverFor === coverImageProject?.id}
+                />
+                <Button
+                  variant="outline"
+                  className="w-full bg-white/5 border-white/10 text-white hover:bg-white/10"
+                  onClick={() => document.getElementById('canvas-cover-dialog-upload')?.click()}
+                  disabled={uploadingCoverFor === coverImageProject?.id}
+                >
+                  {uploadingCoverFor === coverImageProject?.id ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                  ) : (
+                    <Upload className="w-4 h-4 mr-2" />
+                  )}
+                  {uploadingCoverFor === coverImageProject?.id ? "Uploading..." : "Choose File"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-white/10" />
+              <span className="text-white/40 text-xs">or</span>
+              <div className="flex-1 h-px bg-white/10" />
+            </div>
+
+            {/* URL Option */}
+            <div className="space-y-2">
+              <Label className="text-white/70">Image URL</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={coverImageUrl}
+                  onChange={(e) => setCoverImageUrl(e.target.value)}
+                  placeholder="https://example.com/image.jpg"
+                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30"
+                />
+                <Button
+                  onClick={async () => {
+                    if (coverImageUrl.trim() && coverImageProject) {
+                      const project = projects.find(p => p.id === coverImageProject.id);
+                      if (project) {
+                        const updatedProject = {
+                          ...project,
+                          coverImage: coverImageUrl.trim(),
+                          updatedAt: new Date().toISOString()
+                        };
+                        const updatedProjects = projects.map(p =>
+                          p.id === coverImageProject.id ? updatedProject : p
+                        );
+                        setProjects(updatedProjects);
+                        await saveProject(updatedProject);
+                      }
+                      setCoverImageProject(null);
+                      setCoverImageUrl("");
+                    }
+                  }}
+                  className="btn-primary-glow"
+                  disabled={!coverImageUrl.trim()}
+                >
+                  <Link2 className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <Button variant="ghost" onClick={() => { setCoverImageProject(null); setCoverImageUrl(""); }} className="text-white/60 hover:text-white">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Collaboration Panel for Invites */}
+      {inviteProject && (
+        <CollaborationPanel
+          canvasId={inviteProject.id}
+          canvasName={inviteProject.name}
+          isOwner={true}
+          onlineCollaborators={[]}
+          onClose={() => setInviteProject(null)}
+        />
+      )}
 
       {/* Footer */}
       <footer className="relative z-10 py-8 px-4 border-t border-white/10 mt-12">

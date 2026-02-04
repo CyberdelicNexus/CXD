@@ -2,6 +2,7 @@
 
 import { useMemo, useCallback } from 'react';
 import { useCXDStore } from '@/store/cxd-store';
+import { useCollaborationContext } from '@/contexts/collaboration-context';
 import type { CanvasElement, HypercubeFaceTag } from '@/types/canvas-elements';
 import type { 
   TaskProjection, 
@@ -79,8 +80,10 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   
   // Get canvas elements from store
   const project = useCXDStore(state => state.getCurrentProject());
-  const updateCanvasElement = useCXDStore(state => state.updateCanvasElement);
   const setViewMode = useCXDStore(state => state.setViewMode);
+
+  // Use collaboration context for synced updates
+  const { syncUpdateElement } = useCollaborationContext();
   const setCanvasViewMode = useCXDStore(state => state.setCanvasViewMode);
   const setActiveBoardId = useCXDStore(state => state.setActiveBoardId);
   const highlightElementBriefly = useCXDStore(state => state.highlightElementBriefly);
@@ -143,9 +146,9 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     // Find and update the source element
     const element = allElements.find(el => el.id === taskId);
     if (element && 'content' in element) {
-      updateCanvasElement(taskId, { content: newContent } as Partial<CanvasElement>);
+      syncUpdateElement(taskId, { content: newContent } as Partial<CanvasElement>);
     }
-  }, [tasks, allElements, updateCanvasElement]);
+  }, [tasks, allElements, syncUpdateElement]);
   
   // Update task status
   const updateTaskStatus = useCallback((taskId: string, status: TaskStatus) => {
@@ -158,8 +161,8 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     
     const newMetadata = createTaskMetadataUpdate(existingMetadata, { status });
     
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+  }, [allElements, syncUpdateElement]);
   
   // Update task priority
   const updateTaskPriority = useCallback((taskId: string, priority: TaskPriority) => {
@@ -172,8 +175,8 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     
     const newMetadata = createTaskMetadataUpdate(existingMetadata, { priority });
     
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+  }, [allElements, syncUpdateElement]);
   
   // Update task due date
   const updateTaskDueDate = useCallback((taskId: string, dueDate: string | undefined) => {
@@ -186,8 +189,8 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     
     const newMetadata = createTaskMetadataUpdate(existingMetadata, { dueDate });
     
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+  }, [allElements, syncUpdateElement]);
   
   // Update any task metadata
   const updateTaskMetadata = useCallback((taskId: string, updates: Partial<TaskProjection>) => {
@@ -212,8 +215,8 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     
     const newMetadata = createTaskMetadataUpdate(existingMetadata, metadataUpdates);
     
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+  }, [allElements, syncUpdateElement]);
   
   // Navigate to task in canvas
   const navigateToTask = useCallback((taskId: string) => {

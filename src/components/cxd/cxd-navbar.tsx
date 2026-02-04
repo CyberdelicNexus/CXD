@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
@@ -20,6 +21,7 @@ import {
   FolderOpen,
   Check,
   ListTodo,
+  Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -34,6 +36,9 @@ import { createNotification, NotificationType } from "@/lib/notifications";
 import { createClient } from "@/../../supabase/client";
 import { useNotifications } from "@/hooks/use-notifications";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCollaboration, useCanvasPermissions } from "@/hooks/use-collaboration";
+import { CollaboratorAvatars, ConnectionStatus } from "@/components/collaboration";
+import { CollaborationPanel } from "@/components/collaboration";
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
   info: <Info className="w-4 h-4 text-blue-400" />,
@@ -71,6 +76,11 @@ export function CXDNavbar() {
   const { toast } = useToast();
   const project = getCurrentProject();
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll } = useNotifications();
+
+  // Collaboration state
+  const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
+  const { collaborators, isConnected } = useCollaboration(project?.id || null);
+  const { role: canvasRole, permissions } = useCanvasPermissions(project?.id || null);
 
   const handleExportJSON = async () => {
     if (!project) return;
@@ -279,6 +289,34 @@ export function CXDNavbar() {
 
           {project && viewMode !== "home" && (
             <>
+              {/* Collaboration section */}
+              <div className="flex items-center gap-2 mr-2">
+                {/* Online collaborators */}
+                {collaborators.length > 0 && (
+                  <CollaboratorAvatars
+                    collaborators={collaborators}
+                    maxVisible={3}
+                    onClick={() => setShowCollaborationPanel(true)}
+                  />
+                )}
+
+                {/* Collaborators button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowCollaborationPanel(true)}
+                  className="text-muted-foreground hover:text-foreground relative"
+                  title="Collaborators"
+                >
+                  <Users className="w-4 h-4" />
+                  {collaborators.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-green-500 text-[10px] flex items-center justify-center text-white font-medium">
+                      {collaborators.length}
+                    </span>
+                  )}
+                </Button>
+              </div>
+
               <Button
                 variant="ghost"
                 size="icon"
@@ -435,6 +473,17 @@ export function CXDNavbar() {
           </Button>
         </div>
       </div>
+
+      {/* Collaboration Panel Modal */}
+      {showCollaborationPanel && project && (
+        <CollaborationPanel
+          canvasId={project.id}
+          canvasName={project.name}
+          isOwner={canvasRole === 'owner'}
+          onlineCollaborators={collaborators}
+          onClose={() => setShowCollaborationPanel(false)}
+        />
+      )}
     </nav>
   );
 }

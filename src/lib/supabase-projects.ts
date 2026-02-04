@@ -16,18 +16,52 @@ export interface DbCXDProject {
 
 export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
+
+  // Fetch owned projects
+  const { data: ownedData, error: ownedError } = await supabase
     .from('cxd_projects')
     .select('*')
     .eq('owner_id', userId)
     .order('updated_at', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching projects:', error);
-    return [];
+  if (ownedError) {
+    console.error('Error fetching owned projects:', ownedError);
   }
 
-  return (data || []).map((row: DbCXDProject) => {
+  // Fetch projects where user is a collaborator
+  const { data: collabData, error: collabError } = await supabase
+    .from('canvas_collaborators')
+    .select('canvas_id')
+    .eq('user_id', userId);
+
+  if (collabError) {
+    console.error('Error fetching collaborator records:', collabError);
+  }
+
+  // Get the canvas IDs where user is a collaborator
+  const collabCanvasIds = (collabData || []).map(c => c.canvas_id);
+
+  // Fetch collaborated projects (excluding ones the user owns to avoid duplicates)
+  let collaboratedProjects: DbCXDProject[] = [];
+  if (collabCanvasIds.length > 0) {
+    const { data: collabProjects, error: collabProjectsError } = await supabase
+      .from('cxd_projects')
+      .select('*')
+      .in('id', collabCanvasIds)
+      .neq('owner_id', userId) // Exclude owned projects to avoid duplicates
+      .order('updated_at', { ascending: false });
+
+    if (collabProjectsError) {
+      console.error('Error fetching collaborated projects:', collabProjectsError);
+    } else {
+      collaboratedProjects = collabProjects || [];
+    }
+  }
+
+  // Combine owned and collaborated projects
+  const allProjects = [...(ownedData || []), ...collaboratedProjects];
+
+  return allProjects.map((row: DbCXDProject) => {
     // Full project data is stored in project_data, merge with top-level metadata
     const projectData = row.project_data || {};
     return {
@@ -48,13 +82,17 @@ export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
 export async function saveProject(project: CXDProject): Promise<boolean> {
   // Skip saving if ownerId is not a valid UUID (e.g., 'local-user')
   if (!project.ownerId || project.ownerId === 'local-user' || !isValidUUID(project.ownerId)) {
+    console.warn('[saveProject] Skipping save - invalid ownerId:', project.ownerId);
     return false;
   }
-  
+
   // Skip saving if project id is not valid UUID
   if (!project.id || !isValidUUID(project.id)) {
+    console.warn('[saveProject] Skipping save - invalid project id:', project.id);
     return false;
   }
+
+  console.log('[saveProject] Saving project:', project.id, 'Owner:', project.ownerId);
   
   const supabase = createClient();
   
@@ -86,11 +124,13 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
     const msg = String((error as any)?.message ?? '');
     const details = String((error as any)?.details ?? '');
     if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
+      console.warn('[saveProject] Network error - Failed to fetch');
       return false;
     }
-    console.error('Error saving project:', error);
+    console.error('[saveProject] Error saving project:', error);
     return false;
   }
+  console.log('[saveProject] Successfully saved project:', project.id);
   return true;
 }
 

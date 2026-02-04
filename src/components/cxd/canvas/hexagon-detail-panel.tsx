@@ -1,6 +1,7 @@
 "use client";
 
 import { useCXDStore } from "@/store/cxd-store";
+import { useCollaborationContext } from "@/contexts/collaboration-context";
 import {
   CXDSectionId,
   CXD_SECTIONS,
@@ -109,8 +110,6 @@ export function HexagonDetailPanel({
     updateHumanAudienceNeeds,
     updateHumanAudienceDesires,
     updateHumanUserRole,
-    updateSensoryDomain,
-    updatePresenceType,
     updateExperienceFlowEngagement,
     updateExperienceFlowNarrative,
     updateExperienceFlowIntent,
@@ -121,6 +120,9 @@ export function HexagonDetailPanel({
     setCanvasZoom,
     highlightElementBriefly,
   } = useCXDStore();
+
+  // Get collaboration sync functions for fields that need real-time sync
+  const { syncSensoryDomain, syncPresenceType } = useCollaborationContext();
 
   const project = getCurrentProject();
   const section = CXD_SECTIONS.find((s) => s.id === sectionId);
@@ -333,15 +335,28 @@ export function HexagonDetailPanel({
           </div>
         );
 
-      case "sensoryDomains":
+      case "sensoryDomains": {
+        const intensityLevels = [
+          { value: 0, label: "None" },
+          { value: 25, label: "Minimal" },
+          { value: 50, label: "Moderate" },
+          { value: 75, label: "Significant" },
+          { value: 100, label: "Primary" },
+        ];
+        const getClosestLevel = (value: number) => {
+          return intensityLevels.reduce((prev, curr) =>
+            Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+          ).value;
+        };
         return (
           <div className="space-y-6">
             <p className="text-xs text-muted-foreground">
               Define the intensity of each sensory modality.
             </p>
-            {SENSORY_DOMAINS.map((domain) => (
-              <div key={domain.code} className="space-y-2">
-                <div className="flex items-center justify-between">
+            {SENSORY_DOMAINS.map((domain) => {
+              const currentValue = getClosestLevel(project.sensoryDomains[domain.code]);
+              return (
+                <div key={domain.code} className="space-y-3">
                   <div>
                     <Label className="text-sm font-semibold">
                       {domain.label}
@@ -350,33 +365,50 @@ export function HexagonDetailPanel({
                       {domain.description}
                     </p>
                   </div>
-                  <span className="text-lg font-mono text-primary">
-                    {project.sensoryDomains[domain.code]}%
-                  </span>
+                  <div className="flex gap-2">
+                    {intensityLevels.map((level) => (
+                      <button
+                        key={level.value}
+                        onClick={() => syncSensoryDomain(domain.code, level.value)}
+                        className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
+                          currentValue === level.value
+                            ? "bg-primary text-primary-foreground font-medium"
+                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {level.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <Slider
-                  value={[project.sensoryDomains[domain.code]]}
-                  onValueChange={([value]) =>
-                    updateSensoryDomain(domain.code, value)
-                  }
-                  max={100}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
+      }
 
-      case "presence":
+      case "presence": {
+        const presenceLevels = [
+          { value: 0, label: "None" },
+          { value: 25, label: "Minimal" },
+          { value: 50, label: "Moderate" },
+          { value: 75, label: "Significant" },
+          { value: 100, label: "Primary" },
+        ];
+        const getClosestPresenceLevel = (value: number) => {
+          return presenceLevels.reduce((prev, curr) =>
+            Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+          ).value;
+        };
         return (
           <div className="space-y-6">
             <p className="text-xs text-muted-foreground">
               Configure the types of presence you want to cultivate.
             </p>
-            {PRESENCE_TYPES.map((presence) => (
-              <div key={presence.code} className="space-y-2">
-                <div className="flex items-center justify-between">
+            {PRESENCE_TYPES.map((presence) => {
+              const currentValue = getClosestPresenceLevel(project.presenceTypes[presence.code]);
+              return (
+                <div key={presence.code} className="space-y-3">
                   <div>
                     <Label className="text-sm font-semibold">
                       {presence.label}
@@ -385,23 +417,27 @@ export function HexagonDetailPanel({
                       {presence.description}
                     </p>
                   </div>
-                  <span className="text-lg font-mono text-primary">
-                    {project.presenceTypes[presence.code]}%
-                  </span>
+                  <div className="flex gap-2">
+                    {presenceLevels.map((level) => (
+                      <button
+                        key={level.value}
+                        onClick={() => syncPresenceType(presence.code, level.value)}
+                        className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
+                          currentValue === level.value
+                            ? "bg-primary text-primary-foreground font-medium"
+                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {level.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <Slider
-                  value={[project.presenceTypes[presence.code]]}
-                  onValueChange={([value]) =>
-                    updatePresenceType(presence.code, value)
-                  }
-                  max={100}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
+      }
 
       case "experienceFlow":
         return (

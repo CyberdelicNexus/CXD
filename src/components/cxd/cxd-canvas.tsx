@@ -25,6 +25,8 @@ import {
   getNearestAnchor,
   CanvasEdge,
 } from "@/types/canvas-elements";
+import { useCollaboration } from "@/hooks/use-collaboration";
+import { CollaboratorCursors } from "@/components/collaboration";
 
 // Constants for zoom limits
 const MIN_ZOOM = 0.1;
@@ -84,6 +86,160 @@ export function CXDCanvas() {
     canRedo,
     highlightedElementId,
   } = useCXDStore();
+
+  const project = getCurrentProject();
+
+  // Handle remote canvas updates from collaborators
+  const handleRemoteUpdate = useCallback((update: any) => {
+    console.log('[Collab] Received remote update:', update.type);
+
+    switch (update.type) {
+      case 'element_add':
+        if (update.element) {
+          addCanvasElement(update.element);
+        }
+        break;
+      case 'element_update':
+        if (update.elementId && update.changes) {
+          updateCanvasElement(update.elementId, update.changes);
+        }
+        break;
+      case 'element_delete':
+        if (update.elementId) {
+          removeCanvasElement(update.elementId);
+        }
+        break;
+      case 'edge_add':
+        if (update.edge) {
+          addCanvasEdge(update.edge);
+        }
+        break;
+      case 'edge_delete':
+        if (update.edgeId) {
+          removeCanvasEdge(update.edgeId);
+        }
+        break;
+      case 'edge_update':
+        if (update.edgeId && update.edgeChanges) {
+          updateCanvasEdge(update.edgeId, update.edgeChanges);
+        }
+        break;
+      case 'container_move':
+        // Handle container movement with all children
+        if (update.childUpdates) {
+          update.childUpdates.forEach((u: { elementId: string; changes: Record<string, unknown> }) => {
+            updateCanvasElement(u.elementId, u.changes);
+          });
+        }
+        break;
+      case 'state_sync':
+        // Full state sync from undo/redo - update all elements and edges
+        if (update.elements && update.edges) {
+          // Remove all current elements and edges, then add the synced ones
+          const currentElements = getCanvasElements();
+          const currentEdges = getCanvasEdges();
+
+          // Remove elements that don't exist in the synced state
+          currentElements.forEach(el => {
+            if (!update.elements.find((e: any) => e.id === el.id)) {
+              removeCanvasElement(el.id);
+            }
+          });
+
+          // Remove edges that don't exist in the synced state
+          currentEdges.forEach(edge => {
+            if (!update.edges.find((e: any) => e.id === edge.id)) {
+              removeCanvasEdge(edge.id);
+            }
+          });
+
+          // Add or update elements from synced state
+          update.elements.forEach((el: any) => {
+            const existing = currentElements.find(e => e.id === el.id);
+            if (existing) {
+              updateCanvasElement(el.id, el);
+            } else {
+              addCanvasElement(el);
+            }
+          });
+
+          // Add edges that don't exist
+          update.edges.forEach((edge: any) => {
+            const existing = currentEdges.find(e => e.id === edge.id);
+            if (!existing) {
+              addCanvasEdge(edge);
+            }
+          });
+        }
+        break;
+    }
+  }, [addCanvasElement, updateCanvasElement, removeCanvasElement, addCanvasEdge, removeCanvasEdge, getCanvasElements, getCanvasEdges]);
+
+  // Collaboration - realtime cursors and presence
+  const { collaborators, updateCursor, clearCursor, broadcastUpdate } = useCollaboration(
+    project?.id || null,
+    { onRemoteUpdate: handleRemoteUpdate }
+  );
+
+  // Wrapper functions that broadcast changes to collaborators
+  const syncAddElement = useCallback((element: CanvasElement) => {
+    addCanvasElement(element);
+    broadcastUpdate({ type: 'element_add', element });
+  }, [addCanvasElement, broadcastUpdate]);
+
+  const syncUpdateElement = useCallback((elementId: string, updates: Partial<CanvasElement>) => {
+    updateCanvasElement(elementId, updates);
+    broadcastUpdate({ type: 'element_update', elementId, changes: updates });
+  }, [updateCanvasElement, broadcastUpdate]);
+
+  const syncRemoveElement = useCallback((elementId: string) => {
+    removeCanvasElement(elementId);
+    broadcastUpdate({ type: 'element_delete', elementId });
+  }, [removeCanvasElement, broadcastUpdate]);
+
+  const syncAddEdge = useCallback((edge: CanvasEdge) => {
+    addCanvasEdge(edge);
+    broadcastUpdate({ type: 'edge_add', edge });
+  }, [addCanvasEdge, broadcastUpdate]);
+
+  const syncRemoveEdge = useCallback((edgeId: string) => {
+    removeCanvasEdge(edgeId);
+    broadcastUpdate({ type: 'edge_delete', edgeId });
+  }, [removeCanvasEdge, broadcastUpdate]);
+
+  const syncUpdateEdge = useCallback((edgeId: string, changes: Partial<CanvasEdge>) => {
+    updateCanvasEdge(edgeId, changes);
+    broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
+  }, [updateCanvasEdge, broadcastUpdate]);
+
+  // Sync container movement with all children
+  const syncMoveContainerWithChildren = useCallback((containerId: string, deltaX: number, deltaY: number) => {
+    // Get all elements that will be affected (container + children)
+    const allElements = getCanvasElements();
+    const container = allElements.find(el => el.id === containerId);
+    const children = allElements.filter(el => el.containerId === containerId);
+
+    // Move the container and children locally
+    moveContainerWithChildren(containerId, deltaX, deltaY);
+
+    // Broadcast updates for container and all children
+    const childUpdates = [
+      { elementId: containerId, changes: { x: (container?.x || 0) + deltaX, y: (container?.y || 0) + deltaY } },
+      ...children.map(child => ({
+        elementId: child.id,
+        changes: { x: child.x + deltaX, y: child.y + deltaY }
+      }))
+    ];
+
+    broadcastUpdate({ type: 'container_move', containerId, childUpdates });
+  }, [moveContainerWithChildren, getCanvasElements, broadcastUpdate]);
+
+  // Broadcast full state sync after undo/redo
+  const syncAfterUndoRedo = useCallback(() => {
+    const elements = getCanvasElements();
+    const edges = getCanvasEdges();
+    broadcastUpdate({ type: 'state_sync', elements, edges });
+  }, [getCanvasElements, getCanvasEdges, broadcastUpdate]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
@@ -176,7 +332,6 @@ export function CXDCanvas() {
   // Active tool state (lifted from toolkit for line layer integration)
   const [activeTool, setActiveTool] = useState<CanvasElementType | null>(null);
 
-  const project = getCurrentProject();
   const canvasElements = getCanvasElements();
   const canvasEdges = getCanvasEdges();
 
@@ -206,7 +361,7 @@ export function CXDCanvas() {
         surface: activeSurface,
       };
 
-      addCanvasElement(newLine);
+      syncAddElement(newLine);
       // Select the newly created line
       setSelectedElementId(newLine.id);
       setSelectedElementIds(new Set([newLine.id]));
@@ -283,6 +438,14 @@ export function CXDCanvas() {
 
   const handleCanvasMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      // Track cursor position for collaborators
+      if (containerRef.current && updateCursor) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const cursorX = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
+        const cursorY = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+        updateCursor(cursorX, cursorY);
+      }
+
       if (isMarqueeSelecting && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
@@ -323,9 +486,9 @@ export function CXDCanvas() {
             if (el) {
               const offset = dragOffsets.get(id) || { x: 0, y: 0 };
               if (el.type === "container") {
-                moveContainerWithChildren(id, deltaX, deltaY);
+                syncMoveContainerWithChildren(id, deltaX, deltaY);
               } else {
-                updateCanvasElement(id, {
+                syncUpdateElement(id, {
                   x: el.x + deltaX,
                   y: el.y + deltaY,
                 });
@@ -415,9 +578,9 @@ export function CXDCanvas() {
           if (element) {
             // If it's a container, move children too
             if (element.type === "container") {
-              moveContainerWithChildren(draggingElement, deltaX, deltaY);
+              syncMoveContainerWithChildren(draggingElement, deltaX, deltaY);
             } else {
-              updateCanvasElement(draggingElement, {
+              syncUpdateElement(draggingElement, {
                 x: element.x + deltaX,
                 y: element.y + deltaY,
               });
@@ -551,7 +714,7 @@ export function CXDCanvas() {
         const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
         const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
 
-        updateCanvasEdge(draggingBendHandle, {
+        syncUpdateEdge(draggingBendHandle, {
           bend: { x, y },
         });
       }
@@ -578,6 +741,7 @@ export function CXDCanvas() {
       removeNodeFromContainer,
       canvasEdges,
       updateCanvasEdge,
+      updateCursor,
     ],
   );
 
@@ -660,7 +824,7 @@ export function CXDCanvas() {
             },
           };
           console.log("[CONNECTOR] Creating edge:", newEdge);
-          addCanvasEdge(newEdge);
+          syncAddEdge(newEdge);
         }
       }
 
@@ -679,6 +843,22 @@ export function CXDCanvas() {
     // IMPORTANT: Always clear draggingElement on canvas mouse up to prevent
     // the element from getting "stuck" to the cursor on quick click/release
     if (draggingElement) {
+      // Broadcast the final position of dragged element(s) to collaborators
+      if (selectedElementIds.size > 0) {
+        // Multi-select: broadcast all selected elements
+        selectedElementIds.forEach((id) => {
+          const el = canvasElements.find((e) => e.id === id);
+          if (el) {
+            broadcastUpdate({ type: 'element_update', elementId: id, changes: { x: el.x, y: el.y } });
+          }
+        });
+      } else {
+        // Single element drag
+        const el = canvasElements.find((e) => e.id === draggingElement);
+        if (el) {
+          broadcastUpdate({ type: 'element_update', elementId: draggingElement, changes: { x: el.x, y: el.y } });
+        }
+      }
       setDraggingElement(null);
       setDropTargetBoardId(null);
       setDropTargetContainerId(null);
@@ -699,6 +879,8 @@ export function CXDCanvas() {
     activeSurface,
     addCanvasEdge,
     draggingElement,
+    selectedElementIds,
+    broadcastUpdate,
   ]);
 
   // Handle element creation from toolkit (board-scoped)
@@ -829,12 +1011,13 @@ export function CXDCanvas() {
           return;
       }
 
-      addCanvasElement(newElement);
+      syncAddElement(newElement);
       setSelectedElementId(newElement.id);
     },
     [
       canvasElements,
       addCanvasElement,
+      syncAddElement,
       createBoard,
       activeBoardId,
       activeSurface,
@@ -861,7 +1044,7 @@ export function CXDCanvas() {
           x: element.x + 20,
           y: element.y + 20,
         };
-        addCanvasElement(newElement);
+        syncAddElement(newElement);
         setSelectedElementId(newElement.id);
         setSelectedElementIds(new Set([newElement.id]));
         setDraggingElement(newElement.id);
@@ -889,7 +1072,7 @@ export function CXDCanvas() {
       setDragElementStart({ x: e.clientX, y: e.clientY });
       setSelectedElementId(elementId);
     },
-    [canvasElements, selectedElementIds, addCanvasElement, pushCanvasHistory],
+    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory],
   );
 
   // Handle element drag end
@@ -1066,7 +1249,7 @@ export function CXDCanvas() {
             surface: activeSurface,
           };
 
-          addCanvasElement(newElement);
+          syncAddElement(newElement);
         }
       }
 
@@ -1149,7 +1332,7 @@ export function CXDCanvas() {
           },
         };
         console.log("[CONNECTOR] Creating edge:", newEdge);
-        addCanvasEdge(newEdge);
+        syncAddEdge(newEdge);
       }
       setIsConnecting(false);
       setConnectingFrom(null);
@@ -1293,7 +1476,7 @@ export function CXDCanvas() {
           if (selectedEdgeId && selectedElementIds.size === 0) {
             const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
             if (edge && edge.bend) {
-              updateCanvasEdge(selectedEdgeId, {
+              syncUpdateEdge(selectedEdgeId, {
                 bend: {
                   x: edge.bend.x + deltaX,
                   y: edge.bend.y + deltaY,
@@ -1368,6 +1551,8 @@ export function CXDCanvas() {
         e.preventDefault();
         if (canUndo()) {
           undo();
+          // Sync full state to collaborators after undo
+          setTimeout(() => syncAfterUndoRedo(), 50);
         }
         return;
       }
@@ -1377,6 +1562,8 @@ export function CXDCanvas() {
         e.preventDefault();
         if (canRedo()) {
           redo();
+          // Sync full state to collaborators after redo
+          setTimeout(() => syncAfterUndoRedo(), 50);
         }
         return;
       }
@@ -1386,6 +1573,8 @@ export function CXDCanvas() {
         e.preventDefault();
         if (canRedo()) {
           redo();
+          // Sync full state to collaborators after redo
+          setTimeout(() => syncAfterUndoRedo(), 50);
         }
         return;
       }
@@ -1430,7 +1619,7 @@ export function CXDCanvas() {
             x: canvasX + offsetX,
             y: canvasY + offsetY,
           };
-          addCanvasElement(newElement);
+          syncAddElement(newElement);
           newIds.add(newElement.id);
         });
 
@@ -1455,7 +1644,7 @@ export function CXDCanvas() {
               x: element.x + 20,
               y: element.y + 20,
             };
-            addCanvasElement(newElement);
+            syncAddElement(newElement);
             newIds.add(newElement.id);
           }
         });
@@ -1474,20 +1663,20 @@ export function CXDCanvas() {
         }
 
         if (selectedEdgeId) {
-          removeCanvasEdge(selectedEdgeId);
+          syncRemoveEdge(selectedEdgeId);
           setSelectedEdgeId(null);
         }
 
         if (selectedElementIds.size > 0) {
           selectedElementIds.forEach((id) => {
-            // Remove the element
-            removeCanvasElement(id);
+            // Remove the element and broadcast
+            syncRemoveElement(id);
 
             // Remove all connectors attached to this element
             const edges = getCanvasEdges();
             edges.forEach((edge) => {
               if (edge.fromNodeId === id || edge.toNodeId === id) {
-                removeCanvasEdge(edge.id);
+                syncRemoveEdge(edge.id);
               }
             });
           });
@@ -1504,6 +1693,9 @@ export function CXDCanvas() {
     selectedElementIds,
     removeCanvasEdge,
     removeCanvasElement,
+    syncRemoveElement,
+    syncRemoveEdge,
+    syncAfterUndoRedo,
     undo,
     redo,
     canUndo,
@@ -1714,7 +1906,10 @@ export function CXDCanvas() {
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleCanvasMouseUp}
-      onMouseLeave={handleCanvasMouseUp}
+      onMouseLeave={() => {
+        handleCanvasMouseUp();
+        clearCursor?.();
+      }}
       onContextMenu={(e) => e.preventDefault()}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
@@ -1741,6 +1936,16 @@ export function CXDCanvas() {
           transition: "none",
         }}
       />
+
+      {/* Collaborator Cursors Overlay - highest z-index */}
+      {collaborators.length > 0 && (
+        <CollaboratorCursors
+          collaborators={collaborators}
+          canvasOffset={{ x: canvasPosition.x, y: canvasPosition.y }}
+          zoom={canvasZoom}
+        />
+      )}
+
       {/* Canvas Content - z-index 10 to render above connector lines (z-index 5) */}
       <div
         className="absolute will-change-transform"
@@ -1757,8 +1962,8 @@ export function CXDCanvas() {
             <CanvasElementRenderer
               key={element.id}
               element={element}
-              onUpdate={(updates) => updateCanvasElement(element.id, updates)}
-              onDelete={() => removeCanvasElement(element.id)}
+              onUpdate={(updates) => syncUpdateElement(element.id, updates)}
+              onDelete={() => syncRemoveElement(element.id)}
               onDuplicate={() => duplicateCanvasElement(element.id)}
               onDragStart={(e) => {
                 // Prevent dragging while connecting
@@ -1840,9 +2045,9 @@ export function CXDCanvas() {
             setSelectedElementIds(new Set());
           }
         }}
-        onUpdateLine={(id, updates) => updateCanvasElement(id, updates)}
+        onUpdateLine={(id, updates) => syncUpdateElement(id, updates)}
         onCreateLine={handleCreateLine}
-        onDeleteLine={(id) => removeCanvasElement(id)}
+        onDeleteLine={(id) => syncRemoveElement(id)}
         canvasPosition={canvasPosition}
         canvasZoom={canvasZoom}
         isLineToolActive={activeTool === "line"}
@@ -2095,7 +2300,7 @@ export function CXDCanvas() {
               {/* Line style buttons */}
               <button
                 onClick={() =>
-                  updateCanvasEdge(selectedEdgeId, {
+                  syncUpdateEdge(selectedEdgeId, {
                     style: { ...edge.style, lineStyle: "solid" },
                   })
                 }
@@ -2109,7 +2314,7 @@ export function CXDCanvas() {
               </button>
               <button
                 onClick={() =>
-                  updateCanvasEdge(selectedEdgeId, {
+                  syncUpdateEdge(selectedEdgeId, {
                     style: { ...edge.style, lineStyle: "dashed" },
                   })
                 }
@@ -2133,7 +2338,7 @@ export function CXDCanvas() {
               </button>
               <button
                 onClick={() =>
-                  updateCanvasEdge(selectedEdgeId, {
+                  syncUpdateEdge(selectedEdgeId, {
                     style: { ...edge.style, lineStyle: "dotted" },
                   })
                 }
@@ -2165,7 +2370,7 @@ export function CXDCanvas() {
                 max="12"
                 value={widthPx}
                 onChange={(e) =>
-                  updateCanvasEdge(selectedEdgeId, {
+                  syncUpdateEdge(selectedEdgeId, {
                     style: { ...edge.style, thickness: parseInt(e.target.value) },
                   })
                 }
@@ -2178,7 +2383,7 @@ export function CXDCanvas() {
                 type="color"
                 value={getHexColor()}
                 onChange={(e) =>
-                  updateCanvasEdge(selectedEdgeId, { style: { ...edge.style, color: e.target.value } })
+                  syncUpdateEdge(selectedEdgeId, { style: { ...edge.style, color: e.target.value } })
                 }
                 className="w-6 h-6 rounded cursor-pointer border-0"
                 title="Color"
@@ -2187,7 +2392,7 @@ export function CXDCanvas() {
               {/* Delete button */}
               <button
                 onClick={() => {
-                  removeCanvasEdge(selectedEdgeId);
+                  syncRemoveEdge(selectedEdgeId);
                   setSelectedEdgeId(null);
                 }}
                 className="p-1.5 rounded hover:bg-destructive/20 text-destructive transition-colors"
@@ -2239,10 +2444,16 @@ export function CXDCanvas() {
         onResetView={handleResetView}
         onFitAll={handleFitAll}
         onUndo={() => {
-          if (canUndo()) undo();
+          if (canUndo()) {
+            undo();
+            setTimeout(() => syncAfterUndoRedo(), 50);
+          }
         }}
         onRedo={() => {
-          if (canRedo()) redo();
+          if (canRedo()) {
+            redo();
+            setTimeout(() => syncAfterUndoRedo(), 50);
+          }
         }}
         canUndo={canUndo()}
         canRedo={canRedo()}

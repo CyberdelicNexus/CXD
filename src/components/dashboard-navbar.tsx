@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '../../supabase/client'
 import { HypercubeLogo } from '@/components/icons/hypercube-logo'
@@ -27,11 +28,13 @@ import {
   CheckCircle,
   FolderOpen,
   Info,
-  Check
+  Check,
+  UserPlus,
+  Loader2
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useNotifications } from '@/hooks/use-notifications'
-import { NotificationType } from '@/lib/notifications'
+import { NotificationType, Notification } from '@/lib/notifications'
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
   info: <Info className="w-4 h-4 text-blue-400" />,
@@ -57,11 +60,44 @@ function formatTimeAgo(dateString: string): string {
 export default function DashboardNavbar() {
   const supabase = createClient()
   const router = useRouter()
-  const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll } = useNotifications()
+  const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll, refresh } = useNotifications()
+  const [acceptingInvite, setAcceptingInvite] = useState<string | null>(null)
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     router.push('/')
+  }
+
+  const isCollaborationInvite = (notification: Notification) => {
+    return notification.title === 'Collaboration Invitation' && notification.metadata?.inviteToken
+  }
+
+  const handleAcceptInvite = async (e: React.MouseEvent, notification: Notification) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const token = notification.metadata?.inviteToken
+    if (!token) return
+
+    setAcceptingInvite(notification.id)
+    try {
+      const response = await fetch(`/api/canvas/invite/accept?token=${token}`)
+      const data = await response.json()
+
+      if (data.success) {
+        await markAsRead(notification.id)
+        refresh()
+        router.push(`/cxd?id=${data.canvasId}`)
+      } else if (data.error) {
+        console.error('Error accepting invitation:', data.error)
+        alert(data.error)
+      }
+    } catch (error) {
+      console.error('Error accepting invitation:', error)
+      alert('Failed to accept invitation. Please try again.')
+    } finally {
+      setAcceptingInvite(null)
+    }
   }
 
   return (
@@ -134,42 +170,73 @@ export default function DashboardNavbar() {
                   </div>
                 ) : (
                   <div className="py-1">
-                    {notifications.map((notification) => (
-                      <div
-                        key={notification.id}
-                        className={`px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors ${
-                          !notification.is_read ? 'bg-primary/5' : ''
-                        }`}
-                        onClick={() => !notification.is_read && markAsRead(notification.id)}
-                      >
-                        <div className="flex items-start gap-2">
-                          <div className="mt-0.5">
-                            {notificationIcons[notification.type as NotificationType] || notificationIcons.info}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-sm font-medium ${!notification.is_read ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                {notification.title}
-                              </span>
-                              {notification.is_global && (
-                                <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-400 text-[10px] rounded">
-                                  Announcement
-                                </span>
+                    {notifications.map((notification) => {
+                      const isInvite = isCollaborationInvite(notification)
+                      const isAccepting = acceptingInvite === notification.id
+
+                      return (
+                        <div
+                          key={notification.id}
+                          className={`px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors ${
+                            !notification.is_read ? 'bg-primary/5' : ''
+                          }`}
+                          onClick={() => !notification.is_read && !isInvite && markAsRead(notification.id)}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="mt-0.5">
+                              {isInvite ? (
+                                <UserPlus className="w-4 h-4 text-violet-400" />
+                              ) : (
+                                notificationIcons[notification.type as NotificationType] || notificationIcons.info
                               )}
                             </div>
-                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                              {notification.message}
-                            </p>
-                            <span className="text-[10px] text-muted-foreground/70 mt-1 block">
-                              {formatTimeAgo(notification.created_at)}
-                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-sm font-medium ${!notification.is_read ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                  {notification.title}
+                                </span>
+                                {notification.is_global && (
+                                  <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-400 text-[10px] rounded">
+                                    Announcement
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                                {notification.message}
+                              </p>
+                              <span className="text-[10px] text-muted-foreground/70 mt-1 block">
+                                {formatTimeAgo(notification.created_at)}
+                              </span>
+
+                              {/* Accept button for collaboration invitations */}
+                              {isInvite && !notification.is_read && (
+                                <Button
+                                  size="sm"
+                                  className="mt-2 h-7 px-3 bg-violet-600 hover:bg-violet-500 text-white text-xs"
+                                  onClick={(e) => handleAcceptInvite(e, notification)}
+                                  disabled={isAccepting}
+                                >
+                                  {isAccepting ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                      Accepting...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check className="w-3 h-3 mr-1" />
+                                      Accept Invitation
+                                    </>
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                            {!notification.is_read && !isInvite && (
+                              <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
+                            )}
                           </div>
-                          {!notification.is_read && (
-                            <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
-                          )}
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </ScrollArea>

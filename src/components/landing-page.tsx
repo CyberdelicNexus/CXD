@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { HypercubeLogo } from '@/components/icons/hypercube-logo';
+import { ShimmerGrid } from '@/components/ui/shimmer-grid';
+import { TextShimmer } from '@/components/ui/text-shimmer';
 import {
   Layout,
   Target,
@@ -14,12 +15,15 @@ import {
   GitBranch,
   Sparkles,
   Play,
-  Loader2
+  Loader2,
+  Menu,
+  X
 } from 'lucide-react';
 import Image from 'next/image';
 
 export function LandingPage() {
   const [isLoading, setIsLoading] = useState<'pro' | 'lifetime' | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const handleCheckout = async (planType: 'pro' | 'lifetime') => {
     setIsLoading(planType);
@@ -52,72 +56,125 @@ export function LandingPage() {
       setIsLoading(null);
     }
   };
+
   return (
     <div className="min-h-screen bg-black text-white overflow-x-hidden">
-      {/* Background elements */}
-      <div className="fixed inset-0 grid-bg pointer-events-none" />
+      {/* Interactive Shimmer Grid Background */}
+      <ShimmerGrid
+        dotSize={1.5}
+        dotSpacing={24}
+        baseColor="rgba(110, 56, 236, 0.1)"
+        hoverColor="rgba(138, 99, 255, 0.5)"
+        hoverSize={400}
+        smoothing={60}
+      />
+
+      {/* Background gradient overlay */}
       <div className="fixed inset-0 hero-gradient pointer-events-none" />
 
-      {/* Decorative orbs */}
-      <div className="glow-orb" style={{ top: '10%', left: '10%', opacity: 0.5 }} />
-      <div className="glow-orb glow-orb-cyan" style={{ top: '60%', right: '5%', opacity: 0.3 }} />
-
       {/* Navigation */}
-      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50">
-        <div className="nav-glass px-2 py-2 flex items-center gap-1">
-          <a href="/" className="flex items-center gap-2 px-4 py-2">
-            <HypercubeLogo size={24} />
-            <span className="font-semibold">CXD</span>
-          </a>
+      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-4xl">
+        <div className="nav-glass px-2 py-2 flex items-center justify-between">
+          {/* Left side: Logo + Navigation Links */}
+          <div className="flex items-center">
+            <a href="/" className="flex items-center px-3 py-2">
+              <Image
+                src="/images/hypercube-logo.webp"
+                alt="CXD"
+                width={36}
+                height={36}
+                className="object-contain"
+              />
+            </a>
 
-          <div className="hidden md:flex items-center">
-            <a href="#features" className="nav-link-btn">Features</a>
-            <a href="#demo" className="nav-link-btn">Demo</a>
-            <a href="#pricing" className="nav-link-btn">Pricing</a>
+            {/* Desktop Navigation - moved to left */}
+            <div className="hidden md:flex items-center ml-2">
+              <a href="#features" className="nav-link-btn text-violet-300 hover:text-violet-200">Features</a>
+              <a href="#demo" className="nav-link-btn text-violet-300 hover:text-violet-200">Demo</a>
+              <a href="#pricing" className="nav-link-btn text-violet-300 hover:text-violet-200">Pricing</a>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 ml-2">
-            <a href="/sign-in" className="nav-link-btn">Log in</a>
+          {/* Right side: Auth buttons */}
+          <div className="hidden md:flex items-center gap-2">
+            <a href="/sign-in" className="nav-link-btn text-violet-300 hover:text-violet-200">Log in</a>
             <a href="/sign-up">
               <button className="btn-primary-glow text-sm px-5 py-2">
                 Get Started
               </button>
             </a>
           </div>
+
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="md:hidden p-2 text-white/60 hover:text-white transition-colors"
+            aria-label="Toggle menu"
+          >
+            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
         </div>
+
+        {/* Mobile Menu Dropdown */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden mt-2 nav-glass rounded-2xl p-4 space-y-2">
+            <a href="#features" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
+              Features
+            </a>
+            <a href="#demo" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
+              Demo
+            </a>
+            <a href="#pricing" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
+              Pricing
+            </a>
+            <div className="border-t border-white/10 pt-2 mt-2 space-y-2">
+              <a href="/sign-in" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
+                Log in
+              </a>
+              <a href="/sign-up" className="block">
+                <button className="btn-primary-glow text-sm px-5 py-3 w-full">
+                  Get Started
+                </button>
+              </a>
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center px-4 pt-32 pb-20">
-        {/* Concentric circles decoration */}
-        <div className="concentric-circles" style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
-
+      <section className="relative min-h-screen flex flex-col items-center justify-start px-4 pt-48 pb-20">
         <div className="relative z-10 max-w-4xl mx-auto text-center">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass-card mb-8">
-            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-sm text-white/70">Experience Design Tool</span>
-          </div>
-
           {/* Main heading */}
-          <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold mb-6 tracking-tight leading-[0.95]">
-            Design
+          <h1 className="text-5xl md:text-7xl lg:text-8xl font-bold mb-6 tracking-tight leading-[0.95] overflow-visible">
+            <span className="text-outline-purple">Design</span>
             <br />
-            <span className="text-gradient-purple">Transformational</span>
+            <TextShimmer
+              shimmerColor="rgba(255, 255, 255, 0.9)"
+              speed={4}
+              size={40}
+
+            >
+              Meaningful
+            </TextShimmer>
             <br />
-            Experiences
+            <span className="text-outline-purple">Experiences</span>
           </h1>
 
           <p className="text-lg md:text-xl text-white/50 max-w-2xl mx-auto mb-10 leading-relaxed">
-            The spatial canvas for designing immersive experiences that produce
-            specific states and integrate them into lasting traits.
+            The spatial canvas for designing immersive experiences that shape states and cultivate lasting traits.
           </p>
 
           {/* CTA buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <a href="/sign-up">
               <button className="btn-primary-glow flex items-center gap-2 text-base">
-                <HypercubeLogo size={18} />
+                <Image
+                  src="/images/hypercube-logo.webp"
+                  alt=""
+                  width={18}
+                  height={18}
+                  className="object-contain"
+                />
                 Start Free
                 <ArrowRight className="w-4 h-4" />
               </button>
@@ -130,7 +187,7 @@ export function LandingPage() {
             </a>
           </div>
 
-          {/* Social Proof - Designers */}
+          {/* Social Proof - Designers with hover animation */}
           <div className="mt-16 flex flex-col items-center gap-4">
             <div className="flex items-center -space-x-3">
               {/* Designer avatars - replace src with actual photos */}
@@ -143,7 +200,8 @@ export function LandingPage() {
               ].map((designer, i) => (
                 <div
                   key={i}
-                  className={`w-10 h-10 rounded-full ${designer.bg} flex items-center justify-center text-sm font-medium text-white border-2 border-black ring-1 ring-white/10`}
+                  className={`w-10 h-10 rounded-full ${designer.bg} flex items-center justify-center text-sm font-medium text-white border-2 border-black ring-1 ring-white/10 transition-all duration-300 ease-out hover:-translate-y-2 hover:scale-110 hover:z-10 cursor-pointer`}
+                  style={{ transitionDelay: `${i * 50}ms` }}
                 >
                   {designer.initials}
                 </div>
@@ -158,7 +216,7 @@ export function LandingPage() {
 
       {/* Demo/Screenshot Section */}
       <section id="demo" className="relative py-20 px-4">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="glass-card-glow rounded-2xl overflow-hidden">
             {/* Window header */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
@@ -170,12 +228,12 @@ export function LandingPage() {
               <span className="text-sm text-white/40 ml-4">CXD Canvas</span>
             </div>
 
-            {/* Canvas preview */}
-            <div className="aspect-video bg-gradient-to-br from-black/50 to-black/80 relative overflow-hidden">
+            {/* Canvas preview - object-contain to show full image */}
+            <div className="bg-gradient-to-br from-black/50 to-black/80 relative overflow-hidden">
               <img
                 src="/images/canvas-screenshot.png"
                 alt="CXD Canvas - Experience Design Tool"
-                className="w-full h-full object-cover object-top"
+                className="w-full h-auto object-contain"
               />
             </div>
           </div>
@@ -192,7 +250,7 @@ export function LandingPage() {
               <span className="text-gradient-purple">design experiences</span>
             </h2>
             <p className="text-white/50 text-lg max-w-xl mx-auto">
-              A complete toolkit for experience design professionals.
+              A complete toolkit for experience designers, creative producers and humane innovators.
             </p>
           </div>
 
@@ -216,22 +274,78 @@ export function LandingPage() {
             ))}
           </div>
 
-          {/* Pro features callout */}
-          <div className="mt-12 glass-card-featured p-8 rounded-2xl">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-5 h-5 text-violet-400" />
-                  <span className="text-sm font-medium text-violet-400">Pro Features</span>
-                </div>
-                <h3 className="text-2xl font-bold mb-2">AI Assistant & Plan View</h3>
-                <p className="text-white/50 max-w-lg">
-                  Generate content with AI, convert experience blocks into actionable tasks,
-                  and manage your projects with calendar and kanban views.
-                </p>
+          {/* Pro features grid */}
+          <div className="mt-16">
+            <div className="text-center mb-10">
+              <div className="flex items-center justify-center gap-2 mb-3">
+                <Sparkles className="w-5 h-5 text-violet-400" />
+                <span className="text-sm font-medium text-violet-400">Pro Features</span>
               </div>
+              <h3 className="text-3xl md:text-4xl font-bold">Unlock the full power</h3>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-6">
+              {/* AI Assistant */}
+              <div className="glass-card-featured p-6 rounded-2xl">
+                <div className="feature-icon mb-4 w-12 h-12 rounded-xl bg-violet-500/20 flex items-center justify-center">
+                  <Brain className="w-6 h-6 text-violet-400" />
+                </div>
+                <h4 className="text-xl font-semibold mb-3">AI Assistant</h4>
+                <p className="text-white/50 text-sm leading-relaxed mb-4">
+                  Generate experience content, get design suggestions, and accelerate your workflow with intelligent AI that understands experience design principles.
+                </p>
+                <ul className="space-y-2">
+                  {['Content generation', 'Design recommendations', 'Smart suggestions'].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm text-white/60">
+                      <Check className="w-3.5 h-3.5 text-violet-400" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Collaboration */}
+              <div className="glass-card-featured p-6 rounded-2xl">
+                <div className="feature-icon mb-4 w-12 h-12 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+                  <Layout className="w-6 h-6 text-indigo-400" />
+                </div>
+                <h4 className="text-xl font-semibold mb-3">Collaboration</h4>
+                <p className="text-white/50 text-sm leading-relaxed mb-4">
+                  Work together in real-time with your team. See live cursors, share feedback, and co-create experiences seamlessly.
+                </p>
+                <ul className="space-y-2">
+                  {['Real-time cursors', 'Team invitations', 'Live preview sharing'].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm text-white/60">
+                      <Check className="w-3.5 h-3.5 text-indigo-400" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Project Management */}
+              <div className="glass-card-featured p-6 rounded-2xl">
+                <div className="feature-icon mb-4 w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
+                  <GitBranch className="w-6 h-6 text-purple-400" />
+                </div>
+                <h4 className="text-xl font-semibold mb-3">Project Management</h4>
+                <p className="text-white/50 text-sm leading-relaxed mb-4">
+                  Convert experience blocks into actionable tasks. Manage your projects with calendar and kanban views built for production.
+                </p>
+                <ul className="space-y-2">
+                  {['Plan View & Tasks', 'Calendar & Kanban', 'Progress tracking'].map((item, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm text-white/60">
+                      <Check className="w-3.5 h-3.5 text-purple-400" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="text-center mt-10">
               <a href="/sign-up">
-                <button className="btn-primary-glow whitespace-nowrap">
+                <button className="btn-primary-glow">
                   Try Pro Free
                 </button>
               </a>
@@ -395,12 +509,28 @@ export function LandingPage() {
       {/* Final CTA */}
       <section className="relative py-32 px-4">
         <div className="max-w-3xl mx-auto text-center">
-          <HypercubeLogo size={64} className="mx-auto mb-8" animated />
+          {/* Tesseract GIF instead of animated logo */}
+          <div className="mx-auto mb-8 w-24 h-24 md:w-32 md:h-32 relative">
+            <Image
+              src="/images/Tesseract-1K.gif"
+              alt="Tesseract"
+              width={128}
+              height={128}
+              className="object-contain"
+              unoptimized
+            />
+          </div>
 
           <h2 className="text-4xl md:text-6xl font-bold mb-6">
             Ready to design
             <br />
-            <span className="text-gradient-purple">transformation?</span>
+            <TextShimmer
+              shimmerColor="rgba(255, 255, 255, 0.9)"
+              speed={4}
+              size={50}
+            >
+              transformation?
+            </TextShimmer>
           </h2>
 
           <p className="text-white/50 text-lg mb-10 max-w-xl mx-auto">
@@ -409,13 +539,19 @@ export function LandingPage() {
 
           <a href="/sign-up">
             <button className="btn-primary-glow text-lg px-8 py-4 flex items-center gap-3 mx-auto">
-              <HypercubeLogo size={20} />
+              <Image
+                src="/images/hypercube-logo.webp"
+                alt=""
+                width={20}
+                height={20}
+                className="object-contain"
+              />
               Start Your First Canvas
               <ArrowRight className="w-5 h-5" />
             </button>
           </a>
 
-          <p className="text-white/30 text-sm mt-6">Free forever. No credit card required.</p>
+          <p className="text-white/30 text-sm mt-6">Free tier requires no credit card.</p>
         </div>
       </section>
 
@@ -434,7 +570,13 @@ export function LandingPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <HypercubeLogo size={20} />
+            <Image
+              src="/images/hypercube-logo.webp"
+              alt="CXD"
+              width={20}
+              height={20}
+              className="object-contain"
+            />
             <span className="text-white/50 text-sm">CXD Canvas</span>
           </div>
 
