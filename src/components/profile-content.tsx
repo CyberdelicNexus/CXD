@@ -21,9 +21,18 @@ import {
   Check,
   Camera,
   Upload,
+  Pencil,
 } from 'lucide-react';
 import { useSubscription } from '@/hooks/use-subscription';
 import { UpgradeModal } from '@/components/upgrade-modal';
+import {
+  updateNameAction,
+  deleteAccountAction,
+  cancelSubscriptionAction
+} from '@/app/actions';
+import { SubmitButton } from '@/components/submit-button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   getUserProfile,
   uploadProfileImage,
@@ -47,6 +56,10 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
   const [coverImagePosition, setCoverImagePosition] = useState({ x: 0, y: 0 });
   const [isUploadingProfile, setIsUploadingProfile] = useState(false);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isCancellingSub, setIsCancellingSub] = useState(false);
 
   const {
     subscription,
@@ -71,6 +84,7 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
       if (profile) {
         setUserProfile(profile);
         setCoverImagePosition(profile.cover_image_position);
+        setNewName(profile.full_name || profile.name || '');
       }
     };
     loadProfile();
@@ -233,9 +247,51 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
               </div>
 
               <div className="flex-1 pt-12">
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-bold text-white">{userName}</h1>
-                  <Badge className={`text-xs ${planBadge.color}`}>
+                <div className="flex items-center gap-3">
+                  {isEditingName ? (
+                    <form
+                      action={async (formData) => {
+                        await updateNameAction(formData);
+                        setIsEditingName(false);
+                      }}
+                      className="flex items-center gap-2 flex-1 max-w-sm"
+                    >
+                      <Input
+                        name="full_name"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        className="h-8 bg-white/5 border-white/10 text-white"
+                        autoFocus
+                      />
+                      <SubmitButton className="h-8 px-3 text-xs bg-violet-600 hover:bg-violet-500">
+                        Save
+                      </SubmitButton>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 text-white/40 hover:text-white"
+                        onClick={() => setIsEditingName(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </form>
+                  ) : (
+                    <>
+                      <h1 className="text-xl font-bold text-white">
+                        {userProfile?.full_name || userProfile?.name || userName}
+                      </h1>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-6 h-6 p-0 text-white/20 hover:text-white/60"
+                        onClick={() => setIsEditingName(true)}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                    </>
+                  )}
+                  <Badge className={`text-xs ml-auto ${planBadge.color}`}>
                     <PlanIcon className="w-3 h-3 mr-1" />
                     {planBadge.label}
                   </Badge>
@@ -318,22 +374,37 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
                     <Sparkles className="w-4 h-4 mr-2" />
                     Upgrade to Pro
                   </Button>
-                ) : subscription?.stripe_customer_id ? (
-                  <Button
-                    onClick={handleManageBilling}
-                    disabled={isPortalLoading}
-                    className="w-full bg-white/10 hover:bg-white/20 text-white"
-                  >
-                    {isPortalLoading ? (
-                      'Loading...'
-                    ) : (
-                      <>
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        Manage Billing
-                      </>
+                ) : (
+                  <div className="space-y-2">
+                    {subscription?.stripe_customer_id ? (
+                      <Button
+                        onClick={handleManageBilling}
+                        disabled={isPortalLoading}
+                        className="w-full bg-white/10 hover:bg-white/20 text-white"
+                      >
+                        {isPortalLoading ? (
+                          'Loading...'
+                        ) : (
+                          <>
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            Manage Billing
+                          </>
+                        )}
+                      </Button>
+                    ) : null}
+
+                    {!isFree && (
+                      <form action={cancelSubscriptionAction}>
+                        <SubmitButton
+                          variant="ghost"
+                          className="w-full text-xs text-white/40 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                        >
+                          Cancel Subscription
+                        </SubmitButton>
+                      </form>
                     )}
-                  </Button>
-                ) : null}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -366,17 +437,56 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
               </div>
 
               {/* Security */}
-              <div className="pt-4">
-                <p className="text-xs text-white/40 mb-3">Security</p>
-                <Link href="/dashboard/reset-password">
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start bg-white/5 hover:bg-white/10 text-white/80"
-                  >
-                    <Key className="w-4 h-4 mr-2" />
-                    Change Password
-                  </Button>
-                </Link>
+              <div className="pt-4 space-y-4">
+                <div>
+                  <p className="text-xs text-white/40 mb-2">Security</p>
+                  <Link href="/dashboard/reset-password">
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start bg-white/5 hover:bg-white/10 text-white/80"
+                    >
+                      <Key className="w-4 h-4 mr-2" />
+                      Change Password
+                    </Button>
+                  </Link>
+                </div>
+
+                <div className="pt-4 border-t border-white/5">
+                  <p className="text-xs text-white/40 mb-2">Danger Zone</p>
+                  {!isDeletingAccount ? (
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start text-red-400/60 hover:text-red-400 hover:bg-red-400/10"
+                      onClick={() => setIsDeletingAccount(true)}
+                    >
+                      <Shield className="w-4 h-4 mr-2" />
+                      Delete Account
+                    </Button>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 space-y-3">
+                      <p className="text-xs text-red-400 font-medium">
+                        Are you absolutely sure? This will permanently delete your account, all your projects, and all your data.
+                      </p>
+                      <div className="flex gap-2">
+                        <form action={deleteAccountAction} className="flex-1">
+                          <SubmitButton
+                            variant="destructive"
+                            className="w-full h-8 text-xs bg-red-600 hover:bg-red-500"
+                          >
+                            Yes, delete forever
+                          </SubmitButton>
+                        </form>
+                        <Button
+                          variant="ghost"
+                          className="flex-1 h-8 text-xs text-white/60 hover:text-white"
+                          onClick={() => setIsDeletingAccount(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

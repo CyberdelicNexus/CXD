@@ -149,6 +149,16 @@ const config = {
         "gradient-conic":
           "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
       },
+      backdropBlur: {
+        xs: "2px",
+        "3xl": "60px",
+        "4xl": "100px",
+      },
+      blur: {
+        xs: "2px",
+        "3xl": "60px",
+        "4xl": "100px",
+      },
     },
   },
 

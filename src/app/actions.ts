@@ -3,6 +3,7 @@
 import { encodedRedirect } from "@/utils/utils";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { createClient } from "../../supabase/server";
 
 export const signUpAction = async (formData: FormData) => {
@@ -153,3 +154,96 @@ export const signOutAction = async () => {
   await supabase.auth.signOut();
   return redirect("/");
 };
+
+export const updateNameAction = async (formData: FormData) => {
+  const fullName = formData.get("full_name")?.toString();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return encodedRedirect("error", "/dashboard/profile", "Not authenticated");
+  }
+
+  if (!fullName) {
+    return encodedRedirect("error", "/dashboard/profile", "Name is required");
+  }
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      full_name: fullName,
+      name: fullName
+    })
+    .eq('id', user.id);
+
+  if (error) {
+    return encodedRedirect("error", "/dashboard/profile", "Failed to update name");
+  }
+
+  revalidatePath("/dashboard/profile");
+  return encodedRedirect("success", "/dashboard/profile", "Name updated successfully");
+};
+
+export const deleteAccountAction = async () => {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return redirect("/sign-in");
+  }
+
+  // Need a service role client to delete the user from auth.users
+  const adminClient = await createAdminClient();
+  const { error } = await adminClient.auth.admin.deleteUser(user.id);
+
+  if (error) {
+    console.error("Delete account error:", error);
+    return encodedRedirect("error", "/dashboard/profile", "Failed to delete account. Please contact support.");
+  }
+
+  // Sign out locally too
+  await supabase.auth.signOut();
+
+  return redirect("/");
+};
+
+export const cancelSubscriptionAction = async () => {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return redirect("/sign-in");
+  }
+
+  // Update subscription to 'free'
+  const { error } = await supabase
+    .from('subscriptions')
+    .update({
+      plan_id: 'free',
+      status: 'active',
+      updated_at: new Date().toISOString()
+    })
+    .eq('user_id', user.id);
+
+  if (error) {
+    return encodedRedirect("error", "/dashboard/profile", "Failed to cancel subscription");
+  }
+
+  revalidatePath("/dashboard/profile");
+  return encodedRedirect("success", "/dashboard/profile", "Subscription cancelled. You are now on the Free tier.");
+};
+
+// Helper to create an admin client
+async function createAdminClient() {
+  const { createClient: createSupabaseClient } = await import('@supabase/supabase-js');
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  );
+}

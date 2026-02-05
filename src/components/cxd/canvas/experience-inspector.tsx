@@ -356,7 +356,7 @@ export function ExperienceInspectorPanel({
   // Dynamic background based on canvas background
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
   const centerColor = extractCenterColor(canvasBackground);
-  const panelBgColor = hexToRgba(centerColor, 0.95);
+  const panelBgColor = hexToRgba(centerColor, 0.8);
 
   // Render section content
   const renderSectionContent = () => {

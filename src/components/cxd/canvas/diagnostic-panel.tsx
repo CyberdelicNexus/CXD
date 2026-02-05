@@ -120,7 +120,7 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle
   const project = useCXDStore(state => state.getCurrentProject());
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
   const centerColor = extractCenterColor(canvasBackground);
-  const panelBgColor = hexToRgba(centerColor, 0.95);
+  const panelBgColor = hexToRgba(centerColor, 0.8);
   // Scrollbar colors - lighter thumb for visibility against dark background
   const scrollbarThumbColor = 'rgba(255, 255, 255, 0.3)';
   const scrollbarTrackColor = hexToRgba(centerColor, 0.3);
@@ -135,11 +135,11 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle
       opportunity: [],
       integration: []
     };
-    
+
     diagnostics.forEach(d => {
       groups[d.category].push(d);
     });
-    
+
     return groups;
   }, [diagnostics]);
 
@@ -172,152 +172,152 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle
         )}
         style={{ backgroundColor: panelBgColor }}
       >
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
-          System Insights
-        </h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          Interpretive guidance for your experience design
-        </p>
-      </div>
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
+            System Insights
+          </h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Interpretive guidance for your experience design
+          </p>
+        </div>
 
-      {/* Content */}
-      <div
-        className="flex-1 overflow-y-auto px-4 py-3 space-y-4"
-        style={{
-          scrollbarWidth: 'thin',
-          scrollbarColor: `${scrollbarThumbColor} ${scrollbarTrackColor}`,
-        } as React.CSSProperties}
-      >
-        {!hasAnyDiagnostics && (
-          <div className="text-center py-8">
-            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
-              <CheckCircle2 className="w-6 h-6 text-primary/50" />
+        {/* Content */}
+        <div
+          className="flex-1 overflow-y-auto px-4 py-3 space-y-4"
+          style={{
+            scrollbarWidth: 'thin',
+            scrollbarColor: `${scrollbarThumbColor} ${scrollbarTrackColor}`,
+          } as React.CSSProperties}
+        >
+          {!hasAnyDiagnostics && (
+            <div className="text-center py-8">
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
+                <CheckCircle2 className="w-6 h-6 text-primary/50" />
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Your experience structure shows coherent balance.
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-2 leading-relaxed">
+                As your design evolves, insights will appear here to guide your sensemaking.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Your experience structure shows coherent balance.
-            </p>
-            <p className="text-xs text-muted-foreground/70 mt-2 leading-relaxed">
-              As your design evolves, insights will appear here to guide your sensemaking.
+          )}
+
+          {Object.entries(groupedDiagnostics).map(([category, items]) => {
+            if (items.length === 0) return null;
+
+            const config = CATEGORY_CONFIG[category as DiagnosticCategory];
+            const Icon = config.icon;
+
+            return (
+              <div key={category} className="space-y-2">
+                {/* Category header */}
+                <div className="flex items-center gap-2 px-2">
+                  <Icon
+                    className="w-4 h-4"
+                    style={{ color: config.color }}
+                  />
+                  <span
+                    className="text-xs font-medium uppercase tracking-wider"
+                    style={{ color: config.color }}
+                  >
+                    {config.label}
+                  </span>
+                  <span className="text-xs text-muted-foreground/60">
+                    ({items.length})
+                  </span>
+                </div>
+
+                {/* Diagnostic items */}
+                <div className="space-y-2">
+                  {items.map(diagnostic => {
+                    const severityConfig = SEVERITY_CONFIG[diagnostic.severity];
+
+                    return (
+                      <div
+                        key={diagnostic.id}
+                        className={cn(
+                          "rounded-lg p-3 border transition-all",
+                          severityConfig.bg,
+                          severityConfig.border,
+                          "hover:bg-opacity-20"
+                        )}
+                      >
+                        <p className={cn(
+                          "text-sm leading-relaxed",
+                          severityConfig.color
+                        )}>
+                          {diagnostic.message}
+                        </p>
+
+                        {/* Related faces with glyphs */}
+                        {diagnostic.relatedFaces.length > 0 && onFaceReference && (
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            {diagnostic.relatedFaces.map(faceId => {
+                              const faceInfo = FACE_IDENTITY[faceId];
+                              if (!faceInfo) return null;
+
+                              const faceColor = `hsl(${faceInfo.hue} 40% 60%)`;
+
+                              return (
+                                <button
+                                  key={faceId}
+                                  onClick={() => onFaceReference(faceId)}
+                                  className={cn(
+                                    "flex items-center gap-1.5 px-2 py-1 rounded-md",
+                                    "bg-white/5 hover:bg-white/10 border transition-all",
+                                    "group"
+                                  )}
+                                  style={{
+                                    borderColor: `${faceColor}30`
+                                  }}
+                                  title={`Focus on ${faceInfo.label}`}
+                                >
+                                  <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 40 40"
+                                    className="flex-shrink-0"
+                                  >
+                                    <path
+                                      d={faceInfo.glyph}
+                                      fill="none"
+                                      stroke={faceColor}
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                  <span
+                                    className="text-[10px] font-medium uppercase tracking-wide group-hover:opacity-100 opacity-80 transition-opacity"
+                                    style={{ color: faceColor }}
+                                  >
+                                    {faceInfo.label.replace('Types', '').replace('Mapping', '').replace('Architecture', '').trim()}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer hint */}
+        {hasAnyDiagnostics && (
+          <div className="px-4 py-2 border-t border-border">
+            <p className="text-[10px] text-muted-foreground/60 italic leading-relaxed">
+              These interpretations shift as your design evolves. They guide, not judge.
             </p>
           </div>
         )}
-
-        {Object.entries(groupedDiagnostics).map(([category, items]) => {
-          if (items.length === 0) return null;
-          
-          const config = CATEGORY_CONFIG[category as DiagnosticCategory];
-          const Icon = config.icon;
-
-          return (
-            <div key={category} className="space-y-2">
-              {/* Category header */}
-              <div className="flex items-center gap-2 px-2">
-                <Icon 
-                  className="w-4 h-4" 
-                  style={{ color: config.color }}
-                />
-                <span 
-                  className="text-xs font-medium uppercase tracking-wider"
-                  style={{ color: config.color }}
-                >
-                  {config.label}
-                </span>
-                <span className="text-xs text-muted-foreground/60">
-                  ({items.length})
-                </span>
-              </div>
-
-              {/* Diagnostic items */}
-              <div className="space-y-2">
-                {items.map(diagnostic => {
-                  const severityConfig = SEVERITY_CONFIG[diagnostic.severity];
-
-                  return (
-                    <div
-                      key={diagnostic.id}
-                      className={cn(
-                        "rounded-lg p-3 border transition-all",
-                        severityConfig.bg,
-                        severityConfig.border,
-                        "hover:bg-opacity-20"
-                      )}
-                    >
-                      <p className={cn(
-                        "text-sm leading-relaxed",
-                        severityConfig.color
-                      )}>
-                        {diagnostic.message}
-                      </p>
-
-                      {/* Related faces with glyphs */}
-                      {diagnostic.relatedFaces.length > 0 && onFaceReference && (
-                        <div className="flex flex-wrap gap-2 mt-3">
-                          {diagnostic.relatedFaces.map(faceId => {
-                            const faceInfo = FACE_IDENTITY[faceId];
-                            if (!faceInfo) return null;
-
-                            const faceColor = `hsl(${faceInfo.hue} 40% 60%)`;
-
-                            return (
-                              <button
-                                key={faceId}
-                                onClick={() => onFaceReference(faceId)}
-                                className={cn(
-                                  "flex items-center gap-1.5 px-2 py-1 rounded-md",
-                                  "bg-white/5 hover:bg-white/10 border transition-all",
-                                  "group"
-                                )}
-                                style={{
-                                  borderColor: `${faceColor}30`
-                                }}
-                                title={`Focus on ${faceInfo.label}`}
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 40 40"
-                                  className="flex-shrink-0"
-                                >
-                                  <path
-                                    d={faceInfo.glyph}
-                                    fill="none"
-                                    stroke={faceColor}
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                                <span
-                                  className="text-[10px] font-medium uppercase tracking-wide group-hover:opacity-100 opacity-80 transition-opacity"
-                                  style={{ color: faceColor }}
-                                >
-                                  {faceInfo.label.replace('Types', '').replace('Mapping', '').replace('Architecture', '').trim()}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
       </div>
-
-      {/* Footer hint */}
-      {hasAnyDiagnostics && (
-        <div className="px-4 py-2 border-t border-border">
-          <p className="text-[10px] text-muted-foreground/60 italic leading-relaxed">
-            These interpretations shift as your design evolves. They guide, not judge.
-          </p>
-        </div>
-      )}
-    </div>
     </>
   );
 }

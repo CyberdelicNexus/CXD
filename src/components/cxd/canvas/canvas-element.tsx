@@ -589,8 +589,8 @@ export function CanvasElementRenderer({
       {isSelected && !isDragging && element.type !== "line" && !isReadOnly && (
         <div
           className={cn(
-            "absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-lg",
-            "bg-card/95 backdrop-blur border border-border/50 shadow-lg z-50 top-[-57px]",
+            "absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl",
+            "bg-white/10 backdrop-blur-3xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)] z-50 top-[-57px]",
           )}
           onMouseDown={(e) => e.stopPropagation()}
         >

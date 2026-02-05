@@ -392,14 +392,14 @@ export function CanvasToolkit({
       <div
         ref={toolbarRef}
         className={cn(
-          "fixed top-28 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center p-1.5 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
-          isCollapsed ? "w-[52px]" : "w-[438px]"
+          "fixed top-28 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center p-1.5 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+          isCollapsed ? "w-[52px] overflow-hidden" : "w-[438px] overflow-visible"
         )}
       >
         <div
           className={cn(
-            "flex items-center flex-shrink-0 transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
-            isCollapsed ? "opacity-0 w-0" : "opacity-100 w-[380px] gap-1.5 px-1.5 mr-1"
+            "flex items-center flex-shrink-0 transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+            isCollapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100 w-[380px] gap-1.5 px-1.5 mr-1 overflow-visible"
           )}
         >
           {TOOLKIT_TOOLS.map((tool) => {
@@ -439,7 +439,7 @@ export function CanvasToolkit({
                 </button>
                 {/* Shape palette popover */}
                 {tool.type === "shape" && showShapePalette && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl backdrop-blur-2xl border border-white/10 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 bg-zinc-900/90 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-white/10 backdrop-blur-3xl border border-white/20 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {SHAPE_PALETTE.map((shape) => {
                       const ShapeIcon = shape.IconComponent;
                       return (
@@ -468,7 +468,7 @@ export function CanvasToolkit({
                 )}
                 {/* Card type menu popover */}
                 {tool.type === "freeform" && showCardTypeMenu && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl backdrop-blur-2xl border border-white/10 shadow-2xl z-50 flex flex-col gap-1 w-[180px] mt-4 bg-zinc-900/90 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-white/10 backdrop-blur-3xl border border-white/20 shadow-2xl z-50 flex flex-col gap-1 w-[180px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {CARD_TYPE_OPTIONS.map((cardType) => {
                       return (
                         <button
@@ -491,7 +491,7 @@ export function CanvasToolkit({
                 )}
                 {/* Link mode palette popover */}
                 {tool.type === "link" && showLinkPalette && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl backdrop-blur-2xl border border-white/10 shadow-2xl z-50 flex flex-col gap-1 w-[140px] mt-4 bg-zinc-900/90 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-white/10 backdrop-blur-3xl border border-white/20 shadow-2xl z-50 flex flex-col gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {LINK_MODES.map((linkMode) => {
                       const ModeIcon = linkMode.IconComponent;
                       return (

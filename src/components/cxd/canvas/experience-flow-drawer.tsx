@@ -129,7 +129,7 @@ export function ExperienceFlowDrawer() {
   // Dynamic background based on canvas background
   const canvasBackground = project.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
   const centerColor = extractCenterColor(canvasBackground);
-  const drawerBgColor = hexToRgba(centerColor, 0.95);
+  const drawerBgColor = hexToRgba(centerColor, 0.8);
 
   const currentStage = stages.find((s) => s.id === activeStageId);
   const currentStageIndex = stages.findIndex((s) => s.id === activeStageId);
