@@ -1,11 +1,12 @@
+import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 import { signInAction } from "@/app/actions";
 import { FormMessage, Message } from "@/components/form-message";
 import { SubmitButton } from "@/components/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { LogIn } from "lucide-react";
+import Image from "next/image";
 
 interface LoginProps {
   searchParams: Promise<Message>;
@@ -27,19 +28,28 @@ export default async function SignInPage({ searchParams }: LoginProps) {
   return (
     <div className="min-h-screen bg-black text-white overflow-hidden relative">
       {/* Background elements */}
-      <div className="fixed inset-0 grid-bg pointer-events-none" />
+      <ShimmerGrid
+        dotSize={1.5}
+        dotSpacing={24}
+        baseColor="rgba(110, 56, 236, 0.1)"
+        hoverColor="rgba(138, 99, 255, 0.5)"
+        hoverSize={400}
+        smoothing={60}
+      />
       <div className="fixed inset-0 hero-gradient pointer-events-none" />
 
-      {/* Decorative orbs */}
-      <div className="glow-orb" style={{ top: '20%', right: '15%', opacity: 0.4 }} />
-      <div className="glow-orb glow-orb-cyan" style={{ bottom: '25%', left: '10%', opacity: 0.3 }} />
 
       {/* Content */}
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-8">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 mb-8 group">
-          <HypercubeLogo size={32} className="group-hover:scale-110 transition-transform" />
-          <span className="text-xl font-semibold">CXD Canvas</span>
+        <Link href="/" className="mb-8 group">
+          <Image
+            src="/images/hypercube-logo.webp"
+            alt="CXD"
+            width={48}
+            height={48}
+            className="group-hover:scale-110 transition-transform object-contain"
+          />
         </Link>
 
         {/* Form Card */}
@@ -110,11 +120,6 @@ export default async function SignInPage({ searchParams }: LoginProps) {
             <FormMessage message={message} />
           </form>
         </div>
-
-        {/* Footer text */}
-        <p className="text-white/30 text-sm mt-6">
-          Secure login powered by Supabase
-        </p>
       </div>
     </div>
   );

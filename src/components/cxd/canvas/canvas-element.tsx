@@ -32,6 +32,8 @@ import {
   CXDProject,
   REALITY_PLANES,
   DEFAULT_REALITY_PLANES_V2,
+  SENSORY_DOMAINS,
+  PRESENCE_TYPES,
 } from "@/types/cxd-schema";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -77,6 +79,15 @@ import {
   CheckCircle2,
   Plus,
   ArrowUpRight,
+  Ear,
+  Wind,
+  Apple,
+  Fingerprint,
+  PersonStanding,
+  Zap,
+  Eye,
+  Brain,
+  Users,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 
@@ -88,6 +99,23 @@ const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
   "State Mapping": "🎭",
   "Trait Mapping": "💫",
   "Meaning Architecture": "🏛️",
+};
+
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  visual: { icon: <Eye className="w-4 h-4" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  auditory: { icon: <Ear className="w-4 h-4" />, color: "from-indigo-950 to-indigo-400", colorRaw: "99, 102, 241" },
+  olfactory: { icon: <Wind className="w-4 h-4" />, color: "from-teal-950 to-teal-400", colorRaw: "20, 184, 166" },
+  gustatory: { icon: <Apple className="w-4 h-4" />, color: "from-rose-950 to-rose-400", colorRaw: "244, 63, 94" },
+  haptic: { icon: <Fingerprint className="w-4 h-4" />, color: "from-purple-950 to-purple-400", colorRaw: "168, 85, 247" },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  mental: { icon: <Brain className="w-4 h-4" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  emotional: { icon: <Heart className="w-4 h-4" />, color: "from-red-950 to-red-400", colorRaw: "239, 68, 68" },
+  social: { icon: <Users className="w-4 h-4" />, color: "from-violet-950 to-violet-400", colorRaw: "139, 92, 246" },
+  embodied: { icon: <PersonStanding className="w-4 h-4" />, color: "from-orange-950 to-orange-400", colorRaw: "249, 115, 22" },
+  environmental: { icon: <Globe className="w-4 h-4" />, color: "from-emerald-950 to-emerald-400", colorRaw: "16, 185, 129" },
+  active: { icon: <Zap className="w-4 h-4" />, color: "from-yellow-950 to-yellow-400", colorRaw: "234, 179, 8" },
 };
 
 interface CanvasElementRendererProps {
@@ -214,7 +242,7 @@ export function CanvasElementRenderer({
       ) {
         // Don't auto-edit shapes, lines, or experience blocks on double-click
         setIsEditing(true);
-        
+
         // For task cards, clear placeholder on double-click if it's still the default
         if (element.type === "freeform" && element.taskMetadata && element.content === "Task Title") {
           onUpdate({ content: "" });
@@ -447,46 +475,46 @@ export function CanvasElementRenderer({
         element.locked && "opacity-60 cursor-not-allowed",
         // Highlight effect (from hypercube navigation)
         isHighlighted &&
-          "ring-4 ring-cyan-400 shadow-[0_0_40px_rgba(34,211,238,0.6)] animate-pulse",
+        "ring-4 ring-cyan-400 shadow-[0_0_40px_rgba(34,211,238,0.6)] animate-pulse",
         // Selection ring for non-text elements (excluding lines which handle their own visualization)
         isSelected &&
-          !isHighlighted &&
-          element.type !== "board" &&
-          element.type !== "text" &&
-          element.type !== "line" &&
-          element.type !== "freeform" &&
-          "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
+        !isHighlighted &&
+        element.type !== "board" &&
+        element.type !== "text" &&
+        element.type !== "line" &&
+        element.type !== "freeform" &&
+        "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
         // Selection ring for freeform cards - rounded
         isSelected &&
-          !isHighlighted &&
-          element.type === "freeform" &&
-          "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
+        !isHighlighted &&
+        element.type === "freeform" &&
+        "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
         // Selection ring for boards only when drop target
         isSelected &&
-          !isHighlighted &&
-          element.type === "board" &&
-          isDropTarget &&
-          "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
+        !isHighlighted &&
+        element.type === "board" &&
+        isDropTarget &&
+        "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
         // Glow when connector is hovering this element
         isHoverTarget &&
-          !isHighlighted &&
-          "ring-2 ring-green-400 shadow-[0_0_30px_rgba(74,222,128,0.6)]",
+        !isHighlighted &&
+        "ring-2 ring-green-400 shadow-[0_0_30px_rgba(74,222,128,0.6)]",
         // Subtle glow for text when editing
         isEditing &&
-          element.type === "text" &&
-          "shadow-[0_0_12px_rgba(168,85,247,0.15)]",
+        element.type === "text" &&
+        "shadow-[0_0_12px_rgba(168,85,247,0.15)]",
         // Cursor styles
         !isDragging &&
-          !isEditing &&
-          !element.locked &&
-          element.type !== "text" &&
-          element.type !== "line" &&
-          "cursor-grab",
+        !isEditing &&
+        !element.locked &&
+        element.type !== "text" &&
+        element.type !== "line" &&
+        "cursor-grab",
         !isDragging &&
-          !isEditing &&
-          element.type === "text" &&
-          !element.locked &&
-          "cursor-text h-full",
+        !isEditing &&
+        element.type === "text" &&
+        !element.locked &&
+        "cursor-text h-full",
       )}
       style={{
         left: element.x,
@@ -686,7 +714,7 @@ export function CanvasElementRenderer({
                   const isBold =
                     (element as FreeformElement).style?.fontWeight === "bold" ||
                     (element as FreeformElement).style?.fontWeight ===
-                      "semibold";
+                    "semibold";
                   onUpdate({
                     style: {
                       ...element.style,
@@ -698,8 +726,8 @@ export function CanvasElementRenderer({
                   "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
                   ((element as FreeformElement).style?.fontWeight === "bold" ||
                     (element as FreeformElement).style?.fontWeight ===
-                      "semibold") &&
-                    "bg-primary/20 text-primary",
+                    "semibold") &&
+                  "bg-primary/20 text-primary",
                 )}
                 title="Bold"
               >
@@ -721,7 +749,7 @@ export function CanvasElementRenderer({
                 className={cn(
                   "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
                   (element as FreeformElement).taskMetadata?.isActionable &&
-                    "bg-purple-500/20 text-purple-400",
+                  "bg-purple-500/20 text-purple-400",
                 )}
                 title={
                   (element as FreeformElement).taskMetadata?.isActionable
@@ -1019,8 +1047,8 @@ export function CanvasElementRenderer({
                   "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
                   ((element as TextElement).style?.fontWeight === "bold" ||
                     (element as TextElement).style?.fontWeight ===
-                      "semibold") &&
-                    "bg-primary/20 text-primary",
+                    "semibold") &&
+                  "bg-primary/20 text-primary",
                 )}
                 title="Bold"
               >
@@ -1097,44 +1125,44 @@ export function CanvasElementRenderer({
             element.type === "freeform" ||
             element.type === "link" ||
             element.type === "image") && (
-            <>
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    setShowTagMenu(!showTagMenu);
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showTagMenu && "bg-primary/20 text-primary",
-                    element.hypercubeTags &&
+              <>
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setShowTagMenu(!showTagMenu);
+                    }}
+                    className={cn(
+                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                      showTagMenu && "bg-primary/20 text-primary",
+                      element.hypercubeTags &&
                       element.hypercubeTags.length > 0 &&
                       "text-cyan-400",
+                    )}
+                    title="Tag to Hypercube"
+                  >
+                    <Box className="w-4 h-4" />
+                  </button>
+                  {showTagMenu && (
+                    <HypercubeTagPicker
+                      currentTags={element.hypercubeTags || []}
+                      onTagToggle={(tag) => {
+                        const currentTags = element.hypercubeTags || [];
+                        const newTags = currentTags.includes(tag)
+                          ? currentTags.filter((t) => t !== tag)
+                          : [...currentTags, tag];
+                        onUpdate({
+                          hypercubeTags: newTags,
+                        } as Partial<CanvasElement>);
+                      }}
+                      onClose={() => setShowTagMenu(false)}
+                    />
                   )}
-                  title="Tag to Hypercube"
-                >
-                  <Box className="w-4 h-4" />
-                </button>
-                {showTagMenu && (
-                  <HypercubeTagPicker
-                    currentTags={element.hypercubeTags || []}
-                    onTagToggle={(tag) => {
-                      const currentTags = element.hypercubeTags || [];
-                      const newTags = currentTags.includes(tag)
-                        ? currentTags.filter((t) => t !== tag)
-                        : [...currentTags, tag];
-                      onUpdate({
-                        hypercubeTags: newTags,
-                      } as Partial<CanvasElement>);
-                    }}
-                    onClose={() => setShowTagMenu(false)}
-                  />
-                )}
-              </div>
-              <div className="w-px h-4 bg-border/50 mx-0.5" />
-            </>
-          )}
+                </div>
+                <div className="w-px h-4 bg-border/50 mx-0.5" />
+              </>
+            )}
           {/* Universal actions */}
           <button
             onClick={(e) => {
@@ -1329,7 +1357,7 @@ function ConnectionAnchor({
         isConnecting && isHoverTarget && "bg-green-500 animate-pulse",
         // The specific anchor being hovered glows brightly
         showGlow &&
-          "bg-green-400 scale-150 shadow-[0_0_20px_rgba(74,222,128,0.8)]",
+        "bg-green-400 scale-150 shadow-[0_0_20px_rgba(74,222,128,0.8)]",
       )}
       style={positionStyles[position]}
       data-port-id={anchorId}
@@ -1414,7 +1442,7 @@ function ResizeHandle({
         // Determine minimum sizes based on element type
         const minWidth = element.type === "freeform" ? 250 : 50;
         const minHeight = element.type === "freeform" ? 300 : 30;
-        
+
         if (position.includes("e")) {
           newWidth = Math.max(minWidth, startWidth + deltaX);
         }
@@ -1422,7 +1450,7 @@ function ResizeHandle({
           newWidth = Math.max(minWidth, startWidth - deltaX);
           newX = startPosX + (startWidth - newWidth);
         }
-        
+
         // For freeform cards, don't allow height resizing - height is content-based
         if (element.type !== "freeform") {
           if (position.includes("s")) {
@@ -1646,7 +1674,7 @@ function ColorPicker({
             "w-6 h-6 rounded border-2 transition-transform hover:scale-110",
             currentColor === color ? "border-primary" : "border-transparent",
             color === "transparent" &&
-              "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+            "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
           )}
           style={{
             background: color === "transparent" ? undefined : color,
@@ -1999,7 +2027,7 @@ function ContainerStylePicker({
               className={cn(
                 "p-1.5 rounded hover:bg-primary/20 transition-colors",
                 currentStyle === "dashed" &&
-                  "bg-primary/30 ring-1 ring-primary",
+                "bg-primary/30 ring-1 ring-primary",
               )}
               title="Dashed"
             >
@@ -2020,7 +2048,7 @@ function ContainerStylePicker({
               className={cn(
                 "p-1.5 rounded hover:bg-primary/20 transition-colors",
                 currentStyle === "dotted" &&
-                  "bg-primary/30 ring-1 ring-primary",
+                "bg-primary/30 ring-1 ring-primary",
               )}
               title="Dotted"
             >
@@ -2654,7 +2682,7 @@ function FreeformCard({
     if (e.key === "Backspace" || e.key === "Delete") {
       e.stopPropagation();
     }
-    
+
     // Allow Enter to work normally for line breaks
     if (e.key === "Enter") {
       e.stopPropagation(); // Just stop propagation, don't prevent default
@@ -3355,16 +3383,16 @@ function ImageCard({
   const [dragState, setDragState] = useState<{
     active: boolean;
     handle:
-      | "tl"
-      | "tr"
-      | "bl"
-      | "br"
-      | "top"
-      | "right"
-      | "bottom"
-      | "left"
-      | "move"
-      | null;
+    | "tl"
+    | "tr"
+    | "bl"
+    | "br"
+    | "top"
+    | "right"
+    | "bottom"
+    | "left"
+    | "move"
+    | null;
     startX: number;
     startY: number;
     startCrop: typeof cropBox;
@@ -4401,7 +4429,7 @@ function ContainerCard({
       className={cn(
         "w-full h-full rounded-lg backdrop-blur transition-all",
         isDropTarget &&
-          "border-primary shadow-lg shadow-primary/20 brightness-110",
+        "border-primary shadow-lg shadow-primary/20 brightness-110",
       )}
       style={{
         backgroundColor: backgroundWithOpacity,
@@ -4689,12 +4717,12 @@ function TextCard({
               style={
                 hasGradient
                   ? {
-                      background: gradient,
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      backgroundClip: "text",
-                      display: "inline-block",
-                    }
+                    background: gradient,
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    backgroundClip: "text",
+                    display: "inline-block",
+                  }
                   : { color: textColor }
               }
             >
@@ -5851,57 +5879,131 @@ function ExperienceBlockCard({
             </div>
           )}
 
-          {element.componentKey === "sensoryDomains" && (
-            <div className="space-y-3">
-              {Object.entries(project.sensoryDomains || {}).map(
-                ([key, value]) => (
-                  <div key={key} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium text-white capitalize">
-                        {key}
-                      </Label>
-                      <span className="text-xs text-white/70">{value}%</span>
-                    </div>
-                    <Slider
-                      value={[value]}
-                      onValueChange={([v]) =>
-                        updateSensoryDomain(key as any, v)
-                      }
-                      max={100}
-                      step={1}
-                      className="w-full"
-                      data-no-drag
-                    />
-                  </div>
-                ),
-              )}
-            </div>
-          )}
+          {element.componentKey === "sensoryDomains" && (() => {
+            const intensityLevels = [
+              { value: 0, label: "None" },
+              { value: 25, label: "Minimal" },
+              { value: 50, label: "Moderate" },
+              { value: 75, label: "Significant" },
+              { value: 100, label: "Primary" },
+            ];
+            const getClosestLevel = (val: number) =>
+              intensityLevels.reduce((prev, curr) =>
+                Math.abs(curr.value - val) < Math.abs(prev.value - val) ? curr : prev
+              );
+            return (
+              <div className="space-y-4">
+                {SENSORY_DOMAINS.map((domain) => {
+                  const val = project.sensoryDomains[domain.code];
+                  const currentLevel = getClosestLevel(val);
+                  const meta = SENSORY_METADATA[domain.code];
 
-          {element.componentKey === "presenceTypes" && (
-            <div className="space-y-3">
-              {Object.entries(project.presenceTypes || {}).map(
-                ([key, value]) => (
-                  <div key={key} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium text-white capitalize">
-                        {key.replace(/([A-Z])/g, " $1").trim()}
-                      </Label>
-                      <span className="text-xs text-white/70">{value}%</span>
+                  return (
+                    <div key={domain.code} className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/5">
+                      <div className="flex items-center gap-2">
+                        <div className="text-primary/80">
+                          {meta.icon}
+                        </div>
+                        <Label className="text-sm font-bold text-white tracking-tight">
+                          {domain.label}
+                        </Label>
+                        <span className="ml-auto text-[10px] font-mono text-white/50">{currentLevel.label}</span>
+                      </div>
+                      <div className="flex gap-1" data-no-drag>
+                        {intensityLevels.map((level) => {
+                          const isSelected = currentLevel.value === level.value;
+                          const isPrimary = level.label === "Primary" && isSelected;
+
+                          return (
+                            <button
+                              key={level.value}
+                              onClick={() => updateSensoryDomain(domain.code, level.value)}
+                              className={cn(
+                                "flex-1 py-1.5 px-1 text-[9px] uppercase font-bold rounded transition-all duration-300",
+                                isSelected
+                                  ? `bg-gradient-to-br ${meta.color} text-white shadow-md`
+                                  : "bg-secondary/30 text-white/40 hover:bg-secondary/50 hover:text-white",
+                                isPrimary && "scale-105 shadow-[0_0_15px_rgba(var(--primary),0.3)]",
+                                !isSelected && "opacity-60"
+                              )}
+                              style={isSelected ? {
+                                border: `1px solid rgba(${meta.colorRaw}, 0.3)`
+                              } : {}}
+                            >
+                              {level.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <Slider
-                      value={[value]}
-                      onValueChange={([v]) => updatePresenceType(key as any, v)}
-                      max={100}
-                      step={1}
-                      className="w-full"
-                      data-no-drag
-                    />
-                  </div>
-                ),
-              )}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {element.componentKey === "presenceTypes" && (() => {
+            const presenceLevels = [
+              { value: 0, label: "None" },
+              { value: 25, label: "Minimal" },
+              { value: 50, label: "Moderate" },
+              { value: 75, label: "Significant" },
+              { value: 100, label: "Primary" },
+            ];
+            const getClosestLevel = (val: number) =>
+              presenceLevels.reduce((prev, curr) =>
+                Math.abs(curr.value - val) < Math.abs(prev.value - val) ? curr : prev
+              );
+            return (
+              <div className="space-y-4">
+                {PRESENCE_TYPES.map((presence) => {
+                  const val = project.presenceTypes[presence.code];
+                  const currentLevel = getClosestLevel(val);
+                  const meta = PRESENCE_METADATA[presence.code];
+
+                  return (
+                    <div key={presence.code} className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/5">
+                      <div className="flex items-center gap-2">
+                        <div className="text-primary/80">
+                          {meta.icon}
+                        </div>
+                        <Label className="text-sm font-bold text-white tracking-tight">
+                          {presence.label}
+                        </Label>
+                        <span className="ml-auto text-[10px] font-mono text-white/50">{currentLevel.label}</span>
+                      </div>
+                      <div className="flex gap-1" data-no-drag>
+                        {presenceLevels.map((level) => {
+                          const isSelected = currentLevel.value === level.value;
+                          const isPrimary = level.label === "Primary" && isSelected;
+
+                          return (
+                            <button
+                              key={level.value}
+                              onClick={() => updatePresenceType(presence.code, level.value)}
+                              className={cn(
+                                "flex-1 py-1.5 px-1 text-[9px] uppercase font-bold rounded transition-all duration-300",
+                                isSelected
+                                  ? `bg-gradient-to-br ${meta.color} text-white shadow-md`
+                                  : "bg-secondary/30 text-white/40 hover:bg-secondary/50 hover:text-white",
+                                isPrimary && "scale-105 shadow-[0_0_15px_rgba(var(--primary),0.3)]",
+                                !isSelected && "opacity-60"
+                              )}
+                              style={isSelected ? {
+                                border: `1px solid rgba(${meta.colorRaw}, 0.3)`
+                              } : {}}
+                            >
+                              {level.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {element.componentKey === "stateMapping" && (
             <div className="grid grid-cols-2 gap-3">

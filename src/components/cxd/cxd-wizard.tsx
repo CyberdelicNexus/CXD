@@ -10,6 +10,8 @@ import {
   TRAIT_QUADRANTS,
 } from "@/types/cxd-schema";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
+import { ShimmerGrid } from "@/components/ui/shimmer-grid";
+import { extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +34,12 @@ import {
   Wand2,
   Layers,
   Eye,
+  Ear,
+  Wind,
+  Apple,
+  Fingerprint,
+  PersonStanding,
+  Zap,
   Radio,
   Brain,
   Heart,
@@ -52,6 +60,23 @@ const stepIcons: Record<string, React.ReactNode> = {
   "Presence Types": <Radio className="w-5 h-5" />,
   "State Mapping": <Brain className="w-5 h-5" />,
   "Trait Mapping": <Heart className="w-5 h-5" />,
+};
+
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  visual: { icon: <Eye className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  auditory: { icon: <Ear className="w-5 h-5" />, color: "from-indigo-950 to-indigo-400", colorRaw: "99, 102, 241" },
+  olfactory: { icon: <Wind className="w-5 h-5" />, color: "from-teal-950 to-teal-400", colorRaw: "20, 184, 166" },
+  gustatory: { icon: <Apple className="w-5 h-5" />, color: "from-rose-950 to-rose-400", colorRaw: "244, 63, 94" },
+  haptic: { icon: <Fingerprint className="w-5 h-5" />, color: "from-purple-950 to-purple-400", colorRaw: "168, 85, 247" },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  mental: { icon: <Brain className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  emotional: { icon: <Heart className="w-5 h-5" />, color: "from-red-950 to-red-400", colorRaw: "239, 68, 68" },
+  social: { icon: <Users className="w-5 h-5" />, color: "from-violet-950 to-violet-400", colorRaw: "139, 92, 246" },
+  embodied: { icon: <PersonStanding className="w-5 h-5" />, color: "from-orange-950 to-orange-400", colorRaw: "249, 115, 22" },
+  environmental: { icon: <Globe className="w-5 h-5" />, color: "from-emerald-950 to-emerald-400", colorRaw: "16, 185, 129" },
+  active: { icon: <Zap className="w-5 h-5" />, color: "from-yellow-950 to-yellow-400", colorRaw: "234, 179, 8" },
 };
 
 // Group steps by phase for better cognitive organization
@@ -120,6 +145,11 @@ export function CXDWizard() {
   }, [currentStep, scrollToStep]);
 
   if (!project) return null;
+
+  // Dynamic background based on canvas background
+  const canvasBackground = project.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const cardBgColor = hexToRgba(centerColor, 0.7);
 
   const currentStepData = WIZARD_STEPS[currentStep];
   const progress = ((currentStep + 1) / WIZARD_STEPS.length) * 100;
@@ -366,31 +396,51 @@ export function CXDWizard() {
       };
 
       return (
-        <div className="space-y-6 w-full">
+        <div className="space-y-8 w-full">
           {SENSORY_DOMAINS.map((domain) => {
             const currentValue = getClosestLevel(project.sensoryDomains[domain.code]);
+            const meta = SENSORY_METADATA[domain.code];
             return (
-              <div key={domain.code} className="space-y-3">
-                <div>
-                  <Label className="text-sm font-medium">{domain.label}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {domain.description}
-                  </p>
+              <div key={domain.code} className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg bg-gradient-to-br ${meta.color} bg-opacity-10 text-white shadow-sm`}>
+                    {meta.icon}
+                  </div>
+                  <div>
+                    <Label className="text-base font-semibold tracking-tight">{domain.label}</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {domain.description}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex gap-2">
-                  {intensityLevels.map((level) => (
-                    <button
-                      key={level.value}
-                      onClick={() => updateSensoryDomain(domain.code, level.value)}
-                      className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
-                        currentValue === level.value
-                          ? "bg-primary text-primary-foreground font-medium"
-                          : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {level.label}
-                    </button>
-                  ))}
+                  {intensityLevels.map((level) => {
+                    const isSelected = currentValue === level.value;
+                    const baseClass = `flex-1 py-2.5 px-3 text-sm rounded-xl transition-all duration-300 flex items-center justify-center`;
+                    let intensityStyle = "";
+
+                    if (isSelected) {
+                      const color = meta.color;
+                      const raw = meta.colorRaw;
+                      if (level.value === 0) intensityStyle = "bg-zinc-600 text-white shadow-md";
+                      else if (level.value === 25) intensityStyle = `bg-gradient-to-br ${color} opacity-70 text-white shadow-sm`;
+                      else if (level.value === 50) intensityStyle = `bg-gradient-to-br ${color} opacity-90 text-white shadow-[0_0_15px_rgba(${raw},0.3)]`;
+                      else if (level.value === 75) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_20px_rgba(${raw},0.4)]`;
+                      else if (level.value === 100) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_30px_rgba(${raw},0.6)] scale-105 font-bold border border-white/20`;
+                    } else {
+                      intensityStyle = "bg-secondary/40 hover:bg-secondary/60 text-muted-foreground/70 hover:text-foreground";
+                    }
+
+                    return (
+                      <button
+                        key={level.value}
+                        onClick={() => updateSensoryDomain(domain.code, level.value)}
+                        className={`${baseClass} ${intensityStyle}`}
+                      >
+                        {level.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -416,33 +466,53 @@ export function CXDWizard() {
       };
 
       return (
-        <div className="space-y-6 w-full">
+        <div className="space-y-8 w-full">
           {PRESENCE_TYPES.map((presence) => {
             const currentValue = getClosestLevel(project.presenceTypes[presence.code]);
+            const meta = PRESENCE_METADATA[presence.code];
             return (
-              <div key={presence.code} className="space-y-3">
-                <div>
-                  <Label className="text-sm font-medium">
-                    {presence.label}
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    {presence.description}
-                  </p>
+              <div key={presence.code} className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg bg-gradient-to-br ${meta.color} bg-opacity-10 text-white shadow-sm`}>
+                    {meta.icon}
+                  </div>
+                  <div>
+                    <Label className="text-base font-semibold tracking-tight">
+                      {presence.label}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {presence.description}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex gap-2">
-                  {presenceLevels.map((level) => (
-                    <button
-                      key={level.value}
-                      onClick={() => updatePresenceType(presence.code, level.value)}
-                      className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
-                        currentValue === level.value
-                          ? "bg-primary text-primary-foreground font-medium"
-                          : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {level.label}
-                    </button>
-                  ))}
+                  {presenceLevels.map((level) => {
+                    const isSelected = currentValue === level.value;
+                    const baseClass = `flex-1 py-2.5 px-3 text-sm rounded-xl transition-all duration-300 flex items-center justify-center`;
+                    let intensityStyle = "";
+
+                    if (isSelected) {
+                      const color = meta.color;
+                      const raw = meta.colorRaw;
+                      if (level.value === 0) intensityStyle = "bg-zinc-600 text-white shadow-md";
+                      else if (level.value === 25) intensityStyle = `bg-gradient-to-br ${color} opacity-70 text-white shadow-sm`;
+                      else if (level.value === 50) intensityStyle = `bg-gradient-to-br ${color} opacity-90 text-white shadow-[0_0_15px_rgba(${raw},0.3)]`;
+                      else if (level.value === 75) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_20px_rgba(${raw},0.4)]`;
+                      else if (level.value === 100) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_30px_rgba(${raw},0.6)] scale-105 font-bold border border-white/20`;
+                    } else {
+                      intensityStyle = "bg-secondary/40 hover:bg-secondary/60 text-muted-foreground/70 hover:text-foreground";
+                    }
+
+                    return (
+                      <button
+                        key={level.value}
+                        onClick={() => updatePresenceType(presence.code, level.value)}
+                        className={`${baseClass} ${intensityStyle}`}
+                      >
+                        {level.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -518,8 +588,17 @@ export function CXDWizard() {
   };
 
   return (
-    <div className="min-h-screen px-4 py-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen px-4 py-8 relative" style={{ background: canvasBackground }}>
+      {/* Interactive Shimmer Grid Background */}
+      <ShimmerGrid
+        dotSize={1.5}
+        dotSpacing={24}
+        baseColor="rgba(110, 56, 236, 0.1)"
+        hoverColor="rgba(138, 99, 255, 0.5)"
+        hoverSize={400}
+        smoothing={60}
+      />
+      <div className="max-w-4xl mx-auto relative z-10">
         {/* Progress Header with Phase indicator */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">
@@ -536,7 +615,11 @@ export function CXDWizard() {
               {Math.round(progress)}% Complete
             </span>
           </div>
-          <Progress value={progress} className="h-2" />
+          <Progress
+            value={progress}
+            className="h-2"
+            indicatorClassName="from-indigo-600 via-violet-500 to-indigo-400"
+          />
 
           {/* Phase Progress Indicators */}
           <div className="flex gap-1 mt-3">
@@ -548,20 +631,18 @@ export function CXDWizard() {
               return (
                 <div key={phase.name} className="flex-1 flex flex-col gap-1">
                   <div
-                    className={`h-1 rounded-full transition-all ${
-                      isCurrentPhase
-                        ? "bg-primary glow-teal"
-                        : isCompletedPhase
-                          ? "bg-primary/60"
-                          : "bg-secondary"
-                    }`}
+                    className={`h-1.5 rounded-full transition-all ${isCurrentPhase
+                      ? "bg-gradient-to-r from-indigo-700 via-purple-600 to-purple-400 glow-purple"
+                      : isCompletedPhase
+                        ? "bg-indigo-700/60"
+                        : "bg-secondary"
+                      }`}
                   />
                   <span
-                    className={`text-[10px] text-center ${
-                      isCurrentPhase
-                        ? "text-primary font-medium"
-                        : "text-muted-foreground"
-                    }`}
+                    className={`text-[10px] text-center ${isCurrentPhase
+                      ? "text-primary font-medium"
+                      : "text-muted-foreground"
+                      }`}
                   >
                     {phase.name}
                   </span>
@@ -592,13 +673,12 @@ export function CXDWizard() {
                   setCurrentStep(index);
                   setWizardStep(index);
                 }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap transition-all flex-shrink-0 ${
-                  index === currentStep
-                    ? "bg-primary text-primary-foreground glow-teal"
-                    : index < currentStep
-                      ? "bg-primary/20 text-primary"
-                      : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-                }`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap transition-all flex-shrink-0 ${index === currentStep
+                  ? "bg-gradient-to-r from-indigo-700 to-purple-600 text-white glow-purple"
+                  : index < currentStep
+                    ? "bg-indigo-900/30 text-indigo-300 border border-purple-500/20"
+                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                  }`}
               >
                 {index < currentStep ? (
                   <Check className="w-4 h-4" />
@@ -612,7 +692,10 @@ export function CXDWizard() {
         </div>
 
         {/* Main Content Card */}
-        <Card className="gradient-border bg-card/50 backdrop-blur h-fit">
+        <Card
+          className="gradient-border backdrop-blur h-fit overflow-visible"
+          style={{ backgroundColor: cardBgColor }}
+        >
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center">
@@ -638,7 +721,7 @@ export function CXDWizard() {
             )}
           </CardHeader>
           <CardContent className="overflow-visible h-full flex">
-            <div className="pr-4 pb-4 flex h-full w-full items-center justify-center flex-col mx-[0px] overflow-y-visible">
+            <div className="pr-4 pb-4 flex h-full w-full items-center justify-center flex-col mx-[0px] overflow-visible">
               {renderStepContent()}
             </div>
           </CardContent>

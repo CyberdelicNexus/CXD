@@ -238,7 +238,7 @@ export interface ContextAndMeaning {
 }
 
 // CXD Section - All major sections of the canvas
-export type CXDSectionId = 
+export type CXDSectionId =
   | 'intentionCore'
   | 'desiredChange'
   | 'humanContext'
@@ -281,7 +281,8 @@ export interface CXDProject {
   schemaVersion: string;
   ownerId: string;
   shareToken?: string;
-  
+  canvasBackground?: string; // CSS gradient string for canvas background
+
   // Section data
   intentionCore: IntentionCore;
   desiredChange: DesiredChange;
@@ -296,7 +297,7 @@ export interface CXDProject {
   experienceFlowDescription?: string; // High-level flow description from wizard
   stateMapping: Record<StateQuadrantCode, string>;
   traitMapping: Record<TraitQuadrantCode, string>;
-  
+
   // Canvas layout (persisted per project)
   canvasLayout?: {
     sectionPositions?: Record<string, { x: number; y: number }>;
@@ -304,7 +305,7 @@ export interface CXDProject {
     edges?: import('./canvas-elements').CanvasEdge[];
     boards?: import('./canvas-elements').CanvasBoard[];
   };
-  
+
   // Wizard progress
   wizardCompleted: boolean;
   currentWizardStep: number;
@@ -320,7 +321,7 @@ export function createDefaultProject(id: string, name: string, ownerId: string):
     updatedAt: new Date().toISOString(),
     schemaVersion: CXD_SCHEMA_VERSION,
     ownerId,
-    
+
     // New wizard sections
     intentionCore: {
       projectName: name,
@@ -402,13 +403,13 @@ export function createDefaultProject(id: string, name: string, ownerId: string):
       somatic: '',
       relational: '',
     },
-    
+
     // High-level flow description
     experienceFlowDescription: '',
-    
+
     // Canvas layout positions
     canvasLayout: {},
-    
+
     wizardCompleted: false,
     currentWizardStep: 0,
   };

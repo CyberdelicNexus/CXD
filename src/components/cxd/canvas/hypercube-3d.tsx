@@ -35,9 +35,10 @@ import {
   Eye,
   MapPin,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { DiagnosticPanel } from "./diagnostic-panel";
 import { generateDiagnostics } from "@/utils/diagnostic-engine";
+import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 
 // Interaction modes - Two distinct modes per specification
 // DEFAULT MODE: Cube auto-rotates, NOT interactive, face buttons are PRIMARY interaction
@@ -101,7 +102,7 @@ const GLYPHS = {
 };
 
 // Face configuration with identity system
-export interface CubeFace extends FaceIdentity {}
+export interface CubeFace extends FaceIdentity { }
 
 export const CUBE_FACES: CubeFace[] = [
   {
@@ -259,7 +260,7 @@ function getElementPreview(
       let domain = "";
       try {
         domain = new URL(url).hostname;
-      } catch {}
+      } catch { }
       return { ...base, title, domain, url, isEmpty: !url };
     }
     case "image": {
@@ -1046,15 +1047,15 @@ export function Hypercube3D({
           coherence =
             avgValue > 0
               ? 1 -
-                Math.min(
-                  values.reduce(
-                    (sum: number, v: any) => sum + Math.pow(v - avgValue, 2),
-                    0,
-                  ) /
-                    values.length /
-                    1000,
-                  1,
-                )
+              Math.min(
+                values.reduce(
+                  (sum: number, v: any) => sum + Math.pow(v - avgValue, 2),
+                  0,
+                ) /
+                values.length /
+                1000,
+                1,
+              )
               : 0.5;
 
           if (avgValue > 70) glowPattern = "fractured";
@@ -1222,8 +1223,20 @@ export function Hypercube3D({
     return { scale, x: "50%", y: "50%" };
   }, [interactionMode, focusedFaceIndex, isCoreSelected, exploreZoom]);
 
+  // Dynamic background based on canvas background preference
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+
   return (
-    <div className="relative w-full h-full bg-background overflow-hidden">
+    <div className="relative w-full h-full overflow-hidden">
+      {/* 1. Underlying Radial Gradient */}
+      <div
+        className="absolute inset-0 -z-20"
+        style={{ background: canvasBackground }}
+      />
+
+      {/* 2. Shimmer Grid on top of the gradient */}
+      <ShimmerGrid className="absolute inset-0 -z-10 opacity-40" />
       {/* Diagnostic Panel - Left side, visible when face is selected */}
       <DiagnosticPanel
         diagnostics={diagnostics}
@@ -1243,8 +1256,7 @@ export function Hypercube3D({
             : "cursor-default",
         )}
         style={{
-          background:
-            "radial-gradient(circle at 50% 50%, hsl(270 30% 8%), hsl(270 30% 3%))",
+          //  background: canvasBackground,
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -1567,9 +1579,9 @@ export function Hypercube3D({
             className={cn(
               "w-[88px] h-[72px] rounded-lg flex items-center justify-center transition-all duration-300 cursor-default relative overflow-hidden group",
               interactionMode === "default" &&
-                "bg-gradient-to-br from-purple-900/60 via-purple-950/80 to-indigo-950/60 border border-purple-500/30",
+              "bg-gradient-to-br from-purple-900/60 via-purple-950/80 to-indigo-950/60 border border-purple-500/30",
               interactionMode === "explore" &&
-                "bg-gradient-to-br from-amber-900/60 via-amber-950/80 to-orange-950/60 border border-amber-500/30",
+              "bg-gradient-to-br from-amber-900/60 via-amber-950/80 to-orange-950/60 border border-amber-500/30",
             )}
           >
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
@@ -1578,14 +1590,14 @@ export function Hypercube3D({
                 className={cn(
                   "w-2 h-2 rounded-full",
                   interactionMode === "default" &&
-                    focusedFaceIndex === null &&
-                    !isCoreSelected &&
-                    "bg-purple-400 animate-pulse shadow-lg shadow-purple-400/50",
+                  focusedFaceIndex === null &&
+                  !isCoreSelected &&
+                  "bg-purple-400 animate-pulse shadow-lg shadow-purple-400/50",
                   interactionMode === "default" &&
-                    (focusedFaceIndex !== null || isCoreSelected) &&
-                    "bg-cyan-400 shadow-lg shadow-cyan-400/50",
+                  (focusedFaceIndex !== null || isCoreSelected) &&
+                  "bg-cyan-400 shadow-lg shadow-cyan-400/50",
                   interactionMode === "explore" &&
-                    "bg-amber-400 animate-pulse shadow-lg shadow-amber-400/50",
+                  "bg-amber-400 animate-pulse shadow-lg shadow-amber-400/50",
                 )}
               />
               <span
@@ -1643,8 +1655,8 @@ export function Hypercube3D({
                   isFocused && "scale-105 z-10",
                   isDimmed && "opacity-40 scale-95",
                   !isFocused &&
-                    !isDimmed &&
-                    "hover:scale-105 hover:z-10 overflow-visible",
+                  !isDimmed &&
+                  "hover:scale-105 hover:z-10 overflow-visible",
                 )}
                 style={{
                   background: `linear-gradient(135deg, ${gradientStart} 0%, ${gradientMid} 50%, ${gradientEnd} 100%)`,

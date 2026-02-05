@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useCXDStore } from "@/store/cxd-store";
+import { extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import {
@@ -53,13 +54,22 @@ function formatTimeAgo(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  
+
   if (seconds < 60) return 'Just now';
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
   return date.toLocaleDateString();
 }
+
+const CANVAS_GRADIENTS = [
+  { name: 'Dark Nebula', value: 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)' },
+  { name: 'Deep Ocean', value: 'radial-gradient(circle at center, #0b101eff 0%, #000000 100%)' },
+  { name: 'Cosmic Fire', value: 'radial-gradient(circle at center, #18061bff 0%, #000000 100%)' },
+  { name: 'Midnight Purple', value: 'radial-gradient(circle at center, #1c093dff 0%, #000000 100%)' },
+  { name: 'Galactic Blue', value: 'radial-gradient(circle at center, #000323ff 0%, #000000 100%)' },
+  { name: 'Void', value: '#000000' },
+];
 
 export function CXDNavbar() {
   const router = useRouter();
@@ -72,10 +82,29 @@ export function CXDNavbar() {
     setCanvasViewMode,
     focusedSection,
     setFocusedSection,
+    updateProjectName,
+    updateCanvasBackground,
   } = useCXDStore();
   const { toast } = useToast();
   const project = getCurrentProject();
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll } = useNotifications();
+
+  // Renaming state
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [showColorPicker, setShowColorPicker] = useState(false);
+
+  // Initialize rename value when project loads
+  useState(() => {
+    if (project) setRenameValue(project.name);
+  });
+
+  const handleRenameSubmit = () => {
+    if (renameValue.trim()) {
+      updateProjectName(renameValue.trim());
+      setIsRenaming(false);
+    }
+  };
 
   // Collaboration state
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
@@ -84,10 +113,10 @@ export function CXDNavbar() {
 
   const handleExportJSON = async () => {
     if (!project) return;
-    
+
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     const dataStr = JSON.stringify(project, null, 2);
     const dataUri =
       "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
@@ -96,23 +125,23 @@ export function CXDNavbar() {
     linkElement.setAttribute("href", dataUri);
     linkElement.setAttribute("download", exportName);
     linkElement.click();
-    
+
     // Send notification
     if (user) {
       await createNotification(
         user.id,
         'EXPORT_COMPLETE',
         `Your project "${project.name}" has been exported as JSON`,
-        { 
+        {
           projectId: project.id,
           projectName: project.name,
           format: 'json',
-          fileName: exportName 
+          fileName: exportName
         },
         72 // 3 days
       );
     }
-    
+
     toast({
       title: "Export Complete",
       description: "Your CXD map has been exported as JSON.",
@@ -123,17 +152,17 @@ export function CXDNavbar() {
     const token = generateShareToken();
     const shareUrl = `${window.location.origin}/cxd/share/${token}`;
     navigator.clipboard.writeText(shareUrl);
-    
+
     // Send notification
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (user && project) {
       await createNotification(
         user.id,
         'SHARE_LINK_GENERATED',
         'Your share link has been created and copied to clipboard',
-        { 
+        {
           projectId: project.id,
           projectName: project.name,
           shareUrl,
@@ -143,7 +172,7 @@ export function CXDNavbar() {
         720 // 30 days
       );
     }
-    
+
     toast({
       title: "Share Link Copied",
       description: "Read-only share link has been copied to clipboard.",
@@ -166,8 +195,16 @@ export function CXDNavbar() {
     router.push("/dashboard");
   };
 
+  // Get dynamic background color from canvas background
+  const canvasBackground = project?.canvasBackground || CANVAS_GRADIENTS[0].value;
+  const centerColor = extractCenterColor(canvasBackground);
+  const navBgColor = hexToRgba(centerColor, 0.85);
+
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 h-16 bg-card/80 backdrop-blur-xl border-b border-border">
+    <nav
+      className="fixed top-0 left-0 right-0 z-50 h-16 backdrop-blur-xl border-b border-border"
+      style={{ backgroundColor: navBgColor }}
+    >
       <div className="h-full px-4 flex items-center justify-between">
         {/* Left section */}
         <div className="flex items-center gap-4 flex-1">
@@ -193,10 +230,62 @@ export function CXDNavbar() {
           </div>
 
           {project && viewMode !== "home" && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-secondary/50">
-              <span className="text-sm text-muted-foreground">
-                {project.name}
-              </span>
+            <div className="flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-secondary/50">
+                {isRenaming ? (
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={handleRenameSubmit}
+                    onKeyDown={(e) => e.key === "Enter" && handleRenameSubmit()}
+                    className="bg-transparent border-none text-sm text-foreground focus:outline-none min-w-[150px]"
+                  />
+                ) : (
+                  <span
+                    className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
+                    onClick={() => {
+                      setRenameValue(project.name);
+                      setIsRenaming(true);
+                    }}
+                  >
+                    {project.name}
+                  </span>
+                )}
+              </div>
+
+              <DropdownMenu open={showColorPicker} onOpenChange={setShowColorPicker}>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full bg-secondary/30 hover:bg-secondary/50">
+                    <div
+                      className="w-4 h-4 rounded-full border border-white/20"
+                      style={{ background: project.canvasBackground || CANVAS_GRADIENTS[0].value }}
+                    />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-48 bg-card border-border">
+                  <div className="p-2 grid grid-cols-3 gap-2">
+                    {CANVAS_GRADIENTS.map((gradient) => (
+                      <button
+                        key={gradient.name}
+                        className="w-full aspect-square rounded-full border border-white/10 hover:border-white/50 transition-all relative group"
+                        style={{ background: gradient.value }}
+                        onClick={() => {
+                          updateCanvasBackground(gradient.value);
+                          setShowColorPicker(false);
+                        }}
+                        title={gradient.name}
+                      >
+                        {project.canvasBackground === gradient.value && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-2 h-2 bg-white rounded-full shadow-sm" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </div>
@@ -216,7 +305,7 @@ export function CXDNavbar() {
             <Button
               variant={
                 canvasViewMode === "canvas" &&
-                (viewMode === "canvas" || viewMode === "focus")
+                  (viewMode === "canvas" || viewMode === "focus")
                   ? "default"
                   : "ghost"
               }
@@ -227,7 +316,7 @@ export function CXDNavbar() {
               }}
               className={
                 canvasViewMode === "canvas" &&
-                (viewMode === "canvas" || viewMode === "focus")
+                  (viewMode === "canvas" || viewMode === "focus")
                   ? "glow-teal"
                   : ""
               }
@@ -238,7 +327,7 @@ export function CXDNavbar() {
             <Button
               variant={
                 canvasViewMode === "hypercube" &&
-                (viewMode === "canvas" || viewMode === "focus")
+                  (viewMode === "canvas" || viewMode === "focus")
                   ? "default"
                   : "ghost"
               }
@@ -249,7 +338,7 @@ export function CXDNavbar() {
               }}
               className={
                 canvasViewMode === "hypercube" &&
-                (viewMode === "canvas" || viewMode === "focus")
+                  (viewMode === "canvas" || viewMode === "focus")
                   ? "glow-teal"
                   : ""
               }
@@ -260,7 +349,7 @@ export function CXDNavbar() {
             <Button
               variant={
                 canvasViewMode === "plan" &&
-                (viewMode === "canvas" || viewMode === "focus")
+                  (viewMode === "canvas" || viewMode === "focus")
                   ? "default"
                   : "ghost"
               }
@@ -271,7 +360,7 @@ export function CXDNavbar() {
               }}
               className={
                 canvasViewMode === "plan" &&
-                (viewMode === "canvas" || viewMode === "focus")
+                  (viewMode === "canvas" || viewMode === "focus")
                   ? "glow-teal"
                   : ""
               }
@@ -363,8 +452,8 @@ export function CXDNavbar() {
           {/* Notifications */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 size="icon"
                 className="relative text-muted-foreground hover:text-foreground"
               >
@@ -374,8 +463,8 @@ export function CXDNavbar() {
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent 
-              align="end" 
+            <DropdownMenuContent
+              align="end"
               className="w-80 bg-card border-border p-0"
             >
               <div className="flex items-center justify-between p-4 border-b border-border">
@@ -391,7 +480,7 @@ export function CXDNavbar() {
                   </Button>
                 )}
               </div>
-              
+
               <ScrollArea className="h-[400px]">
                 {loading ? (
                   <div className="flex items-center justify-center p-8">
@@ -407,9 +496,8 @@ export function CXDNavbar() {
                     {notifications.map((notification) => (
                       <div
                         key={notification.id}
-                        className={`p-4 hover:bg-accent/50 cursor-pointer transition-colors ${
-                          !notification.is_read ? 'bg-accent/20' : ''
-                        }`}
+                        className={`p-4 hover:bg-accent/50 cursor-pointer transition-colors ${!notification.is_read ? 'bg-accent/20' : ''
+                          }`}
                         onClick={() => markAsRead(notification.id)}
                       >
                         <div className="flex gap-3">
@@ -461,7 +549,7 @@ export function CXDNavbar() {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-          
+
           <Button
             variant="ghost"
             size="icon"

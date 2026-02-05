@@ -11,7 +11,8 @@ import {
   ChevronLeft,
   ChevronRight
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
+import { useCXDStore } from "@/store/cxd-store";
 import { Diagnostic, DiagnosticCategory } from "@/types/diagnostics";
 
 // Face visual identity mapping
@@ -115,6 +116,15 @@ const SEVERITY_CONFIG = {
 };
 
 export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle }: DiagnosticPanelProps) {
+  // Get dynamic background color from canvas background
+  const project = useCXDStore(state => state.getCurrentProject());
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const panelBgColor = hexToRgba(centerColor, 0.95);
+  // Scrollbar colors - lighter thumb for visibility against dark background
+  const scrollbarThumbColor = 'rgba(255, 255, 255, 0.3)';
+  const scrollbarTrackColor = hexToRgba(centerColor, 0.3);
+
   // Group diagnostics by category
   const groupedDiagnostics = React.useMemo(() => {
     const groups: Record<DiagnosticCategory, Diagnostic[]> = {
@@ -141,9 +151,10 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle
       <button
         onClick={onToggle}
         className={cn(
-          "fixed left-0 top-20 z-50 p-2 rounded-r-lg bg-card/95 backdrop-blur-xl border border-l-0 border-border shadow-lg transition-all duration-300",
+          "fixed left-0 top-20 z-50 p-2 rounded-r-lg backdrop-blur-xl border border-l-0 border-border shadow-lg transition-all duration-300",
           isOpen && "left-80"
         )}
+        style={{ backgroundColor: panelBgColor }}
         title={isOpen ? "Hide diagnostics" : "Show diagnostics"}
       >
         {isOpen ? (
@@ -154,10 +165,13 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle
       </button>
 
       {/* Panel */}
-      <div className={cn(
-        "fixed left-0 top-16 h-[calc(100vh-4rem)] w-80 bg-card/95 backdrop-blur-xl border-r border-border shadow-2xl overflow-hidden flex flex-col z-40 transition-transform duration-300",
-        !isOpen && "-translate-x-full"
-      )}>
+      <div
+        className={cn(
+          "fixed left-0 top-16 h-[calc(100vh-4rem)] w-80 backdrop-blur-xl border-r border-border shadow-2xl overflow-hidden flex flex-col z-40 transition-transform duration-300",
+          !isOpen && "-translate-x-full"
+        )}
+        style={{ backgroundColor: panelBgColor }}
+      >
       {/* Header */}
       <div className="px-4 py-3 border-b border-border">
         <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
@@ -169,7 +183,13 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+      <div
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-4"
+        style={{
+          scrollbarWidth: 'thin',
+          scrollbarColor: `${scrollbarThumbColor} ${scrollbarTrackColor}`,
+        } as React.CSSProperties}
+      >
         {!hasAnyDiagnostics && (
           <div className="text-center py-8">
             <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">

@@ -14,12 +14,29 @@ function getSupabaseAdmin() {
 // GET - Fetch user's projects (owned + collaborated)
 export async function GET() {
   try {
+    // Check for required environment variable
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('SUPABASE_SERVICE_ROLE_KEY is not configured');
+      return NextResponse.json(
+        { error: 'Server configuration error', projects: [] },
+        { status: 500 }
+      );
+    }
+
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError) {
+      console.error('Auth error:', authError);
+      return NextResponse.json(
+        { error: 'Authentication error', projects: [] },
+        { status: 401 }
+      );
+    }
 
     if (!user) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        { error: 'Unauthorized', projects: [] },
         { status: 401 }
       );
     }

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 import {
@@ -10,20 +11,32 @@ import {
   Layers,
   ArrowRight,
   Check,
-  Infinity,
+  Infinity as InfinityIcon,
   Palette,
   GitBranch,
   Sparkles,
   Play,
   Loader2,
   Menu,
-  X
+  X,
+  User,
+  LayoutGrid
 } from 'lucide-react';
 import Image from 'next/image';
 
 export function LandingPage() {
   const [isLoading, setIsLoading] = useState<'pro' | 'lifetime' | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<string>('');
+
+  // import { useEffect } from 'react'; // Allow TS to infer or add import if missing. Wait, import is not at top. 
+  // Let's assume standard React import. If useEffect is missing I should add it.
+  // Actually, I can use React.useEffect if needed, or better, add it to imports. 
+  // But strictly I can only modify specific blocks.
+  // I will assume standard imports or add it. Line 3 has `import { useState } from 'react';`. 
+  // I will replace line 3 as well in a separate chunk or just rely on the user having it or adding it.
+  // Wait, I can't edit line 3 easily without a separate chunk. 
+  // I'll add a separate chunk for imports.
 
   const handleCheckout = async (planType: 'pro' | 'lifetime') => {
     setIsLoading(planType);
@@ -57,6 +70,28 @@ export function LandingPage() {
     }
   };
 
+  useEffect(() => {
+    const handleScroll = () => {
+      const sections = ['features', 'demo', 'pricing'];
+      const scrollPosition = window.scrollY + 100; // Offset for navbar
+
+      for (const section of sections) {
+        const element = document.getElementById(section);
+        if (element) {
+          const { offsetTop, offsetHeight } = element;
+          if (scrollPosition >= offsetTop && scrollPosition < offsetTop + offsetHeight) {
+            setActiveSection(section);
+            return;
+          }
+        }
+      }
+      setActiveSection('');
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   return (
     <div className="min-h-screen bg-black text-white overflow-x-hidden">
       {/* Interactive Shimmer Grid Background */}
@@ -73,33 +108,81 @@ export function LandingPage() {
       <div className="fixed inset-0 hero-gradient pointer-events-none" />
 
       {/* Navigation */}
-      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-4xl">
-        <div className="nav-glass px-2 py-2 flex items-center justify-between">
-          {/* Left side: Logo + Navigation Links */}
-          <div className="flex items-center">
-            <a href="/" className="flex items-center px-3 py-2">
-              <Image
-                src="/images/hypercube-logo.webp"
-                alt="CXD"
-                width={36}
-                height={36}
-                className="object-contain"
-              />
-            </a>
+      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[80%] md:w-auto max-w-4xl">
+        <div className="nav-glass w-full p-2 md:p-1.5 flex items-center justify-between md:justify-start gap-1.5 relative overflow-hidden shadow-[inset_0_0_20px_rgba(255,255,255,0.05)]">
+          {/* Glass Reflection Effects */}
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-50" />
+          <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-50" />
+          <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
 
-            {/* Desktop Navigation - moved to left */}
-            <div className="hidden md:flex items-center ml-2">
-              <a href="#features" className="nav-link-btn text-violet-300 hover:text-violet-200">Features</a>
-              <a href="#demo" className="nav-link-btn text-violet-300 hover:text-violet-200">Demo</a>
-              <a href="#pricing" className="nav-link-btn text-violet-300 hover:text-violet-200">Pricing</a>
-            </div>
+          {/* Logo */}
+          <a href="/" className="flex items-center gap-2 group px-2 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 pr-4">
+            <Image
+              src="/images/hypercube-logo.webp"
+              alt="CXD"
+              width={28}
+              height={28}
+              className="object-contain"
+            />
+            <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[200px] group-hover:opacity-100 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap font-medium text-sm text-white/90">
+              Cyberdelic Design Canvas
+            </span>
+          </a>
+
+          {/* Divider */}
+          <div className="hidden md:block w-px h-6 bg-white/10 mx-0.5" />
+
+          {/* Navigation Links */}
+          <div className="hidden md:flex items-center gap-1.5">
+            {[
+              { id: 'features', icon: LayoutGrid, label: 'Features' },
+              { id: 'demo', icon: Play, label: 'Demo' },
+              { id: 'pricing', icon: Target, label: 'Pricing' }
+            ].map((item) => {
+              const isActive = activeSection === item.id;
+              return (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  className={`relative flex items-center p-2 group-hover:pr-4 rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 group overflow-hidden
+                    ${isActive
+                      ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+                      : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+                    }`}
+                  aria-label={item.label}
+                >
+                  <span className="relative z-10 shrink-0">
+                    <item.icon className={`w-4 h-4 transition-colors ${isActive ? 'text-violet-200' : 'group-hover:text-violet-200'}`} />
+                  </span>
+                  <span className={`relative z-10 max-w-0 overflow-hidden group-hover:max-w-[100px] group-hover:opacity-100 group-hover:ml-2 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap text-xs font-medium text-violet-100 ${isActive ? 'opacity-0' : 'opacity-0'}`}>
+                    {item.label}
+                  </span>
+                  {/* Subtle inner top highlight */}
+                  <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  {/* Subtle bottom glow */}
+                  <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                </a>
+              );
+            })}
           </div>
 
-          {/* Right side: Auth buttons */}
-          <div className="hidden md:flex items-center gap-2">
-            <a href="/sign-in" className="nav-link-btn text-violet-300 hover:text-violet-200">Log in</a>
+          {/* Divider */}
+          <div className="hidden md:block w-px h-6 bg-white/10 mx-0.5" />
+
+          {/* Auth buttons */}
+          <div className="hidden md:flex items-center gap-1.5">
+            <a
+              href="/sign-in"
+              className="relative flex items-center p-2 group-hover:pr-4 rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] bg-white/[0.03] border border-white/[0.08] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)] active:scale-95 group overflow-hidden"
+              aria-label="Log in"
+            >
+              <User className="w-4 h-4 shrink-0 group-hover:text-violet-200 transition-colors" />
+              <span className="relative z-10 max-w-0 overflow-hidden opacity-0 group-hover:max-w-[100px] group-hover:opacity-100 group-hover:ml-2 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap text-xs font-medium text-violet-100">
+                Log in
+              </span>
+            </a>
             <a href="/sign-up">
-              <button className="btn-primary-glow text-sm px-5 py-2">
+              <button className="btn-primary-glow text-xs font-semibold px-4 py-2 shadow-[0_0_20px_rgba(139,92,246,0.5)] hover:shadow-[0_0_30px_rgba(139,92,246,0.7)]">
                 Get Started
               </button>
             </a>
@@ -108,37 +191,68 @@ export function LandingPage() {
           {/* Mobile Menu Button */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 text-white/60 hover:text-white transition-colors"
+            className="md:hidden p-2 text-white/80 hover:text-white transition-all duration-300"
             aria-label="Toggle menu"
           >
-            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6 rotate-180" />}
           </button>
         </div>
 
-        {/* Mobile Menu Dropdown */}
-        {isMobileMenuOpen && (
-          <div className="md:hidden mt-2 nav-glass rounded-2xl p-4 space-y-2">
-            <a href="#features" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
-              Features
-            </a>
-            <a href="#demo" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
-              Demo
-            </a>
-            <a href="#pricing" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
-              Pricing
-            </a>
-            <div className="border-t border-white/10 pt-2 mt-2 space-y-2">
-              <a href="/sign-in" className="block px-4 py-3 rounded-lg hover:bg-violet-500/10 text-violet-300 hover:text-violet-200 transition-colors">
-                Log in
-              </a>
-              <a href="/sign-up" className="block">
-                <button className="btn-primary-glow text-sm px-5 py-3 w-full">
-                  Get Started
-                </button>
-              </a>
-            </div>
-          </div>
-        )}
+        {/* Improved Mobile Menu Overlay */}
+        <AnimatePresence>
+          {isMobileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+              className="md:hidden mt-3 relative rounded-[2.5rem] bg-black/90 backdrop-blur-3xl p-4 shadow-[0_25px_60px_-15px_rgba(139,92,246,0.4)] border border-white/10 flex flex-col gap-1 overflow-hidden"
+            >
+              <div className="flex flex-col">
+                {[
+                  { label: "Features", href: "#features", icon: LayoutGrid },
+                  { label: "Demo", href: "#demo", icon: Play },
+                  { label: "Pricing", href: "#pricing", icon: Target },
+                  { label: "Log in", href: "/sign-in", icon: Brain },
+                ].map((item, idx) => (
+                  <motion.a
+                    key={item.label}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.05 * idx }}
+                    href={item.href}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="group flex justify-between items-center px-5 py-4 rounded-3xl hover:bg-white/5 text-base font-semibold text-white/70 hover:text-white transition-all"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-violet-500/20 transition-colors">
+                        <item.icon className="w-4 h-4 text-violet-400" />
+                      </div>
+                      {item.label}
+                    </div>
+                    <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all duration-300" />
+                  </motion.a>
+                ))}
+              </div>
+
+              <div className="px-2 pt-2 pb-2">
+                <motion.a
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.25 }}
+                  href="/sign-up"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="block"
+                >
+                  <button className="btn-primary-glow text-sm px-4 py-4 w-full flex items-center justify-center gap-2 rounded-[1.5rem] whitespace-nowrap">
+                    Start Your First Canvas
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </motion.a>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </nav>
 
       {/* Hero Section */}
@@ -259,10 +373,10 @@ export function LandingPage() {
             {[
               { icon: Target, title: 'Intention-First Design', desc: 'Start with your core message and transformational goal. The canvas structures everything around your intention.' },
               { icon: Brain, title: 'State → Trait Mapping', desc: 'Bridge temporary experiences with lasting change. Design how states become enduring traits.' },
-              { icon: Layers, title: 'Reality Planes', desc: 'Work across physical, virtual, and imaginal dimensions simultaneously.' },
+              { icon: Layers, title: 'Reality Planes', desc: 'Plan and intertwine experiences across physical, virtual, biological, cognitive, generative, mixed and augmented realities simultaneously.' },
               { icon: Layout, title: 'Infinite Canvas', desc: 'Unlimited spatial workspace with smooth zoom, pan, and organization tools.' },
               { icon: GitBranch, title: 'Experience Flow', desc: 'Timeline-based journey mapping with phase transitions and dependencies.' },
-              { icon: Palette, title: 'Sensory Domains', desc: 'Map visual, auditory, tactile, and other sensory elements of your experience.' },
+              { icon: Palette, title: 'Sensory Domains', desc: 'Define the visual, auditory, haptic, olfactory and gustatory sensory domains of your experience.' },
             ].map((feature, i) => (
               <div key={i} className="glass-card p-6 hover:border-white/20 transition-colors cursor-pointer group">
                 <div className="feature-icon mb-4 group-hover:scale-110 transition-transform">
@@ -292,10 +406,10 @@ export function LandingPage() {
                 </div>
                 <h4 className="text-xl font-semibold mb-3">AI Assistant</h4>
                 <p className="text-white/50 text-sm leading-relaxed mb-4">
-                  Generate experience content, get design suggestions, and accelerate your workflow with intelligent AI that understands experience design principles.
+                  Summarize your progress and Generate Experience Requierement Document (ERD), get design suggestions and accelerate your workflow with AI that understands experience design principles.
                 </p>
                 <ul className="space-y-2">
-                  {['Content generation', 'Design recommendations', 'Smart suggestions'].map((item, i) => (
+                  {['ERD generation', 'Design recommendations', 'Smart suggestions'].map((item, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm text-white/60">
                       <Check className="w-3.5 h-3.5 text-violet-400" />
                       {item}
@@ -346,7 +460,7 @@ export function LandingPage() {
             <div className="text-center mt-10">
               <a href="/sign-up">
                 <button className="btn-primary-glow">
-                  Try Pro Free
+                  Starty Your Pro Trial
                 </button>
               </a>
             </div>
@@ -359,17 +473,18 @@ export function LandingPage() {
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
-              From vision to
-              <span className="text-gradient-purple"> reality</span>
+              Design with
+              <span className="text-gradient-purple"> Intent</span>
             </h2>
-            <p className="text-white/50 text-lg">Three steps to design your transformation.</p>
+            <p className="text-white/50 text-lg">A systematic framework for experience design.</p>
           </div>
 
           <div className="space-y-8">
             {[
-              { num: '01', title: 'Define Your Intention', desc: 'Use the Initiation Wizard to establish your core message, audience, and transformation goal.' },
-              { num: '02', title: 'Map on the Canvas', desc: 'Arrange reality planes, sensory domains, and presence types. Build your experience flow timeline.' },
-              { num: '03', title: 'Refine and Execute', desc: 'Use Focus Mode for deep work. Generate tasks with Plan View. Share live previews for feedback.' },
+              { num: '01', title: 'Frame', desc: 'Clarify the audience, context, constraints, and intended transformation before anything is built.' },
+              { num: '02', title: 'Design', desc: 'Compose the experience space by arranging reality planes, sensory domains, and presence elements.' },
+              { num: '03', title: 'Map', desc: 'Explore how experiences unfold over time, across states, traits, and possible paths.' },
+              { num: '04', title: 'Plan', desc: 'Translate the experience into tasks, assets, timelines, and collaboration.' },
             ].map((step, i) => (
               <div key={i} className="glass-card p-6 flex items-start gap-6 group hover:border-white/20 transition-colors">
                 <div className="text-4xl font-bold text-gradient-purple">{step.num}</div>
@@ -469,7 +584,7 @@ export function LandingPage() {
               <div className="mb-6">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg text-cyan-400 mb-2">Lifetime</h3>
-                  <Infinity className="w-5 h-5 text-cyan-400" />
+                  <InfinityIcon className="w-5 h-5 text-cyan-400" />
                 </div>
                 <div className="flex items-baseline gap-1">
                   <span className="text-4xl font-bold">$199</span>

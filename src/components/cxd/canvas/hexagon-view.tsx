@@ -9,6 +9,8 @@ import { HexagonDetailPanel } from "./hexagon-detail-panel";
 import { NavigationToolkit } from "./navigation-toolkit";
 import { Hypercube3D } from "./hypercube-3d";
 import { QuickViewModal } from "./quick-view-modal";
+import { ShimmerGrid } from "@/components/ui/shimmer-grid";
+import { extractCenterColor, hexToRgba } from "@/lib/utils";
 
 // Feature toggle - set to true to use 3D cube view instead of 2D hexagon
 const USE_3D_CUBE = true;
@@ -823,20 +825,17 @@ export function HexagonView() {
   const focusedTaggedElements = focusedFaceTag ? getTaggedElementsForFace(focusedFaceTag) : [];
   const focusedGroupedElements = groupElementsByType(focusedTaggedElements);
 
+  // Dynamic background based on canvas background
+  const canvasBackground = project.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const panelBgColor = hexToRgba(centerColor, 0.95);
+
   // 3D Cube View - new implementation
   if (USE_3D_CUBE) {
     return (
       <div className="fixed inset-0 top-16 overflow-hidden">
-        {/* Dot grid background */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(circle, hsl(270 30% 25% / 0.3) 1px, transparent 1px)`,
-            backgroundSize: '30px 30px',
-          }}
-        />
-
         {/* 3D Hypercube - handles its own zoom and drag internally */}
+        {/* Note: Hypercube3D has its own ShimmerGrid background inside */}
         <Hypercube3D
           project={project}
           onSelectSection={(sectionId) => setSelectedSection(sectionId)}
@@ -856,9 +855,10 @@ export function HexagonView() {
 
         {/* Right side: Details Panel */}
         <div
-          className={`fixed top-16 right-0 h-[calc(100vh-4rem)] w-[420px] min-w-[360px] max-w-[480px] bg-card/95 backdrop-blur-xl border-l border-border shadow-2xl z-40 transition-transform duration-200 ease-out ${
+          className={`fixed top-16 right-0 h-[calc(100vh-4rem)] w-[420px] min-w-[360px] max-w-[480px] backdrop-blur-xl border-l border-border shadow-2xl z-40 transition-transform duration-200 ease-out ${
             isPanelOpen ? "translate-x-0" : "translate-x-full"
           }`}
+          style={{ backgroundColor: panelBgColor }}
         >
           {selectedSection && (
             <HexagonDetailPanel
@@ -885,11 +885,13 @@ export function HexagonView() {
 
   // Original 2D Hexagon View (fallback)
   return (
-    <div className="fixed inset-0 top-16 overflow-hidden">
+    <div className="fixed inset-0 top-16 overflow-hidden" style={{ background: canvasBackground }}>
+      {/* Shimmer grid background - behind everything */}
+      <ShimmerGrid className="!fixed inset-0 !z-0" />
       {/* Hexagon canvas area - fixed, never shifts */}
       <div
         ref={containerRef}
-        className={`absolute inset-0 overflow-hidden ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
+        className={`absolute inset-0 overflow-hidden z-10 ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleCanvasMouseMove}
         onMouseUp={handleCanvasMouseUp}
@@ -1379,9 +1381,10 @@ export function HexagonView() {
       )}
       {/* Right side: Details Panel - fixed overlay, no layout shift */}
       <div
-        className={`fixed top-16 right-0 h-[calc(100vh-4rem)] w-[420px] min-w-[360px] max-w-[480px] bg-card/95 backdrop-blur-xl border-l border-border shadow-2xl z-40 transition-transform duration-200 ease-out ${
+        className={`fixed top-16 right-0 h-[calc(100vh-4rem)] w-[420px] min-w-[360px] max-w-[480px] backdrop-blur-xl border-l border-border shadow-2xl z-40 transition-transform duration-200 ease-out ${
           isPanelOpen ? "translate-x-0" : "translate-x-full"
         }`}
+        style={{ backgroundColor: panelBgColor }}
       >
         {selectedSection && (
           <HexagonDetailPanel

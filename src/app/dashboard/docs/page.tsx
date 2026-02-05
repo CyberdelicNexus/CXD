@@ -1,20 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import DashboardNavbar from '@/components/dashboard-navbar';
-import { 
-  FileText, 
+import { ShimmerGrid } from '@/components/ui/shimmer-grid';
+import {
   ChevronRight,
-  Sparkles,
+  BookOpen,
+  LayoutDashboard,
+  Compass,
   Layout,
   Layers,
-  Wand2,
-  Share2,
-  Settings,
-  BookOpen
+  ClipboardList,
+  Users,
+  Share2
 } from 'lucide-react';
 
 interface DocSection {
@@ -32,90 +31,168 @@ const docSections: DocSection[] = [
     content: (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold mb-4 text-gradient">Welcome to CXD Canvas</h1>
-          <p className="text-muted-foreground mb-4">
-            The Cyberdelic Experience Design Canvas is a comprehensive digital tool for designing transformational experiences.
-            It helps you hold complex experiential variables, translate intention into designed states, and communicate 
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Welcome to CXD Canvas</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The Cyberdelic Experience Design Canvas is a comprehensive spatial tool for designing transformational experiences.
+            It helps you hold complex experiential variables, translate intention into designed states, and communicate
             experience logic to collaborators.
-          </p>
-        </div>
-        
-        <div>
-          <h2 className="text-2xl font-semibold mb-3">What is CXD?</h2>
-          <p className="text-muted-foreground mb-4">
-            CXD is a methodology and framework for designing experiences that produce specific states and integrate into lasting traits.
-            It combines technology, story, and human psychology into a coherent design system.
           </p>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Core Principles</h2>
-          <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-            <li><strong>Schema First, Expression Second</strong> — The CXD structure is fixed. Freedom lives inside it.</li>
-            <li><strong>States Lead to Traits</strong> — Every design choice should trace forward to integration.</li>
-            <li><strong>Quantification Without Reductionism</strong> — Sliders reveal emphasis, not truth.</li>
-            <li><strong>Guidance Without Authority</strong> — The system asks better questions, it does not decide.</li>
-            <li><strong>Design Is Navigation</strong> — Users steer systems, they do not control outcomes.</li>
+          <h2 className="text-2xl font-semibold mb-3 text-white">What is CXD?</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            CXD is a methodology and framework for designing experiences that produce specific states and integrate into lasting traits.
+            It combines technology, story, and human psychology into a coherent design system for experience creators.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Core Principles</h2>
+          <ul className="space-y-3 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Schema First, Expression Second</strong> — The CXD structure provides a consistent framework. Creative freedom lives within it.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">States Lead to Traits</strong> — Every design choice should trace forward to lasting integration and transformation.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Quantification Without Reductionism</strong> — Sliders and values reveal emphasis and balance, not absolute truth.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Guidance Without Authority</strong> — The system asks better questions; it does not make decisions for you.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Design Is Navigation</strong> — Users steer systems and shape experiences, they do not control outcomes.</span>
+            </li>
           </ul>
         </div>
       </div>
     )
   },
   {
-    id: 'wizard',
-    title: 'Initiation Wizard',
-    icon: <Wand2 className="w-4 h-4" />,
+    id: 'dashboard',
+    title: 'Dashboard',
+    icon: <LayoutDashboard className="w-4 h-4" />,
     content: (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold mb-4 text-gradient">Initiation Wizard</h1>
-          <p className="text-muted-foreground mb-4">
-            The Initiation Wizard guides you through the initial creation of your experience design map.
-            It asks structured questions that help you think through each dimension of the experience.
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Dashboard</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The Dashboard is your home base in CXD Canvas. It provides an overview of all your experience design projects
+            and quick access to create new ones.
           </p>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">How It Works</h2>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Your Experience Maps</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            All your projects are displayed as visual cards with cover images. Each card shows:
+          </p>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span>Project name and last modified date</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span>Owner or Collaborator badge indicating your role</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span>Quick actions: add cover image, invite collaborators, rename, or delete</span>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Statistics & Quick Actions</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The sidebar provides statistics about your projects and quick access to support, bug reporting,
+            documentation, and video tutorials.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Creating a New Project</h2>
+          <p className="text-white/60 leading-relaxed">
+            Click "Create New Map" to start a new experience design. You'll be prompted to name your project,
+            then taken directly to the Canvas to begin designing.
+          </p>
+        </div>
+      </div>
+    )
+  },
+  {
+    id: 'framing',
+    title: 'Framing',
+    icon: <Compass className="w-4 h-4" />,
+    content: (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Framing</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The Framing panel is where you define the foundational elements of your experience design.
+            It establishes the context, intention, and audience before you begin detailed mapping.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Framing Elements</h2>
           <div className="space-y-4">
-            <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-              <h3 className="font-semibold mb-2">Step 1: Project Setup</h3>
-              <p className="text-sm text-muted-foreground">
-                Give your experience a name and describe its core intention. What transformation are you designing for?
+            <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold mb-2 text-white">Experience Intention</h3>
+              <p className="text-sm text-white/60">
+                Define your core message and the transformation you want participants to experience.
+                What should they feel, understand, or become?
               </p>
             </div>
-            
-            <div className="p-4 rounded-lg bg-accent/10 border border-accent/20">
-              <h3 className="font-semibold mb-2">Step 2: Reality Planes</h3>
-              <p className="text-sm text-muted-foreground">
-                Define the mix of reality types (Physical, Augmented, Virtual, Mixed, Generative, Biological, Conscious) 
-                that make up your experience.
+
+            <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+              <h3 className="font-semibold mb-2 text-white">Target Audience</h3>
+              <p className="text-sm text-white/60">
+                Describe who this experience is designed for. Consider their background, expectations,
+                and what they're bringing to the experience.
               </p>
             </div>
 
             <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
-              <h3 className="font-semibold mb-2">Step 3: Context & Meaning</h3>
-              <p className="text-sm text-muted-foreground">
-                Establish the world, story, magic system, and user role that frame the experience.
+              <h3 className="font-semibold mb-2 text-white">Context & Setting</h3>
+              <p className="text-sm text-white/60">
+                Establish the world, story, and environment where the experience takes place.
+                This includes the narrative framing and user's role within it.
               </p>
             </div>
 
-            <div className="p-4 rounded-lg bg-teal-500/10 border border-teal-500/20">
-              <h3 className="font-semibold mb-2">Step 4: States & Traits</h3>
-              <p className="text-sm text-muted-foreground">
-                Map the intended experiential states and the lasting traits they should integrate into.
+            <div className="p-4 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+              <h3 className="font-semibold mb-2 text-white">Success Criteria</h3>
+              <p className="text-sm text-white/60">
+                Define what success looks like. How will you know the experience achieved its intention?
               </p>
             </div>
           </div>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Tips</h2>
-          <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-            <li>You can skip questions and return to them later</li>
-            <li>Your progress is automatically saved</li>
-            <li>Use voice input for faster ideation</li>
-            <li>The wizard populates the canvas, which you can then refine</li>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Tips</h2>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span>Start with the transformation you want to create, then work backwards</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span>Be specific about your audience — generic experiences create generic results</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span>Return to framing whenever you feel lost in the details</span>
+            </li>
           </ul>
         </div>
       </div>
@@ -123,169 +200,270 @@ const docSections: DocSection[] = [
   },
   {
     id: 'canvas',
-    title: 'Infinite Canvas',
+    title: 'Canvas',
     icon: <Layout className="w-4 h-4" />,
     content: (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold mb-4 text-gradient">Infinite Canvas</h1>
-          <p className="text-muted-foreground mb-4">
-            The Infinite Canvas is your spatial workspace where all CXD dimensions are visualized and can be edited.
-            It preserves the systemic relationships between different aspects of your experience design.
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Canvas</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The Canvas is your infinite spatial workspace where you design, visualize, and connect
+            all elements of your experience. It's designed for creative exploration and systemic thinking.
           </p>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Navigation</h2>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Navigation</h2>
           <div className="space-y-3">
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-background/50 border border-border/50">
-              <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-mono">⌘</span>
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+              <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs font-mono text-violet-300">⌘</span>
               </div>
               <div>
-                <h3 className="font-semibold text-sm">Pan & Zoom</h3>
-                <p className="text-xs text-muted-foreground">Click and drag to pan. Scroll or pinch to zoom.</p>
+                <h3 className="font-semibold text-sm text-white">Pan & Zoom</h3>
+                <p className="text-xs text-white/50">Click and drag to pan. Scroll or pinch to zoom in and out.</p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-background/50 border border-border/50">
-              <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-mono">⇧</span>
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs font-mono text-cyan-300">+</span>
               </div>
               <div>
-                <h3 className="font-semibold text-sm">Select & Edit</h3>
-                <p className="text-xs text-muted-foreground">Click any section to view details. Double-click to enter Focus Mode.</p>
+                <h3 className="font-semibold text-sm text-white">Add Elements</h3>
+                <p className="text-xs text-white/50">Use the toolbar to add elements, containers, connectors, and more.</p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-background/50 border border-border/50">
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
               <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-mono">M</span>
+                <span className="text-xs font-mono text-purple-300">M</span>
               </div>
               <div>
-                <h3 className="font-semibold text-sm">Minimap</h3>
-                <p className="text-xs text-muted-foreground">Toggle minimap to see your position on the canvas.</p>
+                <h3 className="font-semibold text-sm text-white">Minimap</h3>
+                <p className="text-xs text-white/50">Toggle the minimap to see your position on the canvas and navigate quickly.</p>
               </div>
             </div>
           </div>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Canvas Sections</h2>
-          <p className="text-muted-foreground mb-3">
-            The canvas is organized into spatial clusters for each CXD dimension:
-          </p>
-          <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-            <li><strong>Reality Planes</strong> — PR, AR, VR, MR, GR, BR, CR composition</li>
-            <li><strong>Sensory Domains</strong> — Visual, Auditory, Olfactory, Gustatory, Haptic intensity</li>
-            <li><strong>Presence Types</strong> — Six types of presence with individual controls</li>
-            <li><strong>Experience Flow</strong> — Five stages from Threshold to Return</li>
-            <li><strong>State/Trait Mapping</strong> — Four quadrants for states and traits</li>
-            <li><strong>Context & Meaning</strong> — World, Story, Magic, User Role</li>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Canvas Tools</h2>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Elements</strong> — Create blocks for different aspects of your experience</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Connectors</strong> — Draw relationships and flows between elements</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Containers</strong> — Group related elements together</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Text & Images</strong> — Add annotations and visual references</span>
+            </li>
           </ul>
         </div>
       </div>
     )
   },
   {
-    id: 'hypercube',
-    title: 'Hypercube View',
+    id: 'map',
+    title: 'Map',
     icon: <Layers className="w-4 h-4" />,
     content: (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold mb-4 text-gradient">Hypercube View</h1>
-          <p className="text-muted-foreground mb-4">
-            The Hypercube is a 3D visualization that shows your experience design across multiple dimensions simultaneously.
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Hypercube Map</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The Hypercube Map is a 3D visualization that shows your experience design across multiple dimensions simultaneously.
             It helps you understand the relationships and balance between different aspects of your design.
           </p>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">What It Shows</h2>
-          <p className="text-muted-foreground mb-4">
-            The Hypercube represents your experience design as a multidimensional space where:
+          <h2 className="text-2xl font-semibold mb-3 text-white">What It Shows</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The Hypercube represents your experience design as a multidimensional space:
           </p>
-          <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-            <li>Each axis represents a different dimension of experience (Reality, Sensory, Presence, etc.)</li>
-            <li>The shape and color reveal balance and emphasis across dimensions</li>
-            <li>You can rotate and explore the design from different perspectives</li>
-            <li>Hexagonal faces show individual dimension details</li>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span>Each axis represents a different dimension (Reality Planes, Sensory Domains, Presence Types, etc.)</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span>The shape and color reveal balance and emphasis across dimensions</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span>Rotate and explore your design from different perspectives</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span>Hexagonal faces show individual dimension details on hover</span>
+            </li>
           </ul>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Interactions</h2>
-          <div className="space-y-3">
-            <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-              <h3 className="font-semibold mb-2">Rotate View</h3>
-              <p className="text-sm text-muted-foreground">
-                Click and drag to rotate the hypercube and see your design from different angles.
-              </p>
+          <h2 className="text-2xl font-semibold mb-3 text-white">CXD Dimensions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold text-sm text-white mb-1">Reality Planes</h3>
+              <p className="text-xs text-white/50">PR, AR, VR, MR, GR, BR, CR composition</p>
             </div>
-            
-            <div className="p-4 rounded-lg bg-accent/10 border border-accent/20">
-              <h3 className="font-semibold mb-2">Inspect Faces</h3>
-              <p className="text-sm text-muted-foreground">
-                Click on any hexagonal face to see detailed information about that dimension.
-              </p>
+            <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+              <h3 className="font-semibold text-sm text-white mb-1">Sensory Domains</h3>
+              <p className="text-xs text-white/50">Visual, Auditory, Olfactory, Gustatory, Haptic</p>
             </div>
-
-            <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
-              <h3 className="font-semibold mb-2">Compare Layers</h3>
-              <p className="text-sm text-muted-foreground">
-                Use layer controls to show/hide different dimensions and compare their relationships.
-              </p>
+            <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
+              <h3 className="font-semibold text-sm text-white mb-1">Presence Types</h3>
+              <p className="text-xs text-white/50">Six types of presence with individual controls</p>
+            </div>
+            <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+              <h3 className="font-semibold text-sm text-white mb-1">Experience Flow</h3>
+              <p className="text-xs text-white/50">Five stages from Threshold to Return</p>
             </div>
           </div>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Interactions</h2>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Rotate</strong> — Click and drag to rotate the hypercube</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Inspect</strong> — Click faces to see detailed information</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Layer Toggle</strong> — Show/hide different dimensions</span>
+            </li>
+          </ul>
         </div>
       </div>
     )
   },
   {
-    id: 'focus-mode',
-    title: 'Focus Mode',
-    icon: <Sparkles className="w-4 h-4" />,
+    id: 'plan',
+    title: 'Plan',
+    icon: <ClipboardList className="w-4 h-4" />,
     content: (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold mb-4 text-gradient">Focus Mode</h1>
-          <p className="text-muted-foreground mb-4">
-            Focus Mode allows you to dive deep into any single dimension of your experience design.
-            It isolates the section you're working on while maintaining context with the broader design.
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Plan View</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Plan View transforms your experience design into actionable tasks and timelines.
+            It bridges the gap between creative design and practical execution.
           </p>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Entering Focus Mode</h2>
-          <p className="text-muted-foreground mb-4">
-            You can enter Focus Mode in several ways:
+          <h2 className="text-2xl font-semibold mb-3 text-white">Features</h2>
+          <div className="space-y-4">
+            <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold mb-2 text-white">Task Generation</h3>
+              <p className="text-sm text-white/60">
+                Convert experience blocks into actionable tasks. Each element on your canvas can become
+                a task with deadlines, assignees, and dependencies.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+              <h3 className="font-semibold mb-2 text-white">Timeline View</h3>
+              <p className="text-sm text-white/60">
+                See your experience production as a timeline. Organize phases, milestones,
+                and dependencies in a linear view.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+              <h3 className="font-semibold mb-2 text-white">Kanban Board</h3>
+              <p className="text-sm text-white/60">
+                Track progress with a kanban-style board. Move tasks through stages from
+                planning to completion.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Pro Feature</h2>
+          <p className="text-white/60 leading-relaxed">
+            Plan View is available to Pro subscribers. Upgrade to unlock task management,
+            timeline planning, and production tracking features.
           </p>
-          <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-            <li>Double-click any section on the canvas</li>
-            <li>Click a section and press <code className="px-2 py-1 bg-background rounded">F</code></li>
-            <li>Use the Focus button in the section's detail panel</li>
+        </div>
+      </div>
+    )
+  },
+  {
+    id: 'collaborate',
+    title: 'Collaborate',
+    icon: <Users className="w-4 h-4" />,
+    content: (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Collaboration</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            CXD Canvas supports real-time collaboration so you can design experiences together with your team.
+            See live cursors, share feedback, and co-create seamlessly.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Inviting Collaborators</h2>
+          <ol className="space-y-3 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">1</div>
+              <span>Click the "Invite" button on your canvas card in the Dashboard</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">2</div>
+              <span>Enter your collaborator's email address</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">3</div>
+              <span>They'll receive an invitation to join your canvas</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">4</div>
+              <span>Once accepted, they can view and edit the canvas with you</span>
+            </li>
+          </ol>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Real-Time Features</h2>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Live Cursors</strong> — See where collaborators are working in real-time</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Presence Indicators</strong> — Know who's currently viewing the canvas</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Instant Sync</strong> — Changes appear immediately for all collaborators</span>
+            </li>
           </ul>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">What You Can Edit</h2>
-          <p className="text-muted-foreground mb-4">
-            In Focus Mode, you have access to:
-          </p>
-          <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-            <li><strong>Sliders</strong> — Adjust intensity, emphasis, and mix across dimensions</li>
-            <li><strong>Text Fields</strong> — Write detailed descriptions and design intent</li>
-            <li><strong>Structured Editors</strong> — Work with states, traits, and flow stages</li>
-            <li><strong>Validation</strong> — Real-time feedback on design coherence</li>
-          </ul>
-        </div>
-
-        <div>
-          <h2 className="text-2xl font-semibold mb-3">Exiting Focus Mode</h2>
-          <p className="text-muted-foreground">
-            Press <code className="px-2 py-1 bg-background rounded">ESC</code> or click the Exit button to return to the canvas.
-            Your changes are automatically saved and reflected in the global view.
+          <h2 className="text-2xl font-semibold mb-3 text-white">Permissions</h2>
+          <p className="text-white/60 leading-relaxed">
+            Canvas owners can invite collaborators and manage permissions. Collaborators have full editing access
+            but cannot invite others or delete the canvas.
           </p>
         </div>
       </div>
@@ -298,93 +476,61 @@ const docSections: DocSection[] = [
     content: (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold mb-4 text-gradient">Sharing & Export</h1>
-          <p className="text-muted-foreground mb-4">
-            Share your experience design with collaborators, stakeholders, and team members.
-            Export for documentation, presentation, or integration with other tools.
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Sharing & Export</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Share your experience design with stakeholders, clients, and team members.
+            Export for documentation, presentation, or archival purposes.
           </p>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Live Share Links</h2>
-          <p className="text-muted-foreground mb-4">
+          <h2 className="text-2xl font-semibold mb-3 text-white">Live Share Links</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
             Generate a live, read-only view of your canvas that updates in real-time:
           </p>
-          <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
-            <li>Click the Share button in the canvas toolbar</li>
-            <li>Toggle "Enable Live Sharing"</li>
-            <li>Copy the generated link</li>
-            <li>Share with anyone — no login required</li>
+          <ol className="space-y-3 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">1</div>
+              <span>Click the Share button in the canvas toolbar</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">2</div>
+              <span>Toggle "Enable Live Sharing"</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">3</div>
+              <span>Copy the generated link</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">4</div>
+              <span>Share with anyone — no login required to view</span>
+            </li>
           </ol>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3">Export Options</h2>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Export Options</h2>
           <div className="space-y-3">
-            <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-              <h3 className="font-semibold mb-2">PDF Export</h3>
-              <p className="text-sm text-muted-foreground">
+            <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold mb-2 text-white">PDF Export</h3>
+              <p className="text-sm text-white/60">
                 Export a formatted PDF document with all sections, descriptions, and visualizations.
-                Ideal for presentations and documentation.
+                Ideal for presentations, documentation, and offline reference.
               </p>
             </div>
-            
-            <div className="p-4 rounded-lg bg-accent/10 border border-accent/20">
-              <h3 className="font-semibold mb-2">JSON Export</h3>
-              <p className="text-sm text-muted-foreground">
-                Export the raw data structure for integration with other tools, version control, or programmatic access.
+
+            <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+              <h3 className="font-semibold mb-2 text-white">JSON Export</h3>
+              <p className="text-sm text-white/60">
+                Export the raw data structure for backup, version control, or integration with other tools.
               </p>
             </div>
-          </div>
-        </div>
-      </div>
-    )
-  },
-  {
-    id: 'settings',
-    title: 'Settings & Preferences',
-    icon: <Settings className="w-4 h-4" />,
-    content: (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold mb-4 text-gradient">Settings & Preferences</h1>
-          <p className="text-muted-foreground mb-4">
-            Customize your CXD Canvas experience to match your workflow and preferences.
-          </p>
-        </div>
 
-        <div>
-          <h2 className="text-2xl font-semibold mb-3">Canvas Preferences</h2>
-          <ul className="list-disc list-inside space-y-2 text-muted-foreground">
-            <li><strong>Grid Display</strong> — Toggle canvas grid visibility</li>
-            <li><strong>Auto-Save Interval</strong> — Set how frequently changes are saved</li>
-            <li><strong>Zoom Sensitivity</strong> — Adjust zoom speed for your preference</li>
-            <li><strong>Theme</strong> — Choose between dark, light, or system theme</li>
-          </ul>
-        </div>
-
-        <div>
-          <h2 className="text-2xl font-semibold mb-3">Keyboard Shortcuts</h2>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center p-2 rounded-lg bg-background/50">
-              <span className="text-sm">Pan Canvas</span>
-              <code className="px-2 py-1 bg-muted rounded text-xs">Space + Drag</code>
-            </div>
-            <div className="flex justify-between items-center p-2 rounded-lg bg-background/50">
-              <span className="text-sm">Enter Focus Mode</span>
-              <code className="px-2 py-1 bg-muted rounded text-xs">F</code>
-            </div>
-            <div className="flex justify-between items-center p-2 rounded-lg bg-background/50">
-              <span className="text-sm">Exit Focus Mode</span>
-              <code className="px-2 py-1 bg-muted rounded text-xs">ESC</code>
-            </div>
-            <div className="flex justify-between items-center p-2 rounded-lg bg-background/50">
-              <span className="text-sm">Toggle Minimap</span>
-              <code className="px-2 py-1 bg-muted rounded text-xs">M</code>
-            </div>
-            <div className="flex justify-between items-center p-2 rounded-lg bg-background/50">
-              <span className="text-sm">Save</span>
-              <code className="px-2 py-1 bg-muted rounded text-xs">⌘ + S</code>
+            <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+              <h3 className="font-semibold mb-2 text-white">Image Export</h3>
+              <p className="text-sm text-white/60">
+                Export your canvas as a high-resolution PNG image for sharing on social media or embedding in documents.
+              </p>
             </div>
           </div>
         </div>
@@ -397,56 +543,75 @@ export default function DocsPage() {
   const [selectedSection, setSelectedSection] = useState(docSections[0]);
 
   return (
-    <div className="min-h-screen bg-gradient-radial">
+    <div className="min-h-screen bg-black text-white">
+      {/* Interactive Shimmer Grid Background */}
+      <ShimmerGrid
+        dotSize={1.5}
+        dotSpacing={24}
+        baseColor="rgba(110, 56, 236, 0.1)"
+        hoverColor="rgba(138, 99, 255, 0.5)"
+        hoverSize={400}
+        smoothing={60}
+      />
+
+      {/* Background gradient overlay */}
+      <div className="fixed inset-0 hero-gradient pointer-events-none" />
+
+      {/* Decorative orbs */}
+      <div className="glow-orb" style={{ top: '10%', right: '10%', opacity: 0.3 }} />
+      <div className="glow-orb glow-orb-cyan" style={{ bottom: '20%', left: '5%', opacity: 0.2 }} />
+
       <DashboardNavbar />
-      
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold mb-2">
-            <span className="text-gradient">Documentation</span>
+
+      <div className="relative z-10 container mx-auto px-4 py-8 max-w-7xl">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-4xl md:text-5xl font-bold mb-3">
+            <span className="text-gradient-purple">Documentation</span>
           </h1>
-          <p className="text-muted-foreground">
-            Learn how to use the CXD Canvas to design transformational experiences
+          <p className="text-white/50 text-lg max-w-2xl">
+            Learn how to use CXD Canvas to design transformational experiences
           </p>
         </div>
 
-        <div className="grid grid-cols-12 gap-6">
-          {/* Sidebar - 20% */}
+        <div className="grid grid-cols-12 gap-6 items-start">
+          {/* Sidebar */}
           <div className="col-span-12 md:col-span-3">
-            <Card className="gradient-border bg-card/50 backdrop-blur sticky top-20">
-              <ScrollArea className="h-[calc(100vh-200px)]">
+            <div className="glass-card rounded-xl ">
+              <ScrollArea className="h-[calc(100vh-180px)]">
                 <div className="p-4 space-y-1">
                   {docSections.map((section) => (
                     <button
                       key={section.id}
                       onClick={() => setSelectedSection(section)}
-                      className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left ${
-                        selectedSection.id === section.id
-                          ? 'bg-primary/20 text-foreground'
-                          : 'hover:bg-background/50 text-muted-foreground'
-                      }`}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all text-left ${selectedSection.id === section.id
+                          ? 'bg-violet-500/20 text-white border border-violet-500/30'
+                          : 'hover:bg-white/5 text-white/60 hover:text-white border border-transparent'
+                        }`}
                     >
-                      {section.icon}
+                      <span className={selectedSection.id === section.id ? 'text-violet-400' : 'text-white/40'}>
+                        {section.icon}
+                      </span>
                       <span className="text-sm font-medium">{section.title}</span>
                       {selectedSection.id === section.id && (
-                        <ChevronRight className="w-4 h-4 ml-auto" />
+                        <ChevronRight className="w-4 h-4 ml-auto text-violet-400" />
                       )}
                     </button>
                   ))}
                 </div>
               </ScrollArea>
-            </Card>
+            </div>
           </div>
 
-          {/* Content - 80% */}
+          {/* Content */}
           <div className="col-span-12 md:col-span-9">
-            <Card className="gradient-border bg-card/50 backdrop-blur">
-              <ScrollArea className="h-[calc(100vh-200px)]">
+            <div className="glass-card rounded-xl">
+              <ScrollArea className="h-[calc(100vh-180px)]">
                 <div className="p-8">
                   {selectedSection.content}
                 </div>
               </ScrollArea>
-            </Card>
+            </div>
           </div>
         </div>
       </div>

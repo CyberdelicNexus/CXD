@@ -12,6 +12,7 @@ import {
   TRAIT_QUADRANTS,
 } from "@/types/cxd-schema";
 import { HypercubeFaceTag, CanvasElement } from "@/types/canvas-elements";
+import { cn } from "@/lib/utils";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, AlertTriangle, Layout, Box, Type, Link2, Image, Layers, ExternalLink } from "lucide-react";
+import { X, AlertTriangle, Layout, Box, Type, Link2, Image, Layers, ExternalLink, Eye, Ear, Wind, Apple, Fingerprint, Brain, Heart, Users, PersonStanding, Globe, Zap } from "lucide-react";
 
 // Map CXDSectionId to HypercubeFaceTag
 const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
@@ -43,6 +44,23 @@ const ELEMENT_TYPE_ICONS: Record<string, React.ComponentType<{ className?: strin
   freeform: Type,
 };
 
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  visual: { icon: <Eye className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  auditory: { icon: <Ear className="w-5 h-5" />, color: "from-indigo-950 to-indigo-400", colorRaw: "99, 102, 241" },
+  olfactory: { icon: <Wind className="w-5 h-5" />, color: "from-teal-950 to-teal-400", colorRaw: "20, 184, 166" },
+  gustatory: { icon: <Apple className="w-5 h-5" />, color: "from-rose-950 to-rose-400", colorRaw: "244, 63, 94" },
+  haptic: { icon: <Fingerprint className="w-5 h-5" />, color: "from-purple-950 to-purple-400", colorRaw: "168, 85, 247" },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  mental: { icon: <Brain className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  emotional: { icon: <Heart className="w-5 h-5" />, color: "from-red-950 to-red-400", colorRaw: "239, 68, 68" },
+  social: { icon: <Users className="w-5 h-5" />, color: "from-violet-950 to-violet-400", colorRaw: "139, 92, 246" },
+  embodied: { icon: <PersonStanding className="w-5 h-5" />, color: "from-orange-950 to-orange-400", colorRaw: "249, 115, 22" },
+  environmental: { icon: <Globe className="w-5 h-5" />, color: "from-emerald-950 to-emerald-400", colorRaw: "16, 185, 129" },
+  active: { icon: <Zap className="w-5 h-5" />, color: "from-yellow-950 to-yellow-400", colorRaw: "234, 179, 8" },
+};
+
 // Group elements by type
 function groupElementsByType(elements: CanvasElement[]) {
   const groups: Record<string, CanvasElement[]> = {
@@ -54,13 +72,13 @@ function groupElementsByType(elements: CanvasElement[]) {
     image: [],
     experienceBlock: [],
   };
-  
+
   elements.forEach((el) => {
     if (groups[el.type]) {
       groups[el.type].push(el);
     }
   });
-  
+
   return groups;
 }
 
@@ -142,22 +160,22 @@ export function HexagonDetailPanel({
   const handleNavigateToElement = (element: CanvasElement) => {
     // Switch to canvas view
     setCanvasViewMode('canvas');
-    
+
     // Center on the element with some padding
     // Calculate position to center the element in viewport
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight - 64; // Account for navbar
     const zoom = 0.8;
-    
+
     const centerX = viewportWidth / 2 - (element.x + element.width / 2) * zoom;
     const centerY = viewportHeight / 2 - (element.y + element.height / 2) * zoom;
-    
+
     setCanvasPosition({ x: centerX, y: centerY });
     setCanvasZoom(zoom);
-    
+
     // Highlight the element briefly
     highlightElementBriefly(element.id, 2500);
-    
+
     // Close the panel after navigation
     onClose();
   };
@@ -355,30 +373,49 @@ export function HexagonDetailPanel({
             </p>
             {SENSORY_DOMAINS.map((domain) => {
               const currentValue = getClosestLevel(project.sensoryDomains[domain.code]);
+              const meta = SENSORY_METADATA[domain.code];
+
               return (
-                <div key={domain.code} className="space-y-3">
-                  <div>
-                    <Label className="text-sm font-semibold">
-                      {domain.label}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      {domain.description}
-                    </p>
+                <div key={domain.code} className="space-y-4 p-4 rounded-xl bg-white/5 border border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-white/5 text-primary">
+                      {meta.icon}
+                    </div>
+                    <div>
+                      <Label className="text-base font-bold tracking-tight">
+                        {domain.label}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {domain.description}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    {intensityLevels.map((level) => (
-                      <button
-                        key={level.value}
-                        onClick={() => syncSensoryDomain(domain.code, level.value)}
-                        className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
-                          currentValue === level.value
-                            ? "bg-primary text-primary-foreground font-medium"
-                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {level.label}
-                      </button>
-                    ))}
+                  <div className="flex gap-1.5 p-1 bg-black/20 rounded-lg">
+                    {intensityLevels.map((level) => {
+                      const isSelected = currentValue === level.value;
+                      const isPrimary = level.label === "Primary" && isSelected;
+
+                      return (
+                        <button
+                          key={level.value}
+                          onClick={() => syncSensoryDomain(domain.code, level.value)}
+                          className={cn(
+                            "flex-1 py-2.5 px-2 text-[10px] uppercase tracking-wider font-bold rounded-md transition-all duration-300",
+                            isSelected
+                              ? `bg-gradient-to-br ${meta.color} text-white shadow-lg`
+                              : "bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                            isPrimary && "scale-105 shadow-[0_0_20px_rgba(var(--primary),0.4)]",
+                            !isSelected && "opacity-40"
+                          )}
+                          style={isSelected ? {
+                            boxShadow: `0 4px 12px rgba(${meta.colorRaw}, 0.3)`,
+                            border: `1px solid rgba(${meta.colorRaw}, 0.5)`
+                          } : {}}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -407,30 +444,49 @@ export function HexagonDetailPanel({
             </p>
             {PRESENCE_TYPES.map((presence) => {
               const currentValue = getClosestPresenceLevel(project.presenceTypes[presence.code]);
+              const meta = PRESENCE_METADATA[presence.code];
+
               return (
-                <div key={presence.code} className="space-y-3">
-                  <div>
-                    <Label className="text-sm font-semibold">
-                      {presence.label}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      {presence.description}
-                    </p>
+                <div key={presence.code} className="space-y-4 p-4 rounded-xl bg-white/5 border border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-white/5 text-primary">
+                      {meta.icon}
+                    </div>
+                    <div>
+                      <Label className="text-base font-bold tracking-tight">
+                        {presence.label}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {presence.description}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    {presenceLevels.map((level) => (
-                      <button
-                        key={level.value}
-                        onClick={() => syncPresenceType(presence.code, level.value)}
-                        className={`flex-1 py-2 px-3 text-xs rounded-md transition-all ${
-                          currentValue === level.value
-                            ? "bg-primary text-primary-foreground font-medium"
-                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {level.label}
-                      </button>
-                    ))}
+                  <div className="flex gap-1.5 p-1 bg-black/20 rounded-lg">
+                    {presenceLevels.map((level) => {
+                      const isSelected = currentValue === level.value;
+                      const isPrimary = level.label === "Primary" && isSelected;
+
+                      return (
+                        <button
+                          key={level.value}
+                          onClick={() => syncPresenceType(presence.code, level.value)}
+                          className={cn(
+                            "flex-1 py-2.5 px-2 text-[10px] uppercase tracking-wider font-bold rounded-md transition-all duration-300",
+                            isSelected
+                              ? `bg-gradient-to-br ${meta.color} text-white shadow-lg`
+                              : "bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                            isPrimary && "scale-105 shadow-[0_0_20px_rgba(var(--primary),0.4)]",
+                            !isSelected && "opacity-40"
+                          )}
+                          style={isSelected ? {
+                            boxShadow: `0 4px 12px rgba(${meta.colorRaw}, 0.3)`,
+                            border: `1px solid rgba(${meta.colorRaw}, 0.5)`
+                          } : {}}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -619,7 +675,7 @@ export function HexagonDetailPanel({
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col" onWheel={(e) => e.stopPropagation()} data-prevent-canvas-wheel="true">
       {/* Header */}
       <div className="flex-none flex items-center justify-between p-4 border-b border-border">
         <div>
@@ -638,7 +694,7 @@ export function HexagonDetailPanel({
       {/* Content */}
       <ScrollArea className="flex-1 p-4">
         {renderSectionContent()}
-        
+
         {/* Related Canvas Elements Section */}
         {faceTag && (
           <div className="mt-6 pt-4 border-t border-border">
@@ -651,7 +707,7 @@ export function HexagonDetailPanel({
                 </span>
               )}
             </div>
-            
+
             {!hasTaggedElements ? (
               <div className="text-center py-6">
                 <div className="text-muted-foreground text-sm">
@@ -666,14 +722,14 @@ export function HexagonDetailPanel({
                 {/* Group by element type */}
                 {Object.entries(groupedElements).map(([type, elements]) => {
                   if (elements.length === 0) return null;
-                  
+
                   const Icon = ELEMENT_TYPE_ICONS[type] || Box;
-                  const typeLabel = type === 'experienceBlock' 
-                    ? 'Experience Blocks' 
+                  const typeLabel = type === 'experienceBlock'
+                    ? 'Experience Blocks'
                     : type === 'freeform'
-                    ? 'Cards'
-                    : `${type.charAt(0).toUpperCase() + type.slice(1)}s`;
-                  
+                      ? 'Cards'
+                      : `${type.charAt(0).toUpperCase() + type.slice(1)}s`;
+
                   return (
                     <div key={type} className="space-y-1.5">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider">

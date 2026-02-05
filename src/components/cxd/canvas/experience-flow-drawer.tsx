@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useCXDStore } from "@/store/cxd-store";
+import { extractCenterColor, hexToRgba } from "@/lib/utils";
 import {
   ENGAGEMENT_LEVELS,
   EngagementLevelCode,
@@ -93,6 +94,11 @@ export function ExperienceFlowDrawer() {
   }, [editingStageId]);
 
   if (!project) return null;
+
+  // Dynamic background based on canvas background
+  const canvasBackground = project.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const drawerBgColor = hexToRgba(centerColor, 0.95);
 
   const currentStage = stages.find((s) => s.id === activeStageId);
   const currentStageIndex = stages.findIndex((s) => s.id === activeStageId);
@@ -236,7 +242,8 @@ export function ExperienceFlowDrawer() {
         {/* Collapsed bar */}
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-card/95 backdrop-blur-xl border-t border-border hover:bg-card transition-colors cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 backdrop-blur-xl border-t border-border hover:brightness-110 transition-colors cursor-pointer"
+          style={{ backgroundColor: drawerBgColor }}
         >
           <Activity className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium">Experience Flow</span>
@@ -347,9 +354,10 @@ export function ExperienceFlowDrawer() {
 
         {/* Expanded drawer */}
         <div
-          className={`bg-card/95 backdrop-blur-xl border-t border-border transition-all duration-300 ease-out overflow-hidden ${
+          className={`backdrop-blur-xl border-t border-border transition-all duration-300 ease-out overflow-hidden ${
             isExpanded ? "max-h-[380px]" : "max-h-0"
           }`}
+          style={{ backgroundColor: drawerBgColor }}
         >
           <div className="p-4">
             {/* Stage tabs with Add button */}

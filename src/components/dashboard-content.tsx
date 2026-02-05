@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Plus,
   Trash2,
@@ -37,6 +38,10 @@ import {
   Crown,
   ImagePlus,
   Link2,
+  MessageCircle,
+  Send,
+  Check,
+  Loader2,
 } from "lucide-react";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { useRouter } from "next/navigation";
@@ -70,6 +75,11 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
+  const [bugDescription, setBugDescription] = useState("");
+  const [bugSteps, setBugSteps] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -109,6 +119,42 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
   // Check if user can create more canvases
   const canCreate = canCreateCanvas(projects.length);
+
+  // Support form submit handler
+  const handleSupportSubmit = () => {
+    if (!supportMessage.trim()) return;
+    setIsSubmitting(true);
+
+    // Send email via mailto
+    const subject = encodeURIComponent('CXD Canvas Support Request');
+    const body = encodeURIComponent(`Support Message:\n\n${supportMessage}`);
+    window.location.href = `mailto:contact@cyberdelic.design?subject=${subject}&body=${body}`;
+
+    setIsSubmitting(false);
+    setSubmitSuccess(true);
+    // Close dialog after showing success - state reset handled by onOpenChange
+    setTimeout(() => {
+      setIsSupportOpen(false);
+    }, 1500);
+  };
+
+  // Bug report submit handler
+  const handleBugSubmit = () => {
+    if (!bugDescription.trim()) return;
+    setIsSubmitting(true);
+
+    // Send email via mailto
+    const subject = encodeURIComponent('CXD Canvas Bug Report');
+    const body = encodeURIComponent(`Bug Description:\n${bugDescription}\n\nSteps to Reproduce:\n${bugSteps || 'Not provided'}`);
+    window.location.href = `mailto:contact@cyberdelic.design?subject=${subject}&body=${body}`;
+
+    setIsSubmitting(false);
+    setSubmitSuccess(true);
+    // Close dialog after showing success - state reset handled by onOpenChange
+    setTimeout(() => {
+      setIsBugReportOpen(false);
+    }, 1500);
+  };
 
   useEffect(() => {
     const loadUserAndProjects = async () => {
@@ -256,22 +302,44 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     setIsRepositionMode(true);
   };
 
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!isDraggingCover || !isRepositionMode) return;
+      e.preventDefault();
+      const newY = e.clientY - dragStart.y;
+      setCoverImagePosition((prev) => ({ ...prev, y: Math.max(-200, Math.min(200, newY)) }));
+    };
+
+    const handleWindowMouseUp = () => {
+      if (isDraggingCover) {
+        setIsDraggingCover(false);
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+      }
+    };
+
+    if (isDraggingCover) {
+      // Disable text selection during drag
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'grabbing';
+      window.addEventListener('mousemove', handleWindowMouseMove);
+      window.addEventListener('mouseup', handleWindowMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isDraggingCover, isRepositionMode, dragStart]);
+
   const handleCoverMouseDown = (e: React.MouseEvent) => {
     if (!isRepositionMode || !userProfile?.cover_image) return;
     e.preventDefault();
+    e.stopPropagation();
     setIsDraggingCover(true);
     setDragStart({ x: e.clientX, y: e.clientY - coverImagePosition.y });
-  };
-
-  const handleCoverMouseMove = (e: React.MouseEvent) => {
-    if (!isDraggingCover || !isRepositionMode) return;
-    const newY = e.clientY - dragStart.y;
-    setCoverImagePosition((prev) => ({ ...prev, y: Math.max(-200, Math.min(200, newY)) }));
-  };
-
-  const handleCoverMouseUp = () => {
-    if (!isDraggingCover) return;
-    setIsDraggingCover(false);
   };
 
   const saveRepositionAndExit = async () => {
@@ -332,10 +400,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const planBadge = getPlanBadge();
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      {/* Background */}
-      <div className="fixed inset-0 grid-bg pointer-events-none" />
-      <div className="fixed inset-0 hero-gradient pointer-events-none" />
+    <main className="min-h-screen text-white">
+      {/* Background gradient overlay */}
+      <div className="fixed inset-0 hero-gradient pointer-events-none z-0" />
 
       {/* Decorative orbs */}
       <div className="glow-orb" style={{ top: '10%', right: '10%', opacity: 0.3 }} />
@@ -343,14 +410,11 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
       <div className="relative z-10 container mx-auto px-4 py-6 max-w-7xl">
         {/* Profile Header */}
-        <div className="relative mb-8 rounded-2xl overflow-hidden glass-card-glow">
-          {/* Cover Image */}
-          <div
-            className="relative h-48 bg-gradient-to-br from-violet-900/30 via-purple-900/20 to-cyan-900/20 overflow-hidden"
-            onMouseMove={handleCoverMouseMove}
-            onMouseUp={handleCoverMouseUp}
-            onMouseLeave={handleCoverMouseUp}
-          >
+        <div
+          className="relative mb-8 rounded-2xl overflow-hidden glass-card-glow"
+        >
+          {/* Cover Image - Extends behind entire card */}
+          <div className="absolute inset-0 bg-gradient-to-br from-violet-900/30 via-purple-900/20 to-cyan-900/20">
             {userProfile?.cover_image ? (
               <div
                 className={`absolute inset-0 ${isRepositionMode ? (isDraggingCover ? "cursor-grabbing" : "cursor-grab") : ""}`}
@@ -360,12 +424,12 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   src={userProfile.cover_image}
                   alt="Cover"
                   fill
-                  className="object-cover select-none"
+                  className={`object-cover select-none ${isRepositionMode ? "pointer-events-none" : ""}`}
                   draggable={false}
                   style={{ objectPosition: `50% ${50 + coverImagePosition.y / 4}%` }}
                 />
                 {isRepositionMode && (
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
                     <p className="text-white font-medium">
                       {isDraggingCover ? "Release to stop" : "Drag to reposition"}
                     </p>
@@ -373,13 +437,16 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 )}
               </div>
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center">
+              <div className="absolute inset-0 flex items-center justify-center opacity-30">
                 <Camera className="w-10 h-10 text-white/20" />
               </div>
             )}
+          </div>
 
+          {/* Cover section with actions */}
+          <div className={`relative h-48 ${isRepositionMode ? "pointer-events-none" : ""}`}>
             {/* Cover Actions */}
-            <div className="absolute top-4 right-4 flex gap-2">
+            <div className="absolute top-4 right-4 flex gap-2 z-10 pointer-events-auto">
               <input type="file" id="cover-upload" accept="image/*" className="hidden" onChange={handleCoverImageUpload} disabled={isUploadingCover || isRepositionMode} />
               {isRepositionMode ? (
                 <>
@@ -403,8 +470,8 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             </div>
           </div>
 
-          {/* Profile Info */}
-          <div className="relative px-6 pb-6 bg-black/40 backdrop-blur-sm border-t border-white/10">
+          {/* Profile Info - Semi-transparent to show cover behind */}
+          <div className="relative px-6 pb-6 bg-black/50 backdrop-blur-sm border-t border-white/10">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
               {/* Profile Picture */}
               <div className="relative -mt-14">
@@ -506,9 +573,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
         </div>
 
         {/* Main Content - 70/30 Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
           {/* Left Column - Experience Maps (70%) */}
-          <div className="glass-card rounded-xl overflow-hidden">
+          <div className="rounded-xl overflow-hidden bg-black/20 border border-white/10 h-fit">
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <h3 className="font-semibold text-white">Your Experience Maps</h3>
               <Badge variant="outline" className="text-white/50 border-white/20">
@@ -681,20 +748,20 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
           {/* Right Column - Stats & Quick Actions (30%) */}
           <div className="space-y-6">
             {/* Stats Grid - 2x2 */}
-            <div className="glass-card p-4 rounded-xl">
+            <div className="p-4 rounded-xl bg-black/20 border border-white/10">
               <h3 className="text-sm font-medium text-white/70 mb-3">Statistics</h3>
               <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-white/5 border border-white/5">
+                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 hover:from-violet-950/20 hover:to-violet-900/30 transition-all cursor-default group">
                   <div className="flex items-center justify-between mb-1">
-                    <Layers className="w-4 h-4 text-violet-400" />
+                    <Layers className="w-4 h-4 text-violet-400 group-hover:scale-110 transition-transform" />
                   </div>
                   <p className="text-xl font-bold text-white">{totalProjects}</p>
                   <p className="text-xs text-white/50">Total Maps</p>
                 </div>
 
-                <div className="p-3 rounded-lg bg-white/5 border border-white/5">
+                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-cyan-500/10 hover:border-cyan-500/30 hover:from-cyan-950/20 hover:to-cyan-900/30 transition-all cursor-default group">
                   <div className="flex items-center justify-between mb-1">
-                    <TrendingUp className="w-4 h-4 text-cyan-400" />
+                    <TrendingUp className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
                   </div>
                   <p className="text-xl font-bold text-white">
                     {projects.filter((p) => new Date(p.updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
@@ -702,9 +769,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   <p className="text-xs text-white/50">Active</p>
                 </div>
 
-                <div className="p-3 rounded-lg bg-white/5 border border-white/5">
+                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 hover:from-purple-950/20 hover:to-purple-900/30 transition-all cursor-default group">
                   <div className="flex items-center justify-between mb-1">
-                    <Calendar className="w-4 h-4 text-purple-400" />
+                    <Calendar className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
                   </div>
                   <p className="text-xl font-bold text-white">
                     {projects.filter((p) => new Date(p.createdAt).getMonth() === new Date().getMonth()).length}
@@ -712,9 +779,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   <p className="text-xs text-white/50">This Month</p>
                 </div>
 
-                <div className="p-3 rounded-lg bg-white/5 border border-white/5">
+                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 hover:from-emerald-950/20 hover:to-emerald-900/30 transition-all cursor-default group">
                   <div className="flex items-center justify-between mb-1">
-                    <BarChart3 className="w-4 h-4 text-emerald-400" />
+                    <BarChart3 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
                   </div>
                   <p className="text-xl font-bold text-white">—</p>
                   <p className="text-xs text-white/50">Analytics</p>
@@ -723,39 +790,39 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             </div>
 
             {/* Quick Actions - 2x2 */}
-            <div className="glass-card p-4 rounded-xl">
+            <div className="p-4 rounded-xl bg-black/20 border border-white/10">
               <h3 className="text-sm font-medium text-white/70 mb-3">Quick Actions</h3>
               <div className="grid grid-cols-2 gap-3">
                 <Button
                   variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white"
+                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-violet-950/30 hover:to-violet-900/40 border border-violet-500/10 hover:border-violet-500/30 text-white transition-all group"
                   onClick={() => setIsSupportOpen(true)}
                 >
-                  <HelpCircle className="w-5 h-5 text-violet-400" />
+                  <HelpCircle className="w-5 h-5 text-violet-400 group-hover:scale-110 transition-transform" />
                   <span className="text-xs">Support</span>
                 </Button>
                 <Button
                   variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white"
+                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-cyan-950/30 hover:to-cyan-900/40 border border-cyan-500/10 hover:border-cyan-500/30 text-white transition-all group"
                   onClick={() => setIsBugReportOpen(true)}
                 >
-                  <Bug className="w-5 h-5 text-cyan-400" />
+                  <Bug className="w-5 h-5 text-cyan-400 group-hover:scale-110 transition-transform" />
                   <span className="text-xs">Bug Report</span>
                 </Button>
                 <Button
                   variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white"
+                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-purple-950/30 hover:to-purple-900/40 border border-purple-500/10 hover:border-purple-500/30 text-white transition-all group"
                   onClick={() => router.push("/dashboard/docs")}
                 >
-                  <FileText className="w-5 h-5 text-purple-400" />
+                  <FileText className="w-5 h-5 text-purple-400 group-hover:scale-110 transition-transform" />
                   <span className="text-xs">Docs</span>
                 </Button>
                 <Button
                   variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white"
+                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-emerald-950/30 hover:to-emerald-900/40 border border-emerald-500/10 hover:border-emerald-500/30 text-white transition-all group"
                   onClick={() => router.push("/dashboard/tutorials")}
                 >
-                  <PlayCircle className="w-5 h-5 text-emerald-400" />
+                  <PlayCircle className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
                   <span className="text-xs">Tutorials</span>
                 </Button>
               </div>
@@ -772,44 +839,146 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       />
 
       {/* Support Dialog */}
-      <Dialog open={isSupportOpen} onOpenChange={setIsSupportOpen}>
-        <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
+      <Dialog open={isSupportOpen} onOpenChange={(open) => {
+        setIsSupportOpen(open);
+        if (!open) {
+          // Reset form state when dialog closes
+          setTimeout(() => {
+            setSupportMessage('');
+            setSubmitSuccess(false);
+            setIsSubmitting(false);
+          }, 150);
+        }
+      }}>
+        <DialogContent className="bg-zinc-900/95 backdrop-blur-xl border-white/10 text-white max-w-md">
           <DialogHeader>
-            <DialogTitle>Contact Support</DialogTitle>
-            <DialogDescription className="text-white/60">How can we help?</DialogDescription>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <MessageCircle className="w-5 h-5 text-violet-400" />
+              Contact Support
+            </DialogTitle>
+            <DialogDescription className="text-white/50">
+              Have a question or need help? We're here to assist you.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-white/70">Subject</Label>
-              <Input placeholder="What do you need help with?" className="bg-white/5 border-white/10 text-white placeholder:text-white/30" />
+
+          {submitSuccess ? (
+            <div className="py-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                <Check className="w-8 h-8 text-emerald-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Message Sent!</h3>
+              <p className="text-white/50 text-sm">We'll get back to you as soon as possible.</p>
             </div>
-            <div className="space-y-2">
-              <Label className="text-white/70">Message</Label>
-              <textarea rows={5} placeholder="Describe your issue..." className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-md text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/50" />
+          ) : (
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="support-message" className="text-white/70">Your Message</Label>
+                <Textarea
+                  id="support-message"
+                  placeholder="Describe your question or issue..."
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[120px] focus:border-violet-500/50"
+                />
+              </div>
+
+              <Button
+                onClick={handleSupportSubmit}
+                disabled={!supportMessage.trim() || isSubmitting}
+                className="w-full bg-violet-600 hover:bg-violet-500 text-white"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4 mr-2" />
+                    Send Message
+                  </>
+                )}
+              </Button>
             </div>
-            <Button className="w-full btn-primary-glow">Send Message</Button>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
 
       {/* Bug Report Dialog */}
-      <Dialog open={isBugReportOpen} onOpenChange={setIsBugReportOpen}>
-        <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
+      <Dialog open={isBugReportOpen} onOpenChange={(open) => {
+        setIsBugReportOpen(open);
+        if (!open) {
+          // Reset form state when dialog closes
+          setTimeout(() => {
+            setBugDescription('');
+            setBugSteps('');
+            setSubmitSuccess(false);
+            setIsSubmitting(false);
+          }, 150);
+        }
+      }}>
+        <DialogContent className="bg-zinc-900/95 backdrop-blur-xl border-white/10 text-white max-w-md">
           <DialogHeader>
-            <DialogTitle>Report a Bug</DialogTitle>
-            <DialogDescription className="text-white/60">Help us improve</DialogDescription>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Bug className="w-5 h-5 text-rose-400" />
+              Report a Bug
+            </DialogTitle>
+            <DialogDescription className="text-white/50">
+              Found an issue? Help us improve by reporting it.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-white/70">Bug Title</Label>
-              <Input placeholder="Brief description" className="bg-white/5 border-white/10 text-white placeholder:text-white/30" />
+
+          {submitSuccess ? (
+            <div className="py-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                <Check className="w-8 h-8 text-emerald-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Bug Reported!</h3>
+              <p className="text-white/50 text-sm">Thank you for helping us improve CXD Canvas.</p>
             </div>
-            <div className="space-y-2">
-              <Label className="text-white/70">Description</Label>
-              <textarea rows={4} placeholder="What happened?" className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-md text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-violet-500/50" />
+          ) : (
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="bug-description" className="text-white/70">Bug Description</Label>
+                <Textarea
+                  id="bug-description"
+                  placeholder="What went wrong?"
+                  value={bugDescription}
+                  onChange={(e) => setBugDescription(e.target.value)}
+                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[80px] focus:border-rose-500/50"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="bug-steps" className="text-white/70">Steps to Reproduce (optional)</Label>
+                <Textarea
+                  id="bug-steps"
+                  placeholder="1. Go to...&#10;2. Click on...&#10;3. See error..."
+                  value={bugSteps}
+                  onChange={(e) => setBugSteps(e.target.value)}
+                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[80px] focus:border-rose-500/50"
+                />
+              </div>
+
+              <Button
+                onClick={handleBugSubmit}
+                disabled={!bugDescription.trim() || isSubmitting}
+                className="w-full bg-rose-600 hover:bg-rose-500 text-white"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Bug className="w-4 h-4 mr-2" />
+                    Submit Bug Report
+                  </>
+                )}
+              </Button>
             </div>
-            <Button className="w-full btn-primary-glow">Submit Report</Button>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1029,7 +1198,17 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <HypercubeLogo size={20} />
+
+            <Image
+              src="/images/hypercube-logo.webp"
+              alt="CXD"
+              width={28}
+              height={28}
+              className="object-contain"
+            />
+
+
+
             <span className="text-white/50 text-sm">CXD Canvas</span>
           </div>
 

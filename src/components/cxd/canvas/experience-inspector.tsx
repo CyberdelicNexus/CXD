@@ -8,6 +8,7 @@ import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
@@ -23,6 +24,12 @@ import {
   X,
   Check,
   Loader2,
+  Ear,
+  Wind,
+  Apple,
+  Fingerprint,
+  PersonStanding,
+  Zap,
 } from "lucide-react";
 
 // Section type definition
@@ -90,6 +97,23 @@ export const INSPECTOR_SECTIONS: InspectorSection[] = [
     icon: <Heart className="w-5 h-5" />,
   },
 ];
+
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  visual: { icon: <Eye className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  auditory: { icon: <Ear className="w-5 h-5" />, color: "from-indigo-950 to-indigo-400", colorRaw: "99, 102, 241" },
+  olfactory: { icon: <Wind className="w-5 h-5" />, color: "from-teal-950 to-teal-400", colorRaw: "20, 184, 166" },
+  gustatory: { icon: <Apple className="w-5 h-5" />, color: "from-rose-950 to-rose-400", colorRaw: "244, 63, 94" },
+  haptic: { icon: <Fingerprint className="w-5 h-5" />, color: "from-purple-950 to-purple-400", colorRaw: "168, 85, 247" },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  mental: { icon: <Brain className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  emotional: { icon: <Heart className="w-5 h-5" />, color: "from-red-950 to-red-400", colorRaw: "239, 68, 68" },
+  social: { icon: <Users className="w-5 h-5" />, color: "from-violet-950 to-violet-400", colorRaw: "139, 92, 246" },
+  embodied: { icon: <PersonStanding className="w-5 h-5" />, color: "from-orange-950 to-orange-400", colorRaw: "249, 115, 22" },
+  environmental: { icon: <Globe className="w-5 h-5" />, color: "from-emerald-950 to-emerald-400", colorRaw: "16, 185, 129" },
+  active: { icon: <Zap className="w-5 h-5" />, color: "from-yellow-950 to-yellow-400", colorRaw: "234, 179, 8" },
+};
 
 const REALITY_PLANE_LABELS: Record<string, string> = {
   PR: "Physical Reality",
@@ -210,6 +234,8 @@ export function ExperienceInspectorRail({
         transform: `translateY(-50%) translateX(${isPanelOpen ? -(PANEL_WIDTH + GUTTER) : 0}px)`,
       }}
       onMouseMove={handleMouseMove}
+      onWheel={(e) => e.stopPropagation()}
+      data-prevent-canvas-wheel="true"
     >
       <div className="flex flex-col gap-1.5 px-3 gap-y-[26px] h-fit">
         {INSPECTOR_SECTIONS.map((section) => (
@@ -219,10 +245,9 @@ export function ExperienceInspectorRail({
             size="icon"
             className={`
               w-10 h-10 rounded-lg transition-all duration-200 cursor-grab active:cursor-grabbing
-              ${
-                activeSection === section.id
-                  ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 scale-110"
-                  : "bg-card/90 backdrop-blur-sm border border-border/50 hover:bg-primary/20 hover:scale-105 hover:shadow-md hover:shadow-primary/20"
+              ${activeSection === section.id
+                ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30 scale-110"
+                : "bg-card/90 backdrop-blur-sm border border-border/50 hover:bg-primary/20 hover:scale-105 hover:shadow-md hover:shadow-primary/20"
               }
             `}
             onMouseDown={(e) => handleMouseDown(e, section.id)}
@@ -327,6 +352,11 @@ export function ExperienceInspectorPanel({
 
   // Get section info
   const sectionInfo = INSPECTOR_SECTIONS.find((s) => s.id === activeSection);
+
+  // Dynamic background based on canvas background
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const panelBgColor = hexToRgba(centerColor, 0.95);
 
   // Render section content
   const renderSectionContent = () => {
@@ -571,31 +601,48 @@ export function ExperienceInspectorPanel({
           ).value;
         };
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 pb-32">
             {Object.entries(SENSORY_DOMAIN_LABELS).map(([code, label]) => {
               const currentValue = getClosestLevel(
                 project.sensoryDomains?.[code as keyof typeof project.sensoryDomains] || 0
               );
+              const meta = SENSORY_METADATA[code];
               return (
-                <div key={code} className="space-y-2">
-                  <Label className="text-sm font-medium">{label}</Label>
-                  <div className="flex gap-1.5">
-                    {intensityLevels.map((level) => (
-                      <button
-                        key={level.value}
-                        onClick={() => {
-                          syncSensoryDomain(code as any, level.value);
-                          triggerSave();
-                        }}
-                        className={`flex-1 py-1.5 px-2 text-xs rounded-md transition-all ${
-                          currentValue === level.value
-                            ? "bg-primary text-primary-foreground font-medium"
-                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {level.label}
-                      </button>
-                    ))}
+                <div key={code} className="space-y-4 p-4 rounded-xl bg-white/5 border border-white/10 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg bg-gradient-to-br ${meta.color} bg-opacity-10 text-white shadow-inner`}>
+                      {React.cloneElement(meta.icon as React.ReactElement, { className: "w-5 h-5" })}
+                    </div>
+                    <div className="flex flex-col">
+                      <Label className="text-sm font-bold tracking-tight">{label}</Label>
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-widest opacity-60">Sensory Modality</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 p-1 bg-black/20 rounded-lg">
+                    {intensityLevels.map((level) => {
+                      const isSelected = currentValue === level.value;
+                      const isPrimary = level.label === "Primary" && isSelected;
+
+                      return (
+                        <button
+                          key={level.value}
+                          onClick={() => {
+                            syncSensoryDomain(code as any, level.value);
+                            triggerSave();
+                          }}
+                          className={cn(
+                            "flex-1 py-2 px-1 text-[10px] uppercase tracking-wider font-bold rounded-md transition-all duration-300",
+                            isSelected
+                              ? `bg-gradient-to-br ${meta.color} text-white shadow-md`
+                              : "bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                            isPrimary && "scale-105 shadow-[0_0_15px_rgba(var(--primary),0.3)]",
+                            !isSelected && "opacity-40"
+                          )}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -618,31 +665,48 @@ export function ExperienceInspectorPanel({
           ).value;
         };
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 pb-32">
             {Object.entries(PRESENCE_TYPE_LABELS).map(([code, label]) => {
               const currentValue = getClosestPresenceLevel(
                 project.presenceTypes?.[code as keyof typeof project.presenceTypes] || 0
               );
+              const meta = PRESENCE_METADATA[code];
               return (
-                <div key={code} className="space-y-2">
-                  <Label className="text-sm font-medium">{label}</Label>
-                  <div className="flex gap-1.5">
-                    {presenceLevels.map((level) => (
-                      <button
-                        key={level.value}
-                        onClick={() => {
-                          syncPresenceType(code as any, level.value);
-                          triggerSave();
-                        }}
-                        className={`flex-1 py-1.5 px-2 text-xs rounded-md transition-all ${
-                          currentValue === level.value
-                            ? "bg-primary text-primary-foreground font-medium"
-                            : "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        {level.label}
-                      </button>
-                    ))}
+                <div key={code} className="space-y-4 p-4 rounded-xl bg-white/5 border border-white/10 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg bg-gradient-to-br ${meta.color} bg-opacity-10 text-white shadow-inner`}>
+                      {React.cloneElement(meta.icon as React.ReactElement, { className: "w-5 h-5" })}
+                    </div>
+                    <div className="flex flex-col">
+                      <Label className="text-sm font-bold tracking-tight">{label}</Label>
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-widest opacity-60">Presence Type</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 p-1 bg-black/20 rounded-lg">
+                    {presenceLevels.map((level) => {
+                      const isSelected = currentValue === level.value;
+                      const isPrimary = level.label === "Primary" && isSelected;
+
+                      return (
+                        <button
+                          key={level.value}
+                          onClick={() => {
+                            syncPresenceType(code as any, level.value);
+                            triggerSave();
+                          }}
+                          className={cn(
+                            "flex-1 py-2 px-1 text-[10px] uppercase tracking-wider font-bold rounded-md transition-all duration-300",
+                            isSelected
+                              ? `bg-gradient-to-br ${meta.color} text-white shadow-md`
+                              : "bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                            isPrimary && "scale-105 shadow-[0_0_15px_rgba(var(--primary),0.3)]",
+                            !isSelected && "opacity-40"
+                          )}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -667,7 +731,7 @@ export function ExperienceInspectorPanel({
                   placeholder={`Describe the ${label.toLowerCase()} state...`}
                   value={
                     project.stateMapping?.[
-                      code as keyof typeof project.stateMapping
+                    code as keyof typeof project.stateMapping
                     ] || ""
                   }
                   onChange={(e) => {
@@ -697,7 +761,7 @@ export function ExperienceInspectorPanel({
                   placeholder={`Describe the ${label.toLowerCase()} trait...`}
                   value={
                     project.traitMapping?.[
-                      code as keyof typeof project.traitMapping
+                    code as keyof typeof project.traitMapping
                     ] || ""
                   }
                   onChange={(e) => {
@@ -718,13 +782,16 @@ export function ExperienceInspectorPanel({
 
   return (
     <div
-      className="fixed top-16 bottom-0 z-20 flex flex-col bg-card/95 backdrop-blur-xl border-l border-border shadow-2xl shadow-black/20 transition-transform duration-300 ease-out"
+      className="fixed top-16 bottom-0 z-20 flex flex-col backdrop-blur-xl border-l border-border shadow-2xl shadow-black/20 transition-transform duration-300 ease-out"
       style={{
         right: "0px",
         width: `${PANEL_WIDTH}px`,
         maxWidth: "40vw",
         transform: `translateX(${isOpen ? "0%" : "100%"})`,
+        backgroundColor: panelBgColor,
       }}
+      onWheel={(e) => e.stopPropagation()}
+      data-prevent-canvas-wheel="true"
     >
       {/* Vertical divider/glow when panel is open */}
       {isOpen && <></>}

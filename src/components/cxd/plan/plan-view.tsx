@@ -1,5 +1,7 @@
 'use client';
 
+import { ShimmerGrid } from '@/components/ui/shimmer-grid';
+
 import { useState } from 'react';
 import { KanbanView } from './kanban-view';
 import { TableView } from './table-view';
@@ -14,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { usePlanTasks } from '@/hooks/use-plan-tasks';
 import { useCXDStore } from '@/store/cxd-store';
 import { useCollaborationContext } from '@/contexts/collaboration-context';
+import { extractCenterColor, hexToRgba } from '@/lib/utils';
 import type { PlanViewType, TaskFilter } from '@/types/plan-types';
 import { LayoutGrid, Table as TableIcon, Calendar, GanttChart, Filter, Settings, Plus } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,6 +51,12 @@ export function PlanView() {
 
   const selectedTask = selectedTaskId ? getTaskById(selectedTaskId) : undefined;
 
+  // Dynamic background based on canvas background
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const panelBgColor = hexToRgba(centerColor, 0.4);
+  const headerBgColor = hexToRgba(centerColor, 0.6);
+
   const handleAddTask = () => {
     if (!newTaskText.trim() || !project) return;
 
@@ -74,9 +83,14 @@ export function PlanView() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gradient-to-br from-[#0A0118] via-[#0F0A1F] to-[#0A0420]">
+    <div className="flex flex-col min-h-[calc(100vh-4rem)] h-[calc(100vh-4rem)] relative" style={{ background: canvasBackground }}>
+      {/* Shimmer Grid - fixed position to cover entire viewport */}
+      <ShimmerGrid className="!fixed inset-0 !z-0" />
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-black/20 backdrop-blur-sm">
+      <div
+        className="flex items-center justify-between px-6 py-4 border-b border-white/10 backdrop-blur-sm relative z-10"
+        style={{ backgroundColor: headerBgColor }}
+      >
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-semibold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
             Plan
@@ -138,7 +152,10 @@ export function PlanView() {
       </div>
 
       {/* View Tabs */}
-      <div className="flex items-center px-6 py-3 border-b border-white/10 bg-black/10">
+      <div
+        className="flex items-center px-6 py-3 border-b border-white/10 relative z-10"
+        style={{ backgroundColor: panelBgColor }}
+      >
         <Tabs value={activeView} onValueChange={(v) => setActiveView(v as PlanViewType)}>
           <TabsList className="bg-black/40">
             <TabsTrigger value="kanban" className="gap-2">
@@ -162,10 +179,13 @@ export function PlanView() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative z-10">
         {/* Filter Panel */}
         {isFilterPanelOpen && (
-          <div className="w-80 border-r border-white/10 bg-black/20 overflow-y-auto">
+          <div
+            className="w-80 border-r border-white/10 overflow-y-auto"
+            style={{ backgroundColor: panelBgColor }}
+          >
             <TaskFilterPanel filter={filter} onFilterChange={setFilter} />
           </div>
         )}
@@ -209,7 +229,10 @@ export function PlanView() {
 
         {/* Detail Panel */}
         {selectedTask && (
-          <div className="w-96 border-l border-white/10 bg-black/20 overflow-y-auto">
+          <div
+            className="w-96 border-l border-white/10 overflow-y-auto"
+            style={{ backgroundColor: panelBgColor }}
+          >
             <TaskDetailPanel
               task={selectedTask}
               onClose={() => setSelectedTaskId(null)}

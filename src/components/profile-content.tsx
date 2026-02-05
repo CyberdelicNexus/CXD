@@ -32,6 +32,7 @@ import {
   updateUserCoverImagePosition,
   UserProfile,
 } from '@/lib/user-profile';
+import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 
 interface ProfileContentProps {
   userId: string;
@@ -156,8 +157,17 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
 
   return (
     <main className="min-h-screen bg-black text-white">
-      {/* Background */}
-      <div className="fixed inset-0 grid-bg pointer-events-none" />
+      {/* Interactive Shimmer Grid Background */}
+      <ShimmerGrid
+        dotSize={1.5}
+        dotSpacing={24}
+        baseColor="rgba(110, 56, 236, 0.1)"
+        hoverColor="rgba(138, 99, 255, 0.5)"
+        hoverSize={400}
+        smoothing={60}
+      />
+
+      {/* Background gradient overlay */}
       <div className="fixed inset-0 hero-gradient pointer-events-none" />
 
       {/* Decorative orbs */}

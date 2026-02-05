@@ -88,6 +88,7 @@ export function CXDCanvas() {
   } = useCXDStore();
 
   const project = getCurrentProject();
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
 
   // Handle remote canvas updates from collaborators
   const handleRemoteUpdate = useCallback((update: any) => {
@@ -279,7 +280,7 @@ export function CXDCanvas() {
     nodeId: string;
     port: string;
   } | null>(null);
-  
+
   // Hovered anchor for connector attachment (specific anchor point)
   const [hoveredAnchor, setHoveredAnchor] = useState<string | null>(null);
 
@@ -501,7 +502,7 @@ export function CXDCanvas() {
                   if (container && container.type === 'container') {
                     const newX = el.x + deltaX;
                     const newY = el.y + deltaY;
-                    
+
                     // Check if moved outside container's origin (detach)
                     const isCompletelyOutside =
                       newX < container.x - 50 ||
@@ -520,7 +521,7 @@ export function CXDCanvas() {
                         container.height,
                         newY + el.height - container.y + padding
                       );
-                      
+
                       if (neededWidth > container.width || neededHeight > container.height) {
                         // Use a timeout to batch the update after drag completes
                         setTimeout(() => {
@@ -593,7 +594,7 @@ export function CXDCanvas() {
                 if (container && container.type === 'container') {
                   const newX = element.x + deltaX;
                   const newY = element.y + deltaY;
-                  
+
                   // Check if moved outside container's origin (detach)
                   const isCompletelyOutside =
                     newX < container.x - 50 ||
@@ -612,7 +613,7 @@ export function CXDCanvas() {
                       container.height,
                       newY + element.height - container.y + padding
                     );
-                    
+
                     if (neededWidth > container.width || neededHeight > container.height) {
                       // Use a timeout to batch the update after drag completes
                       setTimeout(() => {
@@ -788,7 +789,7 @@ export function CXDCanvas() {
       // Create connection if hovering any element (snap to nearest anchor)
       if (hoverTargetNodeId && connectingFrom) {
         const toEl = canvasElements.find((el) => el.id === hoverTargetNodeId);
-        
+
         if (toEl && hoverTargetNodeId !== connectingFrom.elementId) {
           const fromEl = canvasElements.find(
             (el) => el.id === connectingFrom.elementId,
@@ -928,7 +929,7 @@ export function CXDCanvas() {
                 "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
               textColor: "#ffffff",
             },
-            taskMetadata: isTaskCard ? { 
+            taskMetadata: isTaskCard ? {
               isActionable: true,
               subtasks: []
             } : undefined,
@@ -1132,9 +1133,9 @@ export function CXDCanvas() {
         const elementsToDrop =
           selectedElementIds.size > 0
             ? Array.from(selectedElementIds).filter((id) => {
-                const el = canvasElements.find((e) => e.id === id);
-                return el && el.type !== "container" && el.type !== "board";
-              })
+              const el = canvasElements.find((e) => e.id === id);
+              return el && el.type !== "container" && el.type !== "board";
+            })
             : draggingElement
               ? [draggingElement]
               : [];
@@ -1145,7 +1146,7 @@ export function CXDCanvas() {
           if (el) {
             // Add to container (this will trigger auto-expansion in addNodeToContainer)
             addNodeToContainer(id, targetContainer.id);
-            
+
             // Double check container expansion on drag end
             const padding = 20;
             const neededWidth = Math.max(
@@ -1156,7 +1157,7 @@ export function CXDCanvas() {
               targetContainer.height,
               el.y + el.height - targetContainer.y + padding
             );
-            
+
             if (neededWidth > targetContainer.width || neededHeight > targetContainer.height) {
               updateCanvasElement(targetContainer.id, {
                 width: neededWidth,
@@ -1375,15 +1376,15 @@ export function CXDCanvas() {
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      
+
       // Don't interfere with clicks on UI controls, menus, or interactive elements
       const isUIControl = target.closest('button, input, textarea, select, [role="menu"], [role="dialog"]');
       if (isUIControl) return;
-      
+
       // Check if click is outside any element (on canvas background or navigation areas)
       const clickedElement = target.closest('[data-element-id]');
       const isCanvasArea = target.closest('.canvas-container, .dot-grid');
-      
+
       if (!clickedElement && isCanvasArea) {
         // Clicked on canvas background - deselect all
         setSelectedElementId(null);
@@ -1417,7 +1418,7 @@ export function CXDCanvas() {
         target.tagName === "TEXTAREA" ||
         target.contentEditable === "true" ||
         target.classList.contains("resize-none"); // TextElement textarea
-      
+
       // ESCAPE - Always cancels current mode/closes menus/deselects elements
       // BUT don't interfere with text editing - let text component handle it
       if (e.key === "Escape") {
@@ -1434,7 +1435,7 @@ export function CXDCanvas() {
         // If editing text, let the text element's own handler deal with it
         return;
       }
-      
+
       // Allow only Escape while editing text
       if (isEditingText) {
         return; // Let normal text editing work
@@ -1718,6 +1719,12 @@ export function CXDCanvas() {
   // Smooth zoom with scroll wheel - zoom towards cursor position
   const handleWheel = useCallback(
     (e: WheelEvent) => {
+      // If target is within an element that should prevent canvas wheeling (like sidebar panels), skip zoom
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-prevent-canvas-wheel="true"]')) {
+        return;
+      }
+
       e.preventDefault();
 
       const container = containerRef.current;
@@ -1816,7 +1823,7 @@ export function CXDCanvas() {
       const clickDuration = Date.now() - clickStartTime;
       const clickDistance = Math.sqrt(
         Math.pow(e.clientX - clickStartPos.x, 2) +
-          Math.pow(e.clientY - clickStartPos.y, 2),
+        Math.pow(e.clientY - clickStartPos.y, 2),
       );
 
       // If it was a quick click with minimal movement, treat as click
@@ -1895,14 +1902,13 @@ export function CXDCanvas() {
   return (
     <div
       ref={containerRef}
-      className={`fixed inset-0 top-16 overflow-hidden select-none transition-[right] duration-300 ${
-        isPanning
-          ? "cursor-grabbing"
-          : draggingElement
-            ? "cursor-move"
-            : "cursor-grab w-full h-full"
-      }`}
-      style={{ right: canvasRightMargin }}
+      className={`fixed inset-0 top-16 overflow-hidden select-none transition-[right] duration-300 ${isPanning
+        ? "cursor-grabbing"
+        : draggingElement
+          ? "cursor-move"
+          : "cursor-grab w-full h-full"
+        }`}
+      style={{ right: canvasRightMargin, background: canvasBackground }}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleCanvasMouseUp}
@@ -2086,7 +2092,7 @@ export function CXDCanvas() {
 
             const from = getAnchorPosition(fromElement, edge.fromAnchor);
             const to = getAnchorPosition(toElement, edge.toAnchor);
-            
+
             if (!from || !to) return null;
 
             const isSelected = selectedEdgeId === edge.id;
@@ -2184,7 +2190,7 @@ export function CXDCanvas() {
           </defs>
         </svg>
       </div>
-      
+
       {/* Bend handles for selected connector - outside pointer-events-none wrapper */}
       {selectedEdgeId &&
         (() => {
@@ -2403,7 +2409,7 @@ export function CXDCanvas() {
             </div>
           );
         })()}
-      
+
       {/* Breadcrumbs for board navigation */}
       {boardPath.length > 0 && (
         <div className="absolute left-6 z-30 flex items-center gap-1 px-3 py-2 rounded-lg bg-card/80 backdrop-blur border border-border text-sm top-[21px] shadow-[0_0_15px_rgba(168,85,247,0.4)]">

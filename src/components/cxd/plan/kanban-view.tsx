@@ -5,6 +5,8 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { useCXDStore } from '@/store/cxd-store';
+import { extractCenterColor, hexToRgba } from '@/lib/utils';
 import type { TaskProjection, TaskStatus } from '@/types/plan-types';
 import { HYPERCUBE_FACE_COLORS } from '@/types/plan-types';
 import { CheckCircle2, Circle, Clock, AlertCircle, Calendar, User, ArrowRight } from 'lucide-react';
@@ -147,13 +149,20 @@ function TaskCard({ task, isDragging, onClick, onNavigate, onDragStart, onSubtas
     low: 'bg-green-500',
   };
 
+  // Get solid background color from canvas background
+  const project = useCXDStore(state => state.getCurrentProject());
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const cardBgColor = hexToRgba(centerColor, 1); // Fully opaque for solid card
+
   return (
     <Card
       draggable
       onDragStart={onDragStart}
       className={`p-4 cursor-pointer hover:border-purple-500/50 transition-all min-w-[250px] ${
         isDragging ? 'opacity-50' : ''
-      } bg-gradient-to-br from-black/40 to-black/20 border-white/10`}
+      } border-white/10`}
+      style={{ backgroundColor: cardBgColor }}
     >
       {/* Priority Indicator */}
       {task.priority && (
