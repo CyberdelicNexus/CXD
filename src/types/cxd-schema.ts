@@ -156,14 +156,15 @@ export interface ExperienceFlowStageV2 {
   presenceTypes: StagePresenceTypes;
   designIntent: string;
   estimatedMinutes: number | null;
+  realityPlanes?: Record<RealityPlaneCode, boolean>;
 }
 
 export const DEFAULT_EXPERIENCE_FLOW_STAGES: ExperienceFlowStageV2[] = [
-  { id: 'preparation', name: 'Preparation', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'induction', name: 'Induction', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'journey', name: 'Journey', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'peak', name: 'Peak', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'integration', name: 'Integration', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
+  { id: 'preparation', name: 'Preparation', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'induction', name: 'Induction', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'journey', name: 'Journey', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'peak', name: 'Peak', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'integration', name: 'Integration', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
 ];
 
 export const EXPERIENCE_FLOW_STAGES: Omit<ExperienceFlowStage, 'engagementLevel' | 'narrativeNotes' | 'designIntent'>[] = [

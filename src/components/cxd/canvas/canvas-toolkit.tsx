@@ -169,6 +169,8 @@ export function CanvasToolkit({
     useState<LinkMode>("bookmark");
   const [showCardTypeMenu, setShowCardTypeMenu] = useState(false);
   const [selectedCardType, setSelectedCardType] = useState<"note" | "task">("note");
+  // Toolbar collapse state
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   // Handle Escape key to cancel placement mode
@@ -205,10 +207,10 @@ export function CanvasToolkit({
         const options = activeTool === "shape"
           ? { shapeType: selectedShapeType }
           : activeTool === "link"
-          ? { linkMode: selectedLinkMode }
-          : activeTool === "freeform"
-          ? { cardType: selectedCardType }
-          : undefined;
+            ? { linkMode: selectedLinkMode }
+            : activeTool === "freeform"
+              ? { cardType: selectedCardType }
+              : undefined;
 
         onPlaceElement(activeTool, { x, y }, options);
         setActiveTool(null);
@@ -229,6 +231,7 @@ export function CanvasToolkit({
     selectedLinkMode,
     selectedCardType,
     canvasOriginOffset,
+    setActiveTool,
   ]);
 
   // NOTE: Line drawing is now handled by LineLayer component
@@ -284,26 +287,26 @@ export function CanvasToolkit({
         }
       }
     },
-    [activeTool, showShapePalette, showLinkPalette, showCardTypeMenu],
+    [activeTool, showShapePalette, showLinkPalette, showCardTypeMenu, setActiveTool],
   );
 
   const handleCardTypeSelect = useCallback((cardType: "note" | "task") => {
     setSelectedCardType(cardType);
     setShowCardTypeMenu(false);
     setActiveTool("freeform");
-  }, []);
+  }, [setActiveTool]);
 
   const handleShapeSelect = useCallback((shapeType: ShapeType) => {
     setSelectedShapeType(shapeType);
     setShowShapePalette(false);
     setActiveTool("shape");
-  }, []);
+  }, [setActiveTool]);
 
   const handleLinkModeSelect = useCallback((linkMode: LinkMode) => {
     setSelectedLinkMode(linkMode);
     setShowLinkPalette(false);
     setActiveTool("link");
-  }, []);
+  }, [setActiveTool]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent, type: CanvasElementType, shapeType?: ShapeType) => {
@@ -329,7 +332,7 @@ export function CanvasToolkit({
       // Clean up ghost after drag starts
       setTimeout(() => document.body.removeChild(ghost), 0);
     },
-    [],
+    [setActiveTool],
   );
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -361,8 +364,8 @@ export function CanvasToolkit({
         const options = dragType === "shape"
           ? { shapeType: selectedShapeType }
           : dragType === "link"
-          ? { linkMode: selectedLinkMode }
-          : undefined;
+            ? { linkMode: selectedLinkMode }
+            : undefined;
 
         onPlaceElement(dragType, { x, y }, options);
       }
@@ -388,139 +391,164 @@ export function CanvasToolkit({
       {/* Floating Toolbar */}
       <div
         ref={toolbarRef}
-        className="fixed top-20 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-card/80 backdrop-blur-xl border border-border/50 shadow-lg"
-        style={{
-          boxShadow:
-            "0 0 30px rgba(168, 85, 247, 0.15), 0 4px 20px rgba(0, 0, 0, 0.3)",
-        }}
+        className={cn(
+          "fixed top-28 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center p-1.5 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
+          isCollapsed ? "w-[52px]" : "w-[438px]"
+        )}
       >
-        {TOOLKIT_TOOLS.map((tool) => {
-          const Icon = tool.IconComponent;
-          const isActive =
-            activeTool === tool.type ||
-            (tool.type === "shape" && showShapePalette);
-          const isBeingDragged = isDragging && dragType === tool.type;
+        <div
+          className={cn(
+            "flex items-center flex-shrink-0 transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
+            isCollapsed ? "opacity-0 w-0" : "opacity-100 w-[380px] gap-1.5 px-1.5 mr-1"
+          )}
+        >
+          {TOOLKIT_TOOLS.map((tool) => {
+            const Icon = tool.IconComponent;
+            const isActive =
+              activeTool === tool.type ||
+              (tool.type === "shape" && showShapePalette);
+            const isBeingDragged = isDragging && dragType === tool.type;
 
-          return (
-            <div key={tool.type} className="relative">
-              <button
-                draggable={tool.type !== "shape"}
-                onClick={() => handleToolClick(tool.type)}
-                onDragStart={(e) => handleDragStart(e, tool.type)}
-                onDrag={handleDrag}
-                onDragEnd={handleDragEnd}
-                title={`${tool.label} (${tool.shortcut})${isActive ? " - Active: Click to place, Esc to cancel" : " - Click to activate or drag to place"}`}
-                className={cn(
-                  "flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200",
-                  "hover:bg-primary/20 hover:scale-105",
-                  "active:scale-95",
-                  tool.type !== "shape" && "cursor-grab active:cursor-grabbing",
-                  isActive &&
-                    "bg-primary/30 ring-2 ring-primary shadow-[0_0_15px_rgba(168,85,247,0.4)]",
-                  isBeingDragged && "opacity-50",
-                )}
-              >
-                <Icon
+            return (
+              <div key={tool.type} className="relative flex-shrink-0">
+                <button
+                  draggable={tool.type !== "shape"}
+                  onClick={() => handleToolClick(tool.type)}
+                  onDragStart={(e) => handleDragStart(e, tool.type)}
+                  onDrag={handleDrag}
+                  onDragEnd={handleDragEnd}
+                  title={`${tool.label} (${tool.shortcut})${isActive ? " - Active: Click to place, Esc to cancel" : " - Click to activate or drag to place"}`}
                   className={cn(
-                    "w-5 h-5 transition-colors",
-                    isActive
-                      ? "text-primary"
-                      : "text-muted-foreground hover:text-foreground",
+                    "flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300 group",
+                    "hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] border border-transparent",
+                    "active:scale-95",
+                    tool.type !== "shape" && "cursor-grab active:cursor-grabbing",
+                    isActive &&
+                    "bg-gradient-to-b from-violet-500/30 to-violet-950/60 border-violet-500/50 shadow-[0_0_15px_rgba(139,92,246,0.4),inset_0_1px_0_rgba(255,255,255,0.1)]",
+                    isBeingDragged && "opacity-50",
                   )}
-                />
-              </button>
-              {/* Shape palette popover */}
-              {tool.type === "shape" && showShapePalette && (
-                <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-1 w-[134px] h-[102px] py-[8px] mt-[14.75px] bg-card opacity-100">
-                  {SHAPE_PALETTE.map((shape) => {
-                    const ShapeIcon = shape.IconComponent;
-                    return (
-                      <button
-                        key={shape.type}
-                        draggable
-                        onClick={() => handleShapeSelect(shape.type)}
-                        onDragStart={(e) =>
-                          handleDragStart(e, "shape", shape.type)
-                        }
-                        onDrag={handleDrag}
-                        onDragEnd={handleDragEnd}
-                        title={shape.label}
-                        className={cn(
-                          "w-10 h-10 flex items-center justify-center rounded-lg transition-all",
-                          "hover:bg-primary/20",
-                          selectedShapeType === shape.type &&
-                            "bg-primary/30 ring-1 ring-primary",
-                        )}
-                      >
-                        <ShapeIcon className="w-5 h-5" />
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Card type menu popover */}
-              {tool.type === "freeform" && showCardTypeMenu && (
-                <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 py-[8px] rounded-lg backdrop-blur border border-border shadow-xl z-50 flex flex-col gap-1 w-[160px] mt-[14.75px] bg-card opacity-100">
-                  {CARD_TYPE_OPTIONS.map((cardType) => {
-                    return (
-                      <button
-                        key={cardType.type}
-                        onClick={() => handleCardTypeSelect(cardType.type)}
-                        title={cardType.description}
-                        className={cn(
-                          "flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm",
-                          "hover:bg-primary/20",
-                          selectedCardType === cardType.type &&
-                            "bg-primary/30 ring-1 ring-primary",
-                        )}
-                      >
-                        <span className="text-lg">{cardType.icon}</span>
-                        <span>{cardType.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Link mode palette popover */}
-              {tool.type === "link" && showLinkPalette && (
-                <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 py-[8px] rounded-lg backdrop-blur border border-border shadow-xl z-50 flex flex-col gap-1 w-[110px] mt-[14.75px] bg-card opacity-100">
-                  {LINK_MODES.map((linkMode) => {
-                    const ModeIcon = linkMode.IconComponent;
-                    return (
-                      <button
-                        key={linkMode.mode}
-                        onClick={() => handleLinkModeSelect(linkMode.mode)}
-                        title={linkMode.label}
-                        className={cn(
-                          "flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm",
-                          "hover:bg-primary/20",
-                          selectedLinkMode === linkMode.mode &&
-                            "bg-primary/30 ring-1 ring-primary",
-                        )}
-                      >
-                        <ModeIcon className="w-4 h-4" />
-                        <span>{linkMode.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
+                >
+                  <Icon
+                    className={cn(
+                      "w-5 h-5 transition-colors",
+                      isActive
+                        ? "text-white"
+                        : "text-white/60 group-hover:text-white",
+                    )}
+                  />
+                </button>
+                {/* Shape palette popover */}
+                {tool.type === "shape" && showShapePalette && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl backdrop-blur-2xl border border-white/10 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 bg-zinc-900/90 animate-in fade-in zoom-in-95 duration-200">
+                    {SHAPE_PALETTE.map((shape) => {
+                      const ShapeIcon = shape.IconComponent;
+                      return (
+                        <button
+                          key={shape.type}
+                          draggable
+                          onClick={() => handleShapeSelect(shape.type)}
+                          onDragStart={(e) =>
+                            handleDragStart(e, "shape", shape.type)
+                          }
+                          onDrag={handleDrag}
+                          onDragEnd={handleDragEnd}
+                          title={shape.label}
+                          className={cn(
+                            "w-10 h-10 flex items-center justify-center rounded-lg transition-all group",
+                            "hover:bg-violet-600/20 hover:border-violet-500/50",
+                            selectedShapeType === shape.type &&
+                            "bg-violet-600/40 border-violet-500/50 shadow-[0_0_10px_rgba(139,92,246,0.2)]",
+                          )}
+                        >
+                          <ShapeIcon className={cn("w-5 h-5 transition-colors", selectedShapeType === shape.type ? "text-white" : "text-white/60 group-hover:text-white")} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* Card type menu popover */}
+                {tool.type === "freeform" && showCardTypeMenu && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl backdrop-blur-2xl border border-white/10 shadow-2xl z-50 flex flex-col gap-1 w-[180px] mt-4 bg-zinc-900/90 animate-in fade-in zoom-in-95 duration-200">
+                    {CARD_TYPE_OPTIONS.map((cardType) => {
+                      return (
+                        <button
+                          key={cardType.type}
+                          onClick={() => handleCardTypeSelect(cardType.type)}
+                          title={cardType.description}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-2.5 rounded-lg transition-all text-sm group",
+                            "hover:bg-violet-600/20 hover:border-violet-500/50",
+                            selectedCardType === cardType.type &&
+                            "bg-violet-600/40 border-violet-500/50 shadow-[0_0_10px_rgba(139,92,246,0.2)]",
+                          )}
+                        >
+                          <span className="text-lg">{cardType.icon}</span>
+                          <span className={cn("font-medium transition-colors", selectedCardType === cardType.type ? "text-white" : "text-white/60 group-hover:text-white")}>{cardType.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* Link mode palette popover */}
+                {tool.type === "link" && showLinkPalette && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl backdrop-blur-2xl border border-white/10 shadow-2xl z-50 flex flex-col gap-1 w-[140px] mt-4 bg-zinc-900/90 animate-in fade-in zoom-in-95 duration-200">
+                    {LINK_MODES.map((linkMode) => {
+                      const ModeIcon = linkMode.IconComponent;
+                      return (
+                        <button
+                          key={linkMode.mode}
+                          onClick={() => handleLinkModeSelect(linkMode.mode)}
+                          title={linkMode.label}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-2.5 rounded-lg transition-all text-sm group",
+                            "hover:bg-violet-600/20 hover:border-violet-500/50",
+                            selectedLinkMode === linkMode.mode &&
+                            "bg-violet-600/40 border-violet-500/50 shadow-[0_0_10px_rgba(139,92,246,0.2)]",
+                          )}
+                        >
+                          <ModeIcon className={cn("w-4 h-4 transition-colors", selectedLinkMode === linkMode.mode ? "text-white" : "text-white/60 group-hover:text-white")} />
+                          <span className={cn("font-medium transition-colors", selectedLinkMode === linkMode.mode ? "text-white" : "text-white/60 group-hover:text-white")}>{linkMode.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Collapse/Expand Toggle Wrapper */}
+        <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center">
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className={cn(
+              "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-500 group border border-white/5",
+              "hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.2)]",
+              isCollapsed && "bg-white/[0.05]"
+            )}
+            title={isCollapsed ? "Expand Tools" : "Focus Mode - Collapse"}
+          >
+            {isCollapsed ? (
+              <LucideIcons.ChevronRight className="w-5 h-5 text-white/50 group-hover:text-white transition-all transform hover:scale-110" />
+            ) : (
+              <LucideIcons.ChevronLeft className="w-5 h-5 text-white/50 group-hover:text-white transition-all transform hover:scale-110" />
+            )}
+          </button>
+        </div>
       </div>
+
       {/* Active Tool Indicator */}
       {activeTool && (
-        <div className="fixed top-32 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded-full bg-primary/90 text-primary-foreground text-xs font-medium shadow-lg animate-in fade-in slide-in-from-top-2 duration-200">
-          {activeTool === "line" ? "Click and drag to draw line" : `Click on canvas to place ${
-            activeTool === "shape"
-              ? SHAPE_PALETTE.find((s) => s.type === selectedShapeType)?.label
-              : activeTool === "link"
+        <div className="fixed top-44 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded-full bg-primary/90 text-primary-foreground text-xs font-medium shadow-lg animate-in fade-in slide-in-from-top-2 duration-200">
+          {activeTool === "line" ? "Click and drag to draw line" : `Click on canvas to place ${activeTool === "shape"
+            ? SHAPE_PALETTE.find((s) => s.type === selectedShapeType)?.label
+            : activeTool === "link"
               ? LINK_MODES.find((m) => m.mode === selectedLinkMode)?.label
               : activeTool === "freeform"
-              ? CARD_TYPE_OPTIONS.find((c) => c.type === selectedCardType)?.label
-              : TOOLKIT_TOOLS.find((t) => t.type === activeTool)?.label
-          }`}{" "}
+                ? CARD_TYPE_OPTIONS.find((c) => c.type === selectedCardType)?.label
+                : TOOLKIT_TOOLS.find((t) => t.type === activeTool)?.label
+            }`}{" "}
           • Esc to cancel
         </div>
       )}

@@ -31,22 +31,26 @@ import {
   HelpCircle,
   Bell,
   FileText,
+  Bug,
+  MessageCircle,
+  Send,
+  X,
+  LayoutGrid,
+  Play,
   PlayCircle,
-  Megaphone,
+  BookOpen,
+  Target,
   Sparkles,
   AlertTriangle,
   CheckCircle,
+  Megaphone,
   FolderOpen,
   Info,
   Check,
   UserPlus,
-  Loader2,
-  Bug,
-  MessageCircle,
-  Send,
-  X
+  Loader2
 } from 'lucide-react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { useNotifications } from '@/hooks/use-notifications'
 import { NotificationType, Notification } from '@/lib/notifications'
 
@@ -74,6 +78,7 @@ function formatTimeAgo(dateString: string): string {
 export default function DashboardNavbar() {
   const supabase = createClient()
   const router = useRouter()
+  const pathname = usePathname()
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll, refresh } = useNotifications()
   const [acceptingInvite, setAcceptingInvite] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
@@ -157,10 +162,15 @@ export default function DashboardNavbar() {
 
   return (
     <>
-      <nav className="w-full border-b border-white/10 bg-black/40 backdrop-blur-x0 sticky top-0 z-50">
-        <div className="container mx-auto px-4 flex justify-between items-center max-w-7xl h-16">
+      <nav className="w-full border-b border-white/10 bg-black/60 backdrop-blur-sm sticky top-0 z-50 overflow-visible">
+        {/* Glass Reflection Effects */}
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-30" />
+        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-20" />
+        <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+
+        <div className="container mx-auto px-4 flex justify-between items-center max-w-7xl h-20">
           <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="flex items-center gap-2">
+            <Link href="/dashboard" className="flex items-center gap-2 group px-3 py-2 rounded-full transition-all duration-300 hover:bg-white/5 pr-4">
               <Image
                 src="/images/hypercube-logo.webp"
                 alt="CXD"
@@ -168,34 +178,52 @@ export default function DashboardNavbar() {
                 height={28}
                 className="object-contain"
               />
-
+              <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[200px] group-hover:opacity-100 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap font-medium text-sm text-white/90">
+                Cyberdelic Design Canvas
+              </span>
             </Link>
 
             {/* Navigation Links */}
-            <div className="hidden md:flex items-center gap-1">
-              <Link href="/dashboard">
-                <Button variant="ghost" size="sm" className="text-foreground bg-primary/10">
-                  Dashboard
-                </Button>
-              </Link>
-              <Link href="/dashboard/tutorials">
-                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground hover:bg-white/5">
-                  Tutorials
-                </Button>
-              </Link>
-              <Link href="/dashboard/docs">
-                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground hover:bg-white/5">
-                  Documentation
-                </Button>
-              </Link>
-              <div className="relative group">
-                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground hover:bg-white/5">
-                  Templates
-                </Button>
-                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-3 py-1 bg-popover text-popover-foreground text-xs rounded-md border border-border opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">
-                  Coming soon
+            <div className="hidden md:flex items-center gap-2">
+              {[
+                { id: 'dashboard', href: '/dashboard', icon: LayoutGrid, label: 'Dashboard' },
+                { id: 'docs', href: '/dashboard/docs', icon: BookOpen, label: 'Documentation' },
+              ].map((item) => {
+                const isActive = pathname === item.href;
+                return (
+                  <Link key={item.id} href={item.href}>
+                    <div className={`relative flex items-center px-4 py-2 group rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 overflow-hidden cursor-pointer
+                      ${isActive
+                        ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+                        : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+                      }`}
+                    >
+                      <item.icon className={`w-4 h-4 mr-2 transition-colors ${isActive ? 'text-violet-200' : 'text-white/60 group-hover:text-violet-200'}`} />
+                      <span className="text-xs font-medium">{item.label}</span>
+                      {/* Subtle inner top highlight */}
+                      <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      {/* Subtle bottom glow */}
+                      <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    </div>
+                  </Link>
+                );
+              })}
+
+              {/* Locked Links */}
+              {[
+                { id: 'tutorials', icon: Play, label: 'Tutorials' },
+                { id: 'templates', icon: Target, label: 'Templates' },
+              ].map((item) => (
+                <div key={item.id} className="relative group">
+                  <div className="flex items-center px-4 py-2 rounded-full text-white/40 bg-white/[0.02] border border-white/[0.05] transition-all duration-300 cursor-not-allowed">
+                    <item.icon className="w-4 h-4 mr-2 opacity-50" />
+                    <span className="text-xs font-medium">{item.label}</span>
+                  </div>
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-3 py-1 bg-zinc-900 text-white text-[10px] rounded-md border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[60]">
+                    Coming soon
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
 
@@ -203,21 +231,23 @@ export default function DashboardNavbar() {
             {/* Notifications */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground relative">
-                  <Bell className="h-5 w-5" />
-                  {unreadCount > 0 && (
-                    <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full animate-pulse" />
-                  )}
-                </Button>
+                <div className="relative group cursor-pointer active:scale-95 transition-all">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
+                    <Bell className="h-5 w-5 text-white/60 group-hover:text-violet-200" />
+                    {unreadCount > 0 && (
+                      <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_10px_rgba(139,92,246,1)]" />
+                    )}
+                  </div>
+                </div>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-card/95 backdrop-blur-xl border-white/10 w-80">
+              <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-80">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                   <span className="font-semibold text-sm">Notifications</span>
                   {unreadCount > 0 && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-xs h-6 px-2"
+                      className="text-xs h-6 px-2 hover:bg-white/5"
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -335,21 +365,23 @@ export default function DashboardNavbar() {
             {/* Help Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                  <HelpCircle className="h-5 w-5" />
-                </Button>
+                <div className="group cursor-pointer active:scale-95 transition-all">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
+                    <HelpCircle className="h-5 w-5 text-white/60 group-hover:text-violet-200" />
+                  </div>
+                </div>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-card/95 backdrop-blur-xl border-white/10 w-48">
+              <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
                 <DropdownMenuItem
                   onClick={() => setShowSupportModal(true)}
-                  className="cursor-pointer"
+                  className="cursor-pointer hover:bg-white/5"
                 >
                   <MessageCircle className="w-4 h-4 mr-2" />
                   Contact Support
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setShowBugModal(true)}
-                  className="cursor-pointer"
+                  className="cursor-pointer hover:bg-white/5"
                 >
                   <Bug className="w-4 h-4 mr-2" />
                   Report a Bug
@@ -360,21 +392,23 @@ export default function DashboardNavbar() {
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                  <UserCircle className="h-6 w-6" />
-                </Button>
+                <div className="group cursor-pointer active:scale-95 transition-all">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
+                    <UserCircle className="h-6 w-6 text-white/60 group-hover:text-violet-200" />
+                  </div>
+                </div>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-card/95 backdrop-blur-xl border-white/10 w-48">
-                <DropdownMenuItem onClick={() => router.push('/dashboard/profile')} className="cursor-pointer">
+              <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
+                <DropdownMenuItem onClick={() => router.push('/dashboard/profile')} className="cursor-pointer hover:bg-white/5">
                   <UserCircle className="w-4 h-4 mr-2" />
                   Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push('/dashboard/reset-password')} className="cursor-pointer">
+                <DropdownMenuItem onClick={() => router.push('/dashboard/reset-password')} className="cursor-pointer hover:bg-white/5">
                   <Settings className="w-4 h-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-destructive">
+                <DropdownMenuSeparator className="bg-white/10" />
+                <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-destructive hover:bg-destructive/10">
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign out
                 </DropdownMenuItem>

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useCXDStore } from "@/store/cxd-store";
-import { extractCenterColor, hexToRgba } from "@/lib/utils";
+import { extractCenterColor, hexToRgba, cn } from "@/lib/utils";
 import {
   ENGAGEMENT_LEVELS,
   EngagementLevelCode,
@@ -12,6 +12,8 @@ import {
   StagePresenceTypeCode,
   StagePresenceTypes,
   DEFAULT_STAGE_PRESENCE_TYPES,
+  REALITY_PLANES,
+  RealityPlaneCode,
 } from "@/types/cxd-schema";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -34,7 +36,27 @@ import {
   Footprints,
   Leaf,
   Zap,
+  Eye,
+  Layers,
+  Monitor,
+  Box,
+  Globe,
+  Smartphone,
+  Cpu,
+  Fingerprint,
+  Lightbulb,
 } from "lucide-react";
+
+// Icon map for reality planes
+const REALITY_ICONS: Record<RealityPlaneCode, React.ReactNode> = {
+  PR: <Box className="w-3.5 h-3.5" />,
+  VR: <Monitor className="w-3.5 h-3.5" />,
+  AR: <Smartphone className="w-3.5 h-3.5" />,
+  MR: <Globe className="w-3.5 h-3.5" />,
+  GR: <Cpu className="w-3.5 h-3.5" />,
+  BR: <Fingerprint className="w-3.5 h-3.5" />,
+  CR: <Lightbulb className="w-3.5 h-3.5" />,
+};
 
 // Icon map for presence types
 const PRESENCE_ICONS: Record<StagePresenceTypeCode, React.ReactNode> = {
@@ -44,6 +66,14 @@ const PRESENCE_ICONS: Record<StagePresenceTypeCode, React.ReactNode> = {
   embodied: <Footprints className="w-4 h-4" />,
   environmental: <Leaf className="w-4 h-4" />,
   active: <Zap className="w-4 h-4" />,
+};
+
+// Icon map for engagement levels
+const ENGAGEMENT_ICONS: Record<EngagementLevelCode, React.ReactNode> = {
+  observer: <Eye className="w-4 h-4" />,
+  engager: <Zap className="w-4 h-4" />,
+  coCreator: <Users className="w-4 h-4" />,
+  architect: <Layers className="w-4 h-4" />,
 };
 
 export function ExperienceFlowDrawer() {
@@ -73,6 +103,7 @@ export function ExperienceFlowDrawer() {
     updateExperienceFlowStageNarrative,
     updateExperienceFlowStagePresence,
     updateExperienceFlowStageTime,
+    toggleExperienceFlowStageRealityPlane,
   } = useCXDStore();
 
   const project = getCurrentProject();
@@ -113,52 +144,22 @@ export function ExperienceFlowDrawer() {
     distribution.coCreator +
     distribution.architect;
 
-  const handleDistributionChange = (
-    level: EngagementLevelCode,
-    value: number,
-  ) => {
+  const handleDistributionToggle = (level: EngagementLevelCode) => {
     if (!activeStageId) return;
+    const isSelected = distribution[level] > 0;
     const newDistribution: EngagementDistribution = {
       ...distribution,
-      [level]: value,
+      [level]: isSelected ? 0 : 100,
     };
     updateExperienceFlowStageDistribution(activeStageId, newDistribution);
   };
 
-  const handleNormalize = () => {
+  const handlePresenceToggle = (type: StagePresenceTypeCode) => {
     if (!activeStageId) return;
-    if (total === 0) {
-      updateExperienceFlowStageDistribution(activeStageId, {
-        observer: 0,
-        engager: 100,
-        coCreator: 0,
-        architect: 0,
-      });
-      return;
-    }
-    const scale = 100 / total;
-    const normalized: EngagementDistribution = {
-      observer: Math.round(distribution.observer * scale),
-      engager: Math.round(distribution.engager * scale),
-      coCreator: Math.round(distribution.coCreator * scale),
-      architect: Math.round(distribution.architect * scale),
-    };
-    const newTotal =
-      normalized.observer +
-      normalized.engager +
-      normalized.coCreator +
-      normalized.architect;
-    if (newTotal !== 100) {
-      normalized.engager += 100 - newTotal;
-    }
-    updateExperienceFlowStageDistribution(activeStageId, normalized);
-  };
-
-  const handlePresenceChange = (type: StagePresenceTypeCode, value: number) => {
-    if (!activeStageId) return;
+    const isSelected = presenceTypes[type] > 0;
     const newPresence: StagePresenceTypes = {
       ...presenceTypes,
-      [type]: value,
+      [type]: isSelected ? 0 : 100,
     };
     updateExperienceFlowStagePresence(activeStageId, newPresence);
   };
@@ -247,7 +248,7 @@ export function ExperienceFlowDrawer() {
         >
           <Activity className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium">Experience Flow</span>
-          
+
           {/* Stage controls - only show when expanded */}
           {isExpanded && currentStage && (
             <div className="flex items-center gap-1 ml-auto mr-2">
@@ -344,7 +345,7 @@ export function ExperienceFlowDrawer() {
               )}
             </div>
           )}
-          
+
           {isExpanded ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
           ) : (
@@ -354,9 +355,8 @@ export function ExperienceFlowDrawer() {
 
         {/* Expanded drawer */}
         <div
-          className={`backdrop-blur-xl border-t border-border transition-all duration-300 ease-out overflow-hidden ${
-            isExpanded ? "max-h-[380px]" : "max-h-0"
-          }`}
+          className={`backdrop-blur-xl border-t border-border transition-all duration-300 ease-out overflow-hidden ${isExpanded ? "max-h-[520px]" : "max-h-0"
+            }`}
           style={{ backgroundColor: drawerBgColor }}
         >
           <div className="p-4">
@@ -390,80 +390,114 @@ export function ExperienceFlowDrawer() {
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, index)}
                     onClick={() => !isEditing && setActiveStageId(stage.id)}
-                    className={`flex-1 min-w-[100px] py-2 px-3 text-xs font-medium rounded-md transition-all flex flex-col items-center gap-1.5 cursor-grab active:cursor-grabbing ${
+                    className={cn(
+                      "flex-1 min-w-[100px] py-1.5 px-3 text-[11px] font-medium rounded-md transition-all flex flex-col items-center gap-0.5 cursor-grab active:cursor-grabbing border",
                       isActive
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                    } ${isDragging ? "opacity-50" : ""} ${isDragOver ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : ""}`}
-                  >
-                    {isEditing ? (
-                      <Input
-                        ref={inputRef}
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onBlur={handleSaveEdit}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleSaveEdit();
-                          if (e.key === "Escape") {
-                            setEditingStageId(null);
-                            setEditName("");
-                          }
-                        }}
-                        className="h-5 text-xs text-center bg-transparent border-none px-1"
-                        onClick={(e) => e.stopPropagation()}
-                        draggable={false}
-                      />
-                    ) : (
-                      <span className="truncate max-w-full">{stage.name}</span>
+                        ? "bg-gradient-to-b from-violet-600/30 to-violet-950/60 border-violet-500/50 text-white shadow-[0_0_20px_rgba(139,92,246,0.3)]"
+                        : "text-white/40 border-transparent hover:text-white/70 hover:bg-white/10",
+                      isDragging && "opacity-50",
+                      isDragOver && "ring-2 ring-primary ring-offset-1 ring-offset-background"
                     )}
-                    {/* Engagement distribution mini bar */}
-                    <div className="w-full h-1.5 rounded-full overflow-hidden flex bg-black/20">
-                      {stageTotal > 0 ? (
-                        <>
-                          {stageDist.observer > 0 && (
-                            <div
-                              className="h-full bg-cyan-400/80"
-                              style={{
-                                width: `${(stageDist.observer / stageTotal) * 100}%`,
-                              }}
-                            />
-                          )}
-                          {stageDist.engager > 0 && (
-                            <div
-                              className="h-full bg-violet-400/80"
-                              style={{
-                                width: `${(stageDist.engager / stageTotal) * 100}%`,
-                              }}
-                            />
-                          )}
-                          {stageDist.coCreator > 0 && (
-                            <div
-                              className="h-full bg-fuchsia-400/80"
-                              style={{
-                                width: `${(stageDist.coCreator / stageTotal) * 100}%`,
-                              }}
-                            />
-                          )}
-                          {stageDist.architect > 0 && (
-                            <div
-                              className="h-full bg-amber-400/80"
-                              style={{
-                                width: `${(stageDist.architect / stageTotal) * 100}%`,
-                              }}
-                            />
-                          )}
-                        </>
+                  >
+                    <div className="min-h-[1.5rem] mt-0.5 flex flex-col items-center">
+                      {isEditing ? (
+                        <div className="px-2 py-0.5 rounded-full bg-white/10 border border-white/10 shadow-inner">
+                          <Input
+                            ref={inputRef}
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            onBlur={handleSaveEdit}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleSaveEdit();
+                              if (e.key === "Escape") {
+                                setEditingStageId(null);
+                                setEditName("");
+                              }
+                            }}
+                            className="h-4 text-[10px] font-bold uppercase tracking-wider text-center bg-transparent border-none px-1 w-[80px]"
+                            onClick={(e) => e.stopPropagation()}
+                            draggable={false}
+                          />
+                        </div>
                       ) : (
-                        <div className="h-full w-full bg-violet-400/80" />
+                        <div className={cn(
+                          "px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-[0.15em] transition-all duration-500",
+                          isActive
+                            ? "bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 border border-violet-500/40 text-white shadow-[0_0_15px_rgba(139,92,246,0.15)]"
+                            : "bg-white/5 border border-white/5 text-white/30"
+                        )}>
+                          {stage.name}
+                        </div>
                       )}
                     </div>
-                    {/* Time indicator */}
-                    {stage.estimatedMinutes !== null &&
-                      stage.estimatedMinutes > 0 && (
-                        <span className="text-muted-foreground/80 font-sans text-[12px] text-[#4f3978]">
-                          {stage.estimatedMinutes}m
-                        </span>
+
+                    {/* Presence & Reality Icons - Horizontal Split */}
+                    <div className="flex items-center justify-center gap-4 mt-2">
+                      {/* Presence Column */}
+                      <div className="flex items-center gap-1.5 min-w-[32px] justify-end">
+                        {Object.entries(stage.presenceTypes || DEFAULT_STAGE_PRESENCE_TYPES)
+                          .filter(([_, val]) => val > 0)
+                          .map(([type]) => (
+                            <div
+                              key={`presence-${type}`}
+                              className="w-3 h-3 flex items-center justify-center transition-all"
+                              style={{ color: `hsl(var(--presence-${type}))` }}
+                              title={`Presence: ${type}`}
+                            >
+                              <div className="scale-90">{PRESENCE_ICONS[type as StagePresenceTypeCode]}</div>
+                            </div>
+                          ))
+                        }
+                      </div>
+
+                      {/* Vertical Divider - Thicker Purple */}
+                      <div className="w-[1.5px] h-4 bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.4)]" />
+
+                      {/* Reality Column */}
+                      <div className="flex items-center gap-1.5 min-w-[32px] justify-start">
+                        {Object.entries(stage.realityPlanes || {})
+                          .filter(([_, enabled]) => enabled)
+                          .map(([code]) => {
+                            const rp = REALITY_PLANES.find(r => r.code === code);
+                            return (
+                              <div
+                                key={`reality-${code}`}
+                                className="w-3 h-3 flex items-center justify-center transition-all text-white"
+                                title={`Reality: ${rp?.label || code}`}
+                              >
+                                <div className="scale-90">{REALITY_ICONS[code as RealityPlaneCode]}</div>
+                              </div>
+                            );
+                          })
+                        }
+                      </div>
+
+                      {Object.values(stage.presenceTypes || DEFAULT_STAGE_PRESENCE_TYPES).every(v => v === 0) &&
+                        (!stage.realityPlanes || Object.values(stage.realityPlanes).every(v => !v)) && (
+                          <div className="w-1 h-1 rounded-full bg-white/20" />
+                        )}
+                    </div>
+
+                    {/* Engagement distribution visualizer (Simplified for categorical) */}
+                    <div className="w-full h-1 rounded-full overflow-hidden flex bg-white/5 mt-2">
+                      {Object.entries(stageDist).some(([_, v]) => v > 0) ? (
+                        <>
+                          {stageDist.observer > 0 && <div className="h-full flex-1 bg-cyan-400/60" />}
+                          {stageDist.engager > 0 && <div className="h-full flex-1 bg-violet-400/60" />}
+                          {stageDist.coCreator > 0 && <div className="h-full flex-1 bg-fuchsia-400/60" />}
+                          {stageDist.architect > 0 && <div className="h-full flex-1 bg-amber-400/60" />}
+                        </>
+                      ) : (
+                        <div className="h-full w-full bg-white/5" />
                       )}
+                    </div>
+
+                    {/* Time indicator - Brighter & More Prominent */}
+                    {(stage.estimatedMinutes ?? 0) > 0 && (
+                      <span className="text-violet-400 font-bold text-[13px] mt-2 font-mono tracking-tight">
+                        {stage.estimatedMinutes} MIN
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -481,248 +515,205 @@ export function ExperienceFlowDrawer() {
             {currentStage && (
               <div className="space-y-3">
 
-                {/* 3-column layout */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Column 1: Degree of Engagement */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-semibold">
-                        Degree of Engagement
-                      </Label>
-                      <span
-                        className={`text-sm font-mono ${total === 100 ? "text-primary" : "text-amber-500"}`}
-                      >
-                        {total}%
-                      </span>
-                    </div>
+                {/* 4-column layout: 10% | 20% | 20% | 50% */}
+                <div className="flex flex-col md:flex-row gap-8 items-start">
+                  {/* Column 1: Degree of Engagement (10%) */}
+                  <div className="w-full md:w-[10%] space-y-4">
+                    <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50 mb-1 block">Engagement</Label>
+                    <div className="flex flex-col gap-2">
+                      {ENGAGEMENT_LEVELS.map((level) => {
+                        const isSelected = distribution[level.code] > 0;
+                        const colors = {
+                          observer: "from-cyan-500/20 to-cyan-950/40 border-cyan-500/40 text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.15)]",
+                          engager: "from-violet-500/20 to-violet-950/40 border-violet-500/40 text-violet-400 shadow-[0_0_15px_rgba(167,139,250,0.15)]",
+                          coCreator: "from-fuchsia-500/20 to-fuchsia-950/40 border-fuchsia-500/40 text-fuchsia-400 shadow-[0_0_15px_rgba(232,121,249,0.15)]",
+                          architect: "from-amber-500/20 to-amber-950/40 border-amber-500/40 text-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.15)]"
+                        };
 
-                    {/* 4 Engagement Level Sliders */}
-                    <div className="space-y-2">
-                      {ENGAGEMENT_LEVELS.map((level) => (
-                        <div key={level.code} className="space-y-1">
-                          <div className="flex items-center justify-between">
-                            <Label className="text-xs text-muted-foreground">
-                              {level.label}
-                            </Label>
-                            <span className="text-xs font-mono text-primary">
-                              {distribution[level.code]}%
-                            </span>
-                          </div>
-                          <input
-                            type="range"
-                            value={distribution[level.code]}
-                            onChange={(e) =>
-                              handleDistributionChange(level.code, parseInt(e.target.value))
-                            }
-                            max={100}
-                            min={0}
-                            step={1}
-                            className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
-                            aria-label={`${level.label} engagement level`}
-                          />
-                        </div>
-                      ))}
+                        return (
+                          <button
+                            key={level.code}
+                            onClick={() => handleDistributionToggle(level.code)}
+                            className={cn(
+                              "flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-300 relative active:scale-95 group",
+                              isSelected
+                                ? "bg-gradient-to-b border-opacity-70 " + colors[level.code]
+                                : "bg-white/[0.05] border-white/10 text-white/40 hover:bg-white/[0.08] hover:border-white/20"
+                            )}
+                            title={level.label}
+                          >
+                            <div className={cn(
+                              "mb-1 transition-all duration-500",
+                              isSelected ? "scale-110" : "opacity-60 grayscale-[0.3]"
+                            )}>
+                              {ENGAGEMENT_ICONS[level.code]}
+                            </div>
+                            <span className={cn(
+                              "text-[8px] font-bold uppercase tracking-tight text-center leading-none",
+                              isSelected ? "text-white" : "text-white/40"
+                            )}>{level.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-
-                    {/* Warning and Normalize button */}
-                    {total !== 100 && (
-                      <div className="flex items-center gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-                        <span className="text-xs text-amber-500 flex-1">
-                          ≠100%
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleNormalize}
-                          className="h-5 text-[10px] px-1.5"
-                        >
-                          Fix
-                        </Button>
-                      </div>
-                    )}
                   </div>
 
-                  {/* Column 2: Presence Types */}
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold">Presence</Label>
-                    <div className="flex gap-3 h-[180px]">
-                      {/* Left: 2-column x 3-row presence buttons grid */}
-                      <div className="grid grid-cols-2 grid-rows-3 gap-1.5 flex-1">
-                        {STAGE_PRESENCE_TYPES.map((pt) => {
-                          const pct = presenceTypes[pt.code];
-                          const isSelected = selectedPresenceType === pt.code;
+                  {/* Column 2: Presence Types (20%) - Split 4 & 2 */}
+                  <div className="w-full md:w-[20%] space-y-4">
+                    <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50 mb-1 block">Presence</Label>
+                    <div className="flex gap-2">
+                      {/* Left Column (4 items) */}
+                      <div className="flex-1 flex flex-col gap-2">
+                        {STAGE_PRESENCE_TYPES.slice(0, 4).map((pt) => {
+                          const isSelected = presenceTypes[pt.code] > 0;
                           return (
                             <button
                               key={pt.code}
-                              onClick={() => setSelectedPresenceType(pt.code)}
-                              className={`presence-btn presence-btn-${pt.code} relative overflow-hidden ${isSelected ? "selected" : ""}`}
+                              onClick={() => handlePresenceToggle(pt.code)}
+                              className={cn(
+                                "flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-300 relative active:scale-95",
+                                isSelected
+                                  ? "bg-gradient-to-br from-white/[0.1] to-transparent border-opacity-80 shadow-[0_0_15px_rgba(255,255,255,0.02)]"
+                                  : "bg-white/[0.05] border-white/10 opacity-60 hover:opacity-100 hover:bg-white/[0.08]"
+                              )}
                               style={{
-                                border: `1.5px solid hsl(var(--presence-${pt.code}) / ${isSelected ? 1 : 0.5})`,
-                                backgroundColor: "transparent",
+                                borderColor: isSelected ? `hsl(var(--presence-${pt.code}))` : 'rgba(255,255,255,0.1)',
+                                color: isSelected ? `hsl(var(--presence-${pt.code}))` : 'rgba(255,255,255,0.4)'
                               }}
-                              aria-label={`${pt.label}: ${pct}%`}
-                              title={`${pt.label}: ${pct}%`}
+                              title={pt.label}
                             >
-                              {/* Fill from bottom to top */}
-                              <div
-                                className="absolute inset-x-0 bottom-0 transition-all duration-200 pointer-events-none rounded-b-md"
-                                style={{
-                                  height: `${pct}%`,
-                                  backgroundColor: `hsl(var(--presence-${pt.code}) / ${0.3 + pct / 200})`,
-                                  boxShadow:
-                                    pct > 30
-                                      ? `inset 0 0 12px hsl(var(--presence-${pt.code}) / 0.4)`
-                                      : "none",
-                                }}
-                              />
-                              <span
-                                className={`relative z-10 transition-colors ${isSelected ? "text-white" : pct > 50 ? "text-white/90" : "text-muted-foreground"}`}
-                              >
-                                {PRESENCE_ICONS[pt.code]}
-                              </span>
-                              <span
-                                className={`relative z-10 text-[9px] font-medium truncate ${isSelected ? "text-white" : pct > 50 ? "text-white/80" : "text-muted-foreground"}`}
-                              >
+                              <div className="mb-0.5 scale-90">{PRESENCE_ICONS[pt.code]}</div>
+                              <span className={cn(
+                                "text-[9px] font-bold uppercase tracking-tight leading-none",
+                                isSelected ? "text-white" : "text-white/40"
+                              )}>
                                 {pt.label}
                               </span>
                             </button>
                           );
                         })}
                       </div>
-
-                      {/* Right: Vertical fader */}
-                      <div className="flex flex-col items-center gap-2 w-12">
-                        <span className="text-xs font-mono text-primary font-semibold">
-                          {presenceTypes[selectedPresenceType]}%
-                        </span>
-                        <div
-                          className="vertical-slider flex-1 w-8"
-                          role="slider"
-                          aria-valuenow={presenceTypes[selectedPresenceType]}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-label={`${STAGE_PRESENCE_TYPES.find((p) => p.code === selectedPresenceType)?.label} presence level`}
-                          tabIndex={0}
-                          onKeyDown={(e) => {
-                            const current = presenceTypes[selectedPresenceType];
-                            if (e.key === "ArrowUp" || e.key === "ArrowRight") {
-                              e.preventDefault();
-                              handlePresenceChange(
-                                selectedPresenceType,
-                                Math.min(100, current + (e.shiftKey ? 10 : 1)),
-                              );
-                            } else if (
-                              e.key === "ArrowDown" ||
-                              e.key === "ArrowLeft"
-                            ) {
-                              e.preventDefault();
-                              handlePresenceChange(
-                                selectedPresenceType,
-                                Math.max(0, current - (e.shiftKey ? 10 : 1)),
-                              );
-                            }
-                          }}
-                          onMouseDown={(e) => {
-                            const rect =
-                              e.currentTarget.getBoundingClientRect();
-                            const handleMove = (moveEvent: MouseEvent) => {
-                              const y = moveEvent.clientY - rect.top;
-                              const percent = Math.round(
-                                Math.max(
-                                  0,
-                                  Math.min(100, 100 - (y / rect.height) * 100),
-                                ),
-                              );
-                              handlePresenceChange(
-                                selectedPresenceType,
-                                percent,
-                              );
-                            };
-                            const handleUp = () => {
-                              document.removeEventListener(
-                                "mousemove",
-                                handleMove,
-                              );
-                              document.removeEventListener("mouseup", handleUp);
-                            };
-                            handleMove(e.nativeEvent);
-                            document.addEventListener("mousemove", handleMove);
-                            document.addEventListener("mouseup", handleUp);
-                          }}
-                        >
-                          <div
-                            className="vertical-slider-fill"
-                            style={{
-                              height: `${presenceTypes[selectedPresenceType]}%`,
-                              backgroundColor: `hsl(var(--presence-${selectedPresenceType}))`,
-                              boxShadow: `0 0 8px hsl(var(--presence-${selectedPresenceType}) / 0.5)`,
-                            }}
-                          />
-                          <div
-                            className="vertical-slider-thumb"
-                            style={{
-                              bottom: `calc(${presenceTypes[selectedPresenceType]}% - 6px)`,
-                              borderColor: `hsl(var(--presence-${selectedPresenceType}))`,
-                            }}
-                          />
-                        </div>
-                        <span className="text-[9px] text-muted-foreground truncate w-full text-center">
-                          {
-                            STAGE_PRESENCE_TYPES.find(
-                              (p) => p.code === selectedPresenceType,
-                            )?.label
-                          }
-                        </span>
+                      {/* Right Column (2 items) */}
+                      <div className="flex-1 flex flex-col gap-2">
+                        {STAGE_PRESENCE_TYPES.slice(4, 6).map((pt) => {
+                          const isSelected = presenceTypes[pt.code] > 0;
+                          return (
+                            <button
+                              key={pt.code}
+                              onClick={() => handlePresenceToggle(pt.code)}
+                              className={cn(
+                                "flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-300 relative active:scale-95",
+                                isSelected
+                                  ? "bg-gradient-to-br from-white/[0.1] to-transparent border-opacity-80 shadow-[0_0_15px_rgba(255,255,255,0.02)]"
+                                  : "bg-white/[0.05] border-white/10 opacity-60 hover:opacity-100 hover:bg-white/[0.08]"
+                              )}
+                              style={{
+                                borderColor: isSelected ? `hsl(var(--presence-${pt.code}))` : 'rgba(255,255,255,0.1)',
+                                color: isSelected ? `hsl(var(--presence-${pt.code}))` : 'rgba(255,255,255,0.4)'
+                              }}
+                              title={pt.label}
+                            >
+                              <div className="mb-0.5 scale-90">{PRESENCE_ICONS[pt.code]}</div>
+                              <span className={cn(
+                                "text-[9px] font-bold uppercase tracking-tight leading-none",
+                                isSelected ? "text-white" : "text-white/40"
+                              )}>
+                                {pt.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                        {/* Empty space filler to keep alignment */}
+                        <div className="flex-1" />
+                        <div className="flex-1" />
                       </div>
                     </div>
                   </div>
 
-                  {/* Column 3: Narrative Notes + Estimated Time */}
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold">
-                      Narrative Notes
-                    </Label>
-                    <Textarea
-                      placeholder={`What happens during ${currentStage.name.toLowerCase()}?`}
-                      value={currentStage.narrativeNotes}
-                      onChange={(e) =>
-                        activeStageId &&
-                        updateExperienceFlowStageNarrative(
-                          activeStageId,
-                          e.target.value,
-                        )
-                      }
-                      className="min-h-[120px] bg-input border-border resize-none text-sm"
-                    />
-                    <div className="space-y-1 pt-2 border-t border-border">
-                      <Label className="text-xs text-muted-foreground">
-                        Estimated time (minutes)
-                      </Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={999}
-                        placeholder="—"
-                        value={currentStage.estimatedMinutes ?? ""}
-                        onChange={(e) => {
-                          if (!activeStageId) return;
-                          const val = e.target.value;
-                          if (val === "") {
-                            updateExperienceFlowStageTime(activeStageId, null);
-                          } else {
-                            const num = Math.max(
-                              0,
-                              Math.min(999, parseInt(val, 10) || 0),
-                            );
-                            updateExperienceFlowStageTime(activeStageId, num);
-                          }
-                        }}
-                        className="h-8 text-sm bg-input border-border"
+                  {/* Column 3: Reality Planes (20%) */}
+                  <div className="w-full md:w-[20%] space-y-4">
+                    <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50 mb-1 block">Reality</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {REALITY_PLANES.map((rp) => {
+                        const stagePlanes = (currentStage.realityPlanes || {}) as Record<RealityPlaneCode, boolean>;
+                        const isEnabled = stagePlanes[rp.code as RealityPlaneCode];
+                        return (
+                          <button
+                            key={rp.code}
+                            onClick={() => toggleExperienceFlowStageRealityPlane(currentStage.id, rp.code as RealityPlaneCode)}
+                            className={cn(
+                              "flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-300 relative active:scale-95",
+                              isEnabled
+                                ? "bg-gradient-to-br from-white/[0.08] to-transparent border-white/40 text-white shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                                : "bg-white/[0.05] border-white/10 text-white/40 opacity-70 hover:opacity-100 hover:bg-white/[0.08]"
+                            )}
+                            title={rp.label}
+                          >
+                            <div className="mb-0.5 scale-90">{REALITY_ICONS[rp.code as RealityPlaneCode]}</div>
+                            <span className={cn(
+                              "text-[9px] font-bold tracking-widest leading-none",
+                              isEnabled ? "text-white" : "text-white/40"
+                            )}>
+                              {rp.code}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Column 4: Experience Script (50%) */}
+                  <div className="w-full md:w-[50%] space-y-4">
+                    <div className="space-y-3">
+                      <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50 mb-1 block">Experience Script</Label>
+                      <Textarea
+                        placeholder={`What happens during ${currentStage.name.toLowerCase()}?`}
+                        value={currentStage.narrativeNotes}
+                        onChange={(e) =>
+                          activeStageId &&
+                          updateExperienceFlowStageNarrative(
+                            activeStageId,
+                            e.target.value,
+                          )
+                        }
+                        className="min-h-[140px] bg-white/[0.03] border-white/10 rounded-xl resize-none text-[12px] leading-relaxed placeholder:text-white/10 focus:ring-1 focus:ring-violet-500/30 transition-all font-sans"
                       />
-                      <p className="text-[10px] text-muted-foreground">
-                        Used to estimate the pacing across stages.
-                      </p>
+                    </div>
+                    <div className="space-y-3 pt-4 border-t border-white/5">
+                      <div className="flex items-center gap-4">
+                        <div className="relative">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={999}
+                            placeholder="0"
+                            value={currentStage.estimatedMinutes ?? ""}
+                            onChange={(e) => {
+                              if (!activeStageId) return;
+                              const val = e.target.value;
+                              if (val === "") {
+                                updateExperienceFlowStageTime(activeStageId, null);
+                              } else {
+                                const num = Math.max(
+                                  0,
+                                  Math.min(999, parseInt(val, 10) || 0),
+                                );
+                                updateExperienceFlowStageTime(activeStageId, num);
+                              }
+                            }}
+                            className="h-11 w-24 text-center text-base bg-white/[0.04] border-white/10 rounded-xl font-mono focus:ring-1 focus:ring-violet-500/40"
+                          />
+                          <span className="absolute -top-2 -right-1 px-1 bg-background text-[8px] font-black uppercase text-violet-400 rounded border border-violet-500/20">MIN</span>
+                        </div>
+                        <div className="flex-1">
+                          <Label className="text-[10px] font-bold uppercase tracking-widest text-white/50 block leading-tight">
+                            Temporal Weight
+                          </Label>
+                          <p className="text-[9px] text-white/20 italic">
+                            Stage duration for timeline pacing
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

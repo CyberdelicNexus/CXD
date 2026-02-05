@@ -12,8 +12,9 @@ import {
   ChevronLeft,
   Sparkles,
   LayoutDashboard,
-  LayoutGrid,
-  Hexagon,
+  Grid3X3,
+  Brain,
+  Box,
   Bell,
   Info,
   CheckCircle,
@@ -23,7 +24,17 @@ import {
   Check,
   ListTodo,
   Users,
+  Settings,
+  HelpCircle,
+  LogOut,
+  UserCircle,
+  Menu,
+  ChevronRight,
+  Palette,
+  Loader2,
 } from "lucide-react";
+import { Link } from "lucide-react";
+import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
@@ -198,40 +209,45 @@ export function CXDNavbar() {
   // Get dynamic background color from canvas background
   const canvasBackground = project?.canvasBackground || CANVAS_GRADIENTS[0].value;
   const centerColor = extractCenterColor(canvasBackground);
-  const navBgColor = hexToRgba(centerColor, 0.85);
+  // Ensure we have a hex color for the opacity conversion
+  const safeHexColor = centerColor.startsWith('#') ? centerColor : '#1a1a1a';
+  const navBgColor = hexToRgba(safeHexColor, 0.8);
 
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-50 h-16 backdrop-blur-xl border-b border-border"
+      className="fixed top-0 left-0 right-0 z-50 h-20 backdrop-blur-md border-b border-white/10 transition-colors duration-500 overflow-visible"
       style={{ backgroundColor: navBgColor }}
     >
-      <div className="h-full px-4 flex items-center justify-between">
+      {/* Glass Reflection Effects */}
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-30" />
+      <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-20" />
+      <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+
+      <div className="h-full px-6 flex items-center justify-between relative z-10">
         {/* Left section */}
         <div className="flex items-center gap-4 flex-1">
-          {viewMode !== "home" && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBack}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </Button>
-          )}
-
-          <div className="flex items-center gap-2">
-            <Image
-              src="/images/CL Logo NL.png"
-              alt="CXD Logo"
-              width={32}
-              height={32}
-              className="w-8 h-8"
-            />
+          <div
+            className="cursor-pointer transition-all"
+            onClick={handleBack}
+          >
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
+              <ChevronLeft className="w-5 h-5 text-white/70 group-hover:text-white transition-colors" />
+            </div>
           </div>
+
+          <NextLink href="/dashboard" className="flex items-center gap-2 transition-all duration-300">
+            <Image
+              src="/images/hypercube-logo.webp"
+              alt="CXD"
+              width={28}
+              height={28}
+              className="object-contain"
+            />
+          </NextLink>
 
           {project && viewMode !== "home" && (
             <div className="flex items-center gap-2">
-              <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-secondary/50">
+              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 shadow-lg group">
                 {isRenaming ? (
                   <input
                     autoFocus
@@ -239,11 +255,11 @@ export function CXDNavbar() {
                     onChange={(e) => setRenameValue(e.target.value)}
                     onBlur={handleRenameSubmit}
                     onKeyDown={(e) => e.key === "Enter" && handleRenameSubmit()}
-                    className="bg-transparent border-none text-sm text-foreground focus:outline-none min-w-[150px]"
+                    className="bg-transparent border-none text-sm text-white focus:outline-none min-w-[120px]"
                   />
                 ) : (
                   <span
-                    className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
+                    className="text-sm font-medium text-white/70 cursor-pointer hover:text-white transition-colors"
                     onClick={() => {
                       setRenameValue(project.name);
                       setIsRenaming(true);
@@ -254,21 +270,24 @@ export function CXDNavbar() {
                 )}
               </div>
 
+              {/* Color Picker with Gradient Outline */}
               <DropdownMenu open={showColorPicker} onOpenChange={setShowColorPicker}>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full bg-secondary/30 hover:bg-secondary/50">
-                    <div
-                      className="w-4 h-4 rounded-full border border-white/20"
-                      style={{ background: project.canvasBackground || CANVAS_GRADIENTS[0].value }}
-                    />
-                  </Button>
+                  <div className="relative group cursor-pointer active:scale-95 transition-all p-[1px] rounded-full bg-gradient-to-r from-violet-500 via-purple-500 to-cyan-500">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-zinc-950 transition-all duration-300">
+                      <div
+                        className="w-5 h-5 rounded-full border border-white/10 shadow-inner"
+                        style={{ background: project.canvasBackground || CANVAS_GRADIENTS[0].value }}
+                      />
+                    </div>
+                  </div>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-48 bg-card border-border">
-                  <div className="p-2 grid grid-cols-3 gap-2">
+                <DropdownMenuContent align="start" className="w-48 bg-zinc-900/95 backdrop-blur-xl border-white/10 p-2 shadow-2xl">
+                  <div className="grid grid-cols-3 gap-2">
                     {CANVAS_GRADIENTS.map((gradient) => (
                       <button
                         key={gradient.name}
-                        className="w-full aspect-square rounded-full border border-white/10 hover:border-white/50 transition-all relative group"
+                        className="w-full aspect-square rounded-full border border-white/10 hover:border-violet-500/50 hover:scale-110 transition-all relative group overflow-hidden"
                         style={{ background: gradient.value }}
                         onClick={() => {
                           updateCanvasBackground(gradient.value);
@@ -277,8 +296,8 @@ export function CXDNavbar() {
                         title={gradient.name}
                       >
                         {project.canvasBackground === gradient.value && (
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-2 h-2 bg-white rounded-full shadow-sm" />
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                            <Check className="w-3 h-3 text-white" />
                           </div>
                         )}
                       </button>
@@ -292,82 +311,56 @@ export function CXDNavbar() {
 
         {/* Center section - Canvas View Toggle (only when in canvas mode) */}
         {project && viewMode !== "home" && (
-          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-1 p-1 rounded-lg bg-secondary/30">{/* Wizard button */}
-            <Button
-              variant={viewMode === "wizard" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setViewMode("wizard")}
-              className={viewMode === "wizard" ? "glow-teal" : ""}
-            >
-              <Wand2 className="w-4 h-4 mr-2" />
-              Framing
-            </Button>
-            <Button
-              variant={
-                canvasViewMode === "canvas" &&
-                  (viewMode === "canvas" || viewMode === "focus")
-                  ? "default"
-                  : "ghost"
-              }
-              size="sm"
-              onClick={() => {
-                setViewMode("canvas");
-                setCanvasViewMode("canvas");
-              }}
-              className={
-                canvasViewMode === "canvas" &&
-                  (viewMode === "canvas" || viewMode === "focus")
-                  ? "glow-teal"
-                  : ""
-              }
-            >
-              <LayoutGrid className="w-4 h-4 mr-2" />
-              Canvas
-            </Button>
-            <Button
-              variant={
-                canvasViewMode === "hypercube" &&
-                  (viewMode === "canvas" || viewMode === "focus")
-                  ? "default"
-                  : "ghost"
-              }
-              size="sm"
-              onClick={() => {
-                setViewMode("canvas");
-                setCanvasViewMode("hypercube");
-              }}
-              className={
-                canvasViewMode === "hypercube" &&
-                  (viewMode === "canvas" || viewMode === "focus")
-                  ? "glow-teal"
-                  : ""
-              }
-            >
-              <Hexagon className="w-4 h-4 mr-2" />
-              Map
-            </Button>
-            <Button
-              variant={
-                canvasViewMode === "plan" &&
-                  (viewMode === "canvas" || viewMode === "focus")
-                  ? "default"
-                  : "ghost"
-              }
-              size="sm"
-              onClick={() => {
-                setViewMode("canvas");
-                setCanvasViewMode("plan");
-              }}
-              className={
-                canvasViewMode === "plan" &&
-                  (viewMode === "canvas" || viewMode === "focus")
-                  ? "glow-teal"
-                  : ""
-              }
-            >
-              <ListTodo className="w-4 h-4 mr-2" />
-              Plan
-            </Button>
+          <div className="absolute left-1/2 -translate-x-1/2 hidden lg:flex items-center gap-2 p-1.5 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6),inset_0_0_20px_rgba(255,255,255,0.15),inset_0_1px_2px_rgba(255,255,255,0.3)]">
+            {/* View Toggle Buttons */}
+            {[
+              { id: 'wizard', label: 'Framing', icon: Brain, mode: 'wizard', color: 'magenta' },
+              { id: 'canvas', label: 'Canvas', icon: Grid3X3, mode: 'canvas', canvasMode: 'canvas', color: 'violet' },
+              { id: 'hypercube', label: 'Map', icon: Box, mode: 'canvas', canvasMode: 'hypercube', color: 'cyan' },
+              { id: 'plan', label: 'Plan', icon: ListTodo, mode: 'canvas', canvasMode: 'plan', color: 'emerald' },
+            ].map((btn) => {
+              const isActive = btn.id === 'wizard'
+                ? viewMode === 'wizard'
+                : (viewMode === 'canvas' || viewMode === 'focus') && canvasViewMode === btn.canvasMode;
+
+              const colors: Record<string, string> = {
+                magenta: isActive
+                  ? 'bg-gradient-to-b from-fuchsia-400/20 to-fuchsia-950/60 border-fuchsia-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+                  : 'hover:bg-fuchsia-500/10 hover:border-fuchsia-500/30 hover:shadow-[0_0_15px_rgba(217,70,239,0.1)]',
+                violet: isActive
+                  ? 'bg-gradient-to-b from-violet-400/20 to-violet-950/60 border-violet-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+                  : 'hover:bg-violet-500/10 hover:border-violet-500/30 hover:shadow-[0_0_15px_rgba(139,92,246,0.1)]',
+                cyan: isActive
+                  ? 'bg-gradient-to-b from-cyan-400/20 to-cyan-950/60 border-cyan-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+                  : 'hover:bg-cyan-500/10 hover:border-cyan-500/30 hover:shadow-[0_0_15px_rgba(6,182,212,0.1)]',
+                emerald: isActive
+                  ? 'bg-gradient-to-b from-emerald-400/20 to-emerald-950/60 border-emerald-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+                  : 'hover:bg-emerald-500/10 hover:border-emerald-500/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.1)]',
+              };
+
+              return (
+                <div
+                  key={btn.id}
+                  onClick={() => {
+                    setViewMode(btn.mode as any);
+                    if (btn.canvasMode) setCanvasViewMode(btn.canvasMode as any);
+                  }}
+                  className={`relative flex items-center px-4 py-2 group rounded-full text-white transition-all duration-500 border active:scale-95 overflow-hidden cursor-pointer
+                    ${isActive ? colors[btn.color] : `bg-transparent border-transparent ${colors[btn.color]}`}
+                  `}
+                >
+                  <btn.icon className={`w-4 h-4 transition-colors ${isActive ? 'text-white' : 'text-white/60 group-hover:text-white'}`} />
+                  <span className={`text-xs font-bold overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap
+                    ${isActive ? 'max-w-[100px] ml-2 opacity-100' : 'max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:ml-2 group-hover:opacity-100'}
+                  `}>
+                    {btn.label}
+                  </span>
+
+                  {/* Glass Shine Effect */}
+                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -379,7 +372,7 @@ export function CXDNavbar() {
           {project && viewMode !== "home" && (
             <>
               {/* Collaboration section */}
-              <div className="flex items-center gap-2 mr-2">
+              <div className="flex items-center gap-3 mr-2">
                 {/* Online collaborators */}
                 {collaborators.length > 0 && (
                   <CollaboratorAvatars
@@ -389,52 +382,43 @@ export function CXDNavbar() {
                   />
                 )}
 
-                {/* Collaborators button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <div
+                  className="cursor-pointer transition-all"
                   onClick={() => setShowCollaborationPanel(true)}
-                  className="text-muted-foreground hover:text-foreground relative"
-                  title="Collaborators"
                 >
-                  <Users className="w-4 h-4" />
-                  {collaborators.length > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-green-500 text-[10px] flex items-center justify-center text-white font-medium">
-                      {collaborators.length}
-                    </span>
-                  )}
-                </Button>
+                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 relative hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group transition-all">
+                    <Users className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                    {collaborators.length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 text-[10px] flex items-center justify-center text-white font-bold">
+                        {collaborators.length}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <Button
-                variant="ghost"
-                size="icon"
+              <div
+                className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
                 onClick={handleShare}
-                className="text-muted-foreground hover:text-foreground"
-                title="Share"
               >
-                <Share2 className="w-4 h-4" />
-              </Button>
+                <Share2 className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+              </div>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-foreground"
-                    title="Export"
-                  >
-                    <Download className="w-4 h-4" />
-                  </Button>
+                  <div className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
+                    <Download className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                  </div>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="end"
-                  className="bg-card border-border"
+                  className="bg-zinc-900/95 backdrop-blur-xl border-white/10 p-1 shadow-2xl"
                 >
-                  <DropdownMenuItem onClick={handleExportJSON}>
+                  <DropdownMenuItem onClick={handleExportJSON} className="hover:bg-white/5 cursor-pointer rounded-md">
                     Export as JSON
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    className="hover:bg-white/5 cursor-not-allowed text-white/40 rounded-md"
                     onClick={() =>
                       toast({
                         title: "Coming Soon",
@@ -442,7 +426,7 @@ export function CXDNavbar() {
                       })
                     }
                   >
-                    Export as PDF
+                    Export as PDF (Soon)
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -452,29 +436,25 @@ export function CXDNavbar() {
           {/* Notifications */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative text-muted-foreground hover:text-foreground"
-              >
-                <Bell className="w-5 h-5" />
+              <div className="relative cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
+                <Bell className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-gradient-to-r from-purple-500 to-teal-500 rounded-full animate-pulse" />
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
                 )}
-              </Button>
+              </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="w-80 bg-card border-border p-0"
+              className="w-80 bg-zinc-900/95 backdrop-blur-xl border-white/10 p-0 shadow-2xl"
             >
-              <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center justify-between p-4 border-b border-white/10">
                 <h3 className="font-semibold text-sm">Notifications</h3>
                 {unreadCount > 0 && (
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={markAllAsRead}
-                    className="text-xs text-purple-400 hover:text-purple-300 h-auto p-1"
+                    className="text-xs text-violet-400 hover:text-violet-300 h-auto p-1 hover:bg-transparent"
                   >
                     Mark all read
                   </Button>
@@ -484,19 +464,19 @@ export function CXDNavbar() {
               <ScrollArea className="h-[400px]">
                 {loading ? (
                   <div className="flex items-center justify-center p-8">
-                    <div className="text-sm text-muted-foreground">Loading...</div>
+                    <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
                   </div>
                 ) : notifications.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-8 text-center">
-                    <Bell className="w-12 h-12 text-muted-foreground/30 mb-3" />
-                    <p className="text-sm text-muted-foreground">No notifications yet</p>
+                    <Bell className="w-12 h-12 text-white/10 mb-3" />
+                    <p className="text-sm text-white/40">No notifications yet</p>
                   </div>
                 ) : (
-                  <div className="divide-y divide-border">
+                  <div className="divide-y divide-white/5">
                     {notifications.map((notification) => (
                       <div
                         key={notification.id}
-                        className={`p-4 hover:bg-accent/50 cursor-pointer transition-colors ${!notification.is_read ? 'bg-accent/20' : ''
+                        className={`p-4 hover:bg-white/5 cursor-pointer transition-colors ${!notification.is_read ? 'bg-violet-500/5' : ''
                           }`}
                         onClick={() => markAsRead(notification.id)}
                       >
@@ -506,22 +486,22 @@ export function CXDNavbar() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2 mb-1">
-                              <p className="text-sm font-medium text-foreground">
+                              <p className="text-sm font-medium text-white">
                                 {notification.title}
                               </p>
                               {!notification.is_read && (
-                                <div className="w-2 h-2 bg-gradient-to-r from-purple-500 to-teal-500 rounded-full flex-shrink-0 mt-1" />
+                                <div className="w-2 h-2 bg-violet-500 rounded-full flex-shrink-0 mt-1 shadow-[0_0_8px_rgba(139,92,246,0.8)]" />
                               )}
                             </div>
-                            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                            <p className="text-xs text-white/50 line-clamp-2 mb-2 leading-relaxed">
                               {notification.message}
                             </p>
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-muted-foreground">
+                              <span className="text-[10px] text-white/30">
                                 {formatTimeAgo(notification.created_at)}
                               </span>
                               {notification.is_read && (
-                                <Check className="w-3 h-3 text-muted-foreground" />
+                                <Check className="w-3 h-3 text-white/20" />
                               )}
                             </div>
                           </div>
@@ -532,11 +512,11 @@ export function CXDNavbar() {
                 )}
               </ScrollArea>
               {notifications.length > 0 && (
-                <div className="border-t border-border p-2">
+                <div className="border-t border-white/5 p-2">
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="w-full text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                    className="w-full text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -550,15 +530,13 @@ export function CXDNavbar() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button
-            variant="ghost"
-            size="icon"
+          <div
+            className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
             onClick={handleDashboard}
-            className="text-muted-foreground hover:text-foreground"
             title="Back to Dashboard"
           >
-            <LayoutDashboard className="w-5 h-5" />
-          </Button>
+            <LayoutDashboard className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
+          </div>
         </div>
       </div>
 

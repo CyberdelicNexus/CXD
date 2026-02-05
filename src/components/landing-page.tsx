@@ -526,7 +526,7 @@ export function LandingPage() {
                 Perfect for exploring and designing your first experience.
               </p>
               <ul className="space-y-3 mb-8">
-                {['1 Canvas', 'Infinite workspace', 'Core design tools', 'Experience flow', 'Focus mode'].map((f, i) => (
+                {['1 Canvas', 'Infinite workspace', 'Core design tools', 'Experience flow'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
                     <Check className="w-4 h-4 text-white/40" />
                     <span className="text-white/70">{f}</span>

@@ -7,13 +7,21 @@ import Link from "next/link";
 import { signUpAction } from "@/app/actions";
 import { UrlProvider } from "@/components/url-provider";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
-import { ArrowRight, CheckCircle, Mail } from "lucide-react";
+import { ArrowRight, CheckCircle, Mail, Shield } from "lucide-react";
 import Image from "next/image";
 
+type SearchParams = {
+  success?: string;
+  error?: string;
+  message?: string;
+  plan?: string;
+  promo?: string;
+};
+
 export default async function Signup(props: {
-  searchParams: Promise<Message>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const searchParams = await props.searchParams;
+  const searchParams = (await props.searchParams) as SearchParams;
 
   // Check if this is a success message (email confirmation sent)
   const isSuccess = "success" in searchParams || "message" in searchParams;
@@ -127,6 +135,25 @@ export default async function Signup(props: {
                 </div>
 
                 <div className="space-y-4">
+                  {/* Promo Code / Beta Access Info */}
+                  {(searchParams.plan === 'beta' || searchParams.promo === 'beta') && (
+                    <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center gap-3 mb-2 animate-in fade-in slide-in-from-top-2 duration-500">
+                      <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0">
+                        <Shield className="w-4 h-4 text-violet-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-violet-400 uppercase tracking-wider">Beta Access Enabled</p>
+                        <p className="text-[10px] text-white/50">You will receive a Beta Tester subscription automatically.</p>
+                      </div>
+                      <input type="hidden" name="promo" value="beta" />
+                    </div>
+                  )}
+
+                  {/* Manual Promo Support (if any other promo) */}
+                  {(searchParams.promo && searchParams.promo !== 'beta') && (
+                    <input type="hidden" name="promo" value={searchParams.promo} />
+                  )}
+
                   <div className="space-y-2">
                     <Label htmlFor="full_name" className="text-sm font-medium text-white/70">
                       Full Name

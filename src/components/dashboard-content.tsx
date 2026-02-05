@@ -89,6 +89,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [uploadingCoverFor, setUploadingCoverFor] = useState<string | null>(null);
   const [coverImageProject, setCoverImageProject] = useState<{ id: string; name: string } | null>(null);
   const [coverImageUrl, setCoverImageUrl] = useState("");
+  const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
 
   // Subscription state
   const {
@@ -244,6 +245,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   };
 
   const handleOpenProject = (projectId: string) => {
+    setNavigatingTo(projectId);
     loadProject(projectId);
     router.push("/cxd");
   };
@@ -627,6 +629,19 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                               alt={project.name}
                               className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
                             />
+                          </div>
+                        )}
+
+                        {/* Loading Overlay */}
+                        {navigatingTo === project.id && (
+                          <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+                            <div className="relative">
+                              <div className="w-12 h-12 border-4 border-violet-500/30 border-t-violet-400 rounded-full animate-spin" />
+                              <Loader2 className="absolute inset-0 m-auto w-5 h-5 text-violet-200 animate-spin-slow" />
+                            </div>
+                            <span className="text-xs font-semibold text-violet-200 tracking-wider animate-pulse">
+                              ENTERING...
+                            </span>
                           </div>
                         )}
 

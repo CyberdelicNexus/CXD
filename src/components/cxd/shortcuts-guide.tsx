@@ -80,15 +80,13 @@ export function ShortcutsGuide() {
   return (
     <>
       {/* Trigger Button */}
-      <Button
-        variant="ghost"
-        size="icon"
+      <div
+        className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
         onClick={() => setIsOpen(true)}
-        className="text-muted-foreground hover:text-foreground"
         title="Keyboard Shortcuts"
       >
-        <Keyboard className="w-5 h-5" />
-      </Button>
+        <Keyboard className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
+      </div>
       {/* Modal Overlay */}
       {isOpen && (
         <div

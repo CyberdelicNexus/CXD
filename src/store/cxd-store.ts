@@ -138,6 +138,7 @@ interface CXDState {
   updateExperienceFlowStageNarrative: (stageId: string, value: string) => void;
   updateExperienceFlowStagePresence: (stageId: string, presenceTypes: StagePresenceTypes) => void;
   updateExperienceFlowStageTime: (stageId: string, estimatedMinutes: number | null) => void;
+  toggleExperienceFlowStageRealityPlane: (stageId: string, code: RealityPlaneCode) => void;
 
   // Actions - State Mapping
   updateStateMapping: (code: StateQuadrantCode, value: string) => void;
@@ -343,6 +344,9 @@ export const useCXDStore = create<CXDState>()(
               }
               if (stage.estimatedMinutes === undefined) {
                 stage.estimatedMinutes = null;
+              }
+              if (!stage.realityPlanes) {
+                stage.realityPlanes = { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false };
               }
             }
           }
@@ -800,6 +804,29 @@ export const useCXDStore = create<CXDState>()(
           const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) =>
             s.id === stageId ? { ...s, narrativeNotes: value } : s
           );
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? { ...p, experienceFlowStages: stages, updatedAt: new Date().toISOString() }
+                : p
+            ),
+          }));
+        }
+      },
+
+      toggleExperienceFlowStageRealityPlane: (stageId, code) => {
+        const currentProject = get().getCurrentProject();
+        if (currentProject) {
+          const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) => {
+            if (s.id === stageId) {
+              const currentPlanes = s.realityPlanes || { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false };
+              return {
+                ...s,
+                realityPlanes: { ...currentPlanes, [code]: !currentPlanes[code] }
+              };
+            }
+            return s;
+          });
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
