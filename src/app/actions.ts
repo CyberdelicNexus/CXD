@@ -34,35 +34,24 @@ export const signUpAction = async (formData: FormData) => {
     },
   });
 
-  console.log("After signUp", error);
-
-
   if (error) {
-    console.error(error.code + " " + error.message);
+    console.error(`Signup error [${error.code}]: ${error.message}`);
+
+    // Check for specific database-related errors that might be cryptic to the user
+    if (error.message.includes("Database error saving new user")) {
+      return encodedRedirect(
+        "error",
+        "/sign-up",
+        "Our database is experiencing a temporary issue. Please try signing up again in a few moments."
+      );
+    }
+
     return encodedRedirect("error", "/sign-up", error.message);
   }
 
-  if (user) {
-    try {
-      const { error: updateError } = await supabase
-        .from('users')
-        .insert({
-          id: user.id,
-          name: fullName,
-          full_name: fullName,
-          email: email,
-          user_id: user.id,
-          token_identifier: user.id,
-          created_at: new Date().toISOString()
-        });
-
-      if (updateError) {
-        console.error('Error updating user profile:', updateError);
-      }
-    } catch (err) {
-      console.error('Error in user profile creation:', err);
-    }
-  }
+  // Note: The public.users and public.subscriptions records are created 
+  // automatically by the on_auth_user_created trigger in the database.
+  // We no longer need to manually insert them here.
 
   return encodedRedirect(
     "success",
