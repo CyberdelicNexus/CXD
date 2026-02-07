@@ -11,7 +11,7 @@ import {
 } from "@/types/cxd-schema";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { ShimmerGrid } from "@/components/ui/shimmer-grid";
-import { extractCenterColor, hexToRgba } from "@/lib/utils";
+import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,6 +46,11 @@ import {
   Target,
   Lightbulb,
   Users,
+  Rocket,
+  Layout,
+  Map,
+  ListTodo,
+  ArrowRight,
 } from "lucide-react";
 
 const stepIcons: Record<string, React.ReactNode> = {
@@ -117,8 +122,12 @@ export function CXDWizard() {
   const [currentStep, setCurrentStep] = useState(
     project?.currentWizardStep || 0,
   );
+  const [showCompletion, setShowCompletion] = useState(false);
   const stepNavRef = useRef<HTMLDivElement>(null);
   const stepButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Get the canvas view mode setter for navigation
+  const { setCanvasViewMode } = useCXDStore();
 
   // Auto-scroll step navigation to keep active step visible
   const scrollToStep = useCallback((stepIndex: number) => {
@@ -160,8 +169,14 @@ export function CXDWizard() {
       setCurrentStep(nextStep);
       setWizardStep(nextStep);
     } else {
-      completeWizard();
+      // Show completion screen instead of immediately completing
+      setShowCompletion(true);
     }
+  };
+
+  const handleComplete = (destination: 'canvas' | 'hexagon' | 'plan') => {
+    completeWizard();
+    setCanvasViewMode(destination);
   };
 
   const handlePrevious = () => {
@@ -598,7 +613,37 @@ export function CXDWizard() {
         hoverSize={400}
         smoothing={60}
       />
-      <div className="max-w-4xl mx-auto relative z-10">
+      {/* 3-Column Layout: Previous Button | Main Frame | Next Button */}
+      <div className="max-w-6xl mx-auto relative z-10 grid grid-cols-[auto_1fr_auto] gap-6 items-start">
+        {/* Left Column - Previous Arrow Button */}
+        <div className="sticky top-1/2 -translate-y-1/2 pt-32">
+          <button
+            onClick={handlePrevious}
+            disabled={currentStep === 0}
+            className={cn(
+              "w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300",
+              "border border-border/50 backdrop-blur-sm",
+              currentStep === 0
+                ? "opacity-30 cursor-not-allowed bg-secondary/30"
+                : "bg-secondary/50 hover:bg-gradient-to-br hover:from-indigo-600/30 hover:to-purple-600/30 hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/20 cursor-pointer"
+            )}
+          >
+            <ChevronLeft className={cn(
+              "w-6 h-6 transition-colors",
+              currentStep === 0 ? "text-muted-foreground/50" : "text-foreground"
+            )} />
+          </button>
+          {/* Label below button */}
+          <span className={cn(
+            "block text-center text-xs mt-2 transition-colors",
+            currentStep === 0 ? "text-muted-foreground/50" : "text-muted-foreground"
+          )}>
+            Previous
+          </span>
+        </div>
+
+        {/* Center Column - Main Content */}
+        <div className="max-w-4xl mx-auto w-full">
         {/* Progress Header with Phase indicator */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">
@@ -727,40 +772,149 @@ export function CXDWizard() {
           </CardContent>
         </Card>
 
-        {/* Navigation Buttons */}
-        <div className="flex items-center justify-between mt-6">
-          <Button
-            variant="outline"
-            onClick={handlePrevious}
-            disabled={currentStep === 0}
-          >
-            <ChevronLeft className="w-4 h-4 mr-2" />
-            Previous
-          </Button>
+        </div>
 
-          <Button
-            variant="ghost"
-            onClick={handleSkip}
-            className="text-muted-foreground"
-          >
-            Skip for now
-          </Button>
-
-          <Button onClick={handleNext} className="glow-teal">
-            {currentStep === WIZARD_STEPS.length - 1 ? (
-              <>
-                <Check className="w-4 h-4 mr-2" />
-                Complete & View Canvas
-              </>
-            ) : (
-              <>
-                Next
-                <ChevronRight className="w-4 h-4 ml-2" />
-              </>
+        {/* Right Column - Next Arrow Button */}
+        <div className="sticky top-1/2 -translate-y-1/2 pt-32">
+          <button
+            onClick={handleNext}
+            className={cn(
+              "w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300",
+              "border border-purple-500/50 backdrop-blur-sm cursor-pointer",
+              "bg-gradient-to-br from-indigo-600 to-purple-600",
+              "hover:from-indigo-500 hover:to-purple-500",
+              "hover:shadow-lg hover:shadow-purple-500/40",
+              "hover:scale-105 active:scale-95"
             )}
-          </Button>
+          >
+            {currentStep === WIZARD_STEPS.length - 1 ? (
+              <Check className="w-6 h-6 text-white" />
+            ) : (
+              <ChevronRight className="w-6 h-6 text-white" />
+            )}
+          </button>
+          {/* Label below button */}
+          <span className="block text-center text-xs text-muted-foreground mt-2">
+            {currentStep === WIZARD_STEPS.length - 1 ? "Complete" : "Next"}
+          </span>
         </div>
       </div>
+
+      {/* Completion Screen Overlay */}
+      {showCompletion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div
+            className="max-w-2xl w-full mx-4 rounded-2xl border border-border/50 p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-300"
+            style={{ backgroundColor: cardBgColor }}
+          >
+            {/* Success Icon */}
+            <div className="flex justify-center mb-6">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                <Check className="w-10 h-10 text-white" />
+              </div>
+            </div>
+
+            {/* Title */}
+            <h2 className="text-2xl font-bold text-center mb-2">
+              Experience Framework Complete!
+            </h2>
+            <p className="text-center text-muted-foreground mb-8 max-w-md mx-auto">
+              You've defined the foundation of your experience. Now it's time to bring your vision to life.
+            </p>
+
+            {/* What's Next Section */}
+            <div className="space-y-4 mb-8">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                What would you like to do next?
+              </h3>
+
+              {/* Destination Options */}
+              <div className="grid gap-3">
+                {/* Canvas - Primary CTA with gradient */}
+                <button
+                  onClick={() => handleComplete('canvas')}
+                  className="group relative w-full p-4 rounded-xl text-left transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] overflow-hidden"
+                >
+                  {/* Gradient background */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 opacity-90 group-hover:opacity-100 transition-opacity" />
+                  {/* Shimmer effect */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
+                  {/* Glow */}
+                  <div className="absolute inset-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] rounded-xl" />
+
+                  <div className="relative flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-lg bg-white/20 flex items-center justify-center">
+                      <Layout className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">Open Canvas</span>
+                        <span className="px-2 py-0.5 text-[10px] font-medium bg-white/20 text-white rounded-full">
+                          Recommended
+                        </span>
+                      </div>
+                      <p className="text-sm text-white/80">
+                        Start designing your experience with the infinite canvas
+                      </p>
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-white group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </button>
+
+                {/* Map View */}
+                <button
+                  onClick={() => handleComplete('hexagon')}
+                  className="group w-full p-4 rounded-xl bg-secondary/50 hover:bg-secondary/80 border border-border/50 hover:border-border text-left transition-all duration-200"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center">
+                      <Map className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <span className="font-semibold">Explore Map View</span>
+                      <p className="text-sm text-muted-foreground">
+                        Visualize your experience as a hypercube structure
+                      </p>
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-1 transition-all" />
+                  </div>
+                </button>
+
+                {/* Plan View */}
+                <button
+                  onClick={() => handleComplete('plan')}
+                  className="group w-full p-4 rounded-xl bg-secondary/50 hover:bg-secondary/80 border border-border/50 hover:border-border text-left transition-all duration-200"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center">
+                      <ListTodo className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <span className="font-semibold">Start Planning</span>
+                      <p className="text-sm text-muted-foreground">
+                        Break down your experience into actionable tasks
+                      </p>
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground group-hover:translate-x-1 transition-all" />
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Back button */}
+            <div className="flex justify-center">
+              <Button
+                variant="ghost"
+                onClick={() => setShowCompletion(false)}
+                className="text-muted-foreground"
+              >
+                <ChevronLeft className="w-4 h-4 mr-2" />
+                Go back and refine
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

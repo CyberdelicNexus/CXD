@@ -88,6 +88,16 @@ import {
   Eye,
   Brain,
   Users,
+  Inbox,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  CaseSensitive,
+  ChevronDown,
+  ListTodo,
+  Calendar,
+  Tag,
+  AlertCircle,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 
@@ -127,6 +137,7 @@ interface CanvasElementRendererProps {
   onDragEnd: () => void;
   isDragging: boolean;
   isSelected: boolean;
+  isMultiSelected?: boolean; // True when multiple elements are selected (hide individual context menu)
   isDropTarget?: boolean;
   isHighlighted?: boolean;
   onSelect: (e?: React.MouseEvent) => void;
@@ -145,6 +156,8 @@ interface CanvasElementRendererProps {
   onOpenExperiencePanel?: (sectionId: InspectorSectionId) => void;
   hoveredAnchor?: string | null;
   onAnchorHover?: (anchor: string | null) => void;
+  onSendToInbox?: () => void; // Send task to inbox
+  onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void; // Create connected shape
   isReadOnly?: boolean;
 }
 
@@ -157,6 +170,7 @@ export function CanvasElementRenderer({
   onDragEnd,
   isDragging,
   isSelected,
+  isMultiSelected = false,
   isDropTarget,
   isHighlighted,
   onSelect,
@@ -169,8 +183,15 @@ export function CanvasElementRenderer({
   onOpenExperiencePanel,
   hoveredAnchor,
   onAnchorHover,
+  onSendToInbox,
+  onCreateConnectedShape,
   isReadOnly = false,
 }: CanvasElementRendererProps) {
+  // Get canvas elements for z-index calculations
+  const getCanvasElements = useCXDStore((state) => state.getCanvasElements);
+  // Get pushCanvasHistory for undo support on resize operations
+  const pushCanvasHistory = useCXDStore((state) => state.pushCanvasHistory);
+
   const [isEditing, setIsEditing] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showLinkViewMenu, setShowLinkViewMenu] = useState(false);
@@ -179,8 +200,67 @@ export function CanvasElementRenderer({
   const [showBoardColorPicker, setShowBoardColorPicker] = useState(false);
   const [showExperienceViewMenu, setShowExperienceViewMenu] = useState(false);
   const [showTagMenu, setShowTagMenu] = useState(false);
+  const [showShapeTypePicker, setShowShapeTypePicker] = useState(false);
+  const [showTextStyleMenu, setShowTextStyleMenu] = useState(false);
+  const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
+  const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
+  const [isEditingTaskDueDate, setIsEditingTaskDueDate] = useState(false);
+  const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
+  const [newTaskTag, setNewTaskTag] = useState('');
   const elementRef = useRef<HTMLDivElement>(null);
   const menuContainerRef = useRef<HTMLDivElement>(null);
+  const subtaskRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
+  const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
+
+  // Helper to close all submenus - ensures only one submenu is open at a time
+  const closeAllSubmenus = useCallback(() => {
+    setShowColorPicker(false);
+    setShowLinkViewMenu(false);
+    setShowEmojiPicker(false);
+    setShowBoardIconPicker(false);
+    setShowBoardColorPicker(false);
+    setShowExperienceViewMenu(false);
+    setShowTagMenu(false);
+    setShowShapeTypePicker(false);
+    setShowTextStyleMenu(false);
+    setShowTaskPriorityMenu(false);
+  }, []);
+
+  // Submenu openers that close others first
+  const openColorPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowColorPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openLinkViewMenu = useCallback(() => {
+    closeAllSubmenus();
+    setShowLinkViewMenu(true);
+  }, [closeAllSubmenus]);
+
+  const openEmojiPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowEmojiPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openBoardIconPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowBoardIconPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openBoardColorPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowBoardColorPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openExperienceViewMenu = useCallback(() => {
+    closeAllSubmenus();
+    setShowExperienceViewMenu(true);
+  }, [closeAllSubmenus]);
+
+  const openTagMenu = useCallback(() => {
+    closeAllSubmenus();
+    setShowTagMenu(true);
+  }, [closeAllSubmenus]);
 
   // Close all submenus when clicking outside
   useEffect(() => {
@@ -193,7 +273,8 @@ export function CanvasElementRenderer({
         showBoardIconPicker ||
         showBoardColorPicker ||
         showExperienceViewMenu ||
-        showTagMenu;
+        showTagMenu ||
+        showTaskPriorityMenu;
 
       if (!anyMenuOpen) return;
 
@@ -210,6 +291,7 @@ export function CanvasElementRenderer({
         setShowBoardColorPicker(false);
         setShowExperienceViewMenu(false);
         setShowTagMenu(false);
+        setShowTaskPriorityMenu(false);
       }
     };
 
@@ -223,6 +305,7 @@ export function CanvasElementRenderer({
     showBoardColorPicker,
     showExperienceViewMenu,
     showTagMenu,
+    showTaskPriorityMenu,
   ]);
 
   const handleDoubleClick = useCallback(
@@ -237,10 +320,9 @@ export function CanvasElementRenderer({
       } else if (
         element.type !== "connector" &&
         element.type !== "line" &&
-        element.type !== "shape" &&
         element.type !== "experienceBlock"
       ) {
-        // Don't auto-edit shapes, lines, or experience blocks on double-click
+        // Allow editing for shapes and other elements (not lines, connectors, experience blocks)
         setIsEditing(true);
 
         // For task cards, clear placeholder on double-click if it's still the default
@@ -277,6 +359,37 @@ export function CanvasElementRenderer({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isEditing]);
+
+  // Auto-typing for shapes: when selected and user types, start editing
+  useEffect(() => {
+    if (element.type !== "shape" || !isSelected || isEditing || isReadOnly) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in another input
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.contentEditable === "true") return;
+
+      // Ignore modifier keys and special keys
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key.length !== 1 && e.key !== "Backspace" && e.key !== "Delete") return;
+
+      // Start editing with the typed character
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === "Backspace" || e.key === "Delete") {
+        // Clear content and start editing
+        onUpdate({ content: "" });
+      } else {
+        // Start with the typed character
+        onUpdate({ content: e.key });
+      }
+      setIsEditing(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [element.type, isSelected, isEditing, isReadOnly, onUpdate]);
 
   // Auto-resize experience blocks when view mode changes
   // NOTE: Avoid calling onUpdate during render (can trigger "Cannot update a component while rendering").
@@ -333,14 +446,32 @@ export function CanvasElementRenderer({
     onUpdate,
   ]);
 
-  // Z-index management helpers
+  // Z-index management helpers - bring to front/send to back relative to all elements
   const handleBringForward = useCallback(() => {
-    onUpdate({ zIndex: (element.zIndex || 0) + 1 });
-  }, [element.zIndex, onUpdate]);
+    const allElements = getCanvasElements();
+    const maxZIndex = allElements.reduce(
+      (max, el) => Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0),
+      0
+    );
+    // Only update if not already at max
+    if ((element.zIndex || 0) < maxZIndex) {
+      pushCanvasHistory(); // Save state before z-index change
+      onUpdate({ zIndex: maxZIndex + 1 });
+    }
+  }, [element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
 
   const handleSendBackward = useCallback(() => {
-    onUpdate({ zIndex: Math.max(0, (element.zIndex || 0) - 1) });
-  }, [element.zIndex, onUpdate]);
+    const allElements = getCanvasElements();
+    const minZIndex = allElements.reduce(
+      (min, el) => Math.min(min, Number.isFinite(el.zIndex) ? el.zIndex : 0),
+      0
+    );
+    // Only update if not already at min
+    if ((element.zIndex || 0) > minZIndex) {
+      pushCanvasHistory(); // Save state before z-index change
+      onUpdate({ zIndex: minZIndex - 1 });
+    }
+  }, [element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
 
   // Handle drag from element body (not just the handle)
   const handleBodyMouseDown = useCallback(
@@ -402,6 +533,8 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isEditing={isEditing}
             onBlur={handleBlur}
+            isSelected={isSelected}
+            onCreateConnectedShape={onCreateConnectedShape}
           />
         );
       case "container":
@@ -464,10 +597,20 @@ export function CanvasElementRenderer({
   // Don't render connectors as regular elements
   if (element.type === "connector") return null;
 
+  // Check if this is a task card for drag-to-inbox functionality
+  const isTaskCard = element.type === "freeform" && (element as any).taskMetadata;
+
   return (
     <div
       ref={elementRef}
       data-element-id={element.id}
+      draggable={isTaskCard}
+      onDragStart={(e) => {
+        if (isTaskCard) {
+          e.dataTransfer.setData("elementId", element.id);
+          e.dataTransfer.effectAllowed = "move";
+        }
+      }}
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
         isDragging && "opacity-80 shadow-2xl cursor-grabbing",
@@ -585,8 +728,8 @@ export function CanvasElementRenderer({
             />
           </>
         )}
-      {/* Unified context menu (hidden for line elements as they have floating menu) */}
-      {isSelected && !isDragging && element.type !== "line" && !isReadOnly && (
+      {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
+      {isSelected && !isDragging && element.type !== "line" && !isReadOnly && !isMultiSelected && (
         <div
           className={cn(
             "absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl",
@@ -597,12 +740,53 @@ export function CanvasElementRenderer({
           {/* Element-specific actions */}
           {element.type === "shape" && (
             <>
+              {/* Font Family Dropdown - Dark themed */}
+              <select
+                value={(element as ShapeElement).style?.fontFamily || 'inherit'}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  onUpdate({ style: { ...element.style, fontFamily: e.target.value } });
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="h-7 px-2 text-[11px] rounded bg-zinc-800/90 border border-zinc-700/50 text-zinc-100 cursor-pointer hover:bg-zinc-700/90 transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none"
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', paddingRight: '24px' }}
+                title="Font"
+              >
+                {FONT_FAMILIES.map(({ value, label }) => (
+                  <option key={value} value={value} className="bg-zinc-800 text-zinc-100">
+                    {label}
+                  </option>
+                ))}
+              </select>
+
+              {/* Font Size Dropdown - Dark themed */}
+              <select
+                value={(element as ShapeElement).style?.fontSize || 14}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  onUpdate({ style: { ...element.style, fontSize: parseInt(e.target.value) } });
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="h-7 px-2 text-[11px] rounded bg-zinc-800/90 border border-zinc-700/50 text-zinc-100 cursor-pointer hover:bg-zinc-700/90 transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none"
+                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', paddingRight: '24px' }}
+                title="Size"
+              >
+                <option value={12} className="bg-zinc-800 text-zinc-100">Small</option>
+                <option value={14} className="bg-zinc-800 text-zinc-100">Medium</option>
+                <option value={18} className="bg-zinc-800 text-zinc-100">Large</option>
+                <option value={24} className="bg-zinc-800 text-zinc-100">XL</option>
+                <option value={32} className="bg-zinc-800 text-zinc-100">2XL</option>
+              </select>
+
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+              {/* Color Picker (Fill/Stroke/Text unified) */}
               <div className="relative">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -618,6 +802,7 @@ export function CanvasElementRenderer({
                     strokeColor={(element as ShapeElement).style?.borderColor}
                     strokeWidth={(element as ShapeElement).style?.borderWidth}
                     fillOpacity={(element as ShapeElement).style?.fillOpacity}
+                    textColor={(element as ShapeElement).style?.textColor}
                     onFillColorChange={(color) =>
                       onUpdate({ style: { ...element.style, bgColor: color } })
                     }
@@ -636,20 +821,96 @@ export function CanvasElementRenderer({
                         style: { ...element.style, fillOpacity: opacity },
                       })
                     }
+                    onTextColorChange={(color) =>
+                      onUpdate({ style: { ...element.style, textColor: color } })
+                    }
                     onClose={() => setShowColorPicker(false)}
                   />
                 )}
               </div>
+
+              {/* Font Weight (Aa) - Secondary popover */}
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (showTextStyleMenu) {
+                      closeAllSubmenus();
+                    } else {
+                      closeAllSubmenus();
+                      setShowTextStyleMenu(true);
+                    }
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showTextStyleMenu && "bg-primary/20 text-primary",
+                  )}
+                  title="Font Weight"
+                >
+                  <Bold className="w-4 h-4" />
+                </button>
+                {showTextStyleMenu && (
+                  <ShapeTextStylePicker
+                    style={(element as ShapeElement).style}
+                    onStyleChange={(updates) =>
+                      onUpdate({ style: { ...element.style, ...updates } })
+                    }
+                    onClose={() => setShowTextStyleMenu(false)}
+                  />
+                )}
+              </div>
+
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+              {/* Shape Type Picker */}
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (showShapeTypePicker) {
+                      closeAllSubmenus();
+                    } else {
+                      closeAllSubmenus();
+                      setShowShapeTypePicker(true);
+                    }
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showShapeTypePicker && "bg-primary/20 text-primary",
+                  )}
+                  title="Change Shape"
+                >
+                  {/* Hexagon icon for shape picker */}
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  </svg>
+                </button>
+                {showShapeTypePicker && (
+                  <ShapeTypePicker
+                    currentType={(element as ShapeElement).shapeType}
+                    onTypeSelect={(shapeType) => {
+                      onUpdate({ shapeType } as Partial<CanvasElement>);
+                      setShowShapeTypePicker(false);
+                    }}
+                    onClose={() => setShowShapeTypePicker(false)}
+                  />
+                )}
+              </div>
+
+              {/* Edit Text */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsEditing(true);
                 }}
                 className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-                title="Add Text"
+                title="Edit Text"
               >
                 <Type className="w-4 h-4" />
               </button>
+
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
@@ -660,7 +921,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -688,7 +949,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowEmojiPicker(!showEmojiPicker);
+                    showEmojiPicker ? closeAllSubmenus() : openEmojiPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -759,6 +1020,22 @@ export function CanvasElementRenderer({
               >
                 <CheckCircle2 className="w-4 h-4" />
               </button>
+              {/* Send to Inbox button */}
+              {onSendToInbox && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSendToInbox();
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    element.inInbox && "bg-cyan-500/20 text-cyan-400",
+                  )}
+                  title={element.inInbox ? "Already in Inbox" : "Send to Inbox"}
+                >
+                  <Inbox className="w-4 h-4" />
+                </button>
+              )}
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
@@ -769,7 +1046,7 @@ export function CanvasElementRenderer({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setShowLinkViewMenu(!showLinkViewMenu);
+                      showLinkViewMenu ? closeAllSubmenus() : openLinkViewMenu();
                     }}
                     className={cn(
                       "p-1.5 rounded text-muted-foreground hover:text-primary transition-colors",
@@ -809,7 +1086,7 @@ export function CanvasElementRenderer({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowBoardIconPicker(!showBoardIconPicker);
+                    showBoardIconPicker ? closeAllSubmenus() : openBoardIconPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -834,7 +1111,7 @@ export function CanvasElementRenderer({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowBoardColorPicker(!showBoardColorPicker);
+                    showBoardColorPicker ? closeAllSubmenus() : openBoardColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -867,7 +1144,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -897,7 +1174,7 @@ export function CanvasElementRenderer({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowExperienceViewMenu(!showExperienceViewMenu);
+                    showExperienceViewMenu ? closeAllSubmenus() : openExperienceViewMenu();
                   }}
                   className={cn(
                     "p-1.5 rounded text-muted-foreground hover:text-primary transition-colors",
@@ -936,7 +1213,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -1077,7 +1354,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -1131,7 +1408,7 @@ export function CanvasElementRenderer({
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setShowTagMenu(!showTagMenu);
+                      showTagMenu ? closeAllSubmenus() : openTagMenu();
                     }}
                     className={cn(
                       "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -1255,12 +1532,14 @@ export function CanvasElementRenderer({
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
                   position="w"
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  onResizeStart={pushCanvasHistory}
                 />
               </>
             ) : (
@@ -1270,24 +1549,28 @@ export function CanvasElementRenderer({
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
                   position="sw"
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
                   position="ne"
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
                   position="nw"
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  onResizeStart={pushCanvasHistory}
                 />
               </>
             )}
@@ -1300,11 +1583,13 @@ export function CanvasElementRenderer({
             element={element as TextElement}
             onUpdate={onUpdate}
             canvasZoom={canvasZoom}
+            onResizeStart={pushCanvasHistory}
           />
           <TextWrapWidthHandle
             element={element as TextElement}
             onUpdate={onUpdate}
             canvasZoom={canvasZoom}
+            onResizeStart={pushCanvasHistory}
           />
         </>
       )}
@@ -1412,16 +1697,21 @@ function ResizeHandle({
   element,
   onUpdate,
   canvasZoom,
+  onResizeStart,
 }: {
   position: "nw" | "ne" | "sw" | "se" | "e" | "w";
   element: CanvasElement;
   onUpdate: (updates: Partial<CanvasElement>) => void;
   canvasZoom: number;
+  onResizeStart?: () => void;
 }) {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
+
+      // Capture history before starting resize for undo support
+      onResizeStart?.();
 
       const startX = e.clientX;
       const startY = e.clientY;
@@ -1443,21 +1733,52 @@ function ResizeHandle({
         const minWidth = element.type === "freeform" ? 250 : 50;
         const minHeight = element.type === "freeform" ? 300 : 30;
 
+        // For images, maintain aspect ratio
+        const isImage = element.type === "image";
+        const aspectRatio = isImage ? startWidth / startHeight : null;
+
         if (position.includes("e")) {
           newWidth = Math.max(minWidth, startWidth + deltaX);
+          if (isImage && aspectRatio) {
+            newHeight = newWidth / aspectRatio;
+          }
         }
         if (position.includes("w")) {
           newWidth = Math.max(minWidth, startWidth - deltaX);
           newX = startPosX + (startWidth - newWidth);
+          if (isImage && aspectRatio) {
+            newHeight = newWidth / aspectRatio;
+          }
         }
 
         // For freeform cards, don't allow height resizing - height is content-based
         if (element.type !== "freeform") {
           if (position.includes("s")) {
             newHeight = Math.max(minHeight, startHeight + deltaY);
+            if (isImage && aspectRatio) {
+              newWidth = newHeight * aspectRatio;
+            }
           }
           if (position.includes("n")) {
             newHeight = Math.max(minHeight, startHeight - deltaY);
+            newY = startPosY + (startHeight - newHeight);
+            if (isImage && aspectRatio) {
+              newWidth = newHeight * aspectRatio;
+            }
+          }
+        }
+
+        // For corner handles on images, resize proportionally
+        if (isImage && aspectRatio && (position === "nw" || position === "ne" || position === "sw" || position === "se")) {
+          // Use the larger delta to determine resize
+          const delta = Math.max(Math.abs(deltaX), Math.abs(deltaY)) * Math.sign(position.includes("e") ? deltaX : -deltaX);
+          newWidth = Math.max(minWidth, startWidth + delta);
+          newHeight = newWidth / aspectRatio;
+
+          if (position.includes("w")) {
+            newX = startPosX + (startWidth - newWidth);
+          }
+          if (position.includes("n")) {
             newY = startPosY + (startHeight - newHeight);
           }
         }
@@ -1478,7 +1799,7 @@ function ResizeHandle({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [element, onUpdate, position, canvasZoom],
+    [element, onUpdate, position, canvasZoom, onResizeStart],
   );
 
   const positionStyles: Record<string, React.CSSProperties> = {
@@ -1504,10 +1825,12 @@ function TextFontSizeHandle({
   element,
   onUpdate,
   canvasZoom,
+  onResizeStart,
 }: {
   element: TextElement;
   onUpdate: (updates: Partial<TextElement>) => void;
   canvasZoom: number;
+  onResizeStart?: () => void;
 }) {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1515,6 +1838,10 @@ function TextFontSizeHandle({
     (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
+
+      // Capture history before starting resize for undo support
+      onResizeStart?.();
+
       setIsDragging(true);
 
       const startX = e.clientX;
@@ -1551,7 +1878,7 @@ function TextFontSizeHandle({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [element, onUpdate, canvasZoom],
+    [element, onUpdate, canvasZoom, onResizeStart],
   );
 
   return (
@@ -1576,10 +1903,12 @@ function TextWrapWidthHandle({
   element,
   onUpdate,
   canvasZoom,
+  onResizeStart,
 }: {
   element: TextElement;
   onUpdate: (updates: Partial<TextElement>) => void;
   canvasZoom: number;
+  onResizeStart?: () => void;
 }) {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1587,6 +1916,10 @@ function TextWrapWidthHandle({
     (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
+
+      // Capture history before starting resize for undo support
+      onResizeStart?.();
+
       setIsDragging(true);
 
       const startX = e.clientX;
@@ -1614,7 +1947,7 @@ function TextWrapWidthHandle({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [element, onUpdate, canvasZoom],
+    [element, onUpdate, canvasZoom, onResizeStart],
   );
 
   return (
@@ -1689,35 +2022,132 @@ function ColorPicker({
   );
 }
 
-// Shape color picker with fill/stroke toggle and stroke width control
+// Shape type picker - allows changing shape type without recreating element
+function ShapeTypePicker({
+  currentType,
+  onTypeSelect,
+  onClose,
+}: {
+  currentType: ShapeType;
+  onTypeSelect: (shapeType: ShapeType) => void;
+  onClose: () => void;
+}) {
+  const shapeTypes: { type: ShapeType; label: string; icon: React.ReactNode }[] = [
+    { type: "rectangle", label: "Rectangle", icon: <div className="w-4 h-3 border-2 border-current rounded-sm" /> },
+    { type: "circle", label: "Circle", icon: <div className="w-4 h-4 border-2 border-current rounded-full" /> },
+    { type: "diamond", label: "Diamond", icon: <div className="w-3 h-3 border-2 border-current rotate-45" /> },
+    { type: "triangle", label: "Triangle", icon: <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-current" /> },
+    { type: "hexagon", label: "Hexagon", icon: <div className="w-4 h-4 bg-current" style={{ clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }} /> },
+    { type: "star", label: "Star", icon: <Star className="w-4 h-4" /> },
+  ];
+
+  return (
+    <div
+      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 p-2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[180px]"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-1 px-1.5 py-1">
+        {shapeTypes.map(({ type, label, icon }) => (
+          <button
+            key={type}
+            onClick={() => onTypeSelect(type)}
+            className={cn(
+              "flex items-center justify-center w-8 h-8 rounded-md transition-colors",
+              currentType === type
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-white/10 text-muted-foreground hover:text-foreground"
+            )}
+            title={label}
+          >
+            <div className="w-5 h-5 flex items-center justify-center">
+              {icon}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Shape text style picker - simplified to only show font weight (secondary popover)
+function ShapeTextStylePicker({
+  style,
+  onStyleChange,
+  onClose,
+}: {
+  style?: ElementStyle;
+  onStyleChange: (updates: Pick<ElementStyle, 'fontWeight'>) => void;
+  onClose: () => void;
+}) {
+  const currentFontWeight = style?.fontWeight || 'normal';
+
+  const fontWeights: { value: '300' | 'normal' | 'bold'; label: string; cssWeight: number }[] = [
+    { value: '300', label: 'Light', cssWeight: 300 },
+    { value: 'normal', label: 'Regular', cssWeight: 400 },
+    { value: 'bold', label: 'Bold', cssWeight: 700 },
+  ];
+
+  return (
+    <div
+      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100]"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-0.5 p-1">
+        {fontWeights.map(({ value, label, cssWeight }) => (
+          <button
+            key={value}
+            onClick={() => onStyleChange({ fontWeight: value })}
+            className={cn(
+              "px-3 py-1.5 text-[11px] rounded transition-colors whitespace-nowrap",
+              currentFontWeight === value
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-white/10 text-muted-foreground hover:text-foreground"
+            )}
+            style={{ fontWeight: cssWeight }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Shape color picker with fill/stroke/text toggle and stroke width control
 function ShapeColorPicker({
   fillColor,
   strokeColor,
   strokeWidth,
   fillOpacity,
+  textColor,
   onFillColorChange,
   onStrokeColorChange,
   onStrokeWidthChange,
   onFillOpacityChange,
+  onTextColorChange,
   onClose,
 }: {
   fillColor?: string;
   strokeColor?: string;
   strokeWidth?: number;
   fillOpacity?: number;
+  textColor?: string;
   onFillColorChange: (color: string) => void;
   onStrokeColorChange: (color: string) => void;
   onStrokeWidthChange: (width: number) => void;
   onFillOpacityChange: (opacity: number) => void;
+  onTextColorChange?: (color: string) => void;
   onClose: () => void;
 }) {
-  const [mode, setMode] = useState<"fill" | "stroke">("fill");
+  const [mode, setMode] = useState<"fill" | "stroke" | "text">("fill");
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
 
   // Convert color to hex for color picker
   const colorToHex = (color?: string): string => {
-    if (!color || color === "transparent") return "#000000";
+    if (!color || color === "transparent" || color === "inherit") return "#ffffff";
     if (color.startsWith("#")) return color;
     // Handle HSL colors
     if (color.startsWith("hsl")) {
@@ -1749,6 +2179,23 @@ function ShapeColorPicker({
 
   const currentFillHex = colorToHex(fillColor);
   const currentStrokeHex = colorToHex(strokeColor);
+  const currentTextHex = colorToHex(textColor);
+
+  const getCurrentColor = () => {
+    switch (mode) {
+      case "fill": return currentFillHex;
+      case "stroke": return currentStrokeHex;
+      case "text": return currentTextHex;
+    }
+  };
+
+  const handleColorChange = (color: string) => {
+    switch (mode) {
+      case "fill": onFillColorChange(color); break;
+      case "stroke": onStrokeColorChange(color); break;
+      case "text": onTextColorChange?.(color); break;
+    }
+  };
 
   return (
     <div
@@ -1779,25 +2226,31 @@ function ShapeColorPicker({
         >
           <PenLine className="w-4 h-4" />
         </button>
+        {onTextColorChange && (
+          <button
+            onClick={() => setMode("text")}
+            className={cn(
+              "p-1.5 rounded hover:bg-primary/20 transition-colors",
+              mode === "text" && "bg-primary/30 ring-1 ring-primary",
+            )}
+            title="Text Color"
+          >
+            <Type className="w-4 h-4" />
+          </button>
+        )}
 
         <div className="w-px h-4 bg-border/50 mx-0.5" />
 
         {/* Color picker */}
         <input
           type="color"
-          value={mode === "fill" ? currentFillHex : currentStrokeHex}
-          onChange={(e) => {
-            if (mode === "fill") {
-              onFillColorChange(e.target.value);
-            } else {
-              onStrokeColorChange(e.target.value);
-            }
-          }}
+          value={getCurrentColor()}
+          onChange={(e) => handleColorChange(e.target.value)}
           className="w-6 h-6 rounded cursor-pointer border-0"
           title="Color"
         />
 
-        {/* Transparent button for fill mode */}
+        {/* Transparent/Default button */}
         {mode === "fill" && (
           <>
             <button
@@ -1811,6 +2264,24 @@ function ShapeColorPicker({
               )}
               title="Transparent"
             />
+            <div className="w-px h-4 bg-border/50 mx-0.5" />
+          </>
+        )}
+
+        {mode === "text" && onTextColorChange && (
+          <>
+            <button
+              onClick={() => onTextColorChange("inherit")}
+              className={cn(
+                "w-6 h-6 rounded border-2 transition-all flex items-center justify-center text-[8px] font-medium",
+                textColor === "inherit" || !textColor
+                  ? "border-primary bg-primary/20"
+                  : "border-border bg-white/10",
+              )}
+              title="Default (Auto)"
+            >
+              A
+            </button>
             <div className="w-px h-4 bg-border/50 mx-0.5" />
           </>
         )}
@@ -2231,17 +2702,17 @@ function GradientPicker({
 }) {
   const gradients = [
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)", // 1 - Keep original
-    "linear-gradient(135deg, #5b21b6 0%, #4c1d95 30%, #3b0764 70%, #2d0552 100%)", // 2 - Darker purple
-    "linear-gradient(135deg, #7e22ce 0%, #6b21a8 30%, #581c87 70%, #4c1d95 100%)", // 3 - Darker violet
+    "linear-gradient(135deg, #290d56ff 0%, #4c1d95 30%, #3b0764 70%, #2d0552 100%)", // 2 - Darker purple
+    "linear-gradient(135deg, #3e0a2dff 0%rgba(14, 22, 65, 1)a8 30%, #871c69ff 70%, #000000ff 100%)", // 3 - Darker violet
     "linear-gradient(135deg, #a21caf 0%, #86198f 30%, #701a75 70%, #581c87 100%)", // 4 - Darker pink/purple
-    "linear-gradient(135deg, #0891b2 0%, #0e7490 30%, #155e75 70%, #164e63 100%)", // 5 - Darker cyan
+    "linear-gradient(135deg, #000d10ff 0%, #063a48ff 30%, #0b323eff 70%, #01455eff 100%)", // 5 - Darker cyan
     "linear-gradient(135deg, #0f766e 0%, #115e59 30%, #134e4a 70%, #0f3d3b 100%)", // 6 - Darker teal
     "linear-gradient(135deg, #4f46e5 0%, #4338ca 30%, #3730a3 70%, #312e81 100%)", // 7 - Darker indigo
-    "linear-gradient(135deg, #7c3aed 0%, #6d28d9 30%, #5b21b6 70%, #4c1d95 100%)", // 8 - Darker lavender
+    "linear-gradient(135deg, #140927ff 0%, #2d1807ff 30%, #260e4dff 70%, #240e06ff 100%)", // 8 - Darker lavender
     "linear-gradient(135deg, #1e40af 0%, #1e3a8a 30%, #1e293b 70%, #0f172a 100%)", // 9 - Keep original
-    "linear-gradient(135deg, #6b21a8 0%, #581c87 30%, #4c1d95 70%, #3b0764 100%)", // 10 - Keep original
-    "linear-gradient(135deg, #b45309 0%, #92400e 30%, #78350f 70%, #451a03 100%)", // 11 - Darker orange
-    "linear-gradient(135deg, #15803d 0%, #166534 30%, #14532d 70%, #052e16 100%)", // 12 - Darker green
+    "linear-gradient(135deg, #1e0434ff 0%, #146065ff 30%, #34092aff 70%, #043634ff 100%)", // 10 - Keep original
+    "linear-gradient(135deg, #3e0c04ff 0%, #510808ff 30%, #281105ff 70%, #451a03 100%)", // 11 - Darker orange
+    "linear-gradient(135deg, #093a1bff 0%, #073b1bff 30%, #0b2917ff 70%, #052e16 100%)", // 12 - Darker green
   ];
 
   return (
@@ -2671,6 +3142,13 @@ function FreeformCard({
   const fontWeight = element.style?.fontWeight || "normal";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const subtaskRefs = useRef<Map<string, HTMLTextAreaElement | null>>(new Map());
+  const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
+  const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
+  const [isEditingTaskDueDate, setIsEditingTaskDueDate] = useState(false);
+  const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
+  const [newTaskTag, setNewTaskTag] = useState('');
+  const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
 
   // Get the store methods for navigation
   const setCanvasViewMode = useCXDStore((state) => state.setCanvasViewMode);
@@ -3198,8 +3676,20 @@ function FreeformCard({
                             </svg>
                           )}
                         </div>
-                        <input
-                          type="text"
+                        <textarea
+                          ref={(el) => {
+                            if (el) {
+                              subtaskRefs.current.set(subtask.id, el);
+                              // Auto-focus if this is the newly created subtask
+                              if (focusedSubtaskId === subtask.id) {
+                                el.focus();
+                                el.select();
+                                setFocusedSubtaskId(null);
+                              }
+                            } else {
+                              subtaskRefs.current.delete(subtask.id);
+                            }
+                          }}
                           value={subtask.text}
                           onChange={(e) => {
                             e.stopPropagation();
@@ -3215,12 +3705,77 @@ function FreeformCard({
                                 subtasks: updatedSubtasks,
                               },
                             });
+                            // Auto-resize textarea
+                            e.target.style.height = 'auto';
+                            e.target.style.height = e.target.scrollHeight + 'px';
+                          }}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            // Enter creates new subtask (unless Shift is held for line break)
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              const newSubtaskId = `subtask-${Date.now()}`;
+                              const currentIndex = element.taskMetadata?.subtasks?.findIndex(
+                                (st) => st.id === subtask.id
+                              ) ?? -1;
+                              const newSubtask: import("@/types/canvas-elements").Subtask = {
+                                id: newSubtaskId,
+                                text: "",
+                                isCompleted: false,
+                                order: currentIndex + 1,
+                              };
+                              // Insert after current subtask and reorder
+                              const currentSubtasks = element.taskMetadata?.subtasks || [];
+                              const updatedSubtasks = [
+                                ...currentSubtasks.slice(0, currentIndex + 1),
+                                newSubtask,
+                                ...currentSubtasks.slice(currentIndex + 1).map((st) => ({
+                                  ...st,
+                                  order: st.order + 1,
+                                })),
+                              ];
+                              onUpdate({
+                                taskMetadata: {
+                                  ...element.taskMetadata,
+                                  subtasks: updatedSubtasks,
+                                },
+                              });
+                              // Set focus to the new subtask
+                              setFocusedSubtaskId(newSubtaskId);
+                            }
+                            // Prevent backspace/delete from bubbling when at start of empty field
+                            if ((e.key === 'Backspace' || e.key === 'Delete') && subtask.text === '') {
+                              e.preventDefault();
+                              // Delete this subtask and focus previous one
+                              const currentIndex = element.taskMetadata?.subtasks?.findIndex(
+                                (st) => st.id === subtask.id
+                              ) ?? -1;
+                              const prevSubtask = element.taskMetadata?.subtasks?.[currentIndex - 1];
+                              const updatedSubtasks =
+                                element.taskMetadata?.subtasks?.filter(
+                                  (st) => st.id !== subtask.id,
+                                ) || [];
+                              onUpdate({
+                                taskMetadata: {
+                                  ...element.taskMetadata,
+                                  subtasks: updatedSubtasks,
+                                },
+                              });
+                              if (prevSubtask) {
+                                setFocusedSubtaskId(prevSubtask.id);
+                              }
+                            }
                           }}
                           onClick={(e) => e.stopPropagation()}
+                          rows={1}
                           className={cn(
-                            "text-xs flex-1 bg-transparent border-0 outline-none focus:outline-none text-white p-0",
+                            "text-xs flex-1 bg-transparent border-0 outline-none focus:outline-none text-white p-0 resize-none overflow-hidden break-words",
                             subtask.isCompleted && "line-through opacity-60",
                           )}
+                          style={{
+                            minHeight: '1.25rem',
+                            lineHeight: '1.25rem',
+                          }}
                         />
                         <button
                           onClick={(e) => {
@@ -3249,9 +3804,10 @@ function FreeformCard({
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                const newSubtaskId = `subtask-${Date.now()}`;
                 const newSubtask: import("@/types/canvas-elements").Subtask = {
-                  id: `subtask-${Date.now()}`,
-                  text: "New subtask",
+                  id: newSubtaskId,
+                  text: "",
                   isCompleted: false,
                   order: element.taskMetadata?.subtasks?.length || 0,
                 };
@@ -3264,6 +3820,8 @@ function FreeformCard({
                     ],
                   },
                 });
+                // Focus the new subtask
+                setFocusedSubtaskId(newSubtaskId);
               }}
               className="flex items-center gap-2 text-xs text-white/50 hover:text-white/80 transition-colors w-full"
             >
@@ -3275,66 +3833,245 @@ function FreeformCard({
       </div>
       {/* Task Properties Display - only show for actionable cards */}
       {isActionable && element.taskMetadata && (
-        <div className="px-3 pb-3 pt-1 border-t border-white/10 space-y-1.5">
-          {element.taskMetadata.status && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Status:</span>
-              <span className="px-2 py-0.5 rounded bg-white/10 capitalize">
-                {element.taskMetadata.status.replace("_", " ")}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.priority && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Priority:</span>
-              <span
-                className={cn("px-2 py-0.5 rounded capitalize", {
-                  "bg-red-500/20 text-red-400":
-                    element.taskMetadata.priority === "urgent",
-                  "bg-orange-500/20 text-orange-400":
-                    element.taskMetadata.priority === "high",
-                  "bg-yellow-500/20 text-yellow-400":
-                    element.taskMetadata.priority === "medium",
-                  "bg-blue-500/20 text-blue-400":
-                    element.taskMetadata.priority === "low",
-                })}
-              >
-                {element.taskMetadata.priority}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.dueDate && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Due:</span>
-              <span className="text-white/70">
-                {new Date(element.taskMetadata.dueDate).toLocaleDateString()}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.assignee && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Assigned:</span>
-              <span className="text-white/70">
-                {element.taskMetadata.assignee}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.customProperties &&
-            Object.keys(element.taskMetadata.customProperties).length > 0 && (
-              <div className="mt-2 pt-2 border-t border-white/5">
-                <div className="text-xs text-white/50 mb-1">
-                  Custom Properties:
+        <div className="px-3 pb-3 pt-1 border-t border-white/10 space-y-2">
+          {/* Priority - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Priority:</span>
+            <div ref={taskPriorityMenuRef} className="relative flex-1">
+              {element.taskMetadata.priority ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTaskPriorityMenu(!showTaskPriorityMenu);
+                  }}
+                  className={cn("px-2 py-0.5 rounded capitalize hover:ring-1 hover:ring-white/20 transition-all flex items-center gap-1", {
+                    "bg-red-500/20 text-red-400": element.taskMetadata.priority === "urgent",
+                    "bg-orange-500/20 text-orange-400": element.taskMetadata.priority === "high",
+                    "bg-yellow-500/20 text-yellow-400": element.taskMetadata.priority === "medium",
+                    "bg-blue-500/20 text-blue-400": element.taskMetadata.priority === "low",
+                  })}
+                >
+                  {element.taskMetadata.priority}
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTaskPriorityMenu(!showTaskPriorityMenu);
+                  }}
+                  className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
+                >
+                  Set Priority
+                </button>
+              )}
+
+              {showTaskPriorityMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-card/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[100] min-w-[120px]">
+                  {[
+                    { value: 'urgent', label: 'Urgent', color: 'bg-red-500/20 text-red-400' },
+                    { value: 'high', label: 'High', color: 'bg-orange-500/20 text-orange-400' },
+                    { value: 'medium', label: 'Medium', color: 'bg-yellow-500/20 text-yellow-400' },
+                    { value: 'low', label: 'Low', color: 'bg-blue-500/20 text-blue-400' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdate({
+                          taskMetadata: {
+                            ...element.taskMetadata,
+                            priority: opt.value as any,
+                          }
+                        } as Partial<FreeformElement>);
+                        setShowTaskPriorityMenu(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-white/5 transition-colors first:rounded-t-lg last:rounded-b-lg text-left"
+                    >
+                      <div className={cn("w-2 h-2 rounded-full", opt.color)} />
+                      {opt.label}
+                    </button>
+                  ))}
+                  {element.taskMetadata.priority && (
+                    <>
+                      <div className="h-px bg-white/10 my-1" />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdate({
+                            taskMetadata: {
+                              ...element.taskMetadata,
+                              priority: undefined,
+                            }
+                          } as Partial<FreeformElement>);
+                          setShowTaskPriorityMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-white/50 hover:bg-white/5 transition-colors rounded-b-lg"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                        Clear
+                      </button>
+                    </>
+                  )}
                 </div>
-                {Object.entries(element.taskMetadata.customProperties).map(
-                  ([key, value]) => (
-                    <div key={key} className="flex items-center gap-2 text-xs">
-                      <span className="text-white/50">{key}:</span>
-                      <span className="text-white/70">{String(value)}</span>
-                    </div>
-                  ),
+              )}
+            </div>
+          </div>
+
+          {/* Due Date - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Due:</span>
+            {isEditingTaskDueDate ? (
+              <input
+                type="date"
+                value={element.taskMetadata.dueDate ? new Date(element.taskMetadata.dueDate).toISOString().split('T')[0] : ''}
+                onChange={(e) => {
+                  const dateValue = e.target.value ? new Date(e.target.value).toISOString() : undefined;
+                  onUpdate({
+                    taskMetadata: {
+                      ...element.taskMetadata,
+                      dueDate: dateValue,
+                    }
+                  } as Partial<FreeformElement>);
+                  setIsEditingTaskDueDate(false);
+                }}
+                onBlur={() => setIsEditingTaskDueDate(false)}
+                onClick={(e) => e.stopPropagation()}
+                className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-400/50 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                autoFocus
+              />
+            ) : element.taskMetadata.dueDate ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditingTaskDueDate(true);
+                }}
+                className="px-2 py-0.5 rounded text-white/70 hover:bg-white/10 transition-all group/date flex items-center gap-1"
+              >
+                {new Date(element.taskMetadata.dueDate).toLocaleDateString()}
+                <X
+                  className="w-2.5 h-2.5 opacity-0 group-hover/date:opacity-100 transition-opacity"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdate({
+                      taskMetadata: {
+                        ...element.taskMetadata,
+                        dueDate: undefined,
+                      }
+                    } as Partial<FreeformElement>);
+                  }}
+                />
+              </button>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditingTaskDueDate(true);
+                }}
+                className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
+              >
+                Set Due Date
+              </button>
+            )}
+          </div>
+
+          {/* Tags - Editable */}
+          {(element.taskMetadata.customTags && element.taskMetadata.customTags.length > 0) || isAddingTaskTag ? (
+            <div className="flex items-start gap-2 text-xs">
+              <span className="text-white/50 min-w-[60px] mt-0.5">Tags:</span>
+              <div className="flex flex-wrap gap-1.5 flex-1">
+                {element.taskMetadata.customTags?.map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 flex items-center gap-1 group/tag hover:ring-1 hover:ring-white/20 transition-all"
+                  >
+                    {tag}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const updatedTags = element.taskMetadata?.customTags?.filter((_, i) => i !== idx) || [];
+                        onUpdate({
+                          taskMetadata: {
+                            ...element.taskMetadata,
+                            customTags: updatedTags,
+                          }
+                        } as Partial<FreeformElement>);
+                      }}
+                      className="opacity-0 group-hover/tag:opacity-100 transition-opacity"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+
+                {isAddingTaskTag ? (
+                  <input
+                    type="text"
+                    value={newTaskTag}
+                    onChange={(e) => setNewTaskTag(e.target.value)}
+                    onBlur={() => {
+                      if (newTaskTag.trim()) {
+                        const currentTags = element.taskMetadata?.customTags || [];
+                        onUpdate({
+                          taskMetadata: {
+                            ...element.taskMetadata,
+                            customTags: [...currentTags, newTaskTag.trim()],
+                          }
+                        } as Partial<FreeformElement>);
+                      }
+                      setNewTaskTag('');
+                      setIsAddingTaskTag(false);
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter' && newTaskTag.trim()) {
+                        const currentTags = element.taskMetadata?.customTags || [];
+                        onUpdate({
+                          taskMetadata: {
+                            ...element.taskMetadata,
+                            customTags: [...currentTags, newTaskTag.trim()],
+                          }
+                        } as Partial<FreeformElement>);
+                        setNewTaskTag('');
+                        setIsAddingTaskTag(false);
+                      }
+                      if (e.key === 'Escape') {
+                        setNewTaskTag('');
+                        setIsAddingTaskTag(false);
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    placeholder="Tag name"
+                    className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/50 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400 w-20"
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsAddingTaskTag(true);
+                    }}
+                    className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
+                  >
+                    + Tag
+                  </button>
                 )}
               </div>
-            )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-white/50 min-w-[60px]">Tags:</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsAddingTaskTag(true);
+                }}
+                className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
+              >
+                Add Tag
+              </button>
+            </div>
+          )}
         </div>
       )}
       {/* View in Plan button - only for actionable cards */}
@@ -3353,7 +4090,7 @@ function FreeformCard({
               boxShadow: "0 4px 12px rgba(168, 85, 247, 0.3)",
             }}
           >
-            <LayoutGrid className="w-4 h-4 text-white" />
+            <ListTodo className="w-4 h-4 text-white" />
           </button>
         </div>
       )}
@@ -3803,9 +4540,9 @@ function ImageCard({
           <img
             src={element.src}
             alt={element.alt || ""}
-            className="w-full h-full"
+            className="w-full h-full object-contain"
             style={{
-              objectFit: element.objectFit || "cover",
+              objectFit: "contain",
               transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
             }}
             onError={() => setHasImage(false)}
@@ -4006,11 +4743,15 @@ function ShapeCard({
   onUpdate,
   isEditing,
   onBlur,
+  isSelected,
+  onCreateConnectedShape,
 }: {
   element: ShapeElement;
   onUpdate: (updates: Partial<ShapeElement>) => void;
   isEditing: boolean;
   onBlur: (e?: React.FocusEvent) => void;
+  isSelected?: boolean;
+  onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void;
 }) {
   const bgColor = element.style?.bgColor || "hsl(var(--primary) / 0.3)";
   const borderColor = element.style?.borderColor || "hsl(var(--primary))";
@@ -4364,33 +5105,119 @@ function ShapeCard({
         />
       )}
       {renderSVGShape()}
-      <div className="relative z-10 text-center px-2">
+      <div
+        className="absolute inset-0 z-10 flex items-center justify-center"
+        style={{
+          padding: '50px',
+          textAlign: 'center',
+        }}
+      >
         {isEditing ? (
-          <input
+          <textarea
             autoFocus
             value={element.content || ""}
             onChange={(e) => onUpdate({ content: e.target.value })}
             onBlur={onBlur}
-            className="w-full bg-transparent border-0 text-center focus:outline-none"
+            className="w-full bg-transparent border-0 focus:outline-none resize-none text-center"
             style={{
               color: textColor,
               fontSize: element.style?.fontSize || 14,
+              fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
+              fontFamily: element.style?.fontFamily || 'inherit',
+              textAlign: 'center',
+              wordBreak: 'break-word',
+              overflowWrap: 'break-word',
+              lineHeight: 1.3,
+              maxHeight: '100%',
+              height: 'auto',
+              minHeight: '1.3em',
             }}
             placeholder="Text..."
             data-no-drag
+            rows={1}
+            onInput={(e) => {
+              // Auto-resize textarea to fit content
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = 'auto';
+              target.style.height = `${target.scrollHeight}px`;
+            }}
           />
         ) : (
           <span
-            className="text-sm"
             style={{
               color: textColor,
               fontSize: element.style?.fontSize || 14,
+              fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
+              fontFamily: element.style?.fontFamily || 'inherit',
+              wordBreak: 'break-word',
+              overflowWrap: 'break-word',
+              display: 'block',
+              textAlign: 'center',
+              lineHeight: 1.3,
             }}
           >
             {element.content}
           </span>
         )}
       </div>
+
+      {/* Plus controls for flow continuation - appear when selected */}
+      {isSelected && onCreateConnectedShape && (
+        <>
+          {/* Top plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("top");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute -top-4 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30 opacity-0 group-hover:opacity-100 hover:opacity-100"
+            style={{ opacity: 1 }}
+            title="Add shape above"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {/* Right plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("right");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute top-1/2 -right-4 -translate-y-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30"
+            title="Add shape to right"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {/* Bottom plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("bottom");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30"
+            title="Add shape below"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {/* Left plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("left");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute top-1/2 -left-4 -translate-y-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30"
+            title="Add shape to left"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -5405,22 +6232,47 @@ function BoardCard({
         isDropTarget && "scale-105 w-fit h-fit",
       )}
     >
-      {/* Drop target glow overlay */}
-      {isDropTarget && (
-        <div
-          className="absolute inset-0 rounded-lg animate-pulse"
-          style={{
-            background:
-              "radial-gradient(circle, rgba(168, 85, 247, 0.3) 0%, transparent 70%)",
-            boxShadow:
-              "0 0 40px rgba(168, 85, 247, 0.8), inset 0 0 20px rgba(168, 85, 247, 0.4)",
-          }}
-        />
-      )}
       {/* Hexagon badge container with 3D effect */}
       <div className="relative flex flex-col items-center gap-3 justify-center w-fit h-fit gap-y-[3.5px]">
         {/* Hexagon icon container */}
         <div className="relative w-32 h-32 flex items-center justify-center">
+          {/* Drop target glow - SVG hexagon outline */}
+          {isDropTarget && (
+            <svg
+              className="absolute inset-0 w-32 h-32 pointer-events-none animate-pulse"
+              viewBox="0 0 128 128"
+              style={{ overflow: "visible" }}
+            >
+              <defs>
+                {/* Glow filter for the hexagon outline */}
+                <filter id="hexagon-glow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="6" result="blur1" />
+                  <feGaussianBlur stdDeviation="12" result="blur2" />
+                  <feMerge>
+                    <feMergeNode in="blur2" />
+                    <feMergeNode in="blur1" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+              {/* Hexagon path matching the clip-path: 50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25% */}
+              <polygon
+                points="64,0 119.4,32 119.4,96 64,128 8.6,96 8.6,32"
+                fill="none"
+                stroke="rgba(168, 85, 247, 0.9)"
+                strokeWidth="3"
+                filter="url(#hexagon-glow)"
+              />
+              {/* Additional outer glow ring */}
+              <polygon
+                points="64,0 119.4,32 119.4,96 64,128 8.6,96 8.6,32"
+                fill="none"
+                stroke="rgba(168, 85, 247, 0.4)"
+                strokeWidth="8"
+                filter="url(#hexagon-glow)"
+              />
+            </svg>
+          )}
           {/* Isometric cube shape with 3D gradient and glow */}
           <div
             className={cn(

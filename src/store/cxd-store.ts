@@ -76,6 +76,9 @@ interface CXDState {
   // Highlighted element (for navigation from hypercube)
   highlightedElementId: string | null;
 
+  // Clipboard for copy/paste across boards
+  clipboard: CanvasElement[];
+
   // Actions - View
   setViewMode: (mode: ViewMode) => void;
   setFocusedSection: (section: CXDSectionId | null) => void;
@@ -83,6 +86,9 @@ interface CXDState {
   setActiveSurface: (surface: 'canvas' | 'hypercube') => void;
   setHighlightedElementId: (elementId: string | null) => void;
   highlightElementBriefly: (elementId: string, durationMs?: number) => void;
+
+  // Actions - Clipboard
+  setClipboard: (elements: CanvasElement[]) => void;
 
   // Actions - Projects
   createProject: (name: string, ownerId: string) => string;
@@ -183,6 +189,7 @@ interface CXDState {
   updateCanvasElement: (elementId: string, updates: Partial<CanvasElement>) => void;
   removeCanvasElement: (elementId: string) => void;
   getCanvasElements: () => CanvasElement[];
+  getAllInboxItems: () => CanvasElement[]; // Get all inbox items across all boards
   duplicateCanvasElement: (elementId: string) => void;
 
   // Actions - Canvas Edges (Connectors)
@@ -203,6 +210,12 @@ interface CXDState {
   addNodeToContainer: (nodeId: string, containerId: string) => void;
   removeNodeFromContainer: (nodeId: string) => void;
   moveContainerWithChildren: (containerId: string, deltaX: number, deltaY: number) => void;
+
+  // Actions - Element Grouping
+  createGroup: (elementIds: string[]) => string; // Returns group ID
+  ungroup: (groupId: string) => void;
+  getGroupElements: (groupId: string) => CanvasElement[];
+  updateGroupElements: (groupId: string, updates: Partial<CanvasElement>) => void;
 
   // Actions - Share
   generateShareToken: () => string;
@@ -234,6 +247,7 @@ export const useCXDStore = create<CXDState>()(
       currentBoardId: null, // backward compatibility alias
       boardPath: [],
       highlightedElementId: null,
+      clipboard: [],
       canvasHistory: [],
       canvasHistoryIndex: -1,
 
@@ -274,6 +288,9 @@ export const useCXDStore = create<CXDState>()(
           }
         }, durationMs);
       },
+
+      // Clipboard actions
+      setClipboard: (elements) => set({ clipboard: elements }),
 
       // Project actions
       createProject: (name, ownerId) => {
@@ -1363,6 +1380,13 @@ export const useCXDStore = create<CXDState>()(
         });
       },
 
+      getAllInboxItems: () => {
+        const currentProject = get().getCurrentProject();
+        const allElements = currentProject?.canvasLayout?.elements || [];
+        // Return all elements with inInbox flag, regardless of board or surface
+        return allElements.filter((el) => el.inInbox === true);
+      },
+
       duplicateCanvasElement: (elementId) => {
         const currentProject = get().getCurrentProject();
         if (currentProject) {
@@ -1710,6 +1734,91 @@ export const useCXDStore = create<CXDState>()(
             ),
           }));
         }
+      },
+
+      // Element Grouping
+      createGroup: (elementIds) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject || elementIds.length < 2) return '';
+
+        const groupId = `group-${uuidv4()}`;
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  elements: (p.canvasLayout?.elements || []).map((el) =>
+                    elementIds.includes(el.id)
+                      ? { ...el, groupId }
+                      : el
+                  ),
+                },
+                updatedAt: new Date().toISOString()
+              }
+              : p
+          ),
+        }));
+
+        return groupId;
+      },
+
+      ungroup: (groupId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  elements: (p.canvasLayout?.elements || []).map((el) =>
+                    el.groupId === groupId
+                      ? { ...el, groupId: undefined }
+                      : el
+                  ),
+                },
+                updatedAt: new Date().toISOString()
+              }
+              : p
+          ),
+        }));
+      },
+
+      getGroupElements: (groupId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return [];
+
+        const elements = currentProject.canvasLayout?.elements || [];
+        return elements.filter((el) => el.groupId === groupId);
+      },
+
+      updateGroupElements: (groupId, updates) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  elements: (p.canvasLayout?.elements || []).map((el) =>
+                    el.groupId === groupId
+                      ? { ...el, ...updates } as typeof el
+                      : el
+                  ),
+                },
+                updatedAt: new Date().toISOString()
+              }
+              : p
+          ),
+        }));
       },
 
       // Share

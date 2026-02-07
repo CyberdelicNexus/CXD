@@ -324,7 +324,7 @@ export default function CXDPage() {
               {viewMode === "canvas" && canvasViewMode === "canvas" && (
                 <CXDCanvas />
               )}
-              {viewMode === "canvas" && canvasViewMode === "hypercube" && (
+              {viewMode === "canvas" && canvasViewMode === "hexagon" && (
                 <HexagonView />
               )}
               {viewMode === "canvas" && canvasViewMode === "plan" && (

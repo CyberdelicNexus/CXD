@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useRef, useState, useEffect } from "react";
-import { LineElement } from "@/types/canvas-elements";
+import { LineElement, LineEndStyle } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
-import { Minus, Trash2 } from "lucide-react";
+import { Minus, Trash2, Circle, ArrowRight, Square, Diamond } from "lucide-react";
 
 // Line interaction mode state machine
 type LineMode =
@@ -34,6 +34,7 @@ interface LineLayerProps {
   isLineToolActive: boolean;
   onLineToolComplete: () => void;
   containerRef: React.RefObject<HTMLDivElement>;
+  onOperationStart?: () => void; // Called before starting drag operations for undo support
 }
 
 export function LineLayer({
@@ -48,6 +49,7 @@ export function LineLayer({
   isLineToolActive,
   onLineToolComplete,
   containerRef,
+  onOperationStart,
 }: LineLayerProps) {
   // State machine
   const [mode, setMode] = useState<LineMode>("idle");
@@ -168,12 +170,29 @@ export function LineLayer({
       const currentWorld = screenToWorld(e.clientX, e.clientY);
 
       if (mode === "drawingLine" && lineDraft) {
+        // Snap to horizontal/vertical when close (within 15 degrees)
+        const dx = currentWorld.x - lineDraft.start.x;
+        const dy = currentWorld.y - lineDraft.start.y;
+        const angle = Math.abs(Math.atan2(dy, dx));
+        const snapThreshold = (15 * Math.PI) / 180; // 15 degrees in radians
+
+        let snappedEnd = currentWorld;
+
+        // Snap to horizontal (angle near 0 or PI)
+        if (angle < snapThreshold || angle > Math.PI - snapThreshold) {
+          snappedEnd = { x: currentWorld.x, y: lineDraft.start.y };
+        }
+        // Snap to vertical (angle near PI/2 or -PI/2)
+        else if (Math.abs(angle - Math.PI / 2) < snapThreshold) {
+          snappedEnd = { x: lineDraft.start.x, y: currentWorld.y };
+        }
+
         // Update end and bend (bend is midpoint)
-        const midX = (lineDraft.start.x + currentWorld.x) / 2;
-        const midY = (lineDraft.start.y + currentWorld.y) / 2;
+        const midX = (lineDraft.start.x + snappedEnd.x) / 2;
+        const midY = (lineDraft.start.y + snappedEnd.y) / 2;
         setLineDraft({
           ...lineDraft,
-          end: currentWorld,
+          end: snappedEnd,
           bend: { x: midX, y: midY },
         });
       } else if (
@@ -189,19 +208,102 @@ export function LineLayer({
         };
 
         if (activeHandle === "start") {
-          onUpdateLine(activeLineId, {
-            start: {
-              x: initial.start.x + delta.x,
-              y: initial.start.y + delta.y,
-            },
-          });
+          // Calculate new start position
+          const newStart = {
+            x: initial.start.x + delta.x,
+            y: initial.start.y + delta.y,
+          };
+
+          // Calculate bend's relative position to maintain proportional placement
+          // Get the initial bend point (or default to midpoint)
+          const initialBend = initial.bend || {
+            x: (initial.start.x + initial.end.x) / 2,
+            y: (initial.start.y + initial.end.y) / 2,
+          };
+
+          // Calculate the line vector before and after
+          const oldLineVec = {
+            x: initial.end.x - initial.start.x,
+            y: initial.end.y - initial.start.y,
+          };
+          const newLineVec = {
+            x: initial.end.x - newStart.x,
+            y: initial.end.y - newStart.y,
+          };
+
+          // Calculate bend's relative position on the original line
+          const oldLength = Math.sqrt(oldLineVec.x * oldLineVec.x + oldLineVec.y * oldLineVec.y);
+          const newLength = Math.sqrt(newLineVec.x * newLineVec.x + newLineVec.y * newLineVec.y);
+
+          if (oldLength > 0 && newLength > 0) {
+            // Calculate t (position along line from start to end, 0-1)
+            const t = ((initialBend.x - initial.start.x) * oldLineVec.x +
+                       (initialBend.y - initial.start.y) * oldLineVec.y) / (oldLength * oldLength);
+
+            // Calculate perpendicular offset
+            const oldPerp = { x: -oldLineVec.y / oldLength, y: oldLineVec.x / oldLength };
+            const perpOffset = (initialBend.x - initial.start.x) * oldPerp.x +
+                               (initialBend.y - initial.start.y) * oldPerp.y;
+
+            // Apply to new line
+            const newPerp = { x: -newLineVec.y / newLength, y: newLineVec.x / newLength };
+            const newBend = {
+              x: newStart.x + t * newLineVec.x + perpOffset * newPerp.x,
+              y: newStart.y + t * newLineVec.y + perpOffset * newPerp.y,
+            };
+
+            onUpdateLine(activeLineId, { start: newStart, bend: newBend });
+          } else {
+            onUpdateLine(activeLineId, { start: newStart });
+          }
         } else if (activeHandle === "end") {
-          onUpdateLine(activeLineId, {
-            end: {
-              x: initial.end.x + delta.x,
-              y: initial.end.y + delta.y,
-            },
-          });
+          // Calculate new end position
+          const newEnd = {
+            x: initial.end.x + delta.x,
+            y: initial.end.y + delta.y,
+          };
+
+          // Calculate bend's relative position to maintain proportional placement
+          const initialBend = initial.bend || {
+            x: (initial.start.x + initial.end.x) / 2,
+            y: (initial.start.y + initial.end.y) / 2,
+          };
+
+          // Calculate the line vector before and after
+          const oldLineVec = {
+            x: initial.end.x - initial.start.x,
+            y: initial.end.y - initial.start.y,
+          };
+          const newLineVec = {
+            x: newEnd.x - initial.start.x,
+            y: newEnd.y - initial.start.y,
+          };
+
+          // Calculate bend's relative position on the original line
+          const oldLength = Math.sqrt(oldLineVec.x * oldLineVec.x + oldLineVec.y * oldLineVec.y);
+          const newLength = Math.sqrt(newLineVec.x * newLineVec.x + newLineVec.y * newLineVec.y);
+
+          if (oldLength > 0 && newLength > 0) {
+            // Calculate t (position along line from start to end, 0-1)
+            const t = ((initialBend.x - initial.start.x) * oldLineVec.x +
+                       (initialBend.y - initial.start.y) * oldLineVec.y) / (oldLength * oldLength);
+
+            // Calculate perpendicular offset
+            const oldPerp = { x: -oldLineVec.y / oldLength, y: oldLineVec.x / oldLength };
+            const perpOffset = (initialBend.x - initial.start.x) * oldPerp.x +
+                               (initialBend.y - initial.start.y) * oldPerp.y;
+
+            // Apply to new line
+            const newPerp = { x: -newLineVec.y / newLength, y: newLineVec.x / newLength };
+            const newBend = {
+              x: initial.start.x + t * newLineVec.x + perpOffset * newPerp.x,
+              y: initial.start.y + t * newLineVec.y + perpOffset * newPerp.y,
+            };
+
+            onUpdateLine(activeLineId, { end: newEnd, bend: newBend });
+          } else {
+            onUpdateLine(activeLineId, { end: newEnd });
+          }
         } else if (activeHandle === "bend") {
           const initialBend = initial.bend || {
             x: (initial.start.x + initial.end.x) / 2,
@@ -265,7 +367,7 @@ export function LineLayer({
             end: lineDraft.end,
             bend: lineDraft.bend,
             style: {
-              color: "hsl(180 100% 50% / 0.8)",
+              color: "hsl(180 100% 50%)",
               widthPx: 2,
               kind: "solid",
             },
@@ -320,6 +422,9 @@ export function LineLayer({
       const line = lines.find((l) => l.id === lineId);
       if (!line || !line.start || !line.end) return;
 
+      // Capture history before starting drag for undo support
+      onOperationStart?.();
+
       setMode("draggingHandle");
       setActiveHandle(handle);
       setActiveLineId(lineId);
@@ -332,7 +437,7 @@ export function LineLayer({
         target.setPointerCapture(e.pointerId);
       }
     },
-    [lines, screenToWorld],
+    [lines, screenToWorld, onOperationStart],
   );
 
   // Start dragging the whole line (via stroke)
@@ -343,6 +448,9 @@ export function LineLayer({
 
       const line = lines.find((l) => l.id === lineId);
       if (!line || !line.start || !line.end) return;
+
+      // Capture history before starting drag for undo support
+      onOperationStart?.();
 
       // Select the line
       onSelectLine(lineId);
@@ -358,7 +466,7 @@ export function LineLayer({
         target.setPointerCapture(e.pointerId);
       }
     },
-    [lines, screenToWorld, onSelectLine],
+    [lines, screenToWorld, onSelectLine, onOperationStart],
   );
 
   // Get stroke dash array from kind
@@ -366,6 +474,95 @@ export function LineLayer({
     if (kind === "dashed") return "10 8";
     if (kind === "dotted") return "2 8";
     return "";
+  };
+
+  // Render end cap at a given position with rotation
+  const renderEndCap = (
+    capStyle: LineEndStyle | undefined,
+    x: number,
+    y: number,
+    angle: number,
+    color: string,
+    size: number,
+    key: string
+  ) => {
+    if (!capStyle || capStyle === "none") return null;
+
+    const halfSize = size / 2;
+
+    switch (capStyle) {
+      case "dot":
+        return (
+          <circle
+            key={key}
+            cx={x}
+            cy={y}
+            r={halfSize}
+            fill={color}
+            style={{ pointerEvents: "none" }}
+          />
+        );
+      case "arrow":
+        // Arrow with base at the endpoint, tip extending outward
+        const arrowPoints = [
+          { x: size, y: 0 }, // Tip of arrow
+          { x: 0, y: -halfSize * 0.8 }, // Upper wing base
+          { x: size * 0.3, y: 0 }, // Center indent
+          { x: 0, y: halfSize * 0.8 }, // Lower wing base
+        ];
+        const rotatedArrow = arrowPoints.map((p) => ({
+          x: x + p.x * Math.cos(angle) - p.y * Math.sin(angle),
+          y: y + p.x * Math.sin(angle) + p.y * Math.cos(angle),
+        }));
+        return (
+          <polygon
+            key={key}
+            points={rotatedArrow.map((p) => `${p.x},${p.y}`).join(" ")}
+            fill={color}
+            style={{ pointerEvents: "none" }}
+          />
+        );
+      case "square":
+        const squarePoints = [
+          { x: halfSize, y: -halfSize },
+          { x: halfSize, y: halfSize },
+          { x: -halfSize, y: halfSize },
+          { x: -halfSize, y: -halfSize },
+        ];
+        const rotatedSquare = squarePoints.map((p) => ({
+          x: x + p.x * Math.cos(angle) - p.y * Math.sin(angle),
+          y: y + p.x * Math.sin(angle) + p.y * Math.cos(angle),
+        }));
+        return (
+          <polygon
+            key={key}
+            points={rotatedSquare.map((p) => `${p.x},${p.y}`).join(" ")}
+            fill={color}
+            style={{ pointerEvents: "none" }}
+          />
+        );
+      case "diamond":
+        const diamondPoints = [
+          { x: halfSize, y: 0 },
+          { x: 0, y: halfSize },
+          { x: -halfSize, y: 0 },
+          { x: 0, y: -halfSize },
+        ];
+        const rotatedDiamond = diamondPoints.map((p) => ({
+          x: x + p.x * Math.cos(angle) - p.y * Math.sin(angle),
+          y: y + p.x * Math.sin(angle) + p.y * Math.cos(angle),
+        }));
+        return (
+          <polygon
+            key={key}
+            points={rotatedDiamond.map((p) => `${p.x},${p.y}`).join(" ")}
+            fill={color}
+            style={{ pointerEvents: "none" }}
+          />
+        );
+      default:
+        return null;
+    }
   };
 
   // Render a single line
@@ -378,11 +575,22 @@ export function LineLayer({
       ? worldToScreen(line.bend.x, line.bend.y)
       : { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
 
-    const color = line.style?.color || "hsl(180 100% 50% / 0.8)";
+    const color = line.style?.color || "hsl(180 100% 50%)";
     const widthPx = (line.style?.widthPx || 2) * canvasZoom;
     const kind = line.style?.kind || "solid";
+    const startCap = line.style?.startCap;
+    const endCap = line.style?.endCap;
 
     const pathD = `M ${start.x} ${start.y} Q ${bend.x} ${bend.y} ${end.x} ${end.y}`;
+
+    // Calculate angles for end caps (tangent to the curve at each endpoint)
+    // For quadratic bezier, tangent at start = bend - start, tangent at end = end - bend
+    // Start arrow points away from the line (opposite direction)
+    const startAngle = Math.atan2(start.y - bend.y, start.x - bend.x);
+    const endAngle = Math.atan2(end.y - bend.y, end.x - bend.x);
+
+    // End cap size scales with line width
+    const capSize = Math.max(8, widthPx * 3) * canvasZoom;
 
     return (
       <g key={line.id}>
@@ -408,6 +616,10 @@ export function LineLayer({
           fill="none"
           style={{ pointerEvents: "none" }}
         />
+        {/* Start cap */}
+        {renderEndCap(startCap, start.x, start.y, startAngle, color, capSize, `${line.id}-start-cap`)}
+        {/* End cap */}
+        {renderEndCap(endCap, end.x, end.y, endAngle, color, capSize, `${line.id}-end-cap`)}
         {/* Handles - only when selected */}
         {isSelected && (
           <>
@@ -489,7 +701,7 @@ export function LineLayer({
         {/* Draft line */}
         <path
           d={pathD}
-          stroke="hsl(180 100% 50% / 0.8)"
+          stroke="hsl(180 100% 50%)"
           strokeWidth={2 * canvasZoom}
           strokeLinecap="round"
           fill="none"
@@ -613,7 +825,7 @@ function LineContextMenu({
   };
 
   const widthPx = line.style?.widthPx || 2;
-  const color = line.style?.color || "hsl(180 100% 50% / 0.8)";
+  const color = line.style?.color || "hsl(180 100% 50%)";
   const kind = line.style?.kind || "solid";
 
   // Convert HSL to hex for color input
@@ -720,6 +932,23 @@ function LineContextMenu({
         title="Color"
       />
       <div className="w-px h-4 bg-border/50 mx-0.5" />
+      {/* Start cap selection */}
+      <EndCapPicker
+        label="Start"
+        value={line.style?.startCap || "none"}
+        onChange={(cap) =>
+          onUpdateLine({ style: { ...line.style, startCap: cap } })
+        }
+      />
+      {/* End cap selection */}
+      <EndCapPicker
+        label="End"
+        value={line.style?.endCap || "none"}
+        onChange={(cap) =>
+          onUpdateLine({ style: { ...line.style, endCap: cap } })
+        }
+      />
+      <div className="w-px h-4 bg-border/50 mx-0.5" />
       {/* Delete button */}
       <button
         onClick={onDelete}
@@ -728,6 +957,88 @@ function LineContextMenu({
       >
         <Trash2 className="w-4 h-4" />
       </button>
+    </div>
+  );
+}
+
+// End cap picker dropdown
+function EndCapPicker({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: LineEndStyle;
+  onChange: (cap: LineEndStyle) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const capOptions: { value: LineEndStyle; label: string; icon: React.ReactNode }[] = [
+    {
+      value: "none",
+      label: "None",
+      icon: <Minus className="w-3 h-3" />,
+    },
+    {
+      value: "dot",
+      label: "Dot",
+      icon: <Circle className="w-3 h-3 fill-current" />,
+    },
+    {
+      value: "arrow",
+      label: "Arrow",
+      icon: <ArrowRight className="w-3 h-3" />,
+    },
+    {
+      value: "square",
+      label: "Square",
+      icon: <Square className="w-3 h-3 fill-current" />,
+    },
+    {
+      value: "diamond",
+      label: "Diamond",
+      icon: <Diamond className="w-3 h-3 fill-current" />,
+    },
+  ];
+
+  const currentOption = capOptions.find((o) => o.value === value) || capOptions[0];
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={cn(
+          "flex items-center gap-1 p-1.5 rounded hover:bg-primary/20 transition-colors text-xs",
+          isOpen && "bg-primary/20"
+        )}
+        title={`${label} cap: ${currentOption.label}`}
+      >
+        {currentOption.icon}
+        <span className="text-[10px] text-muted-foreground">{label}</span>
+      </button>
+      {isOpen && (
+        <div
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex flex-col gap-0.5 p-1 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-lg min-w-[80px]"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {capOptions.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+              }}
+              className={cn(
+                "flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-primary/20 transition-colors",
+                value === option.value && "bg-primary/30"
+              )}
+            >
+              {option.icon}
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

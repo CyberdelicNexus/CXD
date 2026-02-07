@@ -61,16 +61,18 @@ export function PlanView() {
     if (!newTaskText.trim() || !project) return;
 
     // Create a new freeform element with task checkbox syntax
+    // Tasks go to the Task Inbox instead of random canvas positions
     const taskContent = `- [ ] ${newTaskText}`;
     const newElement = {
       id: uuidv4(),
       type: 'freeform' as const,
-      x: 100 + Math.random() * 200, // Random position
-      y: 100 + Math.random() * 200,
+      x: 0, // Position doesn't matter for inbox items
+      y: 0,
       width: 300,
       height: 100,
       zIndex: Date.now(), // Use timestamp for unique high z-index
       content: taskContent,
+      inInbox: true, // Mark as inbox item - not yet placed on canvas
       taskMetadata: {
         isActionable: true,
         status: 'not_started' as const,

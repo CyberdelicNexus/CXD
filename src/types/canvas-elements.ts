@@ -76,7 +76,8 @@ export interface ElementStyle {
   textColor?: string;
   fontFamily?: string;
   fontSize?: number;
-  fontWeight?: 'normal' | 'medium' | 'semibold' | 'bold';
+  fontWeight?: 'normal' | 'medium' | 'semibold' | 'bold' | '300';
+  textAlign?: 'left' | 'center' | 'right';
   fillOpacity?: number; // 0-100 for shapes
 }
 
@@ -116,6 +117,15 @@ export interface CanvasElementBase {
   boardId?: string | null; // ID of the board this element belongs to (null = root canvas)
   surface?: SurfaceType; // Which surface this element belongs to ('canvas' or 'hypercube')
   hypercubeTags?: HypercubeFaceTag[]; // Optional semantic face tags
+  inInbox?: boolean; // If true, element is in the Task Inbox (not yet placed on canvas)
+  groupId?: string; // ID of the group this element belongs to (for logical grouping)
+}
+
+// Canvas group for logical grouping of elements
+export interface CanvasGroup {
+  id: string;
+  elementIds: string[];
+  createdAt: number;
 }
 
 // Task metadata extension for Plan Tab integration
@@ -209,6 +219,9 @@ export interface ConnectorElement extends CanvasElementBase {
   strokeWidth?: number;
 }
 
+// Line end cap styles
+export type LineEndStyle = 'none' | 'dot' | 'arrow' | 'square' | 'diamond';
+
 // Line element (standalone, not connector) - free-floating SVG line
 export interface LineElement extends CanvasElementBase {
   type: 'line';
@@ -219,6 +232,8 @@ export interface LineElement extends CanvasElementBase {
     kind?: 'solid' | 'dashed' | 'dotted';
     widthPx?: number;
     color?: string;
+    startCap?: LineEndStyle;
+    endCap?: LineEndStyle;
   };
 }
 
@@ -293,6 +308,9 @@ export type CanvasElement =
   | BoardElement
   | ExperienceBlockElement;
 
+// Connector endpoint styles
+export type ConnectorEndStyle = 'none' | 'arrow' | 'dot' | 'diamond' | 'square';
+
 // Connection/Edge model with bend control
 export interface CanvasEdge {
   id: string;
@@ -300,13 +318,26 @@ export interface CanvasEdge {
   toNodeId: string;
   fromAnchor: 'top' | 'right' | 'bottom' | 'left';
   toAnchor: 'top' | 'right' | 'bottom' | 'left';
+  // Custom anchor offset (0-1 along the edge, 0.5 = center)
+  fromAnchorOffset?: number;
+  toAnchorOffset?: number;
   boardId?: string | null; // ID of the board this edge belongs to (null = root canvas)
   surface?: SurfaceType; // Which surface this edge belongs to ('canvas' or 'hypercube')
   bend?: { x: number; y: number }; // Control point for curve (world coordinates)
+  // Text label
+  label?: {
+    text: string;
+    fontSize?: number;
+    fontFamily?: string;
+    color?: string;
+    position?: number; // 0-1 along the path, 0.5 = center
+  };
   style?: {
     color?: string;
     thickness?: number;
-    arrowHead?: boolean;
+    arrowHead?: boolean; // Legacy, use endCap instead
+    startCap?: ConnectorEndStyle;
+    endCap?: ConnectorEndStyle;
     lineStyle?: 'solid' | 'dashed' | 'dotted';
   };
 }
@@ -374,20 +405,25 @@ export const SHAPE_TYPES: { type: ShapeType; label: string }[] = [
 ];
 
 // Helper function to get anchor position on an element
+// offset: 0-1 value where 0.5 is center (default)
 export function getAnchorPosition(
   element: CanvasElement,
-  anchor: 'top' | 'right' | 'bottom' | 'left'
+  anchor: 'top' | 'right' | 'bottom' | 'left',
+  offset: number = 0.5
 ): { x: number; y: number } {
   const { x, y, width, height } = element;
+  // Clamp offset to 0-1 range
+  const clampedOffset = Math.max(0, Math.min(1, offset));
+
   switch (anchor) {
     case 'top':
-      return { x: x + width / 2, y };
+      return { x: x + width * clampedOffset, y };
     case 'right':
-      return { x: x + width, y: y + height / 2 };
+      return { x: x + width, y: y + height * clampedOffset };
     case 'bottom':
-      return { x: x + width / 2, y: y + height };
+      return { x: x + width * clampedOffset, y: y + height };
     case 'left':
-      return { x, y: y + height / 2 };
+      return { x, y: y + height * clampedOffset };
   }
 }
 
@@ -398,13 +434,13 @@ export function getClosestAnchors(
 ): { from: 'top' | 'right' | 'bottom' | 'left'; to: 'top' | 'right' | 'bottom' | 'left' } {
   const fromCenter = { x: fromElement.x + fromElement.width / 2, y: fromElement.y + fromElement.height / 2 };
   const toCenter = { x: toElement.x + toElement.width / 2, y: toElement.y + toElement.height / 2 };
-  
+
   const dx = toCenter.x - fromCenter.x;
   const dy = toCenter.y - fromCenter.y;
-  
+
   let fromAnchor: 'top' | 'right' | 'bottom' | 'left';
   let toAnchor: 'top' | 'right' | 'bottom' | 'left';
-  
+
   if (Math.abs(dx) > Math.abs(dy)) {
     fromAnchor = dx > 0 ? 'right' : 'left';
     toAnchor = dx > 0 ? 'left' : 'right';
@@ -412,7 +448,7 @@ export function getClosestAnchors(
     fromAnchor = dy > 0 ? 'bottom' : 'top';
     toAnchor = dy > 0 ? 'top' : 'bottom';
   }
-  
+
   return { from: fromAnchor, to: toAnchor };
 }
 
@@ -422,19 +458,19 @@ export function getAutoAnchorPosition(
   sourcePoint: { x: number; y: number }
 ): { x: number; y: number } {
   const { x, y, width, height } = element;
-  
+
   // Clamp source point to element rectangle edges
   const clampedX = Math.max(x, Math.min(x + width, sourcePoint.x));
   const clampedY = Math.max(y, Math.min(y + height, sourcePoint.y));
-  
+
   // Determine which edge is closest
   const distToLeft = Math.abs(clampedX - x);
   const distToRight = Math.abs(clampedX - (x + width));
   const distToTop = Math.abs(clampedY - y);
   const distToBottom = Math.abs(clampedY - (y + height));
-  
+
   const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
-  
+
   if (minDist === distToLeft) {
     return { x, y: clampedY };
   } else if (minDist === distToRight) {
@@ -452,27 +488,27 @@ export function getNearestAnchor(
   sourcePoint: { x: number; y: number }
 ): 'top' | 'right' | 'bottom' | 'left' {
   const { x, y, width, height } = element;
-  
+
   const anchors = {
     top: { x: x + width / 2, y, anchor: 'top' as const },
     right: { x: x + width, y: y + height / 2, anchor: 'right' as const },
     bottom: { x: x + width / 2, y: y + height, anchor: 'bottom' as const },
     left: { x, y: y + height / 2, anchor: 'left' as const },
   };
-  
+
   let nearestAnchor: 'top' | 'right' | 'bottom' | 'left' = 'top';
   let minDistance = Infinity;
-  
+
   for (const anchor of Object.values(anchors)) {
     const dx = anchor.x - sourcePoint.x;
     const dy = anchor.y - sourcePoint.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    
+
     if (distance < minDistance) {
       minDistance = distance;
       nearestAnchor = anchor.anchor;
     }
   }
-  
+
   return nearestAnchor;
 }

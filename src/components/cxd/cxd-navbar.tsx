@@ -32,6 +32,7 @@ import {
   ChevronRight,
   Palette,
   Loader2,
+  Home,
 } from "lucide-react";
 import { Link } from "lucide-react";
 import NextLink from "next/link";
@@ -95,6 +96,8 @@ export function CXDNavbar() {
     setFocusedSection,
     updateProjectName,
     updateCanvasBackground,
+    boardPath,
+    navigateToBoardPath,
   } = useCXDStore();
   const { toast } = useToast();
   const project = getCurrentProject();
@@ -305,6 +308,74 @@ export function CXDNavbar() {
                   </div>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Breadcrumbs - shown when inside a board */}
+              {boardPath && boardPath.length > 0 && (
+                <div className="flex items-center gap-1 ml-3 pl-3 border-l border-white/10 max-w-[400px]">
+                  <button
+                    onClick={() => navigateToBoardPath(-1)}
+                    className="flex items-center gap-1 text-white/60 hover:text-white transition-colors text-sm flex-shrink-0"
+                  >
+                    <Home className="w-3.5 h-3.5" />
+                  </button>
+                  {boardPath.length <= 3 ? (
+                    // Show all breadcrumbs if 3 or fewer
+                    boardPath.map((board, index) => (
+                      <div key={board.id} className="flex items-center flex-shrink-0">
+                        <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
+                        <button
+                          onClick={() => navigateToBoardPath(index)}
+                          className={`text-sm transition-colors truncate max-w-[100px] ${
+                            index === boardPath.length - 1
+                              ? "text-primary font-medium"
+                              : "text-white/60 hover:text-white"
+                          }`}
+                          title={board.title}
+                        >
+                          {board.title}
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    // Show first, ellipsis, and last 2 when more than 3
+                    <>
+                      <div className="flex items-center flex-shrink-0">
+                        <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
+                        <button
+                          onClick={() => navigateToBoardPath(0)}
+                          className="text-sm text-white/60 hover:text-white transition-colors truncate max-w-[80px]"
+                          title={boardPath[0].title}
+                        >
+                          {boardPath[0].title}
+                        </button>
+                      </div>
+                      <div className="flex items-center flex-shrink-0">
+                        <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
+                        <span className="text-sm text-white/40">...</span>
+                      </div>
+                      {boardPath.slice(-2).map((board, idx) => {
+                        const index = boardPath.length - 2 + idx;
+                        return (
+                          <div key={board.id} className="flex items-center flex-shrink-0">
+                            <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
+                            <button
+                              onClick={() => navigateToBoardPath(index)}
+                              className={`text-sm transition-colors truncate max-w-[100px] ${
+                                index === boardPath.length - 1
+                                  ? "text-primary font-medium"
+                                  : "text-white/60 hover:text-white"
+                              }`}
+                              title={board.title}
+                            >
+                              {board.title}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -316,7 +387,7 @@ export function CXDNavbar() {
             {[
               { id: 'wizard', label: 'Framing', icon: Brain, mode: 'wizard', color: 'magenta' },
               { id: 'canvas', label: 'Canvas', icon: Grid3X3, mode: 'canvas', canvasMode: 'canvas', color: 'violet' },
-              { id: 'hypercube', label: 'Map', icon: Box, mode: 'canvas', canvasMode: 'hypercube', color: 'cyan' },
+              { id: 'hypercube', label: 'Map', icon: Box, mode: 'canvas', canvasMode: 'hexagon', color: 'cyan' },
               { id: 'plan', label: 'Plan', icon: ListTodo, mode: 'canvas', canvasMode: 'plan', color: 'emerald' },
             ].map((btn) => {
               const isActive = btn.id === 'wizard'
