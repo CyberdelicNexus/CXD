@@ -20,6 +20,7 @@ import {
   ShapeType,
   HypercubeFaceTag,
   HYPERCUBE_FACE_TAGS,
+  ElementStyle,
 } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +28,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useCXDStore } from "@/store/cxd-store";
 import {
   CXDProject,
@@ -100,6 +108,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
+import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
+import { parseAssignees, serializeAssignees } from "@/components/cxd/plan/assignee-utils";
 
 // Hypercube tag icons mapping (defined at top for use in JSX)
 const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
@@ -152,6 +162,7 @@ interface CanvasElementRendererProps {
     toAnchor: "top" | "right" | "bottom" | "left",
   ) => void;
   isConnecting?: boolean;
+  showConnectorAnchors?: boolean;
   isHoverTarget?: boolean;
   onOpenExperiencePanel?: (sectionId: InspectorSectionId) => void;
   hoveredAnchor?: string | null;
@@ -179,6 +190,7 @@ export function CanvasElementRenderer({
   onStartConnector,
   onEndConnector,
   isConnecting,
+  showConnectorAnchors = false,
   isHoverTarget,
   onOpenExperiencePanel,
   hoveredAnchor,
@@ -204,7 +216,6 @@ export function CanvasElementRenderer({
   const [showTextStyleMenu, setShowTextStyleMenu] = useState(false);
   const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
   const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
-  const [isEditingTaskDueDate, setIsEditingTaskDueDate] = useState(false);
   const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
   const [newTaskTag, setNewTaskTag] = useState('');
   const elementRef = useRef<HTMLDivElement>(null);
@@ -618,7 +629,7 @@ export function CanvasElementRenderer({
         element.locked && "opacity-60 cursor-not-allowed",
         // Highlight effect (from hypercube navigation)
         isHighlighted &&
-        "ring-4 ring-cyan-400 shadow-[0_0_40px_rgba(34,211,238,0.6)] animate-pulse",
+        "ring-2 ring-purple-400/70 shadow-[0_0_24px_rgba(167,139,250,0.35)] animate-pulse",
         // Selection ring for non-text elements (excluding lines which handle their own visualization)
         isSelected &&
         !isHighlighted &&
@@ -682,7 +693,7 @@ export function CanvasElementRenderer({
       onDoubleClick={handleDoubleClick}
     >
       {/* Connection anchors - shown when connecting or hovering (not for line elements) */}
-      {(isConnecting || isSelected) &&
+      {(showConnectorAnchors || isConnecting || isSelected) &&
         onStartConnector &&
         element.type !== "line" && (
           <>
@@ -2702,17 +2713,17 @@ function GradientPicker({
 }) {
   const gradients = [
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)", // 1 - Keep original
-    "linear-gradient(135deg, #290d56ff 0%, #4c1d95 30%, #3b0764 70%, #2d0552 100%)", // 2 - Darker purple
-    "linear-gradient(135deg, #3e0a2dff 0%rgba(14, 22, 65, 1)a8 30%, #871c69ff 70%, #000000ff 100%)", // 3 - Darker violet
-    "linear-gradient(135deg, #a21caf 0%, #86198f 30%, #701a75 70%, #581c87 100%)", // 4 - Darker pink/purple
-    "linear-gradient(135deg, #000d10ff 0%, #063a48ff 30%, #0b323eff 70%, #01455eff 100%)", // 5 - Darker cyan
-    "linear-gradient(135deg, #0f766e 0%, #115e59 30%, #134e4a 70%, #0f3d3b 100%)", // 6 - Darker teal
-    "linear-gradient(135deg, #4f46e5 0%, #4338ca 30%, #3730a3 70%, #312e81 100%)", // 7 - Darker indigo
+    "linear-gradient(135deg, #290d56ff 0%, #460e3bff 30%, #3b0764 70%, #2d0552 100%)", // 2 - Darker purple
+    "linear-gradient(135deg, #000000ff 0%, #000000ff 30%, #1a0a2dff 70%, #2f0330ff 100%)", // 3 - Darker violet
+    "linear-gradient(135deg, #2d2d2dff 0%, #000000ff 30%, #000000ff 70%, #323232ff 100%)", // 4 - Darker pink/purple
+    "linear-gradient(135deg, #000d10ff 0%, #063a48ff 30%, #0b323eff 70%, #01080bff 100%)", // 5 - Darker cyan
+    "linear-gradient(135deg, #052320ff 0%, #000d0cff 30%, #091337ff 70%, #072012ff 100%)", // 6 - Darker teal
+    "linear-gradient(135deg, #2d0064ff 0%, #22061cff 30%, #3c2f0aff 70%, #292e04ff 100%)", // 7 - Darker indigo
     "linear-gradient(135deg, #140927ff 0%, #2d1807ff 30%, #260e4dff 70%, #240e06ff 100%)", // 8 - Darker lavender
-    "linear-gradient(135deg, #1e40af 0%, #1e3a8a 30%, #1e293b 70%, #0f172a 100%)", // 9 - Keep original
+    "linear-gradient(135deg, #afa01eff 0%, #513812ff 20%, #390021ff 50%, #000000ff 100%)", // 9 - Keep original
     "linear-gradient(135deg, #1e0434ff 0%, #146065ff 30%, #34092aff 70%, #043634ff 100%)", // 10 - Keep original
-    "linear-gradient(135deg, #3e0c04ff 0%, #510808ff 30%, #281105ff 70%, #451a03 100%)", // 11 - Darker orange
-    "linear-gradient(135deg, #093a1bff 0%, #073b1bff 30%, #0b2917ff 70%, #052e16 100%)", // 12 - Darker green
+    "linear-gradient(135deg, #3e0c04ff 0%, #510808ff 30%, #280505ff 70%, #2b0000ff 100%)", // 11 - Darker orange
+    "linear-gradient(135deg, #093a1bff 0%, #00240eff 30%, #000000ff 70%, #052e16 100%)", // 12 - Darker green
   ];
 
   return (
@@ -3145,9 +3156,6 @@ function FreeformCard({
   const subtaskRefs = useRef<Map<string, HTMLTextAreaElement | null>>(new Map());
   const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
   const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
-  const [isEditingTaskDueDate, setIsEditingTaskDueDate] = useState(false);
-  const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
-  const [newTaskTag, setNewTaskTag] = useState('');
   const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
 
   // Get the store methods for navigation
@@ -3834,6 +3842,48 @@ function FreeformCard({
       {/* Task Properties Display - only show for actionable cards */}
       {isActionable && element.taskMetadata && (
         <div className="px-3 pb-3 pt-1 border-t border-white/10 space-y-2">
+          {/* Status - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Status:</span>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={(e) => e.stopPropagation()}
+                  className="h-6 rounded bg-zinc-900/80 border border-zinc-700/70 px-2 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-purple-400/40"
+                >
+                  {(element.taskMetadata.status || "not_started").replace("_", " ")}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="z-[230] bg-zinc-950/95 border border-zinc-700/70 text-zinc-100 rounded-lg p-1.5 min-w-[150px]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {[
+                  { value: "not_started", label: "Not Started" },
+                  { value: "in_progress", label: "In Progress" },
+                  { value: "blocked", label: "Blocked" },
+                  { value: "completed", label: "Completed" },
+                ].map((statusOpt) => (
+                  <DropdownMenuItem
+                    key={statusOpt.value}
+                    className="text-xs rounded-md hover:bg-zinc-800/80 focus:bg-zinc-800/80"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdate({
+                        taskMetadata: {
+                          ...element.taskMetadata,
+                          status: statusOpt.value as any,
+                        },
+                      } as Partial<FreeformElement>);
+                    }}
+                  >
+                    {statusOpt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
           {/* Priority - Editable */}
           <div className="flex items-center gap-2 text-xs">
             <span className="text-white/50 min-w-[60px]">Priority:</span>
@@ -3918,160 +3968,76 @@ function FreeformCard({
             </div>
           </div>
 
+          {/* Start Date - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Start:</span>
+            <DatePicker
+              date={element.taskMetadata.startDate ? new Date(element.taskMetadata.startDate) : undefined}
+              onSelect={(nextDate) => {
+                onUpdate({
+                  taskMetadata: {
+                    ...element.taskMetadata,
+                    startDate: nextDate ? nextDate.toISOString() : undefined,
+                  }
+                } as Partial<FreeformElement>);
+              }}
+              placeholder="Set Start"
+              fitContent
+              triggerClassName="h-6 px-2 py-0.5 text-[11px] bg-zinc-900/80 border-zinc-700/70 text-zinc-100"
+            />
+          </div>
+
           {/* Due Date - Editable */}
           <div className="flex items-center gap-2 text-xs">
             <span className="text-white/50 min-w-[60px]">Due:</span>
-            {isEditingTaskDueDate ? (
-              <input
-                type="date"
-                value={element.taskMetadata.dueDate ? new Date(element.taskMetadata.dueDate).toISOString().split('T')[0] : ''}
-                onChange={(e) => {
-                  const dateValue = e.target.value ? new Date(e.target.value).toISOString() : undefined;
+            <DatePicker
+              date={element.taskMetadata.dueDate ? new Date(element.taskMetadata.dueDate) : undefined}
+              onSelect={(nextDate) => {
+                onUpdate({
+                  taskMetadata: {
+                    ...element.taskMetadata,
+                    dueDate: nextDate ? nextDate.toISOString() : undefined,
+                  }
+                } as Partial<FreeformElement>);
+              }}
+              placeholder="Set Due Date"
+              fitContent
+              triggerClassName="h-6 px-2 py-0.5 text-[11px] bg-zinc-900/80 border-zinc-700/70 text-zinc-100"
+            />
+          </div>
+
+          {/* Assignee - Editable */}
+          <div className="flex items-start gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Assignee:</span>
+            <div className="min-w-0 flex-1 space-y-1">
+              <AssigneeMultiSelect
+                value={parseAssignees(element.taskMetadata.assignee)}
+                onChange={(next) => {
                   onUpdate({
                     taskMetadata: {
                       ...element.taskMetadata,
-                      dueDate: dateValue,
-                    }
+                      assignee: serializeAssignees(next),
+                    },
                   } as Partial<FreeformElement>);
-                  setIsEditingTaskDueDate(false);
                 }}
-                onBlur={() => setIsEditingTaskDueDate(false)}
-                onClick={(e) => e.stopPropagation()}
-                className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-400/50 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                autoFocus
+                compact
+                iconOnly
               />
-            ) : element.taskMetadata.dueDate ? (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditingTaskDueDate(true);
-                }}
-                className="px-2 py-0.5 rounded text-white/70 hover:bg-white/10 transition-all group/date flex items-center gap-1"
-              >
-                {new Date(element.taskMetadata.dueDate).toLocaleDateString()}
-                <X
-                  className="w-2.5 h-2.5 opacity-0 group-hover/date:opacity-100 transition-opacity"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onUpdate({
-                      taskMetadata: {
-                        ...element.taskMetadata,
-                        dueDate: undefined,
-                      }
-                    } as Partial<FreeformElement>);
-                  }}
-                />
-              </button>
-            ) : (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditingTaskDueDate(true);
-                }}
-                className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
-              >
-                Set Due Date
-              </button>
-            )}
-          </div>
-
-          {/* Tags - Editable */}
-          {(element.taskMetadata.customTags && element.taskMetadata.customTags.length > 0) || isAddingTaskTag ? (
-            <div className="flex items-start gap-2 text-xs">
-              <span className="text-white/50 min-w-[60px] mt-0.5">Tags:</span>
-              <div className="flex flex-wrap gap-1.5 flex-1">
-                {element.taskMetadata.customTags?.map((tag, idx) => (
+              <div className="flex flex-wrap gap-1">
+                {parseAssignees(element.taskMetadata.assignee).length === 0 && (
+                  <span className="text-[10px] text-white/45">Unassigned</span>
+                )}
+                {parseAssignees(element.taskMetadata.assignee).map((name) => (
                   <span
-                    key={idx}
-                    className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 flex items-center gap-1 group/tag hover:ring-1 hover:ring-white/20 transition-all"
+                    key={name}
+                    className="px-1.5 py-0.5 rounded-md text-[10px] bg-white/10 text-white/85 border border-white/15"
                   >
-                    {tag}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const updatedTags = element.taskMetadata?.customTags?.filter((_, i) => i !== idx) || [];
-                        onUpdate({
-                          taskMetadata: {
-                            ...element.taskMetadata,
-                            customTags: updatedTags,
-                          }
-                        } as Partial<FreeformElement>);
-                      }}
-                      className="opacity-0 group-hover/tag:opacity-100 transition-opacity"
-                    >
-                      <X className="w-2.5 h-2.5" />
-                    </button>
+                    {name}
                   </span>
                 ))}
-
-                {isAddingTaskTag ? (
-                  <input
-                    type="text"
-                    value={newTaskTag}
-                    onChange={(e) => setNewTaskTag(e.target.value)}
-                    onBlur={() => {
-                      if (newTaskTag.trim()) {
-                        const currentTags = element.taskMetadata?.customTags || [];
-                        onUpdate({
-                          taskMetadata: {
-                            ...element.taskMetadata,
-                            customTags: [...currentTags, newTaskTag.trim()],
-                          }
-                        } as Partial<FreeformElement>);
-                      }
-                      setNewTaskTag('');
-                      setIsAddingTaskTag(false);
-                    }}
-                    onKeyDown={(e) => {
-                      e.stopPropagation();
-                      if (e.key === 'Enter' && newTaskTag.trim()) {
-                        const currentTags = element.taskMetadata?.customTags || [];
-                        onUpdate({
-                          taskMetadata: {
-                            ...element.taskMetadata,
-                            customTags: [...currentTags, newTaskTag.trim()],
-                          }
-                        } as Partial<FreeformElement>);
-                        setNewTaskTag('');
-                        setIsAddingTaskTag(false);
-                      }
-                      if (e.key === 'Escape') {
-                        setNewTaskTag('');
-                        setIsAddingTaskTag(false);
-                      }
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    placeholder="Tag name"
-                    className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-400/50 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400 w-20"
-                    autoFocus
-                  />
-                ) : (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsAddingTaskTag(true);
-                    }}
-                    className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
-                  >
-                    + Tag
-                  </button>
-                )}
               </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50 min-w-[60px]">Tags:</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsAddingTaskTag(true);
-                }}
-                className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
-              >
-                Add Tag
-              </button>
-            </div>
-          )}
+          </div>
         </div>
       )}
       {/* View in Plan button - only for actionable cards */}

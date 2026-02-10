@@ -56,6 +56,7 @@ const FACE_IDENTITY: Record<string, {
 interface DiagnosticPanelProps {
   diagnostics: Diagnostic[];
   onFaceReference?: (faceId: string) => void;
+  onInsightClick?: (message: string) => void;
   isOpen: boolean;
   onToggle: () => void;
 }
@@ -115,7 +116,7 @@ const SEVERITY_CONFIG = {
   }
 };
 
-export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle }: DiagnosticPanelProps) {
+export function DiagnosticPanel({ diagnostics, onFaceReference, onInsightClick, isOpen, onToggle }: DiagnosticPanelProps) {
   // Get dynamic background color from canvas background
   const project = useCXDStore(state => state.getCurrentProject());
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
@@ -241,8 +242,11 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, isOpen, onToggle
                           "rounded-lg p-3 border transition-all",
                           severityConfig.bg,
                           severityConfig.border,
-                          "hover:bg-opacity-20"
+                          "hover:bg-opacity-20",
+                          onInsightClick && "cursor-pointer hover:ring-1 hover:ring-white/10"
                         )}
+                        onClick={() => onInsightClick?.(diagnostic.message)}
+                        title={onInsightClick ? "Click to ask about this insight" : undefined}
                       >
                         <p className={cn(
                           "text-sm leading-relaxed",

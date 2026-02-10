@@ -136,10 +136,18 @@ export interface Subtask {
   text: string;
   isCompleted: boolean;
   order: number;
+  customProperties?: Record<string, any>; // Custom properties (e.g., startDate, dueDate for Gantt)
+}
+
+export interface TaskDependencyMeta {
+  taskId: string;
+  type: 'finish-to-start' | 'start-to-start' | 'finish-to-finish' | 'start-to-finish';
+  lag?: number;
 }
 
 export interface TaskMetadata {
   isActionable?: boolean;            // Explicit actionable marker
+  isArchived?: boolean;              // Archived tasks are hidden from active plan views
   status?: 'not_started' | 'in_progress' | 'completed' | 'blocked';
   priority?: 'low' | 'medium' | 'high' | 'urgent';
   taskType?: TaskType;               // Task categorization
@@ -153,6 +161,7 @@ export interface TaskMetadata {
   customTags?: string[];
   customProperties?: Record<string, string | number | boolean>; // User-defined properties
   subtasks?: Subtask[];              // Direct subtask storage (not markdown)
+  dependencies?: TaskDependencyMeta[]; // Gantt chart task dependencies
 }
 
 // Freeform Card (Post-it style)
@@ -318,6 +327,9 @@ export interface CanvasEdge {
   toNodeId: string;
   fromAnchor: 'top' | 'right' | 'bottom' | 'left';
   toAnchor: 'top' | 'right' | 'bottom' | 'left';
+  // Auto anchor resolves to nearest cardinal side based on the opposite node.
+  fromAutoAnchor?: boolean;
+  toAutoAnchor?: boolean;
   // Custom anchor offset (0-1 along the edge, 0.5 = center)
   fromAnchorOffset?: number;
   toAnchorOffset?: number;

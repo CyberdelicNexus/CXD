@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { CanvasElement, FreeformElement, Subtask } from "@/types/canvas-elements";
-import { cn } from "@/lib/utils";
+import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Inbox, GripVertical, X, ArrowRight, CheckSquare, ChevronDown, Circle, CheckCircle2, Archive, Calendar, Tag, ListTodo, Clock, AlertCircle } from "lucide-react";
 import { useCXDStore } from "@/store/cxd-store";
 
@@ -28,6 +28,7 @@ export function TaskInbox({
     const currentProject = state.getCurrentProject();
     return currentProject?.canvasLayout?.elements || [];
   });
+  const project = useCXDStore(state => state.getCurrentProject());
 
   // Filter inbox items with useMemo to prevent unnecessary re-renders
   const inboxItems = useMemo(() => {
@@ -40,6 +41,10 @@ export function TaskInbox({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isDragOverInbox, setIsDragOverInbox] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
+  const inboxButtonBg = hexToRgba(centerColor, 0.72);
+  const inboxPanelBg = hexToRgba(centerColor, 0.86);
 
   // Filter items by status
   const filteredItems = inboxItems.filter(item => {
@@ -59,6 +64,21 @@ export function TaskInbox({
     }
     setPrevCount(inboxItems.length);
   }, [inboxItems.length, prevCount]);
+
+  useEffect(() => {
+    const handlePulseInbox = (event: Event) => {
+      const customEvent = event as CustomEvent<{ durationMs?: number }>;
+      const durationMs = customEvent.detail?.durationMs ?? 3000;
+      setIsGlowing(true);
+      const timeout = setTimeout(() => setIsGlowing(false), durationMs);
+      return () => clearTimeout(timeout);
+    };
+
+    window.addEventListener('cxd:pulse-task-inbox', handlePulseInbox as EventListener);
+    return () => {
+      window.removeEventListener('cxd:pulse-task-inbox', handlePulseInbox as EventListener);
+    };
+  }, []);
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -134,14 +154,15 @@ export function TaskInbox({
           }
         }}
         className={cn(
-          "absolute left-4 top-6 z-50 w-12 h-12 rounded-full",
+          "absolute left-7 top-7 z-50 w-12 h-12 rounded-full",
           "flex items-center justify-center",
-          "bg-card/90 backdrop-blur-xl border border-border/50",
+          "backdrop-blur-xl border border-border/50",
           "shadow-lg hover:shadow-xl transition-all duration-300",
           "hover:scale-105 active:scale-95",
           isOpen && "ring-2 ring-primary/50",
-          (isGlowing || isDragOverInbox) && "animate-pulse ring-2 ring-purple-400/70 shadow-[0_0_20px_rgba(192,132,252,0.5)]"
+          (isGlowing || isDragOverInbox) && "animate-pulse ring-2 ring-purple-400/40 shadow-[0_0_16px_rgba(167,139,250,0.28)]"
         )}
+        style={{ backgroundColor: inboxButtonBg }}
       >
         <Inbox className={cn(
           "w-5 h-5 transition-colors",
@@ -169,11 +190,12 @@ export function TaskInbox({
         data-prevent-canvas-wheel="true"
         className={cn(
           "absolute left-0 top-0 h-full z-40",
-          "bg-card/95 backdrop-blur-xl border-r border-border/50",
+          "backdrop-blur-xl border-r border-border/50",
           "shadow-2xl transition-all duration-300 ease-out",
           "flex flex-col",
           isOpen ? "w-80 translate-x-0" : "w-80 -translate-x-full pointer-events-none"
         )}
+        style={{ backgroundColor: inboxPanelBg }}
       >
         {/* Panel Header */}
         <div className="px-4 py-4 border-b border-border/30 mt-16">
@@ -398,11 +420,14 @@ function TaskInboxCard({
   // Handle archive
   const handleArchive = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    // Remove inInbox flag to archive the task
     updateCanvasElement(element.id, {
       inInbox: false,
+      taskMetadata: {
+        ...(freeformElement.taskMetadata || {}),
+        isArchived: true,
+      }
     });
-  }, [element.id, updateCanvasElement]);
+  }, [element.id, freeformElement.taskMetadata, updateCanvasElement]);
 
   // Handle priority change
   const handlePriorityChange = useCallback((newPriority: string) => {

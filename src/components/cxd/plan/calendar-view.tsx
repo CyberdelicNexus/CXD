@@ -1,12 +1,19 @@
-'use client';
+﻿'use client';
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { TaskProjection } from '@/types/plan-types';
 import { HYPERCUBE_FACE_COLORS } from '@/types/plan-types';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, ArrowRight, GripVertical } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, GripVertical } from 'lucide-react';
 
 interface CalendarViewProps {
   tasks: TaskProjection[];
@@ -16,424 +23,624 @@ interface CalendarViewProps {
 }
 
 type CalendarViewMode = 'month' | 'week' | 'day';
+type BlockDragMode = 'move' | 'resize';
 
-interface DragState {
+interface TimeAllocation {
+  id: string;
   taskId: string;
-  edge: 'start' | 'end' | 'move';
-  initialX: number;
-  initialDate: Date;
-  initialEndDate?: Date;
+  dateKey: string;
+  startHour: number;
+  durationHours: number;
 }
+
+interface BlockDragState {
+  allocationId: string;
+  mode: BlockDragMode;
+  startX: number;
+  startY: number;
+  initialStartHour: number;
+  initialDurationHours: number;
+  initialDateKey: string;
+}
+
+type CalendarColorBy = 'default' | 'status' | 'priority' | 'assignee' | 'faces';
+
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const HOUR_HEIGHT = 64;
+
+const toDayKey = (date: Date) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString().split('T')[0];
+};
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const parseDayKey = (dayKey: string) => {
+  const d = new Date(dayKey);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: CalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  const calendarRef = useRef<HTMLDivElement>(null);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [draggedMonthTask, setDraggedMonthTask] = useState<{ taskId: string; sourceDayKey: string } | null>(null);
+  const [colorBy, setColorBy] = useState<CalendarColorBy>(() => {
+    if (typeof window === 'undefined') return 'status';
+    return (localStorage.getItem('calendar-color') as CalendarColorBy) || 'status';
+  });
+  const [blockDragState, setBlockDragState] = useState<BlockDragState | null>(null);
+  const [allocations, setAllocations] = useState<TimeAllocation[]>(() => {
+    if (typeof window === 'undefined') return [];
+    const raw = localStorage.getItem('calendar-time-allocations');
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw) as TimeAllocation[];
+    } catch {
+      return [];
+    }
+  });
 
-  // Generate calendar days based on view mode
+  const timelineGridRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    localStorage.setItem('calendar-time-allocations', JSON.stringify(allocations));
+  }, [allocations]);
+  useEffect(() => {
+    localStorage.setItem('calendar-color', colorBy);
+  }, [colorBy]);
+
   const calendarDays = useMemo(() => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    const days: Date[] = [];
 
     if (viewMode === 'day') {
-      // Single day view
-      days.push(new Date(currentDate));
-    } else if (viewMode === 'week') {
-      // Week view - start from Sunday
-      const startOfWeek = new Date(currentDate);
-      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-      for (let i = 0; i < 7; i++) {
-        const day = new Date(startOfWeek);
-        day.setDate(day.getDate() + i);
-        days.push(day);
-      }
-    } else {
-      // Month view
-      // First day of the month
-      const firstDay = new Date(year, month, 1);
-      // Last day of the month
-      const lastDay = new Date(year, month + 1, 0);
-
-      // Start from the Sunday before or on the first day
-      const startDate = new Date(firstDay);
-      startDate.setDate(startDate.getDate() - startDate.getDay());
-
-      // End on the Saturday after or on the last day
-      const endDate = new Date(lastDay);
-      endDate.setDate(endDate.getDate() + (6 - endDate.getDay()));
-
-      // Generate all days
-      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-        days.push(new Date(d));
-      }
+      return [new Date(currentDate)];
     }
 
+    if (viewMode === 'week') {
+      const startOfWeek = addDays(currentDate, -currentDate.getDay());
+      return Array.from({ length: 7 }, (_, i) => addDays(startOfWeek, i));
+    }
+
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDate = addDays(firstDay, -firstDay.getDay());
+    const endDate = addDays(lastDay, 6 - lastDay.getDay());
+
+    const days: Date[] = [];
+    for (let d = new Date(startDate); d <= endDate; d = addDays(d, 1)) {
+      days.push(new Date(d));
+    }
     return days;
   }, [currentDate, viewMode]);
 
-  // Group tasks by date - and also track spanning tasks
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskProjection[]>();
-    const spanningTasks: Array<{ task: TaskProjection; startDate: Date; endDate: Date }> = [];
 
     tasks.forEach((task) => {
-      if (task.dueDate) {
-        const dueDate = new Date(task.dueDate);
-        const startDate = task.startDate ? new Date(task.startDate) : dueDate;
-        
-        // If task spans multiple days, track it separately
-        if (task.startDate && startDate.toDateString() !== dueDate.toDateString()) {
-          spanningTasks.push({ task, startDate, endDate: dueDate });
-        }
-        
-        // Add task to all dates it spans
-        const currentDate = new Date(startDate);
-        while (currentDate <= dueDate) {
-          const dateKey = currentDate.toISOString().split('T')[0];
-          if (!map.has(dateKey)) {
-            map.set(dateKey, []);
-          }
-          map.get(dateKey)!.push(task);
-          currentDate.setDate(currentDate.getDate() + 1);
-        }
+      if (!task.dueDate) return;
+
+      const end = new Date(task.dueDate);
+      end.setHours(0, 0, 0, 0);
+      const start = task.startDate ? new Date(task.startDate) : new Date(end);
+      start.setHours(0, 0, 0, 0);
+
+      for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+        const key = toDayKey(d);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(task);
       }
     });
 
-    return { byDate: map, spanning: spanningTasks };
+    return map;
   }, [tasks]);
 
-  const handlePreviousMonth = () => {
-    const newDate = new Date(currentDate);
+  const selectedDayKey = toDayKey(selectedDate || currentDate);
+  const dayPanelTasks = tasksByDate.get(selectedDayKey) || [];
+
+  const timeViewDays = useMemo(() => {
     if (viewMode === 'day') {
-      newDate.setDate(newDate.getDate() - 1);
-    } else if (viewMode === 'week') {
-      newDate.setDate(newDate.getDate() - 7);
-    } else {
-      newDate.setMonth(newDate.getMonth() - 1);
+      const day = new Date(selectedDate || currentDate);
+      day.setHours(0, 0, 0, 0);
+      return [day];
     }
-    setCurrentDate(newDate);
+
+    if (viewMode === 'week') {
+      const weekStart = addDays(currentDate, -currentDate.getDay());
+      return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    }
+
+    return [] as Date[];
+  }, [viewMode, currentDate, selectedDate]);
+
+  const timeViewTaskPool = useMemo(() => {
+    if (viewMode === 'day') {
+      return dayPanelTasks;
+    }
+    const keys = new Set(timeViewDays.map(d => toDayKey(d)));
+    const seen = new Set<string>();
+    const pooled: TaskProjection[] = [];
+    keys.forEach((key) => {
+      (tasksByDate.get(key) || []).forEach((task) => {
+        if (!seen.has(task.id)) {
+          seen.add(task.id);
+          pooled.push(task);
+        }
+      });
+    });
+    return pooled;
+  }, [viewMode, dayPanelTasks, timeViewDays, tasksByDate]);
+
+  const tasksById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
+
+  const allocationsByDay = useMemo(() => {
+    const map = new Map<string, TimeAllocation[]>();
+    allocations.forEach((allocation) => {
+      if (!map.has(allocation.dateKey)) map.set(allocation.dateKey, []);
+      map.get(allocation.dateKey)!.push(allocation);
+    });
+    return map;
+  }, [allocations]);
+
+  const handlePrevious = () => {
+    const next = new Date(currentDate);
+    if (viewMode === 'day') next.setDate(next.getDate() - 1);
+    else if (viewMode === 'week') next.setDate(next.getDate() - 7);
+    else next.setMonth(next.getMonth() - 1);
+    setCurrentDate(next);
   };
 
-  const handleNextMonth = () => {
-    const newDate = new Date(currentDate);
-    if (viewMode === 'day') {
-      newDate.setDate(newDate.getDate() + 1);
-    } else if (viewMode === 'week') {
-      newDate.setDate(newDate.getDate() + 7);
-    } else {
-      newDate.setMonth(newDate.getMonth() + 1);
-    }
-    setCurrentDate(newDate);
+  const handleNext = () => {
+    const next = new Date(currentDate);
+    if (viewMode === 'day') next.setDate(next.getDate() + 1);
+    else if (viewMode === 'week') next.setDate(next.getDate() + 7);
+    else next.setMonth(next.getMonth() + 1);
+    setCurrentDate(next);
   };
 
   const handleToday = () => {
-    setCurrentDate(new Date());
-  };
-
-  const handleDayClick = (date: Date) => {
-    setSelectedDate(date.toDateString() === selectedDate?.toDateString() ? null : date);
-  };
-
-  const handleDayDoubleClick = (date: Date) => {
-    setCurrentDate(date);
-    setViewMode('day');
-  };
-
-  const handleDragStart = (taskId: string, edge: 'start' | 'end' | 'move', e: React.MouseEvent) => {
-    if (!onTaskUpdate) return;
-    e.preventDefault();
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-
-    setDragState({
-      taskId,
-      edge,
-      initialX: e.clientX,
-      initialDate: task.startDate ? new Date(task.startDate) : new Date(task.dueDate!),
-      initialEndDate: task.dueDate ? new Date(task.dueDate) : undefined,
-    });
-  };
-
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!dragState || !onTaskUpdate || !calendarRef.current) return;
-
-    const task = tasks.find(t => t.id === dragState.taskId);
-    if (!task) return;
-
-    const deltaX = e.clientX - dragState.initialX;
-    const dayWidth = calendarRef.current.offsetWidth / 7; // Approximate day width
-    const daysDelta = Math.round(deltaX / dayWidth);
-
-    if (daysDelta === 0) return;
-
-    if (dragState.edge === 'move') {
-      const newStartDate = new Date(dragState.initialDate);
-      newStartDate.setDate(newStartDate.getDate() + daysDelta);
-      
-      const newEndDate = dragState.initialEndDate ? new Date(dragState.initialEndDate) : new Date(newStartDate);
-      if (dragState.initialEndDate) {
-        newEndDate.setDate(newEndDate.getDate() + daysDelta);
-      }
-
-      onTaskUpdate(dragState.taskId, {
-        startDate: newStartDate.toISOString(),
-        dueDate: newEndDate.toISOString(),
-      });
-    } else if (dragState.edge === 'start' && task.startDate) {
-      const newStartDate = new Date(dragState.initialDate);
-      newStartDate.setDate(newStartDate.getDate() + daysDelta);
-      onTaskUpdate(dragState.taskId, { startDate: newStartDate.toISOString() });
-    } else if (dragState.edge === 'end' && task.dueDate) {
-      const newEndDate = new Date(dragState.initialEndDate || dragState.initialDate);
-      newEndDate.setDate(newEndDate.getDate() + daysDelta);
-      onTaskUpdate(dragState.taskId, { dueDate: newEndDate.toISOString() });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setDragState(null);
-  };
-
-  // Attach mouse event listeners
-  useEffect(() => {
-    if (dragState) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      return () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-      };
-    }
-  }, [dragState]);
-
-  const isToday = (date: Date) => {
     const today = new Date();
-    return (
-      date.getDate() === today.getDate() &&
-      date.getMonth() === today.getMonth() &&
-      date.getFullYear() === today.getFullYear()
-    );
+    setCurrentDate(today);
+    setSelectedDate(today);
   };
 
-  const isCurrentMonth = (date: Date) => {
-    return date.getMonth() === currentDate.getMonth();
+  const isToday = (date: Date) => toDayKey(date) === toDayKey(new Date());
+  const isCurrentMonth = (date: Date) => date.getMonth() === currentDate.getMonth();
+
+  const getTaskColor = (task: TaskProjection) => {
+    if (colorBy === 'status') {
+      if (task.status === 'in_progress') return '#3B82F6';
+      if (task.status === 'completed') return '#10B981';
+      if (task.status === 'blocked') return '#EF4444';
+      return '#6B7280';
+    }
+    if (colorBy === 'priority') {
+      if (task.priority === 'urgent') return '#EF4444';
+      if (task.priority === 'high') return '#F97316';
+      if (task.priority === 'medium') return '#EAB308';
+      if (task.priority === 'low') return '#22C55E';
+      return '#6B7280';
+    }
+    if (colorBy === 'faces') {
+      const face = task.hypercubeTags[0];
+      return face ? HYPERCUBE_FACE_COLORS[face] : '#A78BFA';
+    }
+    if (colorBy === 'assignee') {
+      const seed = task.assignee || task.id;
+      let hash = 0;
+      for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+      const palette = ['#3B82F6', '#10B981', '#EAB308', '#EF4444', '#8B5CF6', '#06B6D4'];
+      return palette[Math.abs(hash) % palette.length];
+    }
+    return '#A78BFA';
+  };
+
+  const shiftTaskDatesByDays = (taskId: string, daysDelta: number) => {
+    if (!onTaskUpdate || daysDelta === 0) return;
+    const task = tasksById.get(taskId);
+    if (!task) return;
+
+    const due = task.dueDate ? new Date(task.dueDate) : null;
+    const start = task.startDate ? new Date(task.startDate) : null;
+    if (!due && !start) return;
+
+    const updates: Partial<TaskProjection> = {};
+    if (due) {
+      due.setDate(due.getDate() + daysDelta);
+      updates.dueDate = due.toISOString();
+    }
+    if (start) {
+      start.setDate(start.getDate() + daysDelta);
+      updates.startDate = start.toISOString();
+    } else if (updates.dueDate) {
+      updates.startDate = updates.dueDate;
+    }
+    onTaskUpdate(taskId, updates);
+  };
+
+  const moveTaskToDay = (taskId: string, targetDayKey: string) => {
+    const task = tasksById.get(taskId);
+    if (!task) return;
+    const anchor = task.dueDate ? parseDayKey(toDayKey(new Date(task.dueDate))) : task.startDate ? parseDayKey(toDayKey(new Date(task.startDate))) : null;
+    if (!anchor) return;
+    const target = parseDayKey(targetDayKey);
+    const deltaDays = Math.round((target.getTime() - anchor.getTime()) / (24 * 60 * 60 * 1000));
+    shiftTaskDatesByDays(taskId, deltaDays);
+  };
+
+  const createAllocation = (taskId: string, dateKey: string, startHour: number, durationHours: number = 1) => {
+    setAllocations(prev => [
+      ...prev,
+      {
+        id: `alloc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        taskId,
+        dateKey,
+        startHour: clamp(startHour, 0, 23),
+        durationHours: clamp(durationHours, 0.5, 8),
+      }
+    ]);
+  };
+
+  const removeAllocation = (allocationId: string) => {
+    setAllocations(prev => prev.filter(a => a.id !== allocationId));
+  };
+
+  const beginBlockDrag = (allocation: TimeAllocation, mode: BlockDragMode, event: React.MouseEvent) => {
+    event.stopPropagation();
+    event.preventDefault();
+    setBlockDragState({
+      allocationId: allocation.id,
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      initialStartHour: allocation.startHour,
+      initialDurationHours: allocation.durationHours,
+      initialDateKey: allocation.dateKey,
+    });
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = mode === 'resize' ? 'ns-resize' : 'grab';
+  };
+
+  useEffect(() => {
+    if (!blockDragState || !timelineGridRef.current) return;
+
+    const handleMove = (event: MouseEvent) => {
+      const dy = event.clientY - blockDragState.startY;
+      const hourDelta = dy / HOUR_HEIGHT;
+
+      setAllocations(prev => prev.map((allocation) => {
+        if (allocation.id !== blockDragState.allocationId) return allocation;
+
+        if (blockDragState.mode === 'resize') {
+          const nextDuration = clamp(Math.round((blockDragState.initialDurationHours + hourDelta) * 2) / 2, 0.5, 12);
+          const maxDuration = 24 - allocation.startHour;
+          return { ...allocation, durationHours: clamp(nextDuration, 0.5, maxDuration) };
+        }
+
+        const rect = timelineGridRef.current!.getBoundingClientRect();
+        const dayColumns = timeViewDays.length;
+        const colWidth = (rect.width - 72) / Math.max(dayColumns, 1);
+        const xInsideGrid = event.clientX - rect.left - 72;
+        const dayOffset = clamp(Math.floor(xInsideGrid / Math.max(colWidth, 1)), 0, Math.max(dayColumns - 1, 0));
+
+        const newDay = timeViewDays[dayOffset] || parseDayKey(blockDragState.initialDateKey);
+        const nextStart = clamp(Math.round((blockDragState.initialStartHour + hourDelta) * 2) / 2, 0, 23.5);
+        const boundedStart = Math.min(nextStart, 24 - allocation.durationHours);
+
+        return {
+          ...allocation,
+          dateKey: toDayKey(newDay),
+          startHour: boundedStart,
+        };
+      }));
+    };
+
+    const handleUp = () => {
+      if (blockDragState && onTaskUpdate) {
+        const finalAllocation = allocations.find(a => a.id === blockDragState.allocationId);
+        if (finalAllocation && finalAllocation.dateKey !== blockDragState.initialDateKey) {
+          const start = parseDayKey(blockDragState.initialDateKey);
+          const end = parseDayKey(finalAllocation.dateKey);
+          const deltaDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+          shiftTaskDatesByDays(finalAllocation.taskId, deltaDays);
+        }
+      }
+      setBlockDragState(null);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [blockDragState, timeViewDays, allocations, onTaskUpdate]);
+
+  const onTimeColumnDrop = (event: React.DragEvent, dateKey: string) => {
+    event.preventDefault();
+    if (!draggingTaskId) return;
+    const columnRect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const y = event.clientY - columnRect.top;
+    const startHour = clamp(Math.floor(y / HOUR_HEIGHT), 0, 23);
+    createAllocation(draggingTaskId, dateKey, startHour, 1);
+    moveTaskToDay(draggingTaskId, dateKey);
+    setDraggingTaskId(null);
+  };
+
+  const renderMonthView = () => (
+    <>
+      <div className="grid grid-cols-7 gap-2 mb-2">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+          <div key={day} className="text-center text-sm font-medium text-muted-foreground py-2">{day}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-2" style={{ gridAutoRows: 'minmax(140px, 1fr)' }}>
+        {calendarDays.map((date, i) => {
+          const dateKey = toDayKey(date);
+          const dayTasks = tasksByDate.get(dateKey) || [];
+          return (
+            <Card
+              key={i}
+              className={[
+                'p-2 cursor-pointer transition-all border hover:border-purple-500/40',
+                isCurrentMonth(date) ? 'bg-gradient-to-br from-black/40 to-black/20 border-white/10' : 'bg-black/10 opacity-55 border-white/5',
+                isToday(date) ? 'ring-1 ring-purple-500/40 border-purple-500/50' : ''
+              ].join(' ')}
+              onClick={() => setSelectedDate(date)}
+              onDragOver={(e) => {
+                if (draggedMonthTask) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (!draggedMonthTask) return;
+                const source = parseDayKey(draggedMonthTask.sourceDayKey);
+                const target = parseDayKey(dateKey);
+                const deltaDays = Math.round((target.getTime() - source.getTime()) / (24 * 60 * 60 * 1000));
+                shiftTaskDatesByDays(draggedMonthTask.taskId, deltaDays);
+                setDraggedMonthTask(null);
+              }}
+              onDoubleClick={() => {
+                setSelectedDate(date);
+                setCurrentDate(date);
+                setViewMode('day');
+              }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className={isToday(date) ? 'bg-purple-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center' : 'text-sm font-medium'}>
+                  {date.getDate()}
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                {dayTasks.slice(0, 4).map(task => (
+                  <button
+                    key={task.id}
+                    draggable
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      setDraggedMonthTask({ taskId: task.id, sourceDayKey: dateKey });
+                    }}
+                    onDragEnd={() => setDraggedMonthTask(null)}
+                    className="w-full text-left text-xs rounded border px-1.5 py-1 truncate"
+                    style={{
+                      borderColor: `${getTaskColor(task)}66`,
+                      backgroundColor: `${getTaskColor(task)}22`,
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTaskClick(task.id);
+                    }}
+                  >
+                    {task.title}
+                  </button>
+                ))}
+                {dayTasks.length > 4 && (
+                  <div className="text-[11px] text-muted-foreground px-1">+{dayTasks.length - 4} more</div>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  const renderTimeView = () => {
+    const dayCount = timeViewDays.length;
+
+    return (
+      <div className="h-full flex overflow-hidden">
+        {viewMode !== 'month' && (
+          <div className="w-72 shrink-0 border-r border-white/10 bg-black/20 p-3 overflow-y-auto gantt-scrollbar">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+              {viewMode === 'day' ? 'Day Tasks' : 'Week Tasks'}
+            </div>
+            <div className="space-y-2">
+              {timeViewTaskPool.map(task => (
+                <div
+                  key={task.id}
+                  draggable
+                  onDragStart={() => setDraggingTaskId(task.id)}
+                  className="rounded-lg border border-white/10 bg-black/45 hover:bg-black/60 cursor-grab p-2"
+                >
+                  <div className="text-sm font-medium truncate">{task.title}</div>
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="flex gap-1">
+                      {task.hypercubeTags.slice(0, 3).map(tag => (
+                        <span key={tag} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: HYPERCUBE_FACE_COLORS[tag] }} />
+                      ))}
+                    </div>
+                    <button
+                      className="text-xs text-muted-foreground hover:text-white"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTaskClick(task.id);
+                      }}
+                    >
+                      Open
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {timeViewTaskPool.length === 0 && (
+                <div className="text-xs text-muted-foreground">No tasks for this day.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto gantt-scrollbar" ref={timelineGridRef}>
+          <div className="min-w-[820px]">
+            <div className="sticky top-0 z-10 grid border-b border-white/10 bg-black/70 backdrop-blur-lg" style={{ gridTemplateColumns: `72px repeat(${dayCount}, minmax(180px, 1fr))` }}>
+              <div className="px-2 py-2 text-xs text-muted-foreground">Time</div>
+              {timeViewDays.map(day => (
+                <div key={toDayKey(day)} className="px-3 py-2 text-xs font-medium border-l border-white/10">
+                  {day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                </div>
+              ))}
+            </div>
+
+            <div className="relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
+              <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `72px repeat(${dayCount}, minmax(180px, 1fr))` }}>
+                <div className="border-r border-white/10 bg-black/20">
+                  {HOURS.map(hour => (
+                    <div key={hour} className="h-16 text-[11px] text-muted-foreground px-2 pt-1 border-b border-white/10">
+                      {String(hour).padStart(2, '0')}:00
+                    </div>
+                  ))}
+                </div>
+
+                {timeViewDays.map(day => {
+                  const dayKey = toDayKey(day);
+                  const dayAllocations = allocationsByDay.get(dayKey) || [];
+                  return (
+                    <div
+                      key={dayKey}
+                      className="relative border-l border-white/10"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => onTimeColumnDrop(e, dayKey)}
+                    >
+                      {HOURS.map(hour => (
+                        <div key={hour} className="h-16 border-b border-white/10" />
+                      ))}
+
+                      {dayAllocations.map((allocation) => {
+                        const task = tasksById.get(allocation.taskId);
+                        if (!task) return null;
+
+                        return (
+                          <div
+                            key={allocation.id}
+                            className="absolute left-2 right-2 rounded-md border px-2 py-1 cursor-grab"
+                            style={{
+                              top: `${allocation.startHour * HOUR_HEIGHT}px`,
+                              height: `${allocation.durationHours * HOUR_HEIGHT}px`,
+                              borderColor: `${getTaskColor(task)}66`,
+                              backgroundColor: `${getTaskColor(task)}22`,
+                            }}
+                            onMouseDown={(e) => beginBlockDrag(allocation, 'move', e)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTaskClick(task.id);
+                            }}
+                          >
+                            <div className="text-xs font-medium truncate">{task.title}</div>
+                            <div className="text-[10px] text-white/70">
+                              {allocation.startHour.toFixed(1).replace('.0', '')}:00 • {allocation.durationHours}h
+                            </div>
+                            <button
+                              className="absolute top-1 right-1 text-[10px] text-white/70 hover:text-white"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeAllocation(allocation.id);
+                              }}
+                              title="Remove allocation"
+                            >
+                              x
+                            </button>
+                            <div
+                              className="absolute left-0 right-0 bottom-0 h-3 cursor-ns-resize rounded-b-md bg-gradient-to-r from-purple-600/35 via-violet-500/30 to-slate-900/45 flex items-center justify-center"
+                              onMouseDown={(e) => beginBlockDrag(allocation, 'resize', e)}
+                            >
+                              <GripVertical className="w-3 h-3 text-white/70" />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
     <div className="h-full flex flex-col overflow-hidden p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handlePreviousMonth}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleNextMonth}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+          <Button variant="outline" size="sm" onClick={handlePrevious}><ChevronLeft className="w-4 h-4" /></Button>
+          <Button variant="outline" size="sm" onClick={handleNext}><ChevronRight className="w-4 h-4" /></Button>
           <h2 className="text-lg font-semibold ml-2">
-            {viewMode === 'day' 
-              ? currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+            {viewMode === 'day'
+              ? (selectedDate || currentDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
               : viewMode === 'week'
-              ? `Week of ${currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-              : currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-            }
+                ? `Week of ${addDays(currentDate, -currentDate.getDay()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                : currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
           </h2>
         </div>
 
         <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="text-xs">
+                Color: {colorBy}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="bg-black/95 border border-white/15 rounded-xl p-1">
+              <DropdownMenuLabel className="text-xs">Color By</DropdownMenuLabel>
+              <DropdownMenuSeparator className="bg-white/10" />
+              <DropdownMenuItem onClick={() => setColorBy('default')}>Default</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setColorBy('status')}>Status</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setColorBy('priority')}>Priority</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setColorBy('assignee')}>Assignee</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setColorBy('faces')}>Faces</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <div className="flex items-center gap-1 mr-2">
             {(['month', 'week', 'day'] as CalendarViewMode[]).map((mode) => (
-              <Button
-                key={mode}
-                variant={viewMode === mode ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode(mode)}
-                className="capitalize"
-              >
+              <Button key={mode} variant={viewMode === mode ? 'default' : 'outline'} size="sm" onClick={() => setViewMode(mode)} className="capitalize">
                 {mode}
               </Button>
             ))}
           </div>
-          <Button variant="outline" size="sm" onClick={handleToday}>
-            Today
-          </Button>
+          <Button variant="outline" size="sm" onClick={handleToday}>Today</Button>
         </div>
       </div>
 
-      {/* Calendar Grid */}
-      <div className="flex-1 overflow-auto" ref={calendarRef}>
-        {/* Day Headers - only show for month and week view */}
-        {viewMode !== 'day' && (
-          <div className={`grid gap-2 mb-2 ${viewMode === 'week' ? 'grid-cols-7' : 'grid-cols-7'}`}>
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-              <div key={day} className="text-center text-sm font-medium text-muted-foreground py-2">
-                {day}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Calendar Days */}
-        <div 
-          className={`grid gap-2 ${
-            viewMode === 'day' 
-              ? 'grid-cols-1' 
-              : viewMode === 'week'
-              ? 'grid-cols-7'
-              : 'grid-cols-7'
-          }`} 
-          style={{ gridAutoRows: viewMode === 'day' ? 'auto' : 'minmax(120px, 1fr)' }}
+      <div className="flex-1 overflow-auto gantt-scrollbar">
+        <div
+          onDragOver={(e) => {
+            if (viewMode === 'month') e.preventDefault();
+          }}
         >
-          {calendarDays.map((date, i) => {
-            const dateKey = date.toISOString().split('T')[0];
-            const dayTasks = tasksByDate.byDate.get(dateKey) || [];
-            const isSelected = selectedDate && date.toDateString() === selectedDate.toDateString();
-
-            return (
-              <Card
-                key={i}
-                onClick={() => handleDayClick(date)}
-                onDoubleClick={() => handleDayDoubleClick(date)}
-                className={`p-2 overflow-visible relative cursor-pointer transition-all ${
-                  viewMode === 'month' && !isCurrentMonth(date)
-                    ? 'bg-black/10 opacity-50'
-                    : 'bg-gradient-to-br from-black/40 to-black/20'
-                } ${
-                  isToday(date)
-                    ? 'border-purple-500/50 ring-1 ring-purple-500/30'
-                    : isSelected
-                    ? 'border-cyan-500/50 ring-1 ring-cyan-500/30'
-                    : 'border-white/10'
-                } ${viewMode === 'day' ? 'min-h-[400px]' : ''} hover:border-purple-500/30`}
-              >
-                {/* Date Number */}
-                <div className="flex items-center justify-between mb-2">
-                  <span
-                    className={`text-sm font-medium ${
-                      isToday(date)
-                        ? 'bg-purple-500 text-white rounded-full w-6 h-6 flex items-center justify-center'
-                        : ''
-                    }`}
-                  >
-                    {viewMode === 'day' 
-                      ? date.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric' })
-                      : date.getDate()
-                    }
-                  </span>
-                  {dayTasks.length > 0 && (
-                    <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-5">
-                      {dayTasks.length}
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Tasks */}
-                <div className="space-y-1 relative z-10" onClick={(e) => e.stopPropagation()}>
-                  {dayTasks.slice(0, viewMode === 'day' ? 999 : 3).map((task) => {
-                    // Check if this is a spanning task
-                    const isSpanning = task.startDate && task.dueDate && 
-                      new Date(task.startDate).toDateString() !== new Date(task.dueDate).toDateString();
-                    const taskStart = task.startDate ? new Date(task.startDate) : null;
-                    const taskEnd = task.dueDate ? new Date(task.dueDate) : null;
-                    const isFirstDay = taskStart && date.toDateString() === taskStart.toDateString();
-                    const isLastDay = taskEnd && date.toDateString() === taskEnd.toDateString();
-                    
-                    return (
-                      <div
-                        key={task.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onTaskClick(task.id);
-                        }}
-                        onMouseDown={(e) => {
-                          if (onTaskUpdate && !(e.target as HTMLElement).closest('button')) {
-                            e.stopPropagation();
-                            handleDragStart(task.id, 'move', e);
-                          }
-                        }}
-                        className={`text-xs p-1.5 rounded border transition-colors group relative ${
-                          isSpanning
-                            ? 'bg-purple-500/30 hover:bg-purple-500/40 border-purple-500/50'
-                            : 'bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/30'
-                        } ${isSpanning && !isFirstDay ? 'rounded-l-none border-l-0' : ''} ${
-                          isSpanning && !isLastDay ? 'rounded-r-none border-r-0' : ''
-                        } ${onTaskUpdate ? 'cursor-move' : 'cursor-pointer'}`}
-                        style={{ 
-                          position: isSpanning ? 'absolute' : 'relative',
-                          top: isSpanning ? '40px' : 'auto',
-                          left: 0,
-                          right: 0,
-                          zIndex: 20,
-                        }}
-                      >
-                        {/* Drag handles for start and end */}
-                        {onTaskUpdate && isFirstDay && (
-                          <div
-                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-purple-500/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              handleDragStart(task.id, 'start', e);
-                            }}
-                          >
-                            <GripVertical className="w-3 h-3 text-white" />
-                          </div>
-                        )}
-                        {onTaskUpdate && isLastDay && (
-                          <div
-                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-purple-500/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              handleDragStart(task.id, 'end', e);
-                            }}
-                          >
-                            <GripVertical className="w-3 h-3 text-white" />
-                          </div>
-                        )}
-                        
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="truncate flex-1">
-                            {isSpanning && isFirstDay && '▶ '}
-                            {task.title}
-                            {isSpanning && isLastDay && ' ◀'}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-4 w-4 p-0 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onTaskNavigate(task.id);
-                            }}
-                          >
-                            <ArrowRight className="w-3 h-3" />
-                          </Button>
-                        </div>
-                        {task.hypercubeTags.length > 0 && (
-                          <div className="flex gap-0.5 mt-0.5">
-                            {task.hypercubeTags.slice(0, 3).map((tag) => (
-                              <div
-                                key={tag}
-                                className="w-1.5 h-1.5 rounded-full"
-                                style={{ backgroundColor: HYPERCUBE_FACE_COLORS[tag] }}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {dayTasks.length > 3 && viewMode !== 'day' && (
-                    <div className="text-xs text-muted-foreground text-center py-1">
-                      +{dayTasks.length - 3} more
-                    </div>
-                  )}
-                </div>
-              </Card>
-            );
-          })}
+          {viewMode === 'month' ? renderMonthView() : renderTimeView()}
         </div>
 
         {tasks.length === 0 && (
@@ -446,3 +653,4 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
     </div>
   );
 }
+

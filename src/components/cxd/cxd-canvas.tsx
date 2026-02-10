@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useCXDStore } from "@/store/cxd-store";
 import { CXD_SECTIONS, CXDSectionId } from "@/types/cxd-schema";
@@ -13,7 +13,7 @@ import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
 import { MultiSelectionBox } from "./canvas/multi-selection-box";
 import { Button } from "@/components/ui/button";
-import { Minus, Trash2 } from "lucide-react";
+import { Minus, Trash2, Circle, ArrowRight, Square, Diamond } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   CanvasElement,
@@ -23,11 +23,10 @@ import {
   ShapeElement,
   LineElement,
   getAnchorPosition,
-  getAutoAnchorPosition,
   getClosestAnchors,
   getNearestAnchor,
   CanvasEdge,
-  ConnectorEndStyle,
+  LineEndStyle,
 } from "@/types/canvas-elements";
 import { useCollaboration } from "@/hooks/use-collaboration";
 import { CollaboratorCursors } from "@/components/collaboration";
@@ -272,6 +271,20 @@ export function CXDCanvas() {
   // Store original element positions when drag starts (for proper snap calculation)
   // Using ref instead of state to avoid async update issues in callbacks
   const dragOriginalPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  // Ref to hold latest values for experience block drop handler.
+  // This avoids stale closures when the useEffect re-registers listeners.
+  // Initialized with placeholder values — gets updated every render before use.
+  const experienceDropCtxRef = useRef({
+    canvasPosition: { x: 0, y: 0 },
+    canvasZoom: 1,
+    canvasElements: [] as any[],
+    syncAddElement: syncAddElement,
+    activeBoardId: null as string | null,
+    activeSurface: 'main',
+    inboxItems: [] as any[],
+    handlePlaceInboxItem: null as ((id: string, x: number, y: number) => void) | null,
+  });
   const [selectedElementId, setSelectedElementId] = useState<string | null>(
     null,
   );
@@ -347,7 +360,7 @@ export function CXDCanvas() {
   const [activeTool, setActiveTool] = useState<CanvasElementType | null>(null);
 
   // Snap to grid and alignment guides state
-  const [snapToGrid, setSnapToGrid] = useState(false);
+  const snapToGrid = false;
   const [showAlignmentGuides, setShowAlignmentGuides] = useState(true);
   const [alignmentGuides, setAlignmentGuides] = useState<{
     horizontal: number[];
@@ -379,6 +392,30 @@ export function CXDCanvas() {
     () => allCanvasElements.filter((el) => !el.inInbox),
     [allCanvasElements]
   );
+  const canShowConnectorAnchors = activeTool === "line" || activeTool === "connector";
+
+  const getResolvedEdgePoints = useCallback((edge: CanvasEdge, fromElement: CanvasElement, toElement: CanvasElement) => {
+    let fromAnchor = edge.fromAnchor;
+    let toAnchor = edge.toAnchor;
+    if (edge.fromAutoAnchor || edge.toAutoAnchor) {
+      const closest = getClosestAnchors(fromElement, toElement);
+      if (edge.fromAutoAnchor) fromAnchor = closest.from;
+      if (edge.toAutoAnchor) toAnchor = closest.to;
+    }
+
+    const from = getAnchorPosition(
+      fromElement,
+      fromAnchor,
+      edge.fromAutoAnchor ? 0.5 : edge.fromAnchorOffset,
+    );
+    const to = getAnchorPosition(
+      toElement,
+      toAnchor,
+      edge.toAutoAnchor ? 0.5 : edge.toAnchorOffset,
+    );
+
+    return { from, to, fromAnchor, toAnchor };
+  }, []);
 
   // State for dragging inbox items onto canvas
   const [draggingInboxItem, setDraggingInboxItem] = useState<string | null>(null);
@@ -990,6 +1027,10 @@ export function CXDCanvas() {
             toNodeId: hoverTargetNodeId,
             fromAnchor: connectingFrom.anchor,
             toAnchor: targetAnchor,
+            fromAutoAnchor: true,
+            toAutoAnchor: true,
+            fromAnchorOffset: 0.5,
+            toAnchorOffset: 0.5,
             boardId: activeBoardId,
             surface: activeSurface,
             bend: bendPoint,
@@ -1042,6 +1083,18 @@ export function CXDCanvas() {
       // Clear alignment guides when drag ends
       setAlignmentGuides({ horizontal: [], vertical: [] });
     }
+
+    // Failsafe: force-clear experience block / inbox drag state on any canvas mouseup.
+    // The document-level handlers in the useEffects should handle this, but if they
+    // miss the event for any reason, this ensures the element never stays stuck.
+    if (draggingExperienceBlock) {
+      setDraggingExperienceBlock(null);
+      setExperienceBlockDragPos(null);
+    }
+    if (draggingInboxItem) {
+      setDraggingInboxItem(null);
+      setInboxDragPos(null);
+    }
   }, [
     draggingSection,
     localPositions,
@@ -1058,6 +1111,8 @@ export function CXDCanvas() {
     activeSurface,
     addCanvasEdge,
     draggingElement,
+    draggingExperienceBlock,
+    draggingInboxItem,
     selectedElementIds,
     broadcastUpdate,
   ]);
@@ -1429,19 +1484,51 @@ export function CXDCanvas() {
     [pushCanvasHistory, removeCanvasElement]
   );
 
-  // Handle experience block drag move
+  // Keep experience block drop context ref in sync every render.
+  // The mouseup handler reads from this ref instead of closures, so it always
+  // sees the latest canvasPosition/canvasZoom/etc. without the useEffect needing
+  // to re-register listeners (which caused the drop-failure race condition).
+  experienceDropCtxRef.current = {
+    canvasPosition,
+    canvasZoom,
+    canvasElements,
+    syncAddElement,
+    activeBoardId,
+    activeSurface,
+    inboxItems,
+    handlePlaceInboxItem,
+  };
+
+  // Handle experience block drag move and drop.
+  // IMPORTANT: Only depends on `draggingExperienceBlock` to avoid tearing down
+  // and re-registering listeners when volatile values (canvasElements, canvasPosition,
+  // etc.) change mid-drag. The handler reads current values from experienceDropCtxRef.
   useEffect(() => {
     if (!draggingExperienceBlock) return;
+
+    let dropped = false; // Guard against double-fire from mouseup + pointerup
 
     const handleMouseMove = (e: MouseEvent) => {
       setExperienceBlockDragPos({ x: e.clientX, y: e.clientY });
     };
 
-    const handleMouseUp = (e: MouseEvent) => {
-      if (containerRef.current && draggingExperienceBlock) {
+    const handleDrop = (e: MouseEvent | PointerEvent) => {
+      if (dropped) return;
+      dropped = true;
+
+      const {
+        canvasPosition: pos,
+        canvasZoom: zoom,
+        canvasElements: elements,
+        syncAddElement: addElement,
+        activeBoardId: boardId,
+        activeSurface: surface,
+      } = experienceDropCtxRef.current;
+
+      if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        const canvasX = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-        const canvasY = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+        const canvasX = (e.clientX - rect.left - pos.x) / zoom;
+        const canvasY = (e.clientY - rect.top - pos.y) / zoom;
 
         // Check if dropped on canvas (not outside)
         if (
@@ -1451,12 +1538,12 @@ export function CXDCanvas() {
           e.clientY <= rect.bottom
         ) {
           // Create experience block element
-          const maxZIndex = canvasElements.reduce(
-            (max, el) => Math.max(max, el.zIndex),
+          const maxZIndex = elements.reduce(
+            (max, el) => Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0),
             0,
           );
 
-          const newElement = {
+          addElement({
             id: uuidv4(),
             type: "experienceBlock" as const,
             componentKey: draggingExperienceBlock.sectionId as any,
@@ -1466,48 +1553,58 @@ export function CXDCanvas() {
             width: 220,
             height: 100,
             zIndex: maxZIndex + 1,
-            boardId: activeBoardId,
-            surface: activeSurface,
-          };
-
-          syncAddElement(newElement);
+            boardId: boardId,
+            surface: surface,
+          } as any);
         }
       }
 
+      // ALWAYS clear drag state — even if drop was outside canvas bounds
       setDraggingExperienceBlock(null);
       setExperienceBlockDragPos(null);
     };
 
+    // Register on document in CAPTURE phase so we catch the event before any
+    // child element can stopPropagation or swallow it.
+    // Listen to both mouseup and pointerup for maximum reliability (pointer
+    // capture from line-layer SVG can redirect pointerup but not mouseup).
     document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mouseup", handleDrop, true);
+    document.addEventListener("pointerup", handleDrop as EventListener, true);
 
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mouseup", handleDrop, true);
+      document.removeEventListener("pointerup", handleDrop as EventListener, true);
     };
-  }, [
-    draggingExperienceBlock,
-    canvasPosition,
-    canvasZoom,
-    canvasElements,
-    addCanvasElement,
-    activeBoardId,
-    activeSurface,
-  ]);
+  }, [draggingExperienceBlock]);
 
-  // Handle inbox item drag move and drop
+  // Handle inbox item drag move and drop.
+  // Same ref-based pattern as experience block drag to prevent drop failures.
   useEffect(() => {
     if (!draggingInboxItem) return;
+
+    let dropped = false;
 
     const handleMouseMove = (e: MouseEvent) => {
       setInboxDragPos({ x: e.clientX, y: e.clientY });
     };
 
-    const handleMouseUp = (e: MouseEvent) => {
-      if (containerRef.current && draggingInboxItem) {
+    const handleDrop = (e: MouseEvent | PointerEvent) => {
+      if (dropped) return;
+      dropped = true;
+
+      const {
+        canvasPosition: pos,
+        canvasZoom: zoom,
+        inboxItems: items,
+        handlePlaceInboxItem: placeItem,
+      } = experienceDropCtxRef.current;
+
+      if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        const canvasX = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-        const canvasY = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+        const canvasX = (e.clientX - rect.left - pos.x) / zoom;
+        const canvasY = (e.clientY - rect.top - pos.y) / zoom;
 
         // Check if dropped on canvas (not outside)
         if (
@@ -1516,12 +1613,11 @@ export function CXDCanvas() {
           e.clientY >= rect.top &&
           e.clientY <= rect.bottom
         ) {
-          // Place the inbox item on canvas at drop position
-          const element = inboxItems.find((el) => el.id === draggingInboxItem);
-          if (element) {
-            handlePlaceInboxItem(
+          const element = items?.find((el: any) => el.id === draggingInboxItem);
+          if (element && placeItem) {
+            placeItem(
               draggingInboxItem,
-              canvasX - element.width / 2, // Center the element
+              canvasX - element.width / 2,
               canvasY - element.height / 2
             );
           }
@@ -1533,19 +1629,15 @@ export function CXDCanvas() {
     };
 
     document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mouseup", handleDrop, true);
+    document.addEventListener("pointerup", handleDrop as EventListener, true);
 
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mouseup", handleDrop, true);
+      document.removeEventListener("pointerup", handleDrop as EventListener, true);
     };
-  }, [
-    draggingInboxItem,
-    canvasPosition,
-    canvasZoom,
-    inboxItems,
-    handlePlaceInboxItem,
-  ]);
+  }, [draggingInboxItem]);
 
   // Handle connector creation start
   const handleStartConnector = useCallback(
@@ -1594,6 +1686,10 @@ export function CXDCanvas() {
           toNodeId: toElementId,
           fromAnchor: connectingFrom.anchor,
           toAnchor: toAnchor,
+          fromAutoAnchor: true,
+          toAutoAnchor: true,
+          fromAnchorOffset: 0.5,
+          toAnchorOffset: 0.5,
           boardId: activeBoardId,
           surface: activeSurface,
           bend: bendPoint,
@@ -2378,6 +2474,10 @@ export function CXDCanvas() {
         fromAnchor,
         toNodeId: newShape.id,
         toAnchor,
+        fromAutoAnchor: true,
+        toAutoAnchor: true,
+        fromAnchorOffset: 0.5,
+        toAnchorOffset: 0.5,
         boardId: activeBoardId,
         surface: activeSurface,
         style: {
@@ -2600,6 +2700,7 @@ export function CXDCanvas() {
               onStartConnector={handleStartConnector}
               onEndConnector={handleEndConnector}
               isConnecting={isConnecting}
+              showConnectorAnchors={canShowConnectorAnchors}
               hoveredAnchor={hoveredAnchor}
               onAnchorHover={setHoveredAnchor}
               onOpenExperiencePanel={(sectionId: any) => {
@@ -2756,13 +2857,12 @@ export function CXDCanvas() {
             );
             if (!fromElement || !toElement) return null;
 
-            // Use custom anchor offset if available
-            const from = getAnchorPosition(fromElement, edge.fromAnchor, edge.fromAnchorOffset);
-            const to = getAnchorPosition(toElement, edge.toAnchor, edge.toAnchorOffset);
+            const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
 
             if (!from || !to) return null;
 
             const isSelected = selectedEdgeId === edge.id;
+            const strokeColor = edge.style?.color || "hsl(180 100% 50% / 0.8)";
 
             // Use bend point or default to midpoint
             const bend = edge.bend || {
@@ -2773,14 +2873,26 @@ export function CXDCanvas() {
             // Create path for curve using quadratic Bezier
             const pathD = `M ${from.x} ${from.y} Q ${bend.x} ${bend.y} ${to.x} ${to.y}`;
 
+            // Per-edge marker ids so endpoint color always follows the line color in realtime.
+            const markerIds = {
+              arrowEnd: `${edge.id}-arrow-end`,
+              arrowStart: `${edge.id}-arrow-start`,
+              dotEnd: `${edge.id}-dot-end`,
+              dotStart: `${edge.id}-dot-start`,
+              diamondEnd: `${edge.id}-diamond-end`,
+              diamondStart: `${edge.id}-diamond-start`,
+              squareEnd: `${edge.id}-square-end`,
+              squareStart: `${edge.id}-square-start`,
+            };
+
             // Determine endpoint markers
             const getMarkerEnd = (): string | undefined => {
               const endCap = edge.style?.endCap || (edge.style?.arrowHead ? 'arrow' : 'none');
               switch (endCap) {
-                case 'arrow': return 'url(#arrowhead)';
-                case 'dot': return 'url(#dot-end)';
-                case 'diamond': return 'url(#diamond-end)';
-                case 'square': return 'url(#square-end)';
+                case 'arrow': return `url(#${markerIds.arrowEnd})`;
+                case 'dot': return `url(#${markerIds.dotEnd})`;
+                case 'diamond': return `url(#${markerIds.diamondEnd})`;
+                case 'square': return `url(#${markerIds.squareEnd})`;
                 default: return undefined;
               }
             };
@@ -2788,10 +2900,10 @@ export function CXDCanvas() {
             const getMarkerStart = (): string | undefined => {
               const startCap = edge.style?.startCap || 'none';
               switch (startCap) {
-                case 'arrow': return 'url(#arrowhead-start)';
-                case 'dot': return 'url(#dot-start)';
-                case 'diamond': return 'url(#diamond-start)';
-                case 'square': return 'url(#square-start)';
+                case 'arrow': return `url(#${markerIds.arrowStart})`;
+                case 'dot': return `url(#${markerIds.dotStart})`;
+                case 'diamond': return `url(#${markerIds.diamondStart})`;
+                case 'square': return `url(#${markerIds.squareStart})`;
                 default: return undefined;
               }
             };
@@ -2808,6 +2920,32 @@ export function CXDCanvas() {
 
             return (
               <g key={edge.id}>
+                <defs>
+                  <marker id={markerIds.arrowEnd} markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
+                  </marker>
+                  <marker id={markerIds.arrowStart} markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto-start-reverse">
+                    <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
+                  </marker>
+                  <marker id={markerIds.dotEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                    <circle cx="4" cy="4" r="3" fill={strokeColor} />
+                  </marker>
+                  <marker id={markerIds.dotStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                    <circle cx="4" cy="4" r="3" fill={strokeColor} />
+                  </marker>
+                  <marker id={markerIds.diamondEnd} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                    <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
+                  </marker>
+                  <marker id={markerIds.diamondStart} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                    <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
+                  </marker>
+                  <marker id={markerIds.squareEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                    <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
+                  </marker>
+                  <marker id={markerIds.squareStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                    <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
+                  </marker>
+                </defs>
                 {/* Clickable invisible path for selection */}
                 <path
                   d={pathD}
@@ -2825,12 +2963,8 @@ export function CXDCanvas() {
                 {/* Visible path */}
                 <path
                   d={pathD}
-                  stroke={
-                    isSelected
-                      ? "hsl(280 100% 70%)" // Purple highlight when selected
-                      : edge.style?.color || "hsl(180 100% 50% / 0.8)"
-                  }
-                  strokeWidth={isSelected ? 3 : edge.style?.thickness || 2}
+                  stroke={strokeColor}
+                  strokeWidth={isSelected ? (edge.style?.thickness || 2) + 1 : edge.style?.thickness || 2}
                   fill="none"
                   strokeDasharray={
                     edge.style?.lineStyle === "dashed"
@@ -2841,6 +2975,7 @@ export function CXDCanvas() {
                   }
                   markerStart={getMarkerStart()}
                   markerEnd={getMarkerEnd()}
+                  style={isSelected ? { filter: "drop-shadow(0 0 4px rgba(167,139,250,0.45))" } : undefined}
                 />
                 {/* Text label */}
                 {edge.label?.text && (
@@ -2902,93 +3037,6 @@ export function CXDCanvas() {
             />
           )}
 
-          {/* Endpoint marker definitions */}
-          <defs>
-            {/* Arrow marker */}
-            <marker
-              id="arrowhead"
-              markerWidth="10"
-              markerHeight="7"
-              refX="9"
-              refY="3.5"
-              orient="auto"
-            >
-              <polygon points="0 0, 10 3.5, 0 7" fill="hsl(var(--primary))" />
-            </marker>
-            <marker
-              id="arrowhead-start"
-              markerWidth="10"
-              markerHeight="7"
-              refX="1"
-              refY="3.5"
-              orient="auto-start-reverse"
-            >
-              <polygon points="0 0, 10 3.5, 0 7" fill="hsl(var(--primary))" />
-            </marker>
-            {/* Dot marker */}
-            <marker
-              id="dot-end"
-              markerWidth="8"
-              markerHeight="8"
-              refX="4"
-              refY="4"
-              orient="auto"
-            >
-              <circle cx="4" cy="4" r="3" fill="hsl(var(--primary))" />
-            </marker>
-            <marker
-              id="dot-start"
-              markerWidth="8"
-              markerHeight="8"
-              refX="4"
-              refY="4"
-              orient="auto"
-            >
-              <circle cx="4" cy="4" r="3" fill="hsl(var(--primary))" />
-            </marker>
-            {/* Diamond marker */}
-            <marker
-              id="diamond-end"
-              markerWidth="10"
-              markerHeight="10"
-              refX="5"
-              refY="5"
-              orient="auto"
-            >
-              <polygon points="5 0, 10 5, 5 10, 0 5" fill="hsl(var(--primary))" />
-            </marker>
-            <marker
-              id="diamond-start"
-              markerWidth="10"
-              markerHeight="10"
-              refX="5"
-              refY="5"
-              orient="auto"
-            >
-              <polygon points="5 0, 10 5, 5 10, 0 5" fill="hsl(var(--primary))" />
-            </marker>
-            {/* Square marker */}
-            <marker
-              id="square-end"
-              markerWidth="8"
-              markerHeight="8"
-              refX="4"
-              refY="4"
-              orient="auto"
-            >
-              <rect x="1" y="1" width="6" height="6" fill="hsl(var(--primary))" />
-            </marker>
-            <marker
-              id="square-start"
-              markerWidth="8"
-              markerHeight="8"
-              refX="4"
-              refY="4"
-              orient="auto"
-            >
-              <rect x="1" y="1" width="6" height="6" fill="hsl(var(--primary))" />
-            </marker>
-          </defs>
         </svg>
       </div>
 
@@ -3006,8 +3054,7 @@ export function CXDCanvas() {
           );
           if (!fromElement || !toElement) return null;
 
-          const from = getAnchorPosition(fromElement, edge.fromAnchor, edge.fromAnchorOffset);
-          const to = getAnchorPosition(toElement, edge.toAnchor, edge.toAnchorOffset);
+          const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
           if (!from || !to) return null;
 
           const bend = edge.bend || {
@@ -3022,6 +3069,61 @@ export function CXDCanvas() {
           const fromScreenY = from.y * canvasZoom + canvasPosition.y;
           const toScreenX = to.x * canvasZoom + canvasPosition.x;
           const toScreenY = to.y * canvasZoom + canvasPosition.y;
+          const fromCenter = {
+            x: fromElement.x + fromElement.width / 2,
+            y: fromElement.y + fromElement.height / 2,
+          };
+          const toCenter = {
+            x: toElement.x + toElement.width / 2,
+            y: toElement.y + toElement.height / 2,
+          };
+          const fromCenterScreenX = fromCenter.x * canvasZoom + canvasPosition.x;
+          const fromCenterScreenY = fromCenter.y * canvasZoom + canvasPosition.y;
+          const toCenterScreenX = toCenter.x * canvasZoom + canvasPosition.x;
+          const toCenterScreenY = toCenter.y * canvasZoom + canvasPosition.y;
+
+          const updatePivotAnchor = (
+            which: "from" | "to",
+            targetElement: CanvasElement,
+            worldX: number,
+            worldY: number,
+          ) => {
+            const centerX = targetElement.x + targetElement.width / 2;
+            const centerY = targetElement.y + targetElement.height / 2;
+            const deltaX = worldX - centerX;
+            const deltaY = worldY - centerY;
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+            const autoThreshold = 18;
+
+            if (distance <= autoThreshold) {
+              syncUpdateEdge(selectedEdgeId, which === "from"
+                ? { fromAutoAnchor: true, fromAnchorOffset: 0.5 }
+                : { toAutoAnchor: true, toAnchorOffset: 0.5 });
+              return;
+            }
+
+            const anchor =
+              Math.abs(deltaX) >= Math.abs(deltaY)
+                ? (deltaX >= 0 ? "right" : "left")
+                : (deltaY >= 0 ? "bottom" : "top");
+
+            const offset =
+              anchor === "top" || anchor === "bottom"
+                ? Math.max(0.1, Math.min(0.9, (worldX - targetElement.x) / targetElement.width))
+                : Math.max(0.1, Math.min(0.9, (worldY - targetElement.y) / targetElement.height));
+
+            syncUpdateEdge(selectedEdgeId, which === "from"
+              ? {
+                  fromAutoAnchor: false,
+                  fromAnchor: anchor,
+                  fromAnchorOffset: offset,
+                }
+              : {
+                  toAutoAnchor: false,
+                  toAnchor: anchor,
+                  toAnchorOffset: offset,
+                });
+          };
 
           return (
             <>
@@ -3040,89 +3142,83 @@ export function CXDCanvas() {
                 }}
                 title="Drag to adjust curve"
               />
-              {/* From anchor handle (cyan) */}
+              {/* Center pivot guide lines */}
+              <svg
+                className="absolute inset-0 pointer-events-none"
+                style={{ zIndex: 999 }}
+              >
+                <line
+                  x1={fromCenterScreenX}
+                  y1={fromCenterScreenY}
+                  x2={fromScreenX}
+                  y2={fromScreenY}
+                  stroke="hsl(188 95% 68% / 0.8)"
+                  strokeWidth={1.5}
+                  strokeDasharray="3,3"
+                />
+                <line
+                  x1={toCenterScreenX}
+                  y1={toCenterScreenY}
+                  x2={toScreenX}
+                  y2={toScreenY}
+                  stroke="hsl(188 95% 68% / 0.8)"
+                  strokeWidth={1.5}
+                  strokeDasharray="3,3"
+                />
+              </svg>
+              {/* From pivot handle */}
               <div
-                className="absolute w-3 h-3 bg-cyan-500 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
+                className="absolute w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
                 style={{
-                  left: fromScreenX - 6,
-                  top: fromScreenY - 6,
+                  left: fromCenterScreenX - 7,
+                  top: fromCenterScreenY - 7,
                   zIndex: 1000,
                 }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  // Start anchor offset dragging
-                  const startX = e.clientX;
-                  const startY = e.clientY;
-                  const initialOffset = edge.fromAnchorOffset ?? 0.5;
-
                   const handleMouseMove = (moveEvent: MouseEvent) => {
-                    const deltaX = (moveEvent.clientX - startX) / canvasZoom;
-                    const deltaY = (moveEvent.clientY - startY) / canvasZoom;
-
-                    // Calculate new offset based on anchor direction
-                    let newOffset = initialOffset;
-                    if (edge.fromAnchor === 'top' || edge.fromAnchor === 'bottom') {
-                      newOffset = initialOffset + deltaX / fromElement.width;
-                    } else {
-                      newOffset = initialOffset + deltaY / fromElement.height;
-                    }
-                    newOffset = Math.max(0.1, Math.min(0.9, newOffset));
-
-                    syncUpdateEdge(selectedEdgeId, { fromAnchorOffset: newOffset });
+                    const rect = containerRef.current?.getBoundingClientRect();
+                    if (!rect) return;
+                    const worldX = (moveEvent.clientX - rect.left - canvasPosition.x) / canvasZoom;
+                    const worldY = (moveEvent.clientY - rect.top - canvasPosition.y) / canvasZoom;
+                    updatePivotAnchor("from", fromElement, worldX, worldY);
                   };
-
                   const handleMouseUp = () => {
-                    document.removeEventListener('mousemove', handleMouseMove);
-                    document.removeEventListener('mouseup', handleMouseUp);
+                    document.removeEventListener("mousemove", handleMouseMove);
+                    document.removeEventListener("mouseup", handleMouseUp);
                   };
-
-                  document.addEventListener('mousemove', handleMouseMove);
-                  document.addEventListener('mouseup', handleMouseUp);
+                  document.addEventListener("mousemove", handleMouseMove);
+                  document.addEventListener("mouseup", handleMouseUp);
                 }}
-                title="Drag to reposition anchor"
+                title="Drag pivot to pick connector side"
               />
-              {/* To anchor handle (cyan) */}
+              {/* To pivot handle */}
               <div
-                className="absolute w-3 h-3 bg-cyan-500 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
+                className="absolute w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
                 style={{
-                  left: toScreenX - 6,
-                  top: toScreenY - 6,
+                  left: toCenterScreenX - 7,
+                  top: toCenterScreenY - 7,
                   zIndex: 1000,
                 }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  // Start anchor offset dragging
-                  const startX = e.clientX;
-                  const startY = e.clientY;
-                  const initialOffset = edge.toAnchorOffset ?? 0.5;
-
                   const handleMouseMove = (moveEvent: MouseEvent) => {
-                    const deltaX = (moveEvent.clientX - startX) / canvasZoom;
-                    const deltaY = (moveEvent.clientY - startY) / canvasZoom;
-
-                    // Calculate new offset based on anchor direction
-                    let newOffset = initialOffset;
-                    if (edge.toAnchor === 'top' || edge.toAnchor === 'bottom') {
-                      newOffset = initialOffset + deltaX / toElement.width;
-                    } else {
-                      newOffset = initialOffset + deltaY / toElement.height;
-                    }
-                    newOffset = Math.max(0.1, Math.min(0.9, newOffset));
-
-                    syncUpdateEdge(selectedEdgeId, { toAnchorOffset: newOffset });
+                    const rect = containerRef.current?.getBoundingClientRect();
+                    if (!rect) return;
+                    const worldX = (moveEvent.clientX - rect.left - canvasPosition.x) / canvasZoom;
+                    const worldY = (moveEvent.clientY - rect.top - canvasPosition.y) / canvasZoom;
+                    updatePivotAnchor("to", toElement, worldX, worldY);
                   };
-
                   const handleMouseUp = () => {
-                    document.removeEventListener('mousemove', handleMouseMove);
-                    document.removeEventListener('mouseup', handleMouseUp);
+                    document.removeEventListener("mousemove", handleMouseMove);
+                    document.removeEventListener("mouseup", handleMouseUp);
                   };
-
-                  document.addEventListener('mousemove', handleMouseMove);
-                  document.addEventListener('mouseup', handleMouseUp);
+                  document.addEventListener("mousemove", handleMouseMove);
+                  document.addEventListener("mouseup", handleMouseUp);
                 }}
-                title="Drag to reposition anchor"
+                title="Drag pivot to pick connector side"
               />
             </>
           );
@@ -3142,8 +3238,7 @@ export function CXDCanvas() {
           );
           if (!fromElement || !toElement) return null;
 
-          const from = getAnchorPosition(fromElement, edge.fromAnchor, edge.fromAnchorOffset);
-          const to = getAnchorPosition(toElement, edge.toAnchor, edge.toAnchorOffset);
+          const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
           if (!from || !to) return null;
 
           const bend = edge.bend || {
@@ -3166,298 +3261,20 @@ export function CXDCanvas() {
           const dx = to.x - from.x;
           const dy = to.y - from.y;
           const isHorizontal = Math.abs(dx) > Math.abs(dy);
-
-          const widthPx = edge.style?.thickness || 2;
-          const color = edge.style?.color || "hsl(180 100% 50% / 0.8)";
-          const lineStyle = edge.style?.lineStyle || "solid";
-          const startCap = edge.style?.startCap || 'none';
-          const endCap = edge.style?.endCap || (edge.style?.arrowHead ? 'arrow' : 'none');
-
-          // Convert HSL to hex for color input
-          const getHexColor = () => {
-            try {
-              if (color.match(/#[0-9a-fA-F]{6}/)) return color;
-              return "#00ffff";
-            } catch {
-              return "#00ffff";
-            }
-          };
-
-          const endpointStyles: ConnectorEndStyle[] = ['none', 'arrow', 'dot', 'diamond', 'square'];
-
-          const EndpointIcon = ({ type, isStart }: { type: ConnectorEndStyle; isStart?: boolean }) => {
-            switch (type) {
-              case 'arrow':
-                return (
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    {isStart ? (
-                      <path d="M19 12H5M5 12L12 5M5 12L12 19" />
-                    ) : (
-                      <path d="M5 12H19M19 12L12 5M19 12L12 19" />
-                    )}
-                  </svg>
-                );
-              case 'dot':
-                return (
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    {isStart ? (
-                      <>
-                        <circle cx="6" cy="12" r="4" />
-                        <line x1="10" y1="12" x2="20" y2="12" stroke="currentColor" strokeWidth="2" />
-                      </>
-                    ) : (
-                      <>
-                        <line x1="4" y1="12" x2="14" y2="12" stroke="currentColor" strokeWidth="2" />
-                        <circle cx="18" cy="12" r="4" />
-                      </>
-                    )}
-                  </svg>
-                );
-              case 'diamond':
-                return (
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    {isStart ? (
-                      <>
-                        <polygon points="3,12 7,8 11,12 7,16" />
-                        <line x1="11" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2" />
-                      </>
-                    ) : (
-                      <>
-                        <line x1="3" y1="12" x2="13" y2="12" stroke="currentColor" strokeWidth="2" />
-                        <polygon points="13,12 17,8 21,12 17,16" />
-                      </>
-                    )}
-                  </svg>
-                );
-              case 'square':
-                return (
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    {isStart ? (
-                      <>
-                        <rect x="3" y="8" width="8" height="8" />
-                        <line x1="11" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2" />
-                      </>
-                    ) : (
-                      <>
-                        <line x1="3" y1="12" x2="13" y2="12" stroke="currentColor" strokeWidth="2" />
-                        <rect x="13" y="8" width="8" height="8" />
-                      </>
-                    )}
-                  </svg>
-                );
-              default:
-                return <Minus className="w-4 h-4" />;
-            }
-          };
-
           return (
-            <div
-              className="flex flex-col gap-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-lg pointer-events-auto"
-              style={{
-                position: "absolute",
-                zIndex: 1001,
-                pointerEvents: "auto",
-                minWidth: 280,
-                ...(isHorizontal
-                  ? { top: midScreenY + 20, left: midScreenX - 140 }
-                  : { top: midScreenY - 20, left: midScreenX + 20 }),
+            <ConnectorContextMenu
+              edge={edge}
+              menuPosition={
+                isHorizontal
+                  ? { top: midScreenY + 16, left: midScreenX - 100 }
+                  : { top: midScreenY - 20, left: midScreenX + 16 }
+              }
+              onUpdateEdge={(updates) => syncUpdateEdge(selectedEdgeId, updates)}
+              onDelete={() => {
+                syncRemoveEdge(selectedEdgeId);
+                setSelectedEdgeId(null);
               }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Row 1: Line style and endpoints */}
-              <div className="flex items-center gap-1">
-                {/* Line style buttons */}
-                <button
-                  onClick={() =>
-                    syncUpdateEdge(selectedEdgeId, {
-                      style: { ...edge.style, lineStyle: "solid" },
-                    })
-                  }
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 transition-colors",
-                    lineStyle === "solid" && "bg-primary/30 ring-1 ring-primary",
-                  )}
-                  title="Solid"
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() =>
-                    syncUpdateEdge(selectedEdgeId, {
-                      style: { ...edge.style, lineStyle: "dashed" },
-                    })
-                  }
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 transition-colors",
-                    lineStyle === "dashed" && "bg-primary/30 ring-1 ring-primary",
-                  )}
-                  title="Dashed"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="4" y1="12" x2="8" y2="12" />
-                    <line x1="12" y1="12" x2="16" y2="12" />
-                    <line x1="20" y1="12" x2="24" y2="12" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() =>
-                    syncUpdateEdge(selectedEdgeId, {
-                      style: { ...edge.style, lineStyle: "dotted" },
-                    })
-                  }
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 transition-colors",
-                    lineStyle === "dotted" && "bg-primary/30 ring-1 ring-primary",
-                  )}
-                  title="Dotted"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="4" cy="12" r="1.5" />
-                    <circle cx="10" cy="12" r="1.5" />
-                    <circle cx="16" cy="12" r="1.5" />
-                    <circle cx="22" cy="12" r="1.5" />
-                  </svg>
-                </button>
-                <div className="w-px h-4 bg-border/50 mx-1" />
-                {/* Width slider */}
-                <input
-                  type="range"
-                  min="1"
-                  max="12"
-                  value={widthPx}
-                  onChange={(e) =>
-                    syncUpdateEdge(selectedEdgeId, {
-                      style: { ...edge.style, thickness: parseInt(e.target.value) },
-                    })
-                  }
-                  className="w-14 h-1 rounded-full appearance-none bg-muted cursor-pointer"
-                  title={`Width: ${widthPx}px`}
-                />
-                <div className="w-px h-4 bg-border/50 mx-1" />
-                {/* Color input */}
-                <input
-                  type="color"
-                  value={getHexColor()}
-                  onChange={(e) =>
-                    syncUpdateEdge(selectedEdgeId, { style: { ...edge.style, color: e.target.value } })
-                  }
-                  className="w-6 h-6 rounded cursor-pointer border-0"
-                  title="Color"
-                />
-                <div className="flex-1" />
-                {/* Delete button */}
-                <button
-                  onClick={() => {
-                    syncRemoveEdge(selectedEdgeId);
-                    setSelectedEdgeId(null);
-                  }}
-                  className="p-1.5 rounded hover:bg-destructive/20 text-destructive transition-colors"
-                  title="Delete"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Row 2: Endpoint styles */}
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground w-10">Start:</span>
-                <div className="flex gap-0.5">
-                  {endpointStyles.map((style) => (
-                    <button
-                      key={`start-${style}`}
-                      onClick={() =>
-                        syncUpdateEdge(selectedEdgeId, {
-                          style: { ...edge.style, startCap: style },
-                        })
-                      }
-                      className={cn(
-                        "p-1 rounded hover:bg-primary/20 transition-colors",
-                        startCap === style && "bg-primary/30 ring-1 ring-primary",
-                      )}
-                      title={style.charAt(0).toUpperCase() + style.slice(1)}
-                    >
-                      <EndpointIcon type={style} isStart />
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground w-10">End:</span>
-                <div className="flex gap-0.5">
-                  {endpointStyles.map((style) => (
-                    <button
-                      key={`end-${style}`}
-                      onClick={() =>
-                        syncUpdateEdge(selectedEdgeId, {
-                          style: { ...edge.style, endCap: style, arrowHead: style === 'arrow' },
-                        })
-                      }
-                      className={cn(
-                        "p-1 rounded hover:bg-primary/20 transition-colors",
-                        endCap === style && "bg-primary/30 ring-1 ring-primary",
-                      )}
-                      title={style.charAt(0).toUpperCase() + style.slice(1)}
-                    >
-                      <EndpointIcon type={style} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Row 3: Label input */}
-              <div className="flex items-center gap-2 pt-1 border-t border-border/30">
-                <span className="text-[10px] text-muted-foreground w-10">Label:</span>
-                <input
-                  type="text"
-                  value={edge.label?.text || ""}
-                  onChange={(e) =>
-                    syncUpdateEdge(selectedEdgeId, {
-                      label: { ...edge.label, text: e.target.value },
-                    })
-                  }
-                  placeholder="Add label..."
-                  className="flex-1 px-2 py-1 text-xs bg-muted/50 rounded border-0 focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-                {edge.label?.text && (
-                  <>
-                    {/* Font size */}
-                    <select
-                      value={edge.label?.fontSize || 12}
-                      onChange={(e) =>
-                        syncUpdateEdge(selectedEdgeId, {
-                          label: { ...edge.label, text: edge.label?.text || "", fontSize: parseInt(e.target.value) },
-                        })
-                      }
-                      className="px-1 py-1 text-[10px] bg-muted/50 rounded border-0 focus:outline-none"
-                      title="Font size"
-                    >
-                      <option value={10}>10</option>
-                      <option value={12}>12</option>
-                      <option value={14}>14</option>
-                      <option value={16}>16</option>
-                    </select>
-                    {/* Font family */}
-                    <select
-                      value={edge.label?.fontFamily || "inherit"}
-                      onChange={(e) =>
-                        syncUpdateEdge(selectedEdgeId, {
-                          label: { ...edge.label, text: edge.label?.text || "", fontFamily: e.target.value },
-                        })
-                      }
-                      className="px-1 py-1 text-[10px] bg-muted/50 rounded border-0 focus:outline-none"
-                      title="Font family"
-                    >
-                      <option value="inherit">Default</option>
-                      <option value="Inter, sans-serif">Inter</option>
-                      <option value="Georgia, serif">Georgia</option>
-                      <option value="ui-monospace, monospace">Mono</option>
-                    </select>
-                  </>
-                )}
-              </div>
-            </div>
+            />
           );
         })()}
 
@@ -3491,8 +3308,6 @@ export function CXDCanvas() {
         }}
         canUndo={canUndo()}
         canRedo={canRedo()}
-        snapToGrid={snapToGrid}
-        onToggleSnapToGrid={() => setSnapToGrid(!snapToGrid)}
         showAlignmentGuides={showAlignmentGuides}
         onToggleAlignmentGuides={() => setShowAlignmentGuides(!showAlignmentGuides)}
       />
@@ -3552,6 +3367,201 @@ export function CXDCanvas() {
               {draggingExperienceBlock.label}
             </span>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConnectorContextMenu({
+  edge,
+  menuPosition,
+  onUpdateEdge,
+  onDelete,
+}: {
+  edge: CanvasEdge;
+  menuPosition: { top: number; left: number };
+  onUpdateEdge: (updates: Partial<CanvasEdge>) => void;
+  onDelete: () => void;
+}) {
+  const widthPx = edge.style?.thickness || 2;
+  const color = edge.style?.color || "hsl(180 100% 50%)";
+  const kind = edge.style?.lineStyle || "solid";
+  const startCap = edge.style?.startCap || "none";
+  const endCap = edge.style?.endCap || (edge.style?.arrowHead ? "arrow" : "none");
+
+  const getHexColor = () => {
+    if (color.match(/#[0-9a-fA-F]{6}/)) return color;
+    return "#00ffff";
+  };
+
+  return (
+    <div
+      className="flex flex-col gap-1 px-2 py-1.5 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-lg pointer-events-auto"
+      style={{ position: "absolute", zIndex: 1001, pointerEvents: "auto", ...menuPosition }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onUpdateEdge({ style: { ...edge.style, lineStyle: "solid" } })}
+          className={cn(
+            "p-1.5 rounded hover:bg-primary/20 transition-colors",
+            kind === "solid" && "bg-primary/30 ring-1 ring-primary",
+          )}
+          title="Solid"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onUpdateEdge({ style: { ...edge.style, lineStyle: "dashed" } })}
+          className={cn(
+            "p-1.5 rounded hover:bg-primary/20 transition-colors",
+            kind === "dashed" && "bg-primary/30 ring-1 ring-primary",
+          )}
+          title="Dashed"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="4" y1="12" x2="8" y2="12" />
+            <line x1="12" y1="12" x2="16" y2="12" />
+            <line x1="20" y1="12" x2="24" y2="12" />
+          </svg>
+        </button>
+        <button
+          onClick={() => onUpdateEdge({ style: { ...edge.style, lineStyle: "dotted" } })}
+          className={cn(
+            "p-1.5 rounded hover:bg-primary/20 transition-colors",
+            kind === "dotted" && "bg-primary/30 ring-1 ring-primary",
+          )}
+          title="Dotted"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="4" cy="12" r="1" fill="currentColor" />
+            <circle cx="10" cy="12" r="1" fill="currentColor" />
+            <circle cx="16" cy="12" r="1" fill="currentColor" />
+            <circle cx="22" cy="12" r="1" fill="currentColor" />
+          </svg>
+        </button>
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+        <input
+          type="range"
+          min="1"
+          max="12"
+          value={widthPx}
+          onChange={(e) =>
+            onUpdateEdge({
+              style: { ...edge.style, thickness: parseInt(e.target.value), lineStyle: edge.style?.lineStyle },
+            })
+          }
+          className="w-16 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+          title={`Width: ${widthPx}px`}
+        />
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+        <input
+          type="color"
+          value={getHexColor()}
+          onChange={(e) =>
+            onUpdateEdge({
+              style: { ...edge.style, color: e.target.value },
+            })
+          }
+          className="w-6 h-6 rounded cursor-pointer border-0"
+          title="Color"
+        />
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+        <EndCapPicker
+          label="Start"
+          value={startCap as LineEndStyle}
+          onChange={(cap) => onUpdateEdge({ style: { ...edge.style, startCap: cap } })}
+        />
+        <EndCapPicker
+          label="End"
+          value={endCap as LineEndStyle}
+          onChange={(cap) => onUpdateEdge({ style: { ...edge.style, endCap: cap, arrowHead: cap === "arrow" } })}
+        />
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+        <button
+          onClick={onDelete}
+          className="p-1.5 rounded hover:bg-destructive/20 text-destructive transition-colors"
+          title="Delete"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-muted-foreground">Label</span>
+        <input
+          type="text"
+          value={edge.label?.text || ""}
+          onChange={(e) =>
+            onUpdateEdge({
+              label: { ...edge.label, text: e.target.value },
+            })
+          }
+          placeholder="Add label..."
+          className="flex-1 px-2 py-1 text-xs bg-muted/50 rounded border-0 focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+      </div>
+    </div>
+  );
+}
+
+function EndCapPicker({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: LineEndStyle;
+  onChange: (cap: LineEndStyle) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const capOptions: { value: LineEndStyle; label: string; icon: ReactNode }[] = [
+    { value: "none", label: "None", icon: <Minus className="w-3 h-3" /> },
+    { value: "dot", label: "Dot", icon: <Circle className="w-3 h-3 fill-current" /> },
+    { value: "arrow", label: "Arrow", icon: <ArrowRight className="w-3 h-3" /> },
+    { value: "square", label: "Square", icon: <Square className="w-3 h-3 fill-current" /> },
+    { value: "diamond", label: "Diamond", icon: <Diamond className="w-3 h-3 fill-current" /> },
+  ];
+
+  const currentOption = capOptions.find((o) => o.value === value) || capOptions[0];
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={cn(
+          "flex items-center gap-1 p-1.5 rounded hover:bg-primary/20 transition-colors text-xs",
+          isOpen && "bg-primary/20",
+        )}
+        title={`${label} cap: ${currentOption.label}`}
+      >
+        {currentOption.icon}
+        <span className="text-[10px] text-muted-foreground">{label}</span>
+      </button>
+      {isOpen && (
+        <div
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex flex-col gap-0.5 p-1 rounded-lg bg-card/95 backdrop-blur border border-border/50 shadow-lg min-w-[80px]"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {capOptions.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+              }}
+              className={cn(
+                "flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-primary/20 transition-colors",
+                value === option.value && "bg-primary/30",
+              )}
+            >
+              {option.icon}
+              <span>{option.label}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>

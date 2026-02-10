@@ -215,12 +215,13 @@ export function projectElementAsTasks(
   const metadata = getTaskMetadata(element);
   
   // Use subtasks from taskMetadata if available, otherwise parse from markdown
-  const subtasks = metadata?.subtasks 
+  const subtasks = metadata?.subtasks
     ? metadata.subtasks.map(st => ({
         id: st.id,
         text: st.text,
         isCompleted: st.isCompleted,
-        lineIndex: st.order
+        lineIndex: st.order,
+        customProperties: st.customProperties, // Preserve subtask dates for Gantt
       }))
     : parseMarkdownTasks(content);
   
@@ -254,6 +255,8 @@ export function projectElementAsTasks(
         estimatedHours: metadata?.estimatedHours,
         tags: metadata?.customTags,
         customProperties: metadata?.customProperties,
+        isArchived: metadata?.isArchived,
+        inInbox: Boolean((element as any).inInbox),
         
         hypercubeTags: element.hypercubeTags ?? [],
         
@@ -287,18 +290,18 @@ export function projectElementAsTasks(
     sourceElementId: element.id,
     sourceElementType: element.type as 'freeform' | 'text' | 'shape',
     sourceBoardId: element.boardId ?? null,
-    
+
     qualificationCriteria: criteria,
-    
+
     title,
-    description: content,
+    description: metadata?.description ?? content,
     subtasks,
-    
+
     status,
     completedSubtasks,
     totalSubtasks,
     completionPercent,
-    
+
     priority: metadata?.priority,
     taskType: metadata?.taskType,
     dueDate: metadata?.dueDate,
@@ -307,9 +310,12 @@ export function projectElementAsTasks(
     estimatedHours: metadata?.estimatedHours,
     tags: metadata?.customTags,
     customProperties: metadata?.customProperties,
-    
+    dependencies: metadata?.dependencies, // Gantt chart dependencies
+    isArchived: metadata?.isArchived,
+    inInbox: Boolean((element as any).inInbox),
+
     hypercubeTags: element.hypercubeTags ?? [],
-    
+
     canvasPosition: { x: element.x, y: element.y },
   }];
 }
@@ -383,7 +389,7 @@ export function projectElementAsTask(
     qualificationCriteria: criteria,
     
     title,
-    description: content,
+    description: metadata?.description ?? content,
     subtasks,
     
     status,
@@ -397,6 +403,8 @@ export function projectElementAsTask(
     assignee: metadata?.assignee,
     estimatedHours: metadata?.estimatedHours,
     tags: metadata?.customTags,
+    isArchived: metadata?.isArchived,
+    inInbox: Boolean((element as any).inInbox),
     
     hypercubeTags: element.hypercubeTags ?? [],
     

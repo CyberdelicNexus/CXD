@@ -17,7 +17,6 @@ import type {
 import { 
   queryTasks, 
   groupTasksBy, 
-  projectElementAsTask,
   getTasksForDate,
   getTasksInRange,
   createUpdatedContent,
@@ -61,6 +60,15 @@ const DEFAULT_SORT: TaskSort[] = [
   { field: 'priority', direction: 'desc' },
   { field: 'dueDate', direction: 'asc' },
 ];
+
+const updateContentTitle = (content: string, title: string): string => {
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) return content;
+  const lines = (content || '').split('\n');
+  if (lines.length === 0) return trimmedTitle;
+  lines[0] = trimmedTitle;
+  return lines.join('\n');
+};
 
 /**
  * Hook for accessing and manipulating tasks derived from canvas elements
@@ -116,11 +124,7 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   
   // Execute query
   const { tasks, total } = useMemo(() => {
-    const result = queryTasks(allElements, query);
-    console.log('[PLAN TASKS] All elements:', allElements.length);
-    console.log('[PLAN TASKS] Query result:', result.tasks.length, 'tasks');
-    console.log('[PLAN TASKS] First few tasks:', result.tasks.slice(0, 3));
-    return result;
+    return queryTasks(allElements, query);
   }, [allElements, query]);
   
   // Pre-computed groupings for views
@@ -196,6 +200,10 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   const updateTaskMetadata = useCallback((taskId: string, updates: Partial<TaskProjection>) => {
     const element = allElements.find(el => el.id === taskId);
     if (!element) return;
+
+    if (updates.hypercubeTags) {
+      syncUpdateElement(taskId, { hypercubeTags: updates.hypercubeTags } as Partial<CanvasElement>);
+    }
     
     const existingMetadata = 'taskMetadata' in element 
       ? (element as any).taskMetadata 
@@ -212,16 +220,35 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     if (updates.tags) metadataUpdates.customTags = updates.tags;
     if (updates.subtasks) metadataUpdates.subtasks = updates.subtasks;
     if (updates.customProperties) metadataUpdates.customProperties = updates.customProperties;
-    
+    if (updates.dependencies) metadataUpdates.dependencies = updates.dependencies;
+    if (updates.isArchived !== undefined) metadataUpdates.isArchived = updates.isArchived;
     const newMetadata = createTaskMetadataUpdate(existingMetadata, metadataUpdates);
-    
-    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+
+    const elementUpdates: Partial<CanvasElement> = { taskMetadata: newMetadata };
+
+    if ('content' in element && typeof (element as any).content === 'string') {
+      const content = (element as any).content as string;
+      if (updates.title !== undefined) {
+        (elementUpdates as any).content = updateContentTitle(content, updates.title);
+      }
+    }
+
+    if (updates.description !== undefined) {
+      const normalized = updates.description.trim();
+      (elementUpdates as any).taskMetadata = createTaskMetadataUpdate(newMetadata, {
+        description: normalized || undefined,
+      });
+    }
+
+    syncUpdateElement(taskId, elementUpdates);
   }, [allElements, syncUpdateElement]);
   
   // Navigate to task in canvas
   const navigateToTask = useCallback((taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
+    const sourceElement = allElements.find(el => el.id === taskId);
+    const isInInbox = Boolean((sourceElement as any)?.inInbox);
     
     // Switch to canvas view
     setViewMode('canvas');
@@ -241,9 +268,16 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     });
     setCanvasZoom(1);
     
+    if (isInInbox) {
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('cxd:pulse-task-inbox', { detail: { durationMs: 3000 } }));
+      }, 120);
+      return;
+    }
+
     // Highlight the element briefly
-    highlightElementBriefly(taskId, 2000);
-  }, [tasks, setViewMode, setCanvasViewMode, setActiveBoardId, setCanvasPosition, setCanvasZoom, highlightElementBriefly]);
+    highlightElementBriefly(taskId, 2500);
+  }, [tasks, allElements, setViewMode, setCanvasViewMode, setActiveBoardId, setCanvasPosition, setCanvasZoom, highlightElementBriefly]);
   
   // Get task by ID
   const getTaskById = useCallback((taskId: string): TaskProjection | undefined => {

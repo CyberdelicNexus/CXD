@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, Magnet, AlignVerticalJustifyCenter } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface NavigationToolkitProps {
@@ -12,8 +12,6 @@ export interface NavigationToolkitProps {
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
-  snapToGrid?: boolean;
-  onToggleSnapToGrid?: () => void;
   showAlignmentGuides?: boolean;
   onToggleAlignmentGuides?: () => void;
 }
@@ -28,8 +26,6 @@ export function NavigationToolkit({
   onRedo,
   canUndo,
   canRedo,
-  snapToGrid,
-  onToggleSnapToGrid,
   showAlignmentGuides,
   onToggleAlignmentGuides,
 }: NavigationToolkitProps) {
@@ -37,20 +33,6 @@ export function NavigationToolkit({
     <div className="absolute left-6 flex items-center gap-2 z-10 bottom-[56px] flex-col h-fit top-[248.8px]">
       {/* Snap & Alignment Toggles */}
       <div className="flex flex-col gap-1 p-1 rounded-lg bg-card/80 backdrop-blur border border-border">
-        {onToggleSnapToGrid && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleSnapToGrid}
-            className={cn(
-              "transition-colors",
-              snapToGrid && "bg-primary/20 text-primary ring-1 ring-primary/50"
-            )}
-            title={snapToGrid ? "Snap to Grid (On)" : "Snap to Grid (Off)"}
-          >
-            <Magnet className="w-4 h-4" />
-          </Button>
-        )}
         {onToggleAlignmentGuides && (
           <Button
             variant="ghost"

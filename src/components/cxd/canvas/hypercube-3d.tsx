@@ -34,6 +34,9 @@ import {
   ExternalLink,
   Eye,
   MapPin,
+  MessageSquare,
+  Send,
+  Sparkles,
 } from "lucide-react";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { DiagnosticPanel } from "./diagnostic-panel";
@@ -230,6 +233,14 @@ interface ElementPreview {
   elementCount?: number; // For boards/containers
   fileName?: string; // For file elements
   url?: string; // For links
+}
+
+// Chat message for AI chatbot shell
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
 }
 
 function getElementPreview(
@@ -547,6 +558,13 @@ export function Hypercube3D({
   // Zoom level for explore mode (1.0 = default, can zoom in/out)
   const [exploreZoom, setExploreZoom] = useState(DEFAULT_ZOOM);
 
+  // AI Chatbot state - independent chat threads per face + general
+  const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
+  const [chatInput, setChatInput] = useState("");
+  const [isChatInputFocused, setIsChatInputFocused] = useState(false);
+  const [isGeneralChatActive, setIsGeneralChatActive] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   // Auto-rotation for overview mode
   const autoRotationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
@@ -563,6 +581,7 @@ export function Hypercube3D({
       interactionMode === "default" &&
       focusedFaceIndex === null &&
       !isCoreSelected &&
+      !isGeneralChatActive &&
       !isAnimating;
 
     if (!shouldAutoRotate) {
@@ -600,7 +619,7 @@ export function Hypercube3D({
       }
       lastTimeRef.current = 0;
     };
-  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected]);
+  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected, isGeneralChatActive]);
 
   // Generate real-time diagnostics
   const diagnostics = useMemo(() => {
@@ -746,9 +765,11 @@ export function Hypercube3D({
 
     console.log("[Hypercube] Selecting face:", index, face.shortLabel);
 
-    // Set focused face and clear core
+    // Set focused face and clear core/general chat
     setFocusedFaceIndex(index);
     setIsCoreSelected(false);
+    setIsGeneralChatActive(false);
+    setChatInput("");
 
     // Rotate cube to bring selected face to FRONT
     const targetRot = getRotationForFace(index);
@@ -764,6 +785,7 @@ export function Hypercube3D({
     // Sidebar should only open via "Configure" button or double-click
     setFocusedFaceIndex(null);
     setIsCoreSelected(true);
+    setIsGeneralChatActive(false);
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
     console.log("[Hypercube] Core selected - showing core panel");
@@ -774,8 +796,67 @@ export function Hypercube3D({
     setInteractionMode("default");
     setFocusedFaceIndex(null);
     setIsCoreSelected(false);
+    setIsGeneralChatActive(false);
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
+  }, []);
+
+  // Get the current chat key (face id or 'general')
+  const currentChatKey = useMemo(() => {
+    if (isGeneralChatActive) return "general";
+    if (focusedFaceIndex !== null) return CUBE_FACES[focusedFaceIndex].id;
+    return null;
+  }, [isGeneralChatActive, focusedFaceIndex]);
+
+  // Get messages for current chat
+  const currentChatMessages = useMemo(() => {
+    if (!currentChatKey) return [];
+    return chatMessages[currentChatKey] || [];
+  }, [currentChatKey, chatMessages]);
+
+  // Send a chat message and append a temporary automatic assistant response.
+  const handleSendMessage = useCallback(() => {
+    const trimmed = chatInput.trim();
+    if (!trimmed || !currentChatKey) return;
+
+    const newMessage: ChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      role: "user",
+      content: trimmed,
+      timestamp: Date.now(),
+    };
+
+    const autoReply: ChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      role: "assistant",
+      content:
+        "This chatbot will be activated in the next release of features. This assistant is being built to guide your cyberdelic experience design across planning, structure, and execution. We are currently fine-tuning the system so it is as accurate, relevant, and helpful as possible for your workflow.",
+      timestamp: Date.now() + 1,
+    };
+
+    setChatMessages((prev) => ({
+      ...prev,
+      [currentChatKey]: [...(prev[currentChatKey] || []), newMessage, autoReply],
+    }));
+    setChatInput("");
+
+    // Auto-scroll to bottom after message
+    setTimeout(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
+  }, [chatInput, currentChatKey]);
+
+  // Handle insight click from diagnostic panel - populate chat input
+  const handleInsightClick = useCallback((message: string) => {
+    setChatInput(message);
+  }, []);
+
+  // Open general AI chat
+  const openGeneralChat = useCallback(() => {
+    setFocusedFaceIndex(null);
+    setIsCoreSelected(false);
+    setIsGeneralChatActive(true);
+    setChatInput("");
   }, []);
 
   const enterExploreMode = useCallback(() => {
@@ -784,6 +865,7 @@ export function Hypercube3D({
     // Clear face selection when entering explore
     setFocusedFaceIndex(null);
     setIsCoreSelected(false);
+    setIsGeneralChatActive(false);
   }, []);
 
   const exitExploreMode = useCallback(() => {
@@ -1184,6 +1266,7 @@ export function Hypercube3D({
 
   const focusedFace =
     focusedFaceIndex !== null ? CUBE_FACES[focusedFaceIndex] : null;
+  const chatAccentHue = focusedFace?.tint.hue ?? 220;
   const focusedFaceTag = focusedFace ? SECTION_TO_TAG[focusedFace.id] : null;
   const focusedTaggedElements = focusedFaceTag
     ? getTaggedElementsForFace(focusedFaceTag)
@@ -1209,7 +1292,7 @@ export function Hypercube3D({
   // When a face is selected: cube shrinks and moves to top-right as NAVIGATION MAP
   // Otherwise: cube is centered and visually prominent
   const cubePosition = useMemo(() => {
-    const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected;
+    const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
 
     if (hasFaceSelected && interactionMode === "default") {
       // Minimap position: top-right corner, smaller but still 3D (20-30° tilt preserved)
@@ -1221,7 +1304,7 @@ export function Hypercube3D({
     const scale =
       interactionMode === "explore" ? baseScale * exploreZoom : baseScale;
     return { scale, x: "50%", y: "50%" };
-  }, [interactionMode, focusedFaceIndex, isCoreSelected, exploreZoom]);
+  }, [interactionMode, focusedFaceIndex, isCoreSelected, isGeneralChatActive, exploreZoom]);
 
   // Dynamic background based on canvas background preference
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
@@ -1241,7 +1324,8 @@ export function Hypercube3D({
       <DiagnosticPanel
         diagnostics={diagnostics}
         onFaceReference={handleFaceReference}
-        isOpen={isPanelOpen && (focusedFaceIndex !== null || isCoreSelected)}
+        onInsightClick={handleInsightClick}
+        isOpen={isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)}
         onToggle={() => setIsPanelOpen(!isPanelOpen)}
       />
       {/* 3D Scene Container */}
@@ -1592,9 +1676,10 @@ export function Hypercube3D({
                   interactionMode === "default" &&
                   focusedFaceIndex === null &&
                   !isCoreSelected &&
+                  !isGeneralChatActive &&
                   "bg-purple-400 animate-pulse shadow-lg shadow-purple-400/50",
                   interactionMode === "default" &&
-                  (focusedFaceIndex !== null || isCoreSelected) &&
+                  (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive) &&
                   "bg-cyan-400 shadow-lg shadow-cyan-400/50",
                   interactionMode === "explore" &&
                   "bg-amber-400 animate-pulse shadow-lg shadow-amber-400/50",
@@ -1609,22 +1694,75 @@ export function Hypercube3D({
                 )}
               >
                 {interactionMode === "default" &&
-                  (focusedFaceIndex !== null || isCoreSelected) &&
+                  (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive) &&
                   "Active"}
                 {interactionMode === "default" &&
                   focusedFaceIndex === null &&
                   !isCoreSelected &&
+                  !isGeneralChatActive &&
                   "Default"}
                 {interactionMode === "explore" && "Explore"}
               </span>
             </div>
           </div>
 
+          {/* General AI Chat button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasDragged) return;
+              openGeneralChat();
+            }}
+            className={cn(
+              "group relative w-[72px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center",
+              isGeneralChatActive && "scale-105 z-10",
+              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-40 scale-95",
+              !isGeneralChatActive && focusedFaceIndex === null && "hover:scale-105 hover:z-10 overflow-visible",
+            )}
+            style={{
+              background: "linear-gradient(135deg, hsl(220 30% 12%) 0%, hsl(220 25% 8%) 50%, hsl(220 20% 5%) 100%)",
+              borderColor: isGeneralChatActive
+                ? "hsl(220 60% 60%)"
+                : "hsl(220 20% 25%)",
+              boxShadow: isGeneralChatActive
+                ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
+                : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
+            }}
+            title="General AI Chat"
+          >
+            <div
+              className={cn(
+                "absolute inset-0 opacity-0 transition-opacity duration-300",
+                !isGeneralChatActive && focusedFaceIndex === null && "group-hover:opacity-100",
+              )}
+              style={{
+                background: "radial-gradient(circle at center, hsl(220 60% 60% / 0.12) 0%, transparent 70%)",
+              }}
+            />
+            <div className="flex flex-col items-center gap-1.5 relative z-10">
+              <Sparkles
+                className="w-5 h-5"
+                style={{
+                  color: isGeneralChatActive ? "hsl(220 60% 70%)" : "hsl(220 40% 55%)",
+                }}
+              />
+              <span
+                className="text-[10px] font-bold uppercase tracking-wide"
+                style={{
+                  color: isGeneralChatActive ? "hsl(220 60% 70%)" : "hsl(220 40% 55%)",
+                  textShadow: isGeneralChatActive ? "0 0 20px hsl(220 60% 60%)" : "none",
+                }}
+              >
+                AI
+              </span>
+            </div>
+          </button>
+
           {/* Face buttons */}
           {CUBE_FACES.map((face, index) => {
             const isFocused = focusedFaceIndex === index;
             const isDimmed =
-              focusedFaceIndex !== null && focusedFaceIndex !== index;
+              (focusedFaceIndex !== null && focusedFaceIndex !== index) || isGeneralChatActive;
             const intensity = calculateFaceIntensity(face);
 
             const { hue, satBase, lightBase } = face.tint;
@@ -1983,51 +2121,71 @@ export function Hypercube3D({
           </div>
         </div>
 
-        {/* CENTER PANEL - When a face is selected in default mode */}
-        {interactionMode === "default" && focusedFace && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-            <div className="w-full max-w-2xl mx-auto px-8 pointer-events-auto">
+        {/* CENTER PANEL - AI Chatbot + Tagged Elements Strip */}
+        {interactionMode === "default" && (focusedFace || isGeneralChatActive) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20">
+            {/* Main Chat Panel */}
+            <div className="w-full max-w-2xl mx-auto px-8 mt-20 pointer-events-auto overflow-visible">
               <div
-                className="bg-card/95 backdrop-blur-xl rounded-2xl border shadow-2xl overflow-hidden"
+                className="bg-card/95 backdrop-blur-xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col"
                 style={{
-                  borderColor: `hsl(${focusedFace.tint.hue} 40% 40% / 0.5)`,
+                  borderColor: focusedFace
+                    ? `hsl(${focusedFace.tint.hue} 40% 40% / 0.5)`
+                    : "hsl(220 20% 40% / 0.5)",
+                  height: "50vh",
+                  transition: "box-shadow 260ms ease, border-color 260ms ease",
+                  boxShadow: isChatInputFocused
+                    ? `0 24px 50px -24px rgba(0,0,0,0.9), 0 0 0 1px hsl(${chatAccentHue} 60% 60% / 0.35), 0 0 14px 3px hsl(${chatAccentHue} 70% 58% / 0.45)`
+                    : undefined,
                 }}
               >
                 {/* Header */}
                 <div
-                  className="px-6 py-4 border-b border-border flex items-center justify-between"
+                  className="px-6 py-3 border-b border-border flex items-center justify-between flex-shrink-0"
                   style={{
-                    backgroundColor: `hsl(${focusedFace.tint.hue} 30% 15% / 0.5)`,
+                    backgroundColor: focusedFace
+                      ? `hsl(${focusedFace.tint.hue} 30% 15% / 0.5)`
+                      : "hsl(220 20% 12% / 0.5)",
                   }}
                 >
-                  <div className="flex items-center gap-4">
-                    <svg width="36" height="36" viewBox="0 0 40 40">
-                      <path
-                        d={focusedFace.glyph}
-                        fill="none"
-                        stroke={`hsl(${focusedFace.tint.hue} 50% 65%)`}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
+                  <div className="flex items-center gap-3">
+                    {focusedFace ? (
+                      <svg width="28" height="28" viewBox="0 0 40 40">
+                        <path
+                          d={focusedFace.glyph}
+                          fill="none"
+                          stroke={`hsl(${focusedFace.tint.hue} 50% 65%)`}
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ) : (
+                      <Sparkles
+                        className="w-6 h-6"
+                        style={{ color: "hsl(220 60% 65%)" }}
                       />
-                    </svg>
+                    )}
                     <div>
-                      <h2 className="text-lg font-semibold text-foreground">
-                        {focusedFace.label}
+                      <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                        {focusedFace ? focusedFace.label : "AI Assistant"}
+                        <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />
                       </h2>
-                      <p className="text-xs text-muted-foreground">
-                        {focusedFace.semanticRole}
+                      <p className="text-[11px] text-muted-foreground">
+                        {focusedFace ? focusedFace.semanticRole : "General experience design guidance"}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onSelectSection(focusedFace.id)}
-                      className="px-3 py-1.5 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded-md transition-colors flex items-center gap-1.5"
-                    >
-                      Configure
-                      <ExternalLink className="w-3 h-3" />
-                    </button>
+                    {focusedFace && (
+                      <button
+                        onClick={() => onSelectSection(focusedFace.id)}
+                        className="px-3 py-1.5 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded-md transition-colors flex items-center gap-1.5"
+                      >
+                        Configure
+                        <ExternalLink className="w-3 h-3" />
+                      </button>
+                    )}
                     <button
                       onClick={returnToDefault}
                       className="p-1.5 hover:bg-white/10 rounded-md text-muted-foreground hover:text-foreground transition-colors"
@@ -2038,157 +2196,177 @@ export function Hypercube3D({
                   </div>
                 </div>
 
-                {/* Summary */}
-                <div className="px-6 py-4 border-b border-border">
-                  <p className="text-sm text-foreground/90 leading-relaxed">
-                    {faceSummary}
-                  </p>
-                </div>
-
-                {/* Rich Content Previews */}
-                <div className="px-6 py-4 max-h-[300px] overflow-y-auto">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-xs uppercase tracking-wider font-semibold text-muted-foreground">
-                      Tagged Canvas Elements
-                    </h3>
-                    <span className="text-xs text-muted-foreground/70">
-                      {focusedElementPreviews.length} element
-                      {focusedElementPreviews.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-
-                  {focusedElementPreviews.length === 0 ? (
-                    <div className="text-center py-8 border border-dashed border-border/50 rounded-lg">
-                      <Type className="w-8 h-8 mx-auto mb-2 text-muted-foreground/40" />
-                      <p className="text-sm text-muted-foreground">
-                        No elements tagged to this face yet
+                {/* Chat Thread */}
+                <div className="flex-1 overflow-y-auto px-6 py-4 min-h-[180px]" style={{ scrollbarWidth: "thin" }}>
+                  {currentChatMessages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center py-6">
+                      <MessageSquare
+                        className="w-10 h-10 mb-3"
+                        style={{
+                          color: focusedFace
+                            ? `hsl(${focusedFace.tint.hue} 30% 45%)`
+                            : "hsl(220 30% 45%)",
+                        }}
+                      />
+                      <p className="text-sm text-muted-foreground leading-relaxed max-w-sm">
+                        {focusedFace
+                          ? `Ask questions about your ${focusedFace.label.toLowerCase()} design, or click a System Insight to start a conversation.`
+                          : "Ask anything about your experience design. Click a System Insight to start a conversation."}
                       </p>
-                      <p className="text-xs text-muted-foreground/70 mt-1">
-                        Use "Tag to Hypercube" in element context menu on canvas
-                      </p>
+                      {focusedFace && faceSummary && (
+                        <p className="text-xs text-muted-foreground/60 mt-3 leading-relaxed max-w-sm italic">
+                          {faceSummary}
+                        </p>
+                      )}
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {focusedElementPreviews.map((preview: ElementPreview) => {
-                        const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
-                        // Find the actual element for callbacks
-                        const element = focusedTaggedElements.find(
-                          (el: CanvasElement) => el.id === preview.id,
-                        );
-
-                        return (
+                    <div className="space-y-3">
+                      {currentChatMessages.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={cn(
+                            "flex",
+                            msg.role === "user" ? "justify-end" : "justify-start",
+                          )}
+                        >
                           <div
-                            key={preview.id}
                             className={cn(
-                              "group p-3 rounded-lg border transition-all hover:bg-white/5 cursor-pointer",
-                              preview.isEmpty
-                                ? "border-border/30 opacity-60"
-                                : "border-border/50",
+                              "max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
+                              msg.role === "user"
+                                ? "bg-primary/20 text-foreground rounded-br-sm"
+                                : "bg-white/5 text-foreground/90 border border-border/40 rounded-bl-sm",
                             )}
-                            style={{
-                              borderLeftColor: `hsl(${focusedFace.tint.hue} 40% 50%)`,
-                              borderLeftWidth: "3px",
-                            }}
-                            onClick={() => {
-                              if (onPreviewElement && element) {
-                                onPreviewElement(element);
-                              }
-                            }}
+                            style={
+                              msg.role === "user" && focusedFace
+                                ? { backgroundColor: `hsl(${focusedFace.tint.hue} 30% 25% / 0.6)` }
+                                : undefined
+                            }
                           >
-                            <div className="flex items-start gap-3">
-                              <Icon className="w-4 h-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-sm font-medium text-foreground truncate">
-                                    {preview.title}
-                                  </span>
-                                  {preview.domain && (
-                                    <span className="text-[10px] text-muted-foreground/70 px-1.5 py-0.5 bg-white/5 rounded">
-                                      {preview.domain}
-                                    </span>
-                                  )}
-                                  {preview.elementCount !== undefined && (
-                                    <span className="text-[10px] text-muted-foreground/70 px-1.5 py-0.5 bg-white/5 rounded">
-                                      {preview.elementCount}{" "}
-                                      {preview.elementCount === 1
-                                        ? "item"
-                                        : "items"}
-                                    </span>
-                                  )}
-                                </div>
-                                {preview.excerpt && (
-                                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                    {preview.excerpt}
-                                  </p>
-                                )}
-                                {preview.isEmpty && (
-                                  <p className="text-xs text-muted-foreground/50 mt-1 italic">
-                                    No content yet
-                                  </p>
-                                )}
-                                {/* Action buttons - always visible for better discoverability */}
-                                <div className="flex items-center gap-2 mt-2">
-                                  {element && onPreviewElement && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onPreviewElement(element);
-                                      }}
-                                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-primary/20 hover:bg-primary/30 text-primary transition-colors"
-                                    >
-                                      <Eye className="w-3 h-3" />
-                                      Quick View
-                                    </button>
-                                  )}
-                                  {onNavigateToElement && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onNavigateToElement(preview.id);
-                                      }}
-                                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-white/10 hover:bg-white/20 text-foreground/80 transition-colors"
-                                    >
-                                      <MapPin className="w-3 h-3" />
-                                      View on Canvas
-                                    </button>
-                                  )}
-                                  {preview.type === "link" && preview.url && (
-                                    <a
-                                      href={preview.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-white/10 hover:bg-white/20 text-foreground/80 transition-colors"
-                                    >
-                                      <ExternalLink className="w-3 h-3" />
-                                      Open Link
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                              {preview.thumbnail && (
-                                <div className="w-16 h-16 rounded overflow-hidden bg-black/20 flex-shrink-0 border border-border/30">
-                                  <img
-                                    src={preview.thumbnail}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      (
-                                        e.target as HTMLImageElement
-                                      ).style.display = "none";
-                                    }}
-                                  />
-                                </div>
-                              )}
-                            </div>
+                            {msg.content}
                           </div>
-                        );
-                      })}
+                        </div>
+                      ))}
+                      <div ref={chatEndRef} />
                     </div>
                   )}
                 </div>
+
+                {/* Chat Input */}
+                <div className="px-4 py-3 border-t border-border flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onFocus={() => setIsChatInputFocused(true)}
+                      onBlur={() => setIsChatInputFocused(false)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      placeholder={
+                        focusedFace
+                          ? `Ask about ${focusedFace.shortLabel.toLowerCase()}...`
+                          : "Ask about your experience design..."
+                      }
+                      className="flex-1 bg-white/5 border border-border/50 rounded-lg px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-transparent transition-all"
+                      style={
+                        focusedFace
+                          ? ({ "--tw-ring-color": `hsl(${focusedFace.tint.hue} 40% 50%)` } as React.CSSProperties)
+                          : undefined
+                      }
+                    />
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!chatInput.trim()}
+                      className={cn(
+                        "p-2 rounded-lg transition-all flex-shrink-0",
+                        chatInput.trim()
+                          ? "bg-primary/20 hover:bg-primary/30 text-primary"
+                          : "bg-white/5 text-muted-foreground/30 cursor-not-allowed",
+                      )}
+                      style={
+                        chatInput.trim() && focusedFace
+                          ? {
+                            backgroundColor: `hsl(${focusedFace.tint.hue} 30% 25% / 0.5)`,
+                            color: `hsl(${focusedFace.tint.hue} 50% 70%)`,
+                          }
+                          : undefined
+                      }
+                      title="Feature coming soon"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
+
+            {/* Tagged Elements Horizontal Strip - Below chat panel, only for face selection */}
+            {focusedFace && focusedElementPreviews.length > 0 && (
+              <div className="w-full max-w-3xl mx-auto px-8 mt-10 pointer-events-auto">
+                <div className="flex items-center gap-2 mb-1.5 px-1">
+                  <h3
+                    className="text-[10px] uppercase tracking-wider font-semibold"
+                    style={{ color: `hsl(${focusedFace.tint.hue} 30% 55%)` }}
+                  >
+                    Tagged Elements
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground/50">
+                    {focusedElementPreviews.length}
+                  </span>
+                </div>
+                <div
+                  className="flex gap-2 overflow-x-auto pb-1"
+                  style={{ scrollbarWidth: "none" } as React.CSSProperties}
+                >
+                  {focusedElementPreviews.map((preview: ElementPreview) => {
+                    const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
+                    const element = focusedTaggedElements.find(
+                      (el: CanvasElement) => el.id === preview.id,
+                    );
+                    return (
+                      <div
+                        key={preview.id}
+                        className="flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg bg-card/90 backdrop-blur-sm border border-border/40 hover:bg-white/10 transition-all group"
+                        style={{
+                          borderLeftColor: `hsl(${focusedFace.tint.hue} 40% 50%)`,
+                          borderLeftWidth: "2px",
+                          maxWidth: "240px",
+                        }}
+                      >
+                        <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="text-xs text-foreground truncate">
+                          {preview.title}
+                        </span>
+                        <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                          {element && onPreviewElement && (
+                            <button
+                              onClick={() => onPreviewElement(element)}
+                              className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                              title="Quick View"
+                            >
+                              <Eye className="w-3 h-3" />
+                            </button>
+                          )}
+                          {onNavigateToElement && (
+                            <button
+                              onClick={() => onNavigateToElement(preview.id)}
+                              className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                              title="View on Canvas"
+                            >
+                              <MapPin className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
