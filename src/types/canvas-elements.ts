@@ -91,7 +91,8 @@ export type HypercubeFaceTag =
   | 'Presence Types'
   | 'State Mapping'
   | 'Trait Mapping'
-  | 'Meaning Architecture';
+  | 'Meaning Architecture'
+  | 'Core';
 
 export const HYPERCUBE_FACE_TAGS: HypercubeFaceTag[] = [
   'Reality Planes',
@@ -100,6 +101,7 @@ export const HYPERCUBE_FACE_TAGS: HypercubeFaceTag[] = [
   'State Mapping',
   'Trait Mapping',
   'Meaning Architecture',
+  'Core',
 ];
 
 // Base interface for all canvas elements
@@ -167,7 +169,10 @@ export interface TaskMetadata {
 // Freeform Card (Post-it style)
 export interface FreeformElement extends CanvasElementBase {
   type: 'freeform';
+  cardType?: 'note' | 'task';
   content: string;
+  noteTitle?: string;
+  noteBody?: string;
   emoji?: string;
   style?: ElementStyle;
   taskMetadata?: TaskMetadata;       // Plan Tab task extension

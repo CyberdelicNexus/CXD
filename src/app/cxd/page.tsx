@@ -13,10 +13,23 @@ import { fetchUserProjects, saveProject } from "@/lib/supabase-projects";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 import { CollaborationProvider } from "@/contexts/collaboration-context";
+import { YjsProjectProvider } from "@/contexts/yjs-project-context";
+import { CreditTopUpSuccess } from "@/components/cxd/credit-topup-success";
 import type { CanvasUpdate } from "@/hooks/use-collaboration";
 
 export default function CXDPage() {
   const router = useRouter();
+  const [showTopUpSuccess, setShowTopUpSuccess] = useState(false);
+  const [topupPack, setTopupPack] = useState<string | null>(null);
+
+  // Show success overlay when returning from Stripe credit checkout
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("credits_topup") === "success") {
+      setTopupPack(params.get("pack"));
+      setShowTopUpSuccess(true);
+    }
+  }, []);
 
   // Mobile device detection and redirect
   useEffect(() => {
@@ -70,9 +83,21 @@ export default function CXDPage() {
     updateExperienceFlowIntent,
   } = useCXDStore();
   const [isRestoring, setIsRestoring] = useState(true);
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  // Wait for Zustand to hydrate from localStorage
+  useEffect(() => {
+    // Small delay to ensure persist middleware has hydrated
+    const timer = setTimeout(() => {
+      setHasHydrated(true);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Handle remote updates from collaborators (shared across all views)
+  // In CRDT mode, the Yjs provider handles all sync — skip LWW dispatch
   const handleRemoteUpdate = useCallback((update: CanvasUpdate) => {
+    if (useCXDStore.getState().yDoc) return;
     console.log('[Collab] Received remote update:', update.type);
 
     switch (update.type) {
@@ -303,13 +328,15 @@ export default function CXDPage() {
 
   // Redirect to dashboard if no project is selected (separate effect to handle timing)
   useEffect(() => {
-    if (!isRestoring && !currentProjectId) {
+    // Wait for Zustand to hydrate before checking currentProjectId
+    if (!isRestoring && hasHydrated && !currentProjectId) {
       // Use window.location for full page navigation to avoid RSC fetch issues
       window.location.href = "/dashboard";
     }
-  }, [isRestoring, currentProjectId, router]);
+  }, [isRestoring, hasHydrated, currentProjectId, router]);
 
   return (
+    <YjsProjectProvider>
     <CollaborationProvider onRemoteUpdate={handleRemoteUpdate}>
       <div className="min-h-screen bg-gradient-radial">
         <CXDNavbar />
@@ -337,6 +364,13 @@ export default function CXDPage() {
           )}
         </main>
       </div>
+      {showTopUpSuccess && (
+        <CreditTopUpSuccess
+          packId={topupPack}
+          onDismiss={() => setShowTopUpSuccess(false)}
+        />
+      )}
     </CollaborationProvider>
+    </YjsProjectProvider>
   );
 }

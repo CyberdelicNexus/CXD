@@ -9,11 +9,13 @@ import {
   Link2,
   Scale,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  MessageCircle,
+  Sparkles
 } from "lucide-react";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
-import { Diagnostic, DiagnosticCategory } from "@/types/diagnostics";
+import { EnrichedDiagnostic, DiagnosticCategory, ProjectPhase } from "@/types/diagnostics";
 
 // Face visual identity mapping
 const FACE_IDENTITY: Record<string, {
@@ -54,9 +56,10 @@ const FACE_IDENTITY: Record<string, {
 };
 
 interface DiagnosticPanelProps {
-  diagnostics: Diagnostic[];
+  diagnostics: EnrichedDiagnostic[];
   onFaceReference?: (faceId: string) => void;
-  onInsightClick?: (message: string) => void;
+  /** Layer 2: Click handler now receives full enriched context for AI */
+  onInsightClick?: (chatContext: EnrichedDiagnostic['chatContext']) => void;
   isOpen: boolean;
   onToggle: () => void;
 }
@@ -116,6 +119,29 @@ const SEVERITY_CONFIG = {
   }
 };
 
+/** Layer 2: Phase visualization config */
+const PHASE_CONFIG: Record<ProjectPhase, {
+  label: string;
+  color: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = {
+  exploring: {
+    label: "Exploring",
+    color: "hsl(195 60% 60%)",
+    icon: Sparkles
+  },
+  shaping: {
+    label: "Shaping",
+    color: "hsl(260 50% 65%)",
+    icon: TrendingUp
+  },
+  refining: {
+    label: "Refining",
+    color: "hsl(160 50% 60%)",
+    icon: CheckCircle2
+  }
+};
+
 export function DiagnosticPanel({ diagnostics, onFaceReference, onInsightClick, isOpen, onToggle }: DiagnosticPanelProps) {
   // Get dynamic background color from canvas background
   const project = useCXDStore(state => state.getCurrentProject());
@@ -128,7 +154,7 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, onInsightClick, 
 
   // Group diagnostics by category
   const groupedDiagnostics = React.useMemo(() => {
-    const groups: Record<DiagnosticCategory, Diagnostic[]> = {
+    const groups: Record<DiagnosticCategory, EnrichedDiagnostic[]> = {
       balance: [],
       coverage: [],
       coherence: [],
@@ -145,6 +171,12 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, onInsightClick, 
   }, [diagnostics]);
 
   const hasAnyDiagnostics = diagnostics.length > 0;
+
+  // Layer 2: Detect current phase from diagnostics
+  const currentPhase: ProjectPhase = React.useMemo(() => {
+    if (diagnostics.length === 0) return 'exploring';
+    return diagnostics[0].phase; // All diagnostics share same phase
+  }, [diagnostics]);
 
   return (
     <>
@@ -174,11 +206,28 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, onInsightClick, 
         style={{ backgroundColor: panelBgColor }}
       >
         {/* Header */}
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
-            System Insights
-          </h2>
-          <p className="text-xs text-muted-foreground mt-1">
+        <div className="px-4 py-3 border-b border-border space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
+              System Insights
+            </h2>
+            {/* Layer 2: Phase indicator */}
+            {hasAnyDiagnostics && (() => {
+              const phaseConfig = PHASE_CONFIG[currentPhase];
+              const PhaseIcon = phaseConfig.icon;
+              return (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white/5 border border-white/10">
+                  <div style={{ color: phaseConfig.color }}>
+                    <PhaseIcon className="w-3 h-3" />
+                  </div>
+                  <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: phaseConfig.color }}>
+                    {phaseConfig.label}
+                  </span>
+                </div>
+              );
+            })()}
+          </div>
+          <p className="text-xs text-muted-foreground">
             Interpretive guidance for your experience design
           </p>
         </div>
@@ -242,11 +291,8 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, onInsightClick, 
                           "rounded-lg p-3 border transition-all",
                           severityConfig.bg,
                           severityConfig.border,
-                          "hover:bg-opacity-20",
-                          onInsightClick && "cursor-pointer hover:ring-1 hover:ring-white/10"
+                          "hover:bg-opacity-20"
                         )}
-                        onClick={() => onInsightClick?.(diagnostic.message)}
-                        title={onInsightClick ? "Click to ask about this insight" : undefined}
                       >
                         <p className={cn(
                           "text-sm leading-relaxed",
@@ -267,7 +313,10 @@ export function DiagnosticPanel({ diagnostics, onFaceReference, onInsightClick, 
                               return (
                                 <button
                                   key={faceId}
-                                  onClick={() => onFaceReference(faceId)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onFaceReference(faceId);
+                                  }}
                                   className={cn(
                                     "flex items-center gap-1.5 px-2 py-1 rounded-md",
                                     "bg-white/5 hover:bg-white/10 border transition-all",

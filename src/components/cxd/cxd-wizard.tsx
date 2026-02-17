@@ -243,7 +243,7 @@ export function CXDWizard() {
     // Desired Change step - Insights, Feelings, States, Knowledge
     if (step.sectionId === "desiredChange") {
       return (
-        <div className="grid grid-cols-2 gap-4 !container">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 w-full max-w-5xl mx-auto">
           <div className="space-y-2">
             <Label className="text-sm font-medium">Insights</Label>
             <p className="text-xs text-muted-foreground">
@@ -546,7 +546,7 @@ export function CXDWizard() {
       };
 
       return (
-        <div className="grid grid-cols-2 gap-4 w-full">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 w-full max-w-5xl mx-auto">
           {STATE_QUADRANTS.map((quadrant) => (
             <div key={quadrant.code} className="space-y-2">
               <Label className="text-sm font-medium">{quadrant.label}</Label>
@@ -569,8 +569,15 @@ export function CXDWizard() {
 
     // Trait Mapping step
     if (step.sectionId === "traitMapping") {
+      const traitExamples: Record<string, string> = {
+        cognitive: "e.g., Strategic thinking, discernment, cognitive flexibility, systems thinking, creative confidence...",
+        emotional: "e.g., Emotional regulation, resilience, compassion, gratitude, inner calm, optimism...",
+        somatic: "e.g., Nervous system balance, embodied awareness, sustainable energy, grounded posture, restorative habits...",
+        relational: "e.g., Deep listening, trust-building, authentic communication, healthy boundaries, collaborative leadership...",
+      };
+
       return (
-        <div className="grid grid-cols-2 gap-4 h-fit w-full">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 h-fit w-full max-w-5xl mx-auto">
           {TRAIT_QUADRANTS.map((quadrant) => (
             <div key={quadrant.code} className="space-y-2">
               <Label className="text-sm font-medium">{quadrant.label}</Label>
@@ -578,7 +585,7 @@ export function CXDWizard() {
                 {quadrant.description}
               </p>
               <Textarea
-                placeholder={`Describe ${quadrant.label.toLowerCase()} traits...`}
+                placeholder={traitExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} traits...`}
                 value={project.traitMapping[quadrant.code]}
                 onChange={(e) =>
                   updateTraitMapping(quadrant.code, e.target.value)
@@ -614,7 +621,7 @@ export function CXDWizard() {
         smoothing={60}
       />
       {/* 3-Column Layout: Previous Button | Main Frame | Next Button */}
-      <div className="max-w-6xl mx-auto relative z-10 grid grid-cols-[auto_1fr_auto] gap-6 items-start">
+      <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-5xl mx-auto relative z-10 grid grid-cols-[auto_1fr_auto] gap-6 items-start">
         {/* Left Column - Previous Arrow Button */}
         <div className="sticky top-1/2 -translate-y-1/2 pt-32">
           <button
@@ -643,7 +650,7 @@ export function CXDWizard() {
         </div>
 
         {/* Center Column - Main Content */}
-        <div className="max-w-4xl mx-auto w-full">
+        <div className="max-w-3xl lg:max-w-4xl mx-auto w-full">
         {/* Progress Header with Phase indicator */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">

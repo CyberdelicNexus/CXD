@@ -3,8 +3,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { CanvasElement, FreeformElement, Subtask } from "@/types/canvas-elements";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
-import { Inbox, GripVertical, X, ArrowRight, CheckSquare, ChevronDown, Circle, CheckCircle2, Archive, Calendar, Tag, ListTodo, Clock, AlertCircle } from "lucide-react";
+import { Inbox, GripVertical, X, ArrowRight, CheckSquare, ChevronDown, Circle, CheckCircle2, Archive, Calendar, Tag, ListTodo, Clock, AlertCircle, FileText, Pencil } from "lucide-react";
 import { useCXDStore } from "@/store/cxd-store";
+import { getFaceDisplayName } from "@/lib/display-utils";
+import { useSubscription } from "@/hooks/use-subscription";
 
 interface TaskInboxProps {
   inboxItems: CanvasElement[];
@@ -29,15 +31,30 @@ export function TaskInbox({
     return currentProject?.canvasLayout?.elements || [];
   });
   const project = useCXDStore(state => state.getCurrentProject());
+  const { hasPlanView } = useSubscription();
 
   // Filter inbox items with useMemo to prevent unnecessary re-renders
   const inboxItems = useMemo(() => {
-    return allElements.filter((el) => el.inInbox === true);
+    const items = allElements.filter((el) => el.inInbox === true);
+    console.log('[TaskInbox] Inbox items from allElements:', {
+      allElementsCount: allElements.length,
+      inboxCount: items.length,
+      inbox: items.map(el => ({
+        id: el.id,
+        type: el.type,
+        cardType: (el as any).cardType,
+        emoji: (el as any).emoji,
+        inInbox: el.inInbox,
+      })),
+    });
+    return items;
   }, [allElements]);
 
   const [isOpen, setIsOpen] = useState(false);
   const [isGlowing, setIsGlowing] = useState(false);
   const [prevCount, setPrevCount] = useState(inboxItems.length);
+  // Default to 'notes' for free users, 'tasks' for pro users
+  const [activeTab, setActiveTab] = useState<'tasks' | 'notes'>(hasPlanView ? 'tasks' : 'notes');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isDragOverInbox, setIsDragOverInbox] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -46,13 +63,54 @@ export function TaskInbox({
   const inboxButtonBg = hexToRgba(centerColor, 0.72);
   const inboxPanelBg = hexToRgba(centerColor, 0.86);
 
-  // Filter items by status
-  const filteredItems = inboxItems.filter(item => {
+  // Separate tasks and notes
+  const taskItems = inboxItems.filter(item => {
+    const freeform = item as FreeformElement;
+    return freeform.cardType === 'task';
+  });
+
+  const noteItems = inboxItems.filter(item => {
+    const freeform = item as FreeformElement;
+    // Include items with cardType 'note', OR items that look like notes (noteTitle, noteBody, or AI emoji)
+    const isNote = freeform.cardType === 'note' ||
+                   freeform.noteTitle !== undefined ||
+                   freeform.noteBody !== undefined ||
+                   freeform.emoji === '🤖';
+
+    console.log('[TaskInbox] Checking if item is note:', {
+      id: item.id,
+      cardType: freeform.cardType,
+      hasNoteTitle: freeform.noteTitle !== undefined,
+      hasNoteBody: freeform.noteBody !== undefined,
+      emoji: freeform.emoji,
+      isNote,
+    });
+
+    return isNote;
+  });
+
+  // Filter items by active tab and status
+  const filteredItems = (activeTab === 'tasks' ? taskItems : noteItems).filter(item => {
+    if (activeTab === 'notes') return true; // Notes don't have status filter
     if (statusFilter === 'all') return true;
     const freeform = item as FreeformElement;
     const status = freeform.taskMetadata?.status || 'not_started';
     return status === statusFilter;
   });
+
+  // Debug: Log filtered items
+  useEffect(() => {
+    console.log('[TaskInbox] Filtered items:', {
+      activeTab,
+      count: filteredItems.length,
+      items: filteredItems.map(item => ({
+        id: item.id,
+        type: item.type,
+        cardType: (item as any).cardType,
+        emoji: (item as any).emoji,
+      })),
+    });
+  }, [filteredItems, activeTab]);
 
   // Glow effect when new tasks are added
   useEffect(() => {
@@ -169,7 +227,7 @@ export function TaskInbox({
           isGlowing ? "text-purple-400" : "text-primary"
         )} />
         {/* Badge for item count */}
-        {inboxItems.length > 0 && (
+        {(taskItems.length + noteItems.length) > 0 && (
           <span className={cn(
             "absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5",
             "flex items-center justify-center",
@@ -179,7 +237,7 @@ export function TaskInbox({
               ? "bg-purple-400 text-black animate-bounce"
               : "bg-primary text-primary-foreground"
           )}>
-            {inboxItems.length}
+            {taskItems.length + noteItems.length}
           </span>
         )}
       </button>
@@ -205,9 +263,9 @@ export function TaskInbox({
                 <Inbox className="w-4 h-4 text-primary" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold">Task Inbox</h2>
+                <h2 className="text-sm font-semibold">Canvas Inbox</h2>
                 <p className="text-xs text-muted-foreground">
-                  {filteredItems.length} {filteredItems.length === 1 ? 'task' : 'tasks'}
+                  {taskItems.length + noteItems.length} {(taskItems.length + noteItems.length) === 1 ? 'item' : 'items'}
                 </p>
               </div>
             </div>
@@ -219,29 +277,78 @@ export function TaskInbox({
             </button>
           </div>
 
-          {/* Status Filter Tags */}
-          <div className="flex gap-1.5">
-            {[
-              { value: 'all', label: 'All' },
-              { value: 'not_started', label: 'Not Started' },
-              { value: 'in_progress', label: 'In Progress' },
-              { value: 'completed', label: 'Completed' },
-              { value: 'blocked', label: 'Blocked' },
-            ].map(({ value, label }) => (
+          {/* Tabs - Only show Tasks tab for pro users */}
+          <div className="flex gap-1 mb-3 bg-white/5 rounded-lg p-1">
+            {hasPlanView && (
               <button
-                key={value}
-                onClick={() => setStatusFilter(value)}
+                onClick={() => {
+                  setActiveTab('tasks');
+                  setStatusFilter('all');
+                }}
                 className={cn(
-                  "px-2 py-1 text-[10px] rounded-md transition-all",
-                  statusFilter === value
-                    ? "bg-primary/20 text-primary font-medium"
-                    : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                  "flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                  activeTab === 'tasks'
+                    ? "bg-primary/20 text-primary shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-white/5"
                 )}
               >
-                {label}
+                <div className="flex items-center justify-center gap-1.5">
+                  <CheckSquare className="w-3 h-3" />
+                  Tasks
+                  {taskItems.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-primary/20 text-[10px]">
+                      {taskItems.length}
+                    </span>
+                  )}
+                </div>
               </button>
-            ))}
+            )}
+            <button
+              onClick={() => setActiveTab('notes')}
+              className={cn(
+                "flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                activeTab === 'notes'
+                  ? "bg-primary/20 text-primary shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+              )}
+            >
+              <div className="flex items-center justify-center gap-1.5">
+                <FileText className="w-3 h-3" />
+                Notes
+                {noteItems.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-primary/20 text-[10px]">
+                    {noteItems.length}
+                  </span>
+                )}
+              </div>
+            </button>
           </div>
+
+          {/* Status Filter Tags - Only for Tasks */}
+          {activeTab === 'tasks' && (
+            <div className="flex gap-1.5">
+              {[
+                { value: 'all', label: 'All' },
+                { value: 'not_started', label: 'Not Started' },
+                { value: 'in_progress', label: 'In Progress' },
+                { value: 'completed', label: 'Completed' },
+                { value: 'blocked', label: 'Blocked' },
+              ].map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setStatusFilter(value)}
+                  className={cn(
+                    "px-2 py-1 text-[10px] rounded-md transition-all",
+                    statusFilter === value
+                      ? "bg-primary/20 text-primary font-medium"
+                      : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Panel Content - Custom styled scrollbar */}
@@ -255,13 +362,21 @@ export function TaskInbox({
           {filteredItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-4">
               <div className="w-16 h-16 rounded-full bg-muted/30 flex items-center justify-center mb-4">
-                <CheckSquare className="w-8 h-8 text-muted-foreground/50" />
+                {activeTab === 'tasks' ? (
+                  <CheckSquare className="w-8 h-8 text-muted-foreground/50" />
+                ) : (
+                  <FileText className="w-8 h-8 text-muted-foreground/50" />
+                )}
               </div>
-              <p className="text-sm text-muted-foreground font-medium">No tasks in inbox</p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
-                Create tasks in the Plan tab to see them here
+              <p className="text-sm text-muted-foreground font-medium">
+                {activeTab === 'tasks' ? 'No tasks in inbox' : 'No notes in inbox'}
               </p>
-              {onGoToPlanTab && (
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                {activeTab === 'tasks'
+                  ? 'Create tasks in the Plan tab or via AI chat'
+                  : 'Save insights from AI chat as notes'}
+              </p>
+              {activeTab === 'tasks' && onGoToPlanTab && (
                 <button
                   onClick={onGoToPlanTab}
                   className="mt-4 px-4 py-2 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded-lg transition-colors flex items-center gap-2"
@@ -272,17 +387,30 @@ export function TaskInbox({
               )}
             </div>
           ) : (
-            filteredItems.map((item) => (
-              <TaskInboxCard
-                key={item.id}
-                element={item}
-                title={getTaskTitle(item)}
-                description={getTaskDescription(item)}
-                onStartDrag={onStartDrag}
-                onRemove={() => onRemoveFromInbox(item.id)}
-                onGoToPlanTab={onGoToPlanTab}
-              />
-            ))
+            filteredItems.map((item) => {
+              const freeform = item as FreeformElement;
+              if (freeform.cardType === 'note') {
+                return (
+                  <NoteInboxCard
+                    key={item.id}
+                    element={item}
+                    onStartDrag={onStartDrag}
+                    onRemove={() => onRemoveFromInbox(item.id)}
+                  />
+                );
+              }
+              return (
+                <TaskInboxCard
+                  key={item.id}
+                  element={item}
+                  title={getTaskTitle(item)}
+                  description={getTaskDescription(item)}
+                  onStartDrag={onStartDrag}
+                  onRemove={() => onRemoveFromInbox(item.id)}
+                  onGoToPlanTab={onGoToPlanTab}
+                />
+              );
+            })
           )}
         </div>
 
@@ -363,7 +491,20 @@ function TaskInboxCard({
   // Get task data
   const freeformElement = element as FreeformElement;
   const status = freeformElement.taskMetadata?.status || 'not_started';
-  const subtasks = freeformElement.taskMetadata?.subtasks || [];
+  const rawSubtasks = freeformElement.taskMetadata?.subtasks;
+  // Ensure subtasks is always an array (handle JSON string from Yjs serialization)
+  const subtasks: Subtask[] = Array.isArray(rawSubtasks)
+    ? rawSubtasks
+    : typeof rawSubtasks === 'string'
+      ? (() => {
+          try {
+            const parsed = JSON.parse(rawSubtasks);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })()
+      : [];
 
   const statusColors: Record<string, string> = {
     not_started: "bg-zinc-500/20 text-zinc-400",
@@ -543,16 +684,22 @@ function TaskInboxCard({
                 autoFocus
               />
             ) : (
-              <p
-                className="text-sm font-medium text-white/90 line-clamp-2 cursor-text pointer-events-auto"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditingTitle(true);
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                {title}
-              </p>
+              <div className="flex items-start gap-1.5 group/title">
+                <p className="text-sm font-medium text-white/90 line-clamp-2 flex-1 pointer-events-none">
+                  {title}
+                </p>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditingTitle(true);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="opacity-0 group-hover/title:opacity-100 p-0.5 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-all pointer-events-auto flex-shrink-0"
+                  title="Edit title"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              </div>
             )}
             {description && !isEditingTitle && (
               <p className="text-xs text-white/50 mt-1 line-clamp-2 pointer-events-none">{description}</p>
@@ -874,6 +1021,128 @@ function TaskInboxCard({
               <ListTodo className="w-3.5 h-3.5" />
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Note card in inbox
+function NoteInboxCard({
+  element,
+  onStartDrag,
+  onRemove,
+}: {
+  element: CanvasElement;
+  onStartDrag: (elementId: string, e: React.MouseEvent) => void;
+  onRemove: () => void;
+}) {
+  const { updateCanvasElement } = useCXDStore();
+  const freeformElement = element as FreeformElement;
+  const noteContent = freeformElement.content || freeformElement.noteBody || '';
+  const noteTitle = freeformElement.noteTitle || 'Untitled Note';
+  const sourceFaces = freeformElement.hypercubeTags || [];
+
+  // Debug: Log when component renders
+  useEffect(() => {
+    console.log('[NoteInboxCard] Rendered for note:', {
+      id: element.id,
+      title: noteTitle,
+      cardType: freeformElement.cardType,
+      emoji: freeformElement.emoji,
+      hasOnStartDrag: typeof onStartDrag === 'function',
+    });
+  }, [element.id, noteTitle, freeformElement.cardType, freeformElement.emoji, onStartDrag]);
+
+  const handleDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      console.log('[NoteInboxCard] Drag started for note:', element.id);
+      e.preventDefault();
+      e.stopPropagation();
+      onStartDrag(element.id, e);
+    },
+    [element.id, onStartDrag]
+  );
+
+  return (
+    <div
+      className="group relative bg-gradient-to-br from-cyan-500/[0.08] to-purple-500/[0.02] rounded-xl border border-cyan-500/20 hover:border-cyan-500/30 transition-all cursor-grab active:cursor-grabbing"
+      onMouseDown={handleDragStart}
+      onClick={(e) => {
+        console.log('[NoteInboxCard] Card clicked:', element.id);
+      }}
+      onMouseEnter={() => {
+        console.log('[NoteInboxCard] Mouse entered card:', element.id);
+      }}
+    >
+      {/* Card gradient accent */}
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyan-400/50 via-blue-400/50 to-purple-400/50 pointer-events-none rounded-t-xl" />
+
+      <div className="p-3" style={{ pointerEvents: 'auto' }}>
+        {/* Header with drag handle */}
+        <div className="flex items-start gap-2">
+          {/* Drag handle icon */}
+          <div className="mt-0.5 text-muted-foreground/50 group-hover:text-cyan-400 transition-colors" style={{ pointerEvents: 'none' }}>
+            <GripVertical className="w-4 h-4" />
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 min-w-0" style={{ pointerEvents: 'auto' }}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5" style={{ pointerEvents: 'none' }}>
+                <FileText className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+                <h4 className="text-sm font-medium text-white/90 line-clamp-1">
+                  {noteTitle}
+                </h4>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-start gap-1 flex-shrink-0" style={{ pointerEvents: 'auto' }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    console.log('[NoteInboxCard] Delete button clicked');
+                    onRemove();
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    console.log('[NoteInboxCard] Delete button mousedown');
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all min-h-[24px] min-w-[24px]"
+                  title="Delete note"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Note content preview */}
+            <p className="text-xs text-white/60 line-clamp-3 mb-2 leading-relaxed" style={{ pointerEvents: 'none' }}>
+              {noteContent}
+            </p>
+
+            {/* Source faces */}
+            {sourceFaces.length > 0 && (
+              <div className="flex flex-wrap gap-1" style={{ pointerEvents: 'none' }}>
+                {sourceFaces.map((faceKey) => (
+                  <span
+                    key={faceKey}
+                    className="text-[10px] px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                  >
+                    {getFaceDisplayName(faceKey)}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* AI source indicator */}
+            {freeformElement.emoji === '🤖' && (
+              <div className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground" style={{ pointerEvents: 'none' }}>
+                <span className="text-sm">🤖</span>
+                AI-generated insight
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

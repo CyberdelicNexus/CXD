@@ -23,6 +23,7 @@ const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
   stateMapping: 'State Mapping',
   traitMapping: 'Trait Mapping',
   contextAndMeaning: 'Meaning Architecture',
+  intentionCore: 'Core',
 };
 
 // Element type icons for related elements preview

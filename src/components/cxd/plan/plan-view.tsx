@@ -94,6 +94,9 @@ export function PlanView() {
     const newElement = {
       id: uuidv4(),
       type: 'freeform' as const,
+      cardType: 'task' as const,
+      noteTitle: undefined,
+      noteBody: undefined,
       x: 0, // Position doesn't matter for inbox items
       y: 0,
       width: 300,

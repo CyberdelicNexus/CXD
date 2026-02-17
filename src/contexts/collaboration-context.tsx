@@ -3,6 +3,7 @@
 import { createContext, useContext, ReactNode, useCallback } from 'react';
 import { useCollaboration, CollaboratorPresence, CanvasUpdate } from '@/hooks/use-collaboration';
 import { useCXDStore } from '@/store/cxd-store';
+import { useYjsSync } from '@/hooks/use-yjs-sync';
 import { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 import { SensoryDomainCode, PresenceTypeCode, RealityPlaneCode, StateQuadrantCode, TraitQuadrantCode, ExperienceFlowStageCode } from '@/types/cxd-schema';
 
@@ -87,73 +88,90 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
     broadcastUpdate,
   } = useCollaboration(project?.id || null, { onRemoteUpdate });
 
+  // Wire Yjs CRDT sync provider (creates a dedicated Supabase channel for binary sync)
+  useYjsSync(project?.id || null, currentUser?.id || null);
+
   // Canvas element sync wrapper functions
+  // In CRDT mode, the store action mutates Y.Doc which auto-broadcasts — no LWW broadcast needed
   const syncAddElement = useCallback((element: CanvasElement) => {
     addCanvasElement(element);
-    broadcastUpdate({ type: 'element_add', element });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'element_add', element });
+    }
   }, [addCanvasElement, broadcastUpdate]);
 
   const syncUpdateElement = useCallback((elementId: string, updates: Partial<CanvasElement>) => {
     updateCanvasElement(elementId, updates);
-    broadcastUpdate({ type: 'element_update', elementId, changes: updates });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'element_update', elementId, changes: updates });
+    }
   }, [updateCanvasElement, broadcastUpdate]);
 
   const syncRemoveElement = useCallback((elementId: string) => {
     removeCanvasElement(elementId);
-    broadcastUpdate({ type: 'element_delete', elementId });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'element_delete', elementId });
+    }
   }, [removeCanvasElement, broadcastUpdate]);
 
   const syncAddEdge = useCallback((edge: CanvasEdge) => {
     addCanvasEdge(edge);
-    broadcastUpdate({ type: 'edge_add', edge });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'edge_add', edge });
+    }
   }, [addCanvasEdge, broadcastUpdate]);
 
   const syncUpdateEdge = useCallback((edgeId: string, changes: Partial<CanvasEdge>) => {
     updateCanvasEdge(edgeId, changes);
-    broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
+    }
   }, [updateCanvasEdge, broadcastUpdate]);
 
   const syncRemoveEdge = useCallback((edgeId: string) => {
     removeCanvasEdge(edgeId);
-    broadcastUpdate({ type: 'edge_delete', edgeId });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'edge_delete', edgeId });
+    }
   }, [removeCanvasEdge, broadcastUpdate]);
 
   // CXD Field sync wrapper functions
+  // In CRDT mode, store actions mutate Y.Doc which auto-broadcasts — skip LWW broadcast
   const syncSensoryDomain = useCallback((code: SensoryDomainCode, value: number) => {
     updateSensoryDomain(code, value);
-    broadcastUpdate({ type: 'field_update', path: ['sensoryDomains', code], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['sensoryDomains', code], value });
   }, [updateSensoryDomain, broadcastUpdate]);
 
   const syncPresenceType = useCallback((code: PresenceTypeCode, value: number) => {
     updatePresenceType(code, value);
-    broadcastUpdate({ type: 'field_update', path: ['presenceTypes', code], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['presenceTypes', code], value });
   }, [updatePresenceType, broadcastUpdate]);
 
   const syncRealityPlaneToggle = useCallback((code: RealityPlaneCode) => {
     toggleRealityPlane(code);
-    broadcastUpdate({ type: 'field_update', path: ['realityPlanesV2', 'toggle'], value: code });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['realityPlanesV2', 'toggle'], value: code });
   }, [toggleRealityPlane, broadcastUpdate]);
 
   const syncRealityPlaneInterface = useCallback((code: RealityPlaneCode, interfaceModality: string) => {
     updateRealityPlaneInterface(code, interfaceModality);
-    broadcastUpdate({ type: 'field_update', path: ['realityPlanesV2', code, 'interfaceModality'], value: interfaceModality });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['realityPlanesV2', code, 'interfaceModality'], value: interfaceModality });
   }, [updateRealityPlaneInterface, broadcastUpdate]);
 
   const syncStateMapping = useCallback((code: StateQuadrantCode, value: string) => {
     updateStateMapping(code, value);
-    broadcastUpdate({ type: 'field_update', path: ['stateMapping', code], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['stateMapping', code], value });
   }, [updateStateMapping, broadcastUpdate]);
 
   const syncTraitMapping = useCallback((code: TraitQuadrantCode, value: string) => {
     updateTraitMapping(code, value);
-    broadcastUpdate({ type: 'field_update', path: ['traitMapping', code], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['traitMapping', code], value });
   }, [updateTraitMapping, broadcastUpdate]);
 
   const syncIntentionCore = useCallback((field: 'projectName' | 'mainConcept' | 'coreMessage', value: string) => {
     if (field === 'projectName') updateIntentionProjectName(value);
     else if (field === 'mainConcept') updateIntentionMainConcept(value);
     else if (field === 'coreMessage') updateIntentionCoreMessage(value);
-    broadcastUpdate({ type: 'field_update', path: ['intentionCore', field], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['intentionCore', field], value });
   }, [updateIntentionProjectName, updateIntentionMainConcept, updateIntentionCoreMessage, broadcastUpdate]);
 
   const syncDesiredChange = useCallback((field: 'insights' | 'feelings' | 'states' | 'knowledge', value: string) => {
@@ -161,31 +179,31 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
     else if (field === 'feelings') updateDesiredFeelings(value);
     else if (field === 'states') updateDesiredStates(value);
     else if (field === 'knowledge') updateDesiredKnowledge(value);
-    broadcastUpdate({ type: 'field_update', path: ['desiredChange', field], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['desiredChange', field], value });
   }, [updateDesiredInsights, updateDesiredFeelings, updateDesiredStates, updateDesiredKnowledge, broadcastUpdate]);
 
   const syncHumanContext = useCallback((field: 'audienceNeeds' | 'audienceDesires' | 'userRole', value: string) => {
     if (field === 'audienceNeeds') updateHumanAudienceNeeds(value);
     else if (field === 'audienceDesires') updateHumanAudienceDesires(value);
     else if (field === 'userRole') updateHumanUserRole(value);
-    broadcastUpdate({ type: 'field_update', path: ['humanContext', field], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['humanContext', field], value });
   }, [updateHumanAudienceNeeds, updateHumanAudienceDesires, updateHumanUserRole, broadcastUpdate]);
 
   const syncContextMeaning = useCallback((field: 'world' | 'story' | 'magic', value: string) => {
     if (field === 'world') updateContextWorld(value);
     else if (field === 'story') updateContextStory(value);
     else if (field === 'magic') updateContextMagic(value);
-    broadcastUpdate({ type: 'field_update', path: ['contextAndMeaning', field], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['contextAndMeaning', field], value });
   }, [updateContextWorld, updateContextStory, updateContextMagic, broadcastUpdate]);
 
   const syncExperienceFlowNarrativeFunc = useCallback((code: ExperienceFlowStageCode, value: string) => {
     updateExperienceFlowNarrative(code, value);
-    broadcastUpdate({ type: 'field_update', path: ['experienceFlow', code, 'narrativeNotes'], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['experienceFlow', code, 'narrativeNotes'], value });
   }, [updateExperienceFlowNarrative, broadcastUpdate]);
 
   const syncExperienceFlowIntentFunc = useCallback((code: ExperienceFlowStageCode, value: string) => {
     updateExperienceFlowIntent(code, value);
-    broadcastUpdate({ type: 'field_update', path: ['experienceFlow', code, 'designIntent'], value });
+    if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['experienceFlow', code, 'designIntent'], value });
   }, [updateExperienceFlowIntent, broadcastUpdate]);
 
   return (

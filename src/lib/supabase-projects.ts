@@ -2,6 +2,7 @@
 
 import { createClient } from '@/supabase/client';
 import { CXDProject } from '@/types/cxd-schema';
+import { fixDuplicateStageIds } from './fix-duplicate-stage-ids';
 
 export interface DbCXDProject {
   id: string;
@@ -64,7 +65,7 @@ export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
   return allProjects.map((row: DbCXDProject) => {
     // Full project data is stored in project_data, merge with top-level metadata
     const projectData = row.project_data || {};
-    return {
+    const project = {
       // Spread full project data first (preserves all nested structures)
       ...projectData,
       // Override with authoritative top-level fields
@@ -76,6 +77,9 @@ export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     } as CXDProject;
+
+    // Fix duplicate stage IDs if any exist
+    return fixDuplicateStageIds(project);
   });
 }
 
@@ -93,9 +97,33 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
   }
 
   console.log('[saveProject] Saving project:', project.id, 'Owner:', project.ownerId);
-  
+
   const supabase = createClient();
-  
+
+  // Check authentication first
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    console.warn('[saveProject] User not authenticated, skipping save');
+    return false;
+  }
+
+  // Verify the authenticated user is either the owner or a collaborator
+  if (user.id !== project.ownerId) {
+    // Check if user is a collaborator
+    const { data: collabData } = await supabase
+      .from('canvas_collaborators')
+      .select('id')
+      .eq('canvas_id', project.id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (!collabData) {
+      console.warn('[saveProject] User is neither owner nor collaborator - authenticated:', user.id, 'project owner:', project.ownerId);
+      return false;
+    }
+    console.log('[saveProject] User is a collaborator, allowing save');
+  }
+
   // Store the complete project object in project_data
   // This ensures all fields including nested structures are persisted:
   // - intentionCore (projectName, mainConcept, coreMessage)
@@ -123,10 +151,19 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
     // Avoid spamming the console and keep the app usable by degrading gracefully.
     const msg = String((error as any)?.message ?? '');
     const details = String((error as any)?.details ?? '');
+    const code = (error as any)?.code ?? '';
+
     if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
       console.warn('[saveProject] Network error - Failed to fetch');
       return false;
     }
+
+    // Handle RLS policy violations more gracefully
+    if (code === '42501' || msg.includes('row-level security')) {
+      console.warn('[saveProject] Permission denied - RLS policy violation');
+      return false;
+    }
+
     console.error('[saveProject] Error saving project:', error);
     return false;
   }

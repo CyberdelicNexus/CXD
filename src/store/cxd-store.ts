@@ -24,6 +24,19 @@ import {
 } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
 import { saveProject, deleteProjectFromDb, updateProjectShareToken } from '@/lib/supabase-projects';
+import type * as Y from 'yjs';
+import {
+  yjsAddElement, yjsUpdateElement, yjsRemoveElement, yjsDuplicateElement,
+  yjsAddEdge, yjsUpdateEdge, yjsRemoveEdge,
+  yjsMoveContainerWithChildren, yjsCreateGroup, yjsUngroup,
+  yjsSetDesignTextField, yjsSetDesignNumberField, yjsSetMetaField,
+  yjsToggleRealityPlane, yjsUpdateRealityPlaneInterface,
+  yjsUpdateStageField, yjsAddExperienceFlowStage, yjsRemoveExperienceFlowStage,
+  yjsMoveExperienceFlowStage, yjsSetExperienceFlowDescription,
+  yjsDeleteElementField, yjsReorderRealityPlanes, yjsReorderExperienceFlowStage,
+  yjsToggleExperienceFlowStageRealityPlane,
+} from '@/lib/yjs/yjs-store-actions';
+import { createCanvasUndoManager, createDesignUndoManager } from '@/lib/yjs/undo-manager';
 
 export type ViewMode = 'home' | 'wizard' | 'canvas' | 'focus' | 'share';
 
@@ -53,6 +66,7 @@ interface CXDState {
   viewMode: ViewMode;
   focusedSection: CXDSectionId | null;
   canvasViewMode: 'canvas' | 'hexagon' | 'hypercube' | 'plan';
+  defaultView: 'canvas' | 'hexagon' | 'plan'; // User's preferred default view
 
   // Active surface state - determines which surface (canvas vs hypercube) elements are created in
   activeSurface: 'canvas' | 'hypercube';
@@ -79,10 +93,18 @@ interface CXDState {
   // Clipboard for copy/paste across boards
   clipboard: CanvasElement[];
 
+  // Yjs CRDT document (set when collaborative mode is active)
+  yDoc: Y.Doc | null;
+  setYDoc: (doc: Y.Doc | null) => void;
+  // Yjs UndoManagers (canvas + design fields)
+  canvasUndoManager: Y.UndoManager | null;
+  designUndoManager: Y.UndoManager | null;
+
   // Actions - View
   setViewMode: (mode: ViewMode) => void;
   setFocusedSection: (section: CXDSectionId | null) => void;
   setCanvasViewMode: (mode: 'canvas' | 'hexagon' | 'hypercube' | 'plan') => void;
+  setDefaultView: (mode: 'canvas' | 'hexagon' | 'plan') => void;
   setActiveSurface: (surface: 'canvas' | 'hypercube') => void;
   setHighlightedElementId: (elementId: string | null) => void;
   highlightElementBriefly: (elementId: string, durationMs?: number) => void;
@@ -237,6 +259,7 @@ export const useCXDStore = create<CXDState>()(
       viewMode: 'home',
       focusedSection: null,
       canvasViewMode: 'canvas',
+      defaultView: 'canvas', // User's preferred default view
       activeSurface: 'canvas', // default to canvas surface
       projects: [],
       currentProjectId: null,
@@ -250,6 +273,27 @@ export const useCXDStore = create<CXDState>()(
       clipboard: [],
       canvasHistory: [],
       canvasHistoryIndex: -1,
+      yDoc: null,
+      canvasUndoManager: null,
+      designUndoManager: null,
+      setYDoc: (doc) => {
+        // Destroy previous undo managers if any
+        const prev = get();
+        if (prev.canvasUndoManager) {
+          prev.canvasUndoManager.destroy();
+        }
+        if (prev.designUndoManager) {
+          prev.designUndoManager.destroy();
+        }
+
+        if (doc) {
+          const canvasUM = createCanvasUndoManager(doc);
+          const designUM = createDesignUndoManager(doc);
+          set({ yDoc: doc, canvasUndoManager: canvasUM, designUndoManager: designUM });
+        } else {
+          set({ yDoc: null, canvasUndoManager: null, designUndoManager: null });
+        }
+      },
 
       // View actions
       setViewMode: (mode) => set({ viewMode: mode }),
@@ -276,6 +320,7 @@ export const useCXDStore = create<CXDState>()(
           restoreViewport(canvasId);
         }
       },
+      setDefaultView: (mode) => set({ defaultView: mode }),
       setActiveSurface: (surface) => set({ activeSurface: surface }),
       setHighlightedElementId: (elementId) => set({ highlightedElementId: elementId }),
       highlightElementBriefly: (elementId, durationMs = 2000) => {
@@ -311,7 +356,9 @@ export const useCXDStore = create<CXDState>()(
         if (project) {
           set({
             currentProjectId: id,
-            viewMode: project.wizardCompleted ? 'canvas' : 'wizard',
+            // Always open existing projects in canvas view
+            // Only new projects (via createProject) open in wizard
+            viewMode: 'canvas',
           });
         }
       },
@@ -517,7 +564,11 @@ export const useCXDStore = create<CXDState>()(
 
       toggleRealityPlane: (code) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsToggleRealityPlane(yDoc, code);
+        } else {
           const currentPlanes = currentProject.realityPlanesV2 || [...DEFAULT_REALITY_PLANES_V2];
           const updatedPlanes = currentPlanes.map((plane) =>
             plane.code === code ? { ...plane, enabled: !plane.enabled } : plane
@@ -525,11 +576,7 @@ export const useCXDStore = create<CXDState>()(
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  realityPlanesV2: updatedPlanes,
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, realityPlanesV2: updatedPlanes, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -538,7 +585,11 @@ export const useCXDStore = create<CXDState>()(
 
       updateRealityPlaneInterface: (code, interfaceModality) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateRealityPlaneInterface(yDoc, code, interfaceModality);
+        } else {
           const currentPlanes = currentProject.realityPlanesV2 || [...DEFAULT_REALITY_PLANES_V2];
           const updatedPlanes = currentPlanes.map((plane) =>
             plane.code === code ? { ...plane, interfaceModality } : plane
@@ -546,11 +597,7 @@ export const useCXDStore = create<CXDState>()(
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  realityPlanesV2: updatedPlanes,
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, realityPlanesV2: updatedPlanes, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -559,7 +606,11 @@ export const useCXDStore = create<CXDState>()(
 
       reorderRealityPlanes: (newOrder) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsReorderRealityPlanes(yDoc, newOrder);
+        } else {
           const currentPlanes = currentProject.realityPlanesV2 || [...DEFAULT_REALITY_PLANES_V2];
           const reorderedPlanes = newOrder.map((code, index) => {
             const plane = currentPlanes.find((p) => p.code === code);
@@ -568,11 +619,7 @@ export const useCXDStore = create<CXDState>()(
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  realityPlanesV2: reorderedPlanes,
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, realityPlanesV2: reorderedPlanes, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -582,15 +629,15 @@ export const useCXDStore = create<CXDState>()(
       // Sensory Domains
       updateSensoryDomain: (code, value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignNumberField(yDoc, 'sensoryDomains', code, value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  sensoryDomains: { ...p.sensoryDomains, [code]: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, sensoryDomains: { ...p.sensoryDomains, [code]: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -600,15 +647,15 @@ export const useCXDStore = create<CXDState>()(
       // Presence Types
       updatePresenceType: (code, value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignNumberField(yDoc, 'presenceTypes', code, value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  presenceTypes: { ...p.presenceTypes, [code]: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, presenceTypes: { ...p.presenceTypes, [code]: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -707,7 +754,11 @@ export const useCXDStore = create<CXDState>()(
 
       addExperienceFlowStage: (afterIndex) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsAddExperienceFlowStage(yDoc, afterIndex);
+        } else {
           const stages = [...(currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES)];
           const newStage: ExperienceFlowStageV2 = {
             id: uuidv4(),
@@ -731,9 +782,13 @@ export const useCXDStore = create<CXDState>()(
 
       removeExperienceFlowStage: (stageId) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsRemoveExperienceFlowStage(yDoc, stageId);
+        } else {
           const stages = currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES;
-          if (stages.length <= 1) return; // Prevent deleting last stage
+          if (stages.length <= 1) return;
           const newStages = stages.filter((s) => s.id !== stageId);
           set((state) => ({
             projects: state.projects.map((p) =>
@@ -747,7 +802,11 @@ export const useCXDStore = create<CXDState>()(
 
       renameExperienceFlowStage: (stageId, newName) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateStageField(yDoc, stageId, 'name', newName);
+        } else {
           const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) =>
             s.id === stageId ? { ...s, name: newName } : s
           );
@@ -763,7 +822,11 @@ export const useCXDStore = create<CXDState>()(
 
       moveExperienceFlowStage: (stageId, direction) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsMoveExperienceFlowStage(yDoc, stageId, direction);
+        } else {
           const stages = [...(currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES)];
           const index = stages.findIndex((s) => s.id === stageId);
           if (index === -1) return;
@@ -782,7 +845,11 @@ export const useCXDStore = create<CXDState>()(
 
       reorderExperienceFlowStage: (stageId, newIndex) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsReorderExperienceFlowStage(yDoc, stageId, newIndex);
+        } else {
           const stages = [...(currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES)];
           const oldIndex = stages.findIndex((s) => s.id === stageId);
           if (oldIndex === -1 || oldIndex === newIndex) return;
@@ -801,7 +868,11 @@ export const useCXDStore = create<CXDState>()(
 
       updateExperienceFlowStageDistribution: (stageId, distribution) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateStageField(yDoc, stageId, 'engagementDistribution', distribution);
+        } else {
           const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) =>
             s.id === stageId ? { ...s, engagementDistribution: distribution } : s
           );
@@ -817,7 +888,11 @@ export const useCXDStore = create<CXDState>()(
 
       updateExperienceFlowStageNarrative: (stageId, value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateStageField(yDoc, stageId, 'narrativeNotes', value);
+        } else {
           const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) =>
             s.id === stageId ? { ...s, narrativeNotes: value } : s
           );
@@ -833,14 +908,15 @@ export const useCXDStore = create<CXDState>()(
 
       toggleExperienceFlowStageRealityPlane: (stageId, code) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsToggleExperienceFlowStageRealityPlane(yDoc, stageId, code);
+        } else {
           const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) => {
             if (s.id === stageId) {
               const currentPlanes = s.realityPlanes || { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false };
-              return {
-                ...s,
-                realityPlanes: { ...currentPlanes, [code]: !currentPlanes[code] }
-              };
+              return { ...s, realityPlanes: { ...currentPlanes, [code]: !currentPlanes[code] } };
             }
             return s;
           });
@@ -856,7 +932,11 @@ export const useCXDStore = create<CXDState>()(
 
       updateExperienceFlowStagePresence: (stageId, presenceTypes) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateStageField(yDoc, stageId, 'presenceTypes', presenceTypes);
+        } else {
           const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) =>
             s.id === stageId ? { ...s, presenceTypes } : s
           );
@@ -872,7 +952,11 @@ export const useCXDStore = create<CXDState>()(
 
       updateExperienceFlowStageTime: (stageId, estimatedMinutes) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateStageField(yDoc, stageId, 'estimatedMinutes', estimatedMinutes);
+        } else {
           const stages = (currentProject.experienceFlowStages || DEFAULT_EXPERIENCE_FLOW_STAGES).map((s) =>
             s.id === stageId ? { ...s, estimatedMinutes } : s
           );
@@ -889,7 +973,11 @@ export const useCXDStore = create<CXDState>()(
       // State Mapping
       updateStateMapping: (code, value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'stateMapping', code, value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -907,7 +995,11 @@ export const useCXDStore = create<CXDState>()(
       // Trait Mapping
       updateTraitMapping: (code, value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'traitMapping', code, value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -925,15 +1017,15 @@ export const useCXDStore = create<CXDState>()(
       // Context and Meaning
       updateContextWorld: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'contextAndMeaning', 'world', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  contextAndMeaning: { ...p.contextAndMeaning, world: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, contextAndMeaning: { ...p.contextAndMeaning, world: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -942,15 +1034,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateContextStory: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'contextAndMeaning', 'story', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  contextAndMeaning: { ...p.contextAndMeaning, story: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, contextAndMeaning: { ...p.contextAndMeaning, story: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -959,15 +1051,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateContextMagic: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'contextAndMeaning', 'magic', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  contextAndMeaning: { ...p.contextAndMeaning, magic: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, contextAndMeaning: { ...p.contextAndMeaning, magic: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -977,16 +1069,16 @@ export const useCXDStore = create<CXDState>()(
       // Intention Core
       updateIntentionProjectName: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'intentionCore', 'projectName', value);
+          yjsSetMetaField(yDoc, 'name', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  name: value,
-                  intentionCore: { ...p.intentionCore, projectName: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, name: value, intentionCore: { ...p.intentionCore, projectName: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -995,15 +1087,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateIntentionMainConcept: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'intentionCore', 'mainConcept', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  intentionCore: { ...p.intentionCore, mainConcept: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, intentionCore: { ...p.intentionCore, mainConcept: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1012,15 +1104,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateIntentionCoreMessage: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'intentionCore', 'coreMessage', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  intentionCore: { ...p.intentionCore, coreMessage: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, intentionCore: { ...p.intentionCore, coreMessage: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1030,15 +1122,15 @@ export const useCXDStore = create<CXDState>()(
       // Desired Change
       updateDesiredInsights: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'desiredChange', 'insights', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  desiredChange: { ...p.desiredChange, insights: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, desiredChange: { ...p.desiredChange, insights: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1047,15 +1139,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateDesiredFeelings: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'desiredChange', 'feelings', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  desiredChange: { ...p.desiredChange, feelings: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, desiredChange: { ...p.desiredChange, feelings: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1064,15 +1156,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateDesiredStates: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'desiredChange', 'states', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  desiredChange: { ...p.desiredChange, states: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, desiredChange: { ...p.desiredChange, states: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1081,15 +1173,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateDesiredKnowledge: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'desiredChange', 'knowledge', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  desiredChange: { ...p.desiredChange, knowledge: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, desiredChange: { ...p.desiredChange, knowledge: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1099,15 +1191,15 @@ export const useCXDStore = create<CXDState>()(
       // Human Context
       updateHumanAudienceNeeds: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'humanContext', 'audienceNeeds', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  humanContext: { ...p.humanContext, audienceNeeds: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, humanContext: { ...p.humanContext, audienceNeeds: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1116,15 +1208,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateHumanAudienceDesires: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'humanContext', 'audienceDesires', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  humanContext: { ...p.humanContext, audienceDesires: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, humanContext: { ...p.humanContext, audienceDesires: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1133,15 +1225,15 @@ export const useCXDStore = create<CXDState>()(
 
       updateHumanUserRole: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetDesignTextField(yDoc, 'humanContext', 'userRole', value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
-                ? {
-                  ...p,
-                  humanContext: { ...p.humanContext, userRole: value },
-                  updatedAt: new Date().toISOString(),
-                }
+                ? { ...p, humanContext: { ...p.humanContext, userRole: value }, updatedAt: new Date().toISOString() }
                 : p
             ),
           }));
@@ -1151,7 +1243,11 @@ export const useCXDStore = create<CXDState>()(
       // Project metadata
       updateProjectName: (name) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetMetaField(yDoc, 'name', name);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1164,7 +1260,11 @@ export const useCXDStore = create<CXDState>()(
 
       updateProjectDescription: (description) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetMetaField(yDoc, 'description', description);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1178,7 +1278,11 @@ export const useCXDStore = create<CXDState>()(
       // Experience Flow Description (simplified wizard)
       updateExperienceFlowDescription: (value) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetExperienceFlowDescription(yDoc, value);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1191,7 +1295,11 @@ export const useCXDStore = create<CXDState>()(
 
       updateCanvasBackground: (background) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetMetaField(yDoc, 'canvasBackground', background);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1229,14 +1337,22 @@ export const useCXDStore = create<CXDState>()(
       // Canvas Elements
       addCanvasElement: (element) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
-          get().pushCanvasHistory(); // Save state before adding
-          // Ensure element has the correct boardId and surface
-          const elementWithBoardAndSurface = {
-            ...element,
-            boardId: element.boardId !== undefined ? element.boardId : get().activeBoardId,
-            surface: element.surface !== undefined ? element.surface : get().activeSurface,
-          };
+        if (!currentProject) return;
+
+        // Ensure element has the correct boardId and surface
+        const elementWithBoardAndSurface = {
+          ...element,
+          boardId: element.boardId !== undefined ? element.boardId : get().activeBoardId,
+          surface: element.surface !== undefined ? element.surface : get().activeSurface,
+        };
+
+        const { yDoc } = get();
+        if (yDoc) {
+          // CRDT path: mutate Y.Doc, bridge observer updates Zustand
+          yjsAddElement(yDoc, elementWithBoardAndSurface);
+        } else {
+          // Fallback: direct Zustand mutation
+          get().pushCanvasHistory();
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1256,7 +1372,59 @@ export const useCXDStore = create<CXDState>()(
 
       updateCanvasElement: (elementId, updates) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+        if (yDoc) {
+          // CRDT path: mutate Y.Doc, bridge observer updates Zustand
+          const elements = currentProject.canvasLayout?.elements || [];
+          const element = elements.find(el => el.id === elementId);
+
+          // Container expansion logic in Yjs path
+          if (element?.containerId) {
+            const container = elements.find(el => el.id === element.containerId);
+            if (container && container.type === 'container') {
+              const newX = updates.x !== undefined ? updates.x : element.x;
+              const newY = updates.y !== undefined ? updates.y : element.y;
+              const newWidth = updates.width !== undefined ? updates.width : element.width;
+              const newHeight = updates.height !== undefined ? updates.height : element.height;
+              const padding = 20;
+              const headerHeight = 40;
+              const neededWidth = Math.max(container.width, newX + newWidth - container.x + padding);
+              const neededHeight = Math.max(container.height, newY + newHeight - container.y + padding + headerHeight);
+
+              yjsUpdateElement(yDoc, elementId, updates);
+              if (neededWidth > container.width || neededHeight > container.height) {
+                yjsUpdateElement(yDoc, element.containerId, { width: neededWidth, height: neededHeight });
+              }
+              return;
+            }
+          }
+
+          yjsUpdateElement(yDoc, elementId, updates);
+
+          // Board title sync — boards aren't in Y.Doc yet, update Zustand directly
+          if (element?.type === 'board' && updates.hasOwnProperty('title')) {
+            set((state) => ({
+              projects: state.projects.map((p) =>
+                p.id === currentProject.id
+                  ? {
+                    ...p,
+                    canvasLayout: {
+                      ...(p.canvasLayout || {}),
+                      boards: (p.canvasLayout?.boards || []).map((board) =>
+                        board.id === (element as any).childBoardId
+                          ? { ...board, title: (updates as any).title }
+                          : board
+                      ),
+                    },
+                  }
+                  : p
+              ),
+            }));
+          }
+        } else {
+          // Fallback: direct Zustand mutation
           const elements = currentProject.canvasLayout?.elements || [];
           const element = elements.find(el => el.id === elementId);
 
@@ -1264,7 +1432,6 @@ export const useCXDStore = create<CXDState>()(
           if (element?.containerId) {
             const container = elements.find(el => el.id === element.containerId);
             if (container && container.type === 'container') {
-              // Calculate the new bounds of the child element
               const newX = updates.x !== undefined ? updates.x : element.x;
               const newY = updates.y !== undefined ? updates.y : element.y;
               const newWidth = updates.width !== undefined ? updates.width : element.width;
@@ -1273,7 +1440,6 @@ export const useCXDStore = create<CXDState>()(
               const padding = 20;
               const headerHeight = 40;
 
-              // Calculate required container size
               const neededWidth = Math.max(
                 container.width,
                 newX + newWidth - container.x + padding
@@ -1283,7 +1449,6 @@ export const useCXDStore = create<CXDState>()(
                 newY + newHeight - container.y + padding + headerHeight
               );
 
-              // Update both the element and container if expansion is needed
               set((state) => ({
                 projects: state.projects.map((p) =>
                   p.id === currentProject.id
@@ -1315,11 +1480,9 @@ export const useCXDStore = create<CXDState>()(
             }
           }
 
-          // Check if this is a board element with a title update - sync title to the board object
           const isBoardElement = element?.type === 'board';
           const isTitleUpdate = updates.hasOwnProperty('title');
 
-          // Normal update without container logic
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1348,7 +1511,12 @@ export const useCXDStore = create<CXDState>()(
 
       removeCanvasElement: (elementId) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsRemoveElement(yDoc, elementId);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1389,10 +1557,15 @@ export const useCXDStore = create<CXDState>()(
 
       duplicateCanvasElement: (elementId) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsDuplicateElement(yDoc, elementId);
+        } else {
           const element = currentProject.canvasLayout?.elements?.find(el => el.id === elementId);
           if (element) {
-            get().pushCanvasHistory(); // Save state before duplicating
+            get().pushCanvasHistory();
             const newElement = {
               ...element,
               id: uuidv4(),
@@ -1420,22 +1593,19 @@ export const useCXDStore = create<CXDState>()(
       // Canvas Edges (Connectors)
       addCanvasEdge: (edge) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
-          console.log('[STORE] addCanvasEdge called with:', edge);
-          console.log('[STORE] Current project:', currentProject.id);
-          console.log('[STORE] Active board:', get().activeBoardId);
-          console.log('[STORE] Active surface:', get().activeSurface);
+        if (!currentProject) return;
 
-          get().pushCanvasHistory(); // Save state before adding edge
-          // Ensure edge has the correct boardId and surface
-          const edgeWithBoardAndSurface = {
-            ...edge,
-            boardId: edge.boardId !== undefined ? edge.boardId : get().activeBoardId,
-            surface: edge.surface !== undefined ? edge.surface : get().activeSurface,
-          };
+        const edgeWithBoardAndSurface = {
+          ...edge,
+          boardId: edge.boardId !== undefined ? edge.boardId : get().activeBoardId,
+          surface: edge.surface !== undefined ? edge.surface : get().activeSurface,
+        };
 
-          console.log('[STORE] Edge with board and surface:', edgeWithBoardAndSurface);
-
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsAddEdge(yDoc, edgeWithBoardAndSurface);
+        } else {
+          get().pushCanvasHistory();
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1450,18 +1620,17 @@ export const useCXDStore = create<CXDState>()(
                 : p
             ),
           }));
-
-          // Verify it was added
-          const updatedProject = get().getCurrentProject();
-          console.log('[STORE] After add, edges in project:', updatedProject?.canvasLayout?.edges);
-        } else {
-          console.error('[STORE] No current project found when adding edge');
         }
       },
 
       updateCanvasEdge: (edgeId, updates) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateEdge(yDoc, edgeId, updates);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1483,7 +1652,12 @@ export const useCXDStore = create<CXDState>()(
 
       removeCanvasEdge: (edgeId) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsRemoveEdge(yDoc, edgeId);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1636,30 +1810,32 @@ export const useCXDStore = create<CXDState>()(
       // Container Management
       addNodeToContainer: (nodeId, containerId) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+        if (yDoc) {
           const elements = currentProject.canvasLayout?.elements || [];
           const container = elements.find((el) => el.id === containerId);
           const node = elements.find((el) => el.id === nodeId);
-
           if (container && node) {
-            // Calculate required container size to fit the node
-            const padding = 20; // Padding from container edges
-            const headerHeight = 40; // Height of container header
-
-            // Calculate node's position relative to container
-            const nodeRight = node.x + node.width;
-            const nodeBottom = node.y + node.height;
-
-            // Calculate new container dimensions if node extends beyond current bounds
-            const neededWidth = Math.max(
-              container.width,
-              nodeRight - container.x + padding
-            );
-            const neededHeight = Math.max(
-              container.height,
-              nodeBottom - container.y + padding + headerHeight
-            );
-
+            const padding = 20;
+            const headerHeight = 40;
+            const neededWidth = Math.max(container.width, node.x + node.width - container.x + padding);
+            const neededHeight = Math.max(container.height, node.y + node.height - container.y + padding + headerHeight);
+            yjsUpdateElement(yDoc, nodeId, { containerId });
+            if (neededWidth > container.width || neededHeight > container.height) {
+              yjsUpdateElement(yDoc, containerId, { width: neededWidth, height: neededHeight });
+            }
+          }
+        } else {
+          const elements = currentProject.canvasLayout?.elements || [];
+          const container = elements.find((el) => el.id === containerId);
+          const node = elements.find((el) => el.id === nodeId);
+          if (container && node) {
+            const padding = 20;
+            const headerHeight = 40;
+            const neededWidth = Math.max(container.width, node.x + node.width - container.x + padding);
+            const neededHeight = Math.max(container.height, node.y + node.height - container.y + padding + headerHeight);
             set((state) => ({
               projects: state.projects.map((p) =>
                 p.id === currentProject.id
@@ -1668,16 +1844,8 @@ export const useCXDStore = create<CXDState>()(
                     canvasLayout: {
                       ...(p.canvasLayout || {}),
                       elements: (p.canvasLayout?.elements || []).map((el) => {
-                        if (el.id === nodeId) {
-                          return { ...el, containerId };
-                        }
-                        if (el.id === containerId) {
-                          return {
-                            ...el,
-                            width: neededWidth,
-                            height: neededHeight
-                          };
-                        }
+                        if (el.id === nodeId) return { ...el, containerId };
+                        if (el.id === containerId) return { ...el, width: neededWidth, height: neededHeight };
                         return el;
                       }),
                     },
@@ -1692,7 +1860,11 @@ export const useCXDStore = create<CXDState>()(
 
       removeNodeFromContainer: (nodeId) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsDeleteElementField(yDoc, nodeId, 'containerId');
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1714,7 +1886,11 @@ export const useCXDStore = create<CXDState>()(
 
       moveContainerWithChildren: (containerId, deltaX, deltaY) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
+        if (!currentProject) return;
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsMoveContainerWithChildren(yDoc, containerId, deltaX, deltaY);
+        } else {
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -1741,52 +1917,56 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject || elementIds.length < 2) return '';
 
-        const groupId = `group-${uuidv4()}`;
-
-        set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === currentProject.id
-              ? {
-                ...p,
-                canvasLayout: {
-                  ...(p.canvasLayout || {}),
-                  elements: (p.canvasLayout?.elements || []).map((el) =>
-                    elementIds.includes(el.id)
-                      ? { ...el, groupId }
-                      : el
-                  ),
-                },
-                updatedAt: new Date().toISOString()
-              }
-              : p
-          ),
-        }));
-
-        return groupId;
+        const { yDoc } = get();
+        if (yDoc) {
+          return yjsCreateGroup(yDoc, elementIds);
+        } else {
+          const groupId = `group-${uuidv4()}`;
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                  ...p,
+                  canvasLayout: {
+                    ...(p.canvasLayout || {}),
+                    elements: (p.canvasLayout?.elements || []).map((el) =>
+                      elementIds.includes(el.id) ? { ...el, groupId } : el
+                    ),
+                  },
+                  updatedAt: new Date().toISOString()
+                }
+                : p
+            ),
+          }));
+          return groupId;
+        }
       },
 
       ungroup: (groupId) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
-        set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === currentProject.id
-              ? {
-                ...p,
-                canvasLayout: {
-                  ...(p.canvasLayout || {}),
-                  elements: (p.canvasLayout?.elements || []).map((el) =>
-                    el.groupId === groupId
-                      ? { ...el, groupId: undefined }
-                      : el
-                  ),
-                },
-                updatedAt: new Date().toISOString()
-              }
-              : p
-          ),
-        }));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUngroup(yDoc, groupId);
+        } else {
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                  ...p,
+                  canvasLayout: {
+                    ...(p.canvasLayout || {}),
+                    elements: (p.canvasLayout?.elements || []).map((el) =>
+                      el.groupId === groupId ? { ...el, groupId: undefined } : el
+                    ),
+                  },
+                  updatedAt: new Date().toISOString()
+                }
+                : p
+            ),
+          }));
+        }
       },
 
       getGroupElements: (groupId) => {
@@ -1801,24 +1981,34 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
-        set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === currentProject.id
-              ? {
-                ...p,
-                canvasLayout: {
-                  ...(p.canvasLayout || {}),
-                  elements: (p.canvasLayout?.elements || []).map((el) =>
-                    el.groupId === groupId
-                      ? { ...el, ...updates } as typeof el
-                      : el
-                  ),
-                },
-                updatedAt: new Date().toISOString()
-              }
-              : p
-          ),
-        }));
+        const { yDoc } = get();
+        if (yDoc) {
+          const elements = currentProject.canvasLayout?.elements || [];
+          for (const el of elements) {
+            if (el.groupId === groupId) {
+              yjsUpdateElement(yDoc, el.id, updates);
+            }
+          }
+        } else {
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                  ...p,
+                  canvasLayout: {
+                    ...(p.canvasLayout || {}),
+                    elements: (p.canvasLayout?.elements || []).map((el) =>
+                      el.groupId === groupId
+                        ? { ...el, ...updates } as typeof el
+                        : el
+                    ),
+                  },
+                  updatedAt: new Date().toISOString()
+                }
+                : p
+            ),
+          }));
+        }
       },
 
       // Share
@@ -1872,6 +2062,14 @@ export const useCXDStore = create<CXDState>()(
       },
 
       undo: () => {
+        const { canvasUndoManager } = get();
+        if (canvasUndoManager) {
+          // CRDT path: Y.UndoManager reverses local ops, bridge syncs Zustand
+          canvasUndoManager.undo();
+          return;
+        }
+
+        // Fallback: snapshot-based undo
         const { canvasHistory, canvasHistoryIndex, getCurrentProject } = get();
         const currentProject = getCurrentProject();
 
@@ -1899,6 +2097,14 @@ export const useCXDStore = create<CXDState>()(
       },
 
       redo: () => {
+        const { canvasUndoManager } = get();
+        if (canvasUndoManager) {
+          // CRDT path: Y.UndoManager re-applies local ops
+          canvasUndoManager.redo();
+          return;
+        }
+
+        // Fallback: snapshot-based redo
         const { canvasHistory, canvasHistoryIndex, getCurrentProject } = get();
         const currentProject = getCurrentProject();
 
@@ -1926,12 +2132,18 @@ export const useCXDStore = create<CXDState>()(
       },
 
       canUndo: () => {
-        const { canvasHistoryIndex } = get();
+        const { canvasUndoManager, canvasHistoryIndex } = get();
+        if (canvasUndoManager) {
+          return canvasUndoManager.undoStack.length > 0;
+        }
         return canvasHistoryIndex > 0;
       },
 
       canRedo: () => {
-        const { canvasHistory, canvasHistoryIndex } = get();
+        const { canvasUndoManager, canvasHistory, canvasHistoryIndex } = get();
+        if (canvasUndoManager) {
+          return canvasUndoManager.redoStack.length > 0;
+        }
         return canvasHistoryIndex < canvasHistory.length - 1;
       },
     }),

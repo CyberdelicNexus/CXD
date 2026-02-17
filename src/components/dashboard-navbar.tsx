@@ -403,7 +403,7 @@ export default function DashboardNavbar() {
                   <UserCircle className="w-4 h-4 mr-2" />
                   Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push('/dashboard/reset-password')} className="cursor-pointer hover:bg-white/5">
+                <DropdownMenuItem onClick={() => router.push('/dashboard/settings')} className="cursor-pointer hover:bg-white/5">
                   <Settings className="w-4 h-4 mr-2" />
                   Settings
                 </DropdownMenuItem>

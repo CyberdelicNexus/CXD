@@ -31,6 +31,7 @@ const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
   stateMapping: 'State Mapping',
   traitMapping: 'Trait Mapping',
   contextAndMeaning: 'Meaning Architecture',
+  intentionCore: 'Core',
 };
 
 // Element type icons
@@ -217,7 +218,7 @@ export function HexagonDetailPanel({
                 placeholder="The central concept..."
                 value={project.intentionCore?.mainConcept || ""}
                 onChange={(e) => updateIntentionMainConcept(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -226,7 +227,7 @@ export function HexagonDetailPanel({
                 placeholder="The core message participants will take away..."
                 value={project.intentionCore?.coreMessage || ""}
                 onChange={(e) => updateIntentionCoreMessage(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
           </div>
@@ -246,7 +247,7 @@ export function HexagonDetailPanel({
                   placeholder="New understanding, perspectives..."
                   value={project.desiredChange?.insights || ""}
                   onChange={(e) => updateDesiredInsights(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
               <div className="space-y-2">
@@ -255,7 +256,7 @@ export function HexagonDetailPanel({
                   placeholder="Emotional responses, sensations..."
                   value={project.desiredChange?.feelings || ""}
                   onChange={(e) => updateDesiredFeelings(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
               <div className="space-y-2">
@@ -264,7 +265,7 @@ export function HexagonDetailPanel({
                   placeholder="Mental states, altered consciousness..."
                   value={project.desiredChange?.states || ""}
                   onChange={(e) => updateDesiredStates(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
               <div className="space-y-2">
@@ -273,7 +274,7 @@ export function HexagonDetailPanel({
                   placeholder="Information, skills, understanding..."
                   value={project.desiredChange?.knowledge || ""}
                   onChange={(e) => updateDesiredKnowledge(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
             </div>
@@ -289,7 +290,7 @@ export function HexagonDetailPanel({
                 placeholder="Unmet needs, pain points, aspirations..."
                 value={project.humanContext?.audienceNeeds || ""}
                 onChange={(e) => updateHumanAudienceNeeds(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -298,7 +299,7 @@ export function HexagonDetailPanel({
                 placeholder="Motivations, wants, hopes..."
                 value={project.humanContext?.audienceDesires || ""}
                 onChange={(e) => updateHumanAudienceDesires(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -307,7 +308,7 @@ export function HexagonDetailPanel({
                 placeholder="Describe participant agency..."
                 value={project.humanContext?.userRole || ""}
                 onChange={(e) => updateHumanUserRole(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
           </div>
@@ -322,7 +323,7 @@ export function HexagonDetailPanel({
                 placeholder="The world of your experience..."
                 value={project.contextAndMeaning?.world || ""}
                 onChange={(e) => updateContextWorld(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -331,7 +332,7 @@ export function HexagonDetailPanel({
                 placeholder="The story of your experience..."
                 value={project.contextAndMeaning?.story || ""}
                 onChange={(e) => updateContextStory(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -340,7 +341,7 @@ export function HexagonDetailPanel({
                 placeholder="The magic of your experience..."
                 value={project.contextAndMeaning?.magic || ""}
                 onChange={(e) => updateContextMagic(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
           </div>
@@ -570,7 +571,7 @@ export function HexagonDetailPanel({
                           e.target.value,
                         )
                       }
-                      className="min-h-[70px] bg-input border-border resize-none"
+                      className="min-h-[70px] bg-input border-border resize-y hex-textarea-scroll"
                     />
                   </div>
 
@@ -584,7 +585,7 @@ export function HexagonDetailPanel({
                       onChange={(e) =>
                         updateExperienceFlowIntent(stage.code, e.target.value)
                       }
-                      className="min-h-[70px] bg-input border-border resize-none"
+                      className="min-h-[70px] bg-input border-border resize-y hex-textarea-scroll"
                     />
                   </div>
                 </TabsContent>
@@ -614,7 +615,7 @@ export function HexagonDetailPanel({
                     onChange={(e) =>
                       updateStateMapping(quadrant.code, e.target.value)
                     }
-                    className="min-h-[80px] bg-input border-border resize-none"
+                    className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                   />
                 </div>
               ))}
@@ -661,7 +662,7 @@ export function HexagonDetailPanel({
                     onChange={(e) =>
                       updateTraitMapping(quadrant.code, e.target.value)
                     }
-                    className="min-h-[80px] bg-input border-border resize-none"
+                    className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                   />
                 </div>
               ))}
@@ -692,7 +693,7 @@ export function HexagonDetailPanel({
         </Button>
       </div>
       {/* Content */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 p-4 [&_[data-orientation=vertical]]:w-3 [&_[data-orientation=vertical]]:rounded-full [&_[data-orientation=vertical]]:bg-[#130d1f]/70 [&_[data-orientation=vertical]]:p-[2px] [&_[data-orientation=vertical]>*]:rounded-full [&_[data-orientation=vertical]>*]:border [&_[data-orientation=vertical]>*]:border-violet-300/15 [&_[data-orientation=vertical]>*]:bg-gradient-to-b [&_[data-orientation=vertical]>*]:from-violet-500/65 [&_[data-orientation=vertical]>*]:via-purple-500/55 [&_[data-orientation=vertical]>*]:to-indigo-500/55">
         {renderSectionContent()}
 
         {/* Related Canvas Elements Section */}

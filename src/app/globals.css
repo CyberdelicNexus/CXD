@@ -231,6 +231,76 @@
     scrollbar-width: none;
   }
 
+  /* Chat scrollbar styling (accent-aware) */
+  .chat-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color:
+      hsl(var(--chat-scrollbar-hue, 270) 60% 60% / 0.55)
+      hsl(var(--chat-scrollbar-hue, 270) 20% 14% / 0.18);
+  }
+
+  .chat-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-track {
+    background: hsl(var(--chat-scrollbar-hue, 270) 20% 14% / 0.18);
+    border-radius: 9999px;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      180deg,
+      hsl(var(--chat-scrollbar-hue, 270) 64% 62% / 0.75),
+      hsl(var(--chat-scrollbar-hue, 270) 55% 45% / 0.75)
+    );
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--chat-scrollbar-hue, 270) 20% 14% / 0.22);
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      180deg,
+      hsl(var(--chat-scrollbar-hue, 270) 70% 68% / 0.9),
+      hsl(var(--chat-scrollbar-hue, 270) 58% 50% / 0.9)
+    );
+  }
+
+  /* Face detail textarea scrollbar styling */
+  .hex-textarea-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 92, 246, 0.65) rgba(17, 12, 30, 0.45);
+  }
+
+  .hex-textarea-scroll::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  .hex-textarea-scroll::-webkit-scrollbar-track {
+    background: rgba(17, 12, 30, 0.45);
+    border-radius: 9999px;
+  }
+
+  .hex-textarea-scroll::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      180deg,
+      rgba(167, 139, 250, 0.8),
+      rgba(99, 102, 241, 0.7)
+    );
+    border: 2px solid rgba(17, 12, 30, 0.5);
+    border-radius: 9999px;
+  }
+
+  .hex-textarea-scroll::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(196, 181, 253, 0.95),
+      rgba(129, 140, 248, 0.9)
+    );
+  }
+
   /* === HARD FIX react-day-picker v9 GRID STRUCTURE === */
 
   /* Month grid stays a single column of weeks */
@@ -805,5 +875,16 @@
     box-shadow:
       0 30px 60px rgba(139, 92, 246, 0.25),
       0 15px 30px rgba(139, 92, 246, 0.15);
+  }
+
+  /* AI Chat expand/focus mode animations */
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
   }
 }

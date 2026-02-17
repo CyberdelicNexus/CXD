@@ -7,6 +7,7 @@ import { CXD_SECTIONS, CXDSectionId } from "@/types/cxd-schema";
 import { ExperienceFlowDrawer } from "./canvas/experience-flow-drawer";
 import { CanvasToolkit } from "./canvas/canvas-toolkit";
 import { CanvasElementRenderer } from "./canvas/canvas-element";
+import { canResizeFreeformCard, sanitizeFreeformResizeUpdate } from "./canvas/card-type-utils";
 import { ExperienceInspector } from "./canvas/experience-inspector";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
 import { LineLayer } from "./canvas/line-layer";
@@ -30,11 +31,11 @@ import {
 } from "@/types/canvas-elements";
 import { useCollaboration } from "@/hooks/use-collaboration";
 import { CollaboratorCursors } from "@/components/collaboration";
+import { useCanvasSettings } from "@/hooks/use-canvas-settings";
 
 // Constants for zoom limits
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
-const ZOOM_SENSITIVITY = 0.001;
 
 // Default section positions (used when no stored positions exist)
 const DEFAULT_SECTION_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -98,8 +99,13 @@ export function CXDCanvas() {
   const project = getCurrentProject();
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
 
+  // Canvas settings from user preferences
+  const { settings, zoomSensitivity } = useCanvasSettings();
+
   // Handle remote canvas updates from collaborators
+  // In CRDT mode, Yjs provider handles sync — skip LWW dispatch
   const handleRemoteUpdate = useCallback((update: any) => {
+    if (useCXDStore.getState().yDoc) return;
     console.log('[Collab] Received remote update:', update.type);
 
     switch (update.type) {
@@ -190,61 +196,74 @@ export function CXDCanvas() {
     { onRemoteUpdate: handleRemoteUpdate }
   );
 
-  // Wrapper functions that broadcast changes to collaborators
+  // Wrapper functions that sync changes to collaborators
+  // In CRDT mode, the store action mutates Y.Doc which auto-broadcasts via SupabaseYjsProvider
+  // In LWW mode, we explicitly broadcast the update
   const syncAddElement = useCallback((element: CanvasElement) => {
     addCanvasElement(element);
-    broadcastUpdate({ type: 'element_add', element });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'element_add', element });
+    }
   }, [addCanvasElement, broadcastUpdate]);
 
   const syncUpdateElement = useCallback((elementId: string, updates: Partial<CanvasElement>) => {
     updateCanvasElement(elementId, updates);
-    broadcastUpdate({ type: 'element_update', elementId, changes: updates });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'element_update', elementId, changes: updates });
+    }
   }, [updateCanvasElement, broadcastUpdate]);
 
   const syncRemoveElement = useCallback((elementId: string) => {
     removeCanvasElement(elementId);
-    broadcastUpdate({ type: 'element_delete', elementId });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'element_delete', elementId });
+    }
   }, [removeCanvasElement, broadcastUpdate]);
 
   const syncAddEdge = useCallback((edge: CanvasEdge) => {
     addCanvasEdge(edge);
-    broadcastUpdate({ type: 'edge_add', edge });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'edge_add', edge });
+    }
   }, [addCanvasEdge, broadcastUpdate]);
 
   const syncRemoveEdge = useCallback((edgeId: string) => {
     removeCanvasEdge(edgeId);
-    broadcastUpdate({ type: 'edge_delete', edgeId });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'edge_delete', edgeId });
+    }
   }, [removeCanvasEdge, broadcastUpdate]);
 
   const syncUpdateEdge = useCallback((edgeId: string, changes: Partial<CanvasEdge>) => {
     updateCanvasEdge(edgeId, changes);
-    broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
+    if (!useCXDStore.getState().yDoc) {
+      broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
+    }
   }, [updateCanvasEdge, broadcastUpdate]);
 
   // Sync container movement with all children
   const syncMoveContainerWithChildren = useCallback((containerId: string, deltaX: number, deltaY: number) => {
-    // Get all elements that will be affected (container + children)
-    const allElements = getCanvasElements();
-    const container = allElements.find(el => el.id === containerId);
-    const children = allElements.filter(el => el.containerId === containerId);
-
-    // Move the container and children locally
     moveContainerWithChildren(containerId, deltaX, deltaY);
 
-    // Broadcast updates for container and all children
-    const childUpdates = [
-      { elementId: containerId, changes: { x: (container?.x || 0) + deltaX, y: (container?.y || 0) + deltaY } },
-      ...children.map(child => ({
-        elementId: child.id,
-        changes: { x: child.x + deltaX, y: child.y + deltaY }
-      }))
-    ];
-
-    broadcastUpdate({ type: 'container_move', containerId, childUpdates });
+    // In CRDT mode, Y.Doc handles sync; in LWW mode, broadcast explicitly
+    if (!useCXDStore.getState().yDoc) {
+      const allElements = getCanvasElements();
+      const container = allElements.find(el => el.id === containerId);
+      const children = allElements.filter(el => el.containerId === containerId);
+      const childUpdates = [
+        { elementId: containerId, changes: { x: (container?.x || 0) + deltaX, y: (container?.y || 0) + deltaY } },
+        ...children.map(child => ({
+          elementId: child.id,
+          changes: { x: child.x + deltaX, y: child.y + deltaY }
+        }))
+      ];
+      broadcastUpdate({ type: 'container_move', containerId, childUpdates });
+    }
   }, [moveContainerWithChildren, getCanvasElements, broadcastUpdate]);
 
-  // Broadcast full state sync after undo/redo
+  // Broadcast full state sync after undo/redo (LWW only — CRDT uses Y.UndoManager)
   const syncAfterUndoRedo = useCallback(() => {
+    if (useCXDStore.getState().yDoc) return;
     const elements = getCanvasElements();
     const edges = getCanvasEdges();
     broadcastUpdate({ type: 'state_sync', elements, edges });
@@ -367,9 +386,9 @@ export function CXDCanvas() {
     vertical: number[];
   }>({ horizontal: [], vertical: [] });
 
-  // Grid constants
-  const GRID_SIZE = 30; // Main grid size (matches dot grid)
-  const MINOR_GRID_SIZE = 15; // Minor grid for finer snapping
+  // Grid constants - use settings.gridSize for main grid
+  const GRID_SIZE = settings.gridSize; // Main grid size from settings
+  const MINOR_GRID_SIZE = Math.floor(settings.gridSize / 2); // Minor grid for finer snapping
   const SNAP_THRESHOLD = 6; // Distance threshold for snapping
   const ALIGNMENT_THRESHOLD = 5; // Distance for alignment guide detection
 
@@ -1084,16 +1103,12 @@ export function CXDCanvas() {
       setAlignmentGuides({ horizontal: [], vertical: [] });
     }
 
-    // Failsafe: force-clear experience block / inbox drag state on any canvas mouseup.
-    // The document-level handlers in the useEffects should handle this, but if they
-    // miss the event for any reason, this ensures the element never stays stuck.
+    // Failsafe: force-clear experience block drag state on any canvas mouseup.
+    // Inbox items use a document-level bubble handler that fires AFTER this, so
+    // we must NOT clear draggingInboxItem here — that would cancel the drop.
     if (draggingExperienceBlock) {
       setDraggingExperienceBlock(null);
       setExperienceBlockDragPos(null);
-    }
-    if (draggingInboxItem) {
-      setDraggingInboxItem(null);
-      setInboxDragPos(null);
     }
   }, [
     draggingSection,
@@ -1112,7 +1127,6 @@ export function CXDCanvas() {
     addCanvasEdge,
     draggingElement,
     draggingExperienceBlock,
-    draggingInboxItem,
     selectedElementIds,
     broadcastUpdate,
   ]);
@@ -1154,8 +1168,13 @@ export function CXDCanvas() {
           const isNoteCard = options?.cardType === "note";
           newElement = {
             ...baseElement,
+            width: isTaskCard ? 250 : 300,
+            height: isTaskCard ? baseElement.height : 300,
             type: "freeform",
+            cardType: isTaskCard ? "task" : "note",
             content: isTaskCard ? "Task Title" : "",
+            noteTitle: isTaskCard ? undefined : "Untitled Note",
+            noteBody: isTaskCard ? undefined : "",
             emoji: isTaskCard ? "✅" : isNoteCard ? "📌" : undefined,
             style: {
               bgColor:
@@ -1465,14 +1484,35 @@ export function CXDCanvas() {
   // Handle inbox item placement on canvas
   const handlePlaceInboxItem = useCallback(
     (elementId: string, x: number, y: number) => {
+      // IMPORTANT: Search in ALL elements, not just current board/surface filtered elements
+      // Inbox items can be created on different boards/surfaces but should be placeable anywhere
+      const allElements = project?.canvasLayout?.elements || [];
+      const element = allElements.find(el => el.id === elementId);
+      console.log('[CXDCanvas] Placing inbox item on canvas:', {
+        elementId,
+        x,
+        y,
+        allElementsCount: allElements.length,
+        element: element ? {
+          type: element.type,
+          cardType: (element as any).cardType,
+          emoji: (element as any).emoji,
+          inInbox: element.inInbox,
+          boardId: element.boardId,
+          surface: element.surface,
+        } : 'NOT FOUND'
+      });
       pushCanvasHistory();
       updateCanvasElement(elementId, {
         x,
         y,
         inInbox: false, // Remove from inbox
+        // Update boardId and surface to current active board/surface
+        boardId: activeBoardId,
+        surface: activeSurface,
       });
     },
-    [pushCanvasHistory, updateCanvasElement]
+    [pushCanvasHistory, updateCanvasElement, project, activeBoardId, activeSurface]
   );
 
   // Handle removing item from inbox (delete)
@@ -1580,20 +1620,16 @@ export function CXDCanvas() {
   }, [draggingExperienceBlock]);
 
   // Handle inbox item drag move and drop.
-  // Same ref-based pattern as experience block drag to prevent drop failures.
+  // Uses bubble-phase mouseup at document level (fires after React synthetic events
+  // but reads from ref so values are always current — no stale-closure issues).
   useEffect(() => {
     if (!draggingInboxItem) return;
-
-    let dropped = false;
 
     const handleMouseMove = (e: MouseEvent) => {
       setInboxDragPos({ x: e.clientX, y: e.clientY });
     };
 
-    const handleDrop = (e: MouseEvent | PointerEvent) => {
-      if (dropped) return;
-      dropped = true;
-
+    const handleMouseUp = (e: MouseEvent) => {
       const {
         canvasPosition: pos,
         canvasZoom: zoom,
@@ -1606,7 +1642,7 @@ export function CXDCanvas() {
         const canvasX = (e.clientX - rect.left - pos.x) / zoom;
         const canvasY = (e.clientY - rect.top - pos.y) / zoom;
 
-        // Check if dropped on canvas (not outside)
+        // Place if dropped anywhere inside the canvas container
         if (
           e.clientX >= rect.left &&
           e.clientX <= rect.right &&
@@ -1629,13 +1665,11 @@ export function CXDCanvas() {
     };
 
     document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleDrop, true);
-    document.addEventListener("pointerup", handleDrop as EventListener, true);
+    document.addEventListener("mouseup", handleMouseUp);
 
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleDrop, true);
-      document.removeEventListener("pointerup", handleDrop as EventListener, true);
+      document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [draggingInboxItem]);
 
@@ -2164,8 +2198,8 @@ export function CXDCanvas() {
           zoomAccumulator.current = 0;
         }
       } else {
-        // Mouse wheel - use continuous zoom
-        const delta = -normalizedDelta * ZOOM_SENSITIVITY;
+        // Mouse wheel - use continuous zoom with user's sensitivity setting
+        const delta = -normalizedDelta * zoomSensitivity;
 
         const newZoom = Math.min(
           MAX_ZOOM,
@@ -2296,10 +2330,21 @@ export function CXDCanvas() {
     (updates: Map<string, Partial<CanvasElement>>) => {
       pushCanvasHistory();
       updates.forEach((update, id) => {
+        const source = canvasElements.find((el) => el.id === id);
+        if (source?.type === "freeform" && !canResizeFreeformCard(source)) {
+          syncUpdateElement(
+            id,
+            sanitizeFreeformResizeUpdate(
+              source,
+              update as Partial<typeof source>,
+            ) as Partial<CanvasElement>,
+          );
+          return;
+        }
         syncUpdateElement(id, update);
       });
     },
-    [pushCanvasHistory, syncUpdateElement]
+    [pushCanvasHistory, syncUpdateElement, canvasElements]
   );
 
   const handleMultiSelectDeleteElements = useCallback(() => {
@@ -2583,27 +2628,29 @@ export function CXDCanvas() {
         }}
       />
       {/* Dot grid - rendered inside canvas transform for perfect alignment */}
-      <div
-        className="dot-grid pointer-events-none absolute"
-        style={{
-          // Position grid to cover visible area and beyond
-          left: -10000,
-          top: -10000,
-          width: 20000,
-          height: 20000,
-          // Apply same transform as canvas content for perfect alignment
-          transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
-          transformOrigin: "0 0",
-          // Layered grid: Major dots (90px) + Medium dots (30px) + Minor dots (15px)
-          backgroundImage: `
-            radial-gradient(circle, hsl(270 30% 29% / 0.6) 1.5px, transparent 1.5px),
-            radial-gradient(circle, hsl(270 30% 28% / 0.4) 1px, transparent 1px),
-            radial-gradient(circle, hsl(270 30% 22% / 0.25) 0.5px, transparent 0.5px)
-          `,
-          backgroundSize: `90px 90px, 30px 30px, 15px 15px`,
-          backgroundPosition: "0 0, 0 0, 0 0",
-        }}
-      />
+      {settings.gridVisible && (
+        <div
+          className="dot-grid pointer-events-none absolute"
+          style={{
+            // Position grid to cover visible area and beyond
+            left: -10000,
+            top: -10000,
+            width: 20000,
+            height: 20000,
+            // Apply same transform as canvas content for perfect alignment
+            transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
+            transformOrigin: "0 0",
+            // Layered grid: Major dots (3x grid) + Medium dots (1x grid) + Minor dots (0.5x grid)
+            backgroundImage: `
+              radial-gradient(circle, hsl(270 30% 29% / 0.6) 1.5px, transparent 1.5px),
+              radial-gradient(circle, hsl(270 30% 28% / 0.4) 1px, transparent 1px),
+              radial-gradient(circle, hsl(270 30% 22% / 0.25) 0.5px, transparent 0.5px)
+            `,
+            backgroundSize: `${settings.gridSize * 3}px ${settings.gridSize * 3}px, ${settings.gridSize}px ${settings.gridSize}px, ${settings.gridSize / 2}px ${settings.gridSize / 2}px`,
+            backgroundPosition: "0 0, 0 0, 0 0",
+          }}
+        />
+      )}
 
       {/* Collaborator Cursors Overlay - highest z-index */}
       {collaborators.length > 0 && (
@@ -2703,6 +2750,7 @@ export function CXDCanvas() {
               showConnectorAnchors={canShowConnectorAnchors}
               hoveredAnchor={hoveredAnchor}
               onAnchorHover={setHoveredAnchor}
+              snapToGrid={snapToGrid}
               onOpenExperiencePanel={(sectionId: any) => {
                 if ((window as any).__openExperienceSection) {
                   (window as any).__openExperienceSection(sectionId);
@@ -3114,15 +3162,15 @@ export function CXDCanvas() {
 
             syncUpdateEdge(selectedEdgeId, which === "from"
               ? {
-                  fromAutoAnchor: false,
-                  fromAnchor: anchor,
-                  fromAnchorOffset: offset,
-                }
+                fromAutoAnchor: false,
+                fromAnchor: anchor,
+                fromAnchorOffset: offset,
+              }
               : {
-                  toAutoAnchor: false,
-                  toAnchor: anchor,
-                  toAnchorOffset: offset,
-                });
+                toAutoAnchor: false,
+                toAnchor: anchor,
+                toAnchorOffset: offset,
+              });
           };
 
           return (
@@ -3331,7 +3379,7 @@ export function CXDCanvas() {
           }}
         >
           <div className="bg-card/90 backdrop-blur border border-primary/50 rounded-lg px-4 py-2 shadow-lg">
-            <span className="text-sm">Drop to place task</span>
+            <span className="text-sm">Drop to place on canvas</span>
           </div>
         </div>
       )}

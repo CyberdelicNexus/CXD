@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCollaboration, useCanvasPermissions } from "@/hooks/use-collaboration";
 import { CollaboratorAvatars, ConnectionStatus } from "@/components/collaboration";
 import { CollaborationPanel } from "@/components/collaboration";
+import { NavCreditMeter } from "./nav-credit-meter";
+import { AccountMenu } from "./account-menu";
+import { useSubscription } from "@/hooks/use-subscription";
+import { useAICredits } from "@/hooks/use-ai-credits";
+import { UpgradeModal } from "@/components/modals/upgrade-modal";
+import { SettingsModal } from "@/components/modals/settings-modal";
+import { Lock } from "lucide-react";
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
   info: <Info className="w-4 h-4 text-blue-400" />,
@@ -103,15 +110,40 @@ export function CXDNavbar() {
   const project = getCurrentProject();
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll } = useNotifications();
 
+  // Subscription and credits
+  const { hasPlanView, plan, isTrialing, trialDaysRemaining } = useSubscription();
+  const { credits } = useAICredits();
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [blockedFeature, setBlockedFeature] = useState<'plan-view' | 'tasks' | 'premium-ai' | 'templates' | 'collaboration' | 'canvases'>('plan-view');
+  const [userEmail, setUserEmail] = useState<string | undefined>();
+
+  // Fetch user email
+  useEffect(() => {
+    const fetchUser = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserEmail(user?.email);
+    };
+    fetchUser();
+  }, []);
+
+  // Handle logout
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push('/');
+  };
+
   // Renaming state
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [showColorPicker, setShowColorPicker] = useState(false);
 
   // Initialize rename value when project loads
-  useState(() => {
+  useEffect(() => {
     if (project) setRenameValue(project.name);
-  });
+  }, [project]);
 
   const handleRenameSubmit = () => {
     if (renameValue.trim()) {
@@ -205,10 +237,6 @@ export function CXDNavbar() {
     }
   };
 
-  const handleDashboard = () => {
-    router.push("/dashboard");
-  };
-
   // Get dynamic background color from canvas background
   const canvasBackground = project?.canvasBackground || CANVAS_GRADIENTS[0].value;
   const centerColor = extractCenterColor(canvasBackground);
@@ -226,7 +254,7 @@ export function CXDNavbar() {
       <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-20" />
       <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
 
-      <div className="h-full px-6 flex items-center justify-between relative z-10">
+      <div className="h-full px-6 lg:px-8 xl:px-10 2xl:px-12 flex items-center justify-between relative z-10">
         {/* Left section */}
         <div className="flex items-center gap-4 flex-1">
           <div
@@ -309,9 +337,12 @@ export function CXDNavbar() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
+              {/* AI Credit Meter */}
+              <NavCreditMeter />
+
               {/* Breadcrumbs - shown when inside a board */}
               {boardPath && boardPath.length > 0 && (
-                <div className="flex items-center gap-1 ml-3 pl-3 border-l border-white/10 max-w-[400px]">
+                <div className="flex items-center gap-1 ml-3 pl-3 border-l border-white/10 max-w-[300px] lg:max-w-[400px] xl:max-w-[500px] 2xl:max-w-[600px]">
                   <button
                     onClick={() => navigateToBoardPath(-1)}
                     className="flex items-center gap-1 text-white/60 hover:text-white transition-colors text-sm flex-shrink-0"
@@ -325,7 +356,7 @@ export function CXDNavbar() {
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
                         <button
                           onClick={() => navigateToBoardPath(index)}
-                          className={`text-sm transition-colors truncate max-w-[100px] ${
+                          className={`text-sm transition-colors truncate max-w-[100px] lg:max-w-[120px] xl:max-w-[150px] ${
                             index === boardPath.length - 1
                               ? "text-primary font-medium"
                               : "text-white/60 hover:text-white"
@@ -409,17 +440,31 @@ export function CXDNavbar() {
                   : 'hover:bg-emerald-500/10 hover:border-emerald-500/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.1)]',
               };
 
+              const isPlanView = btn.id === 'plan';
+              const isLocked = isPlanView && !hasPlanView;
+
               return (
                 <div
                   key={btn.id}
                   onClick={() => {
+                    // Gate Plan View for non-Pro users
+                    if (isPlanView && !hasPlanView) {
+                      setBlockedFeature('plan-view');
+                      setShowUpgradeModal(true);
+                      return;
+                    }
+
                     setViewMode(btn.mode as any);
                     if (btn.canvasMode) setCanvasViewMode(btn.canvasMode as any);
                   }}
-                  className={`relative flex items-center px-4 py-2 group rounded-full text-white transition-all duration-500 border active:scale-95 overflow-hidden cursor-pointer
+                  className={`relative flex items-center px-4 py-2 group rounded-full text-white transition-all duration-500 border active:scale-95 overflow-visible cursor-pointer
                     ${isActive ? colors[btn.color] : `bg-transparent border-transparent ${colors[btn.color]}`}
+                    ${isLocked ? 'opacity-60' : ''}
                   `}
                 >
+                  {isLocked && (
+                    <Lock className="w-3 h-3 absolute -top-1 -right-1 text-orange-400 z-10" />
+                  )}
                   <btn.icon className={`w-4 h-4 transition-colors ${isActive ? 'text-white' : 'text-white/60 group-hover:text-white'}`} />
                   <span className={`text-xs font-bold overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap
                     ${isActive ? 'max-w-[100px] ml-2 opacity-100' : 'max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:ml-2 group-hover:opacity-100'}
@@ -601,13 +646,16 @@ export function CXDNavbar() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div
-            className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
-            onClick={handleDashboard}
-            title="Back to Dashboard"
-          >
-            <LayoutDashboard className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
-          </div>
+          {/* Account Menu - Shows tier, credits, trial countdown in dropdown - Far right */}
+          <AccountMenu
+            userEmail={userEmail}
+            aiCredits={credits}
+            onLogout={handleLogout}
+            onOpenSettings={() => setShowSettingsModal(true)}
+            plan={plan.id as any}
+            isTrialing={isTrialing}
+            trialDaysRemaining={trialDaysRemaining}
+          />
         </div>
       </div>
 
@@ -621,6 +669,19 @@ export function CXDNavbar() {
           onClose={() => setShowCollaborationPanel(false)}
         />
       )}
+
+      {/* Upgrade Modal */}
+      <UpgradeModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        feature={blockedFeature}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+      />
     </nav>
   );
 }

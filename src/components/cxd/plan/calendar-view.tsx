@@ -382,12 +382,12 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
 
   const renderMonthView = () => (
     <>
-      <div className="grid grid-cols-7 gap-2 mb-2">
+      <div className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4 mb-2">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-          <div key={day} className="text-center text-sm font-medium text-muted-foreground py-2">{day}</div>
+          <div key={day} className="text-center text-xs sm:text-sm font-medium text-muted-foreground py-2">{day}</div>
         ))}
       </div>
-      <div className="grid grid-cols-7 gap-2" style={{ gridAutoRows: 'minmax(140px, 1fr)' }}>
+      <div className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4" style={{ gridAutoRows: 'minmax(120px, 160px)' }}>
         {calendarDays.map((date, i) => {
           const dateKey = toDayKey(date);
           const dayTasks = tasksByDate.get(dateKey) || [];
@@ -395,7 +395,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
             <Card
               key={i}
               className={[
-                'p-2 cursor-pointer transition-all border hover:border-purple-500/40',
+                'p-2 sm:p-3 cursor-pointer transition-all border hover:border-purple-500/40',
                 isCurrentMonth(date) ? 'bg-gradient-to-br from-black/40 to-black/20 border-white/10' : 'bg-black/10 opacity-55 border-white/5',
                 isToday(date) ? 'ring-1 ring-purple-500/40 border-purple-500/50' : ''
               ].join(' ')}
@@ -419,7 +419,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
               }}
             >
               <div className="flex items-center justify-between mb-2">
-                <span className={isToday(date) ? 'bg-purple-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center' : 'text-sm font-medium'}>
+                <span className={isToday(date) ? 'bg-purple-500 text-white rounded-full w-6 h-6 sm:w-7 sm:h-7 text-xs flex items-center justify-center' : 'text-xs sm:text-sm font-medium'}>
                   {date.getDate()}
                 </span>
               </div>
@@ -434,7 +434,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
                       setDraggedMonthTask({ taskId: task.id, sourceDayKey: dateKey });
                     }}
                     onDragEnd={() => setDraggedMonthTask(null)}
-                    className="w-full text-left text-xs rounded border px-1.5 py-1 truncate"
+                    className="w-full text-left text-[10px] sm:text-xs rounded border px-1.5 py-1 truncate"
                     style={{
                       borderColor: `${getTaskColor(task)}66`,
                       backgroundColor: `${getTaskColor(task)}22`,
@@ -448,7 +448,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
                   </button>
                 ))}
                 {dayTasks.length > 4 && (
-                  <div className="text-[11px] text-muted-foreground px-1">+{dayTasks.length - 4} more</div>
+                  <div className="text-[10px] text-muted-foreground px-1">+{dayTasks.length - 4} more</div>
                 )}
               </div>
             </Card>
@@ -464,7 +464,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
     return (
       <div className="h-full flex overflow-hidden">
         {viewMode !== 'month' && (
-          <div className="w-72 shrink-0 border-r border-white/10 bg-black/20 p-3 overflow-y-auto gantt-scrollbar">
+          <div className="w-64 lg:w-72 xl:w-80 shrink-0 border-r border-white/10 bg-black/20 p-3 overflow-y-auto gantt-scrollbar">
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
               {viewMode === 'day' ? 'Day Tasks' : 'Week Tasks'}
             </div>
@@ -503,18 +503,18 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
         )}
 
         <div className="flex-1 overflow-auto gantt-scrollbar" ref={timelineGridRef}>
-          <div className="min-w-[820px]">
-            <div className="sticky top-0 z-10 grid border-b border-white/10 bg-black/70 backdrop-blur-lg" style={{ gridTemplateColumns: `72px repeat(${dayCount}, minmax(180px, 1fr))` }}>
+          <div style={{ minWidth: viewMode === 'week' ? '1400px' : '820px' }}>
+            <div className="sticky top-0 z-10 grid border-b border-white/10 bg-black/70 backdrop-blur-lg" style={{ gridTemplateColumns: `72px repeat(${dayCount}, ${viewMode === 'week' ? '1fr' : 'minmax(180px, min(300px, 1fr))'})` }}>
               <div className="px-2 py-2 text-xs text-muted-foreground">Time</div>
               {timeViewDays.map(day => (
-                <div key={toDayKey(day)} className="px-3 py-2 text-xs font-medium border-l border-white/10">
+                <div key={toDayKey(day)} className="px-3 py-2 text-xs lg:text-sm font-medium border-l border-white/10">
                   {day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                 </div>
               ))}
             </div>
 
             <div className="relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
-              <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `72px repeat(${dayCount}, minmax(180px, 1fr))` }}>
+              <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `72px repeat(${dayCount}, ${viewMode === 'week' ? '1fr' : 'minmax(180px, min(300px, 1fr))'})` }}>
                 <div className="border-r border-white/10 bg-black/20">
                   {HOURS.map(hour => (
                     <div key={hour} className="h-16 text-[11px] text-muted-foreground px-2 pt-1 border-b border-white/10">
@@ -592,12 +592,12 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
+    <div className="h-full flex flex-col overflow-hidden p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={handlePrevious}><ChevronLeft className="w-4 h-4" /></Button>
           <Button variant="outline" size="sm" onClick={handleNext}><ChevronRight className="w-4 h-4" /></Button>
-          <h2 className="text-lg font-semibold ml-2">
+          <h2 className="text-base sm:text-lg lg:text-xl font-semibold ml-2">
             {viewMode === 'day'
               ? (selectedDate || currentDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
               : viewMode === 'week'
@@ -606,7 +606,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
           </h2>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="text-xs">

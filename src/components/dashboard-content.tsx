@@ -525,7 +525,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                       {canCreate ? (
                         <>
                           <Plus className="w-4 h-4 mr-2" />
-                          Create New Map
+                          Create New Canvas
                         </>
                       ) : (
                         <>
@@ -538,7 +538,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   {canCreate && (
                     <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
                       <DialogHeader>
-                        <DialogTitle>Create New Experience Map</DialogTitle>
+                        <DialogTitle>Create New Canvas</DialogTitle>
                         <DialogDescription className="text-white/60">
                           Give your new CXD project a name
                         </DialogDescription>

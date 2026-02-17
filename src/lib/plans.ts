@@ -11,10 +11,13 @@ export const PLANS = {
       'Core design tools',
       'Experience flow',
       'Focus mode',
+      '50 AI Credits (One-Time Bonus)',
     ],
     limits: {
       maxCanvases: 1,
-      hasAI: false,
+      hasAI: true,
+      monthlyAICredits: 0, // No monthly credits for free tier
+      signupBonusCredits: 50, // One-time 50 credits on signup
       hasPlanView: false,
       hasTemplates: false,
       hasCollaboration: false,
@@ -31,8 +34,9 @@ export const PLANS = {
     features: [
       'Unlimited Canvases',
       'Everything in Free',
-      'AI Design Assistant',
-      'Plan View',
+      'Premium AI Models (GPT-4o, Claude Sonnet, Kimi)',
+      '500 AI Credits/month',
+      'Plan View with Kanban',
       'Smart Templates',
       'Team collaboration (3)',
       'Priority support',
@@ -40,6 +44,7 @@ export const PLANS = {
     limits: {
       maxCanvases: Infinity,
       hasAI: true,
+      monthlyAICredits: 500,
       hasPlanView: true,
       hasTemplates: true,
       hasCollaboration: true,
@@ -50,19 +55,23 @@ export const PLANS = {
     id: 'lifetime',
     name: 'Lifetime',
     description: 'Pay once, own forever',
-    price: 199,
+    price: 399,
     interval: 'once' as const,
     features: [
       'Everything in Pro',
-      'Lifetime access',
-      'All future updates',
-      'All future features',
+      'All AI Models (Including Claude Opus)',
+      '1000 Credits One-Time + BYOK',
+      'Bring Your Own API Keys',
+      'Lifetime access - Pay once',
+      'All future updates forever',
       'Founding member badge',
-      'Direct founder access',
+      'Priority feature requests',
     ],
     limits: {
       maxCanvases: Infinity,
       hasAI: true,
+      monthlyAICredits: 0, // No monthly credits - use BYOK or purchase addon credits
+      lifetimeCredits: 1000, // One-time 1000 credits on signup
       hasPlanView: true,
       hasTemplates: true,
       hasCollaboration: true,
@@ -82,6 +91,7 @@ export const PLANS = {
     limits: {
       maxCanvases: Infinity,
       hasAI: true,
+      monthlyAICredits: 500,
       hasPlanView: true,
       hasTemplates: true,
       hasCollaboration: true,

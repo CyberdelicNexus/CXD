@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   CanvasElement,
   FreeformElement,
@@ -60,6 +61,12 @@ import {
   LayoutGrid,
   ChevronRight,
   Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  List,
+  ListOrdered,
+  Highlighter,
   Smile,
   Palette,
   Paintbrush,
@@ -110,6 +117,12 @@ import {
 import { createClient } from "../../../../supabase/client";
 import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
 import { parseAssignees, serializeAssignees } from "@/components/cxd/plan/assignee-utils";
+import { NoteRichTextEditor } from "@/components/cxd/canvas/note-rich-text-editor";
+import {
+  canResizeFreeformCard,
+  getFreeformCardType,
+  isNoteCard,
+} from "@/components/cxd/canvas/card-type-utils";
 
 // Hypercube tag icons mapping (defined at top for use in JSX)
 const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
@@ -119,6 +132,7 @@ const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
   "State Mapping": "🎭",
   "Trait Mapping": "💫",
   "Meaning Architecture": "🏛️",
+  "Core": "🎯",
 };
 
 const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
@@ -170,6 +184,7 @@ interface CanvasElementRendererProps {
   onSendToInbox?: () => void; // Send task to inbox
   onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void; // Create connected shape
   isReadOnly?: boolean;
+  snapToGrid?: boolean;
 }
 
 export function CanvasElementRenderer({
@@ -198,6 +213,7 @@ export function CanvasElementRenderer({
   onSendToInbox,
   onCreateConnectedShape,
   isReadOnly = false,
+  snapToGrid = false,
 }: CanvasElementRendererProps) {
   // Get canvas elements for z-index calculations
   const getCanvasElements = useCXDStore((state) => state.getCanvasElements);
@@ -525,6 +541,8 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isEditing={isEditing}
             onBlur={handleBlur}
+            isSelected={isSelected}
+            onStartEdit={() => setIsEditing(true)}
             className=" h-full"
           />
         );
@@ -608,20 +626,19 @@ export function CanvasElementRenderer({
   // Don't render connectors as regular elements
   if (element.type === "connector") return null;
 
-  // Check if this is a task card for drag-to-inbox functionality
-  const isTaskCard = element.type === "freeform" && (element as any).taskMetadata;
+  const freeformCardType =
+    element.type === "freeform"
+      ? getFreeformCardType(element as FreeformElement)
+      : null;
+  const isResizableNoteCard =
+    element.type === "freeform" &&
+    freeformCardType === "note";
 
   return (
     <div
       ref={elementRef}
       data-element-id={element.id}
-      draggable={isTaskCard}
-      onDragStart={(e) => {
-        if (isTaskCard) {
-          e.dataTransfer.setData("elementId", element.id);
-          e.dataTransfer.effectAllowed = "move";
-        }
-      }}
+      draggable={false}
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
         isDragging && "opacity-80 shadow-2xl cursor-grabbing",
@@ -643,6 +660,9 @@ export function CanvasElementRenderer({
         !isHighlighted &&
         element.type === "freeform" &&
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
+        element.type === "freeform" &&
+        freeformCardType === "note" &&
+        "card--note-resizable",
         // Selection ring for boards only when drop target
         isSelected &&
         !isHighlighted &&
@@ -673,10 +693,32 @@ export function CanvasElementRenderer({
       style={{
         left: element.x,
         top: element.y,
-        width: element.width,
-        minWidth: element.type === "freeform" ? "250px" : undefined,
-        height: element.type === "freeform" ? "auto" : element.height,
-        minHeight: element.type === "freeform" ? "300px" : undefined,
+        width:
+          element.type === "freeform" && freeformCardType === "task"
+            ? 300
+            : element.width,
+        minWidth:
+          element.type === "freeform"
+            ? isResizableNoteCard
+              ? "200px"
+              : "300px"
+            : undefined,
+        maxWidth:
+          element.type === "freeform" && !isResizableNoteCard
+            ? "300px"
+            : undefined,
+        height:
+          element.type === "freeform"
+            ? isResizableNoteCard
+              ? "auto"
+              : "auto"
+            : element.height,
+        minHeight:
+          element.type === "freeform"
+            ? isResizableNoteCard
+              ? "300px"
+              : "300px"
+            : undefined,
         zIndex: Number.isFinite(element.zIndex) ? element.zIndex : 0,
         transform: element.rotation
           ? `rotate(${element.rotation}deg)`
@@ -1032,21 +1074,23 @@ export function CanvasElementRenderer({
                 <CheckCircle2 className="w-4 h-4" />
               </button>
               {/* Send to Inbox button */}
-              {onSendToInbox && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSendToInbox();
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    element.inInbox && "bg-cyan-500/20 text-cyan-400",
-                  )}
-                  title={element.inInbox ? "Already in Inbox" : "Send to Inbox"}
-                >
-                  <Inbox className="w-4 h-4" />
-                </button>
-              )}
+              {onSendToInbox &&
+                element.type === "freeform" &&
+                getFreeformCardType(element as FreeformElement) === "task" && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSendToInbox();
+                    }}
+                    className={cn(
+                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                      element.inInbox && "bg-cyan-500/20 text-cyan-400",
+                    )}
+                    title={element.inInbox ? "Already in Inbox" : "Send to Inbox"}
+                  >
+                    <Inbox className="w-4 h-4" />
+                  </button>
+                )}
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
@@ -1496,6 +1540,23 @@ export function CanvasElementRenderer({
           >
             <Copy className="w-4 h-4" />
           </button>
+          {/* Send to Inbox button - only for note cards */}
+          {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle || (element as any).emoji === '🤖') && !element.inInbox && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                // Ensure cardType is set to 'note' when sending to inbox
+                onUpdate({
+                  inInbox: true,
+                  cardType: 'note'
+                } as any);
+              }}
+              className="p-1.5 rounded hover:bg-violet-500/20 text-muted-foreground hover:text-violet-400 transition-colors"
+              title="Send to Inbox"
+            >
+              <Inbox className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1535,24 +1596,60 @@ export function CanvasElementRenderer({
         element.type !== "text" &&
         element.type !== "line" && (
           <>
-            {/* For freeform cards, only show horizontal (left/right) resize handles */}
+            {/* Note cards are the only resizable freeform cards (width-only). */}
             {element.type === "freeform" ? (
-              <>
-                <ResizeHandle
-                  position="e"
-                  element={element}
-                  onUpdate={onUpdate}
-                  canvasZoom={canvasZoom}
-                  onResizeStart={pushCanvasHistory}
-                />
-                <ResizeHandle
-                  position="w"
-                  element={element}
-                  onUpdate={onUpdate}
-                  canvasZoom={canvasZoom}
-                  onResizeStart={pushCanvasHistory}
-                />
-              </>
+              isResizableNoteCard ? (
+                <>
+                  <ResizeHandle
+                    position="nw"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="sw"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="ne"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="se"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="e"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="w"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                </>
+              ) : null
             ) : (
               <>
                 <ResizeHandle
@@ -1560,6 +1657,7 @@ export function CanvasElementRenderer({
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
                   onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
@@ -1567,6 +1665,7 @@ export function CanvasElementRenderer({
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
                   onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
@@ -1574,6 +1673,7 @@ export function CanvasElementRenderer({
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
                   onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
@@ -1581,6 +1681,7 @@ export function CanvasElementRenderer({
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
                   onResizeStart={pushCanvasHistory}
                 />
               </>
@@ -1708,18 +1809,25 @@ function ResizeHandle({
   element,
   onUpdate,
   canvasZoom,
+  snapToGrid,
   onResizeStart,
 }: {
   position: "nw" | "ne" | "sw" | "se" | "e" | "w";
   element: CanvasElement;
   onUpdate: (updates: Partial<CanvasElement>) => void;
   canvasZoom: number;
+  snapToGrid?: boolean;
   onResizeStart?: () => void;
 }) {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
+
+      if (element.type === "freeform") {
+        // Type guard: task cards are intentionally non-resizable.
+        if (!canResizeFreeformCard(element as FreeformElement)) return;
+      }
 
       // Capture history before starting resize for undo support
       onResizeStart?.();
@@ -1739,15 +1847,19 @@ function ResizeHandle({
         let newHeight = startHeight;
         let newX = startPosX;
         let newY = startPosY;
+        const isResizableNote =
+          element.type === "freeform" &&
+          canResizeFreeformCard(element as FreeformElement);
 
         // Determine minimum sizes based on element type
-        const minWidth = element.type === "freeform" ? 250 : 50;
-        const minHeight = element.type === "freeform" ? 300 : 30;
+        const minWidth =
+          element.type === "freeform" && isResizableNote ? 200 : element.type === "freeform" ? 200 : 50;
+        const minHeight =
+          element.type === "freeform" && isResizableNote ? 300 : element.type === "freeform" ? 120 : 30;
 
         // For images, maintain aspect ratio
         const isImage = element.type === "image";
         const aspectRatio = isImage ? startWidth / startHeight : null;
-
         if (position.includes("e")) {
           newWidth = Math.max(minWidth, startWidth + deltaX);
           if (isImage && aspectRatio) {
@@ -1762,8 +1874,8 @@ function ResizeHandle({
           }
         }
 
-        // For freeform cards, don't allow height resizing - height is content-based
-        if (element.type !== "freeform") {
+        // Note cards are width-resizable only; keep height content-driven.
+        if (!isResizableNote) {
           if (position.includes("s")) {
             newHeight = Math.max(minHeight, startHeight + deltaY);
             if (isImage && aspectRatio) {
@@ -1776,6 +1888,18 @@ function ResizeHandle({
             if (isImage && aspectRatio) {
               newWidth = newHeight * aspectRatio;
             }
+          }
+        }
+
+        if (snapToGrid) {
+          const gridSize = 30;
+          newWidth = Math.round(newWidth / gridSize) * gridSize;
+          if (!isResizableNote) {
+            newHeight = Math.round(newHeight / gridSize) * gridSize;
+          }
+          newX = Math.round(newX / gridSize) * gridSize;
+          if (!isResizableNote) {
+            newY = Math.round(newY / gridSize) * gridSize;
           }
         }
 
@@ -1810,16 +1934,19 @@ function ResizeHandle({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [element, onUpdate, position, canvasZoom, onResizeStart],
+    [element, onUpdate, position, canvasZoom, snapToGrid, onResizeStart],
   );
 
+  // Scale handles inversely with zoom to keep them visible at all zoom levels
+  const handleScale = 1 / canvasZoom;
+
   const positionStyles: Record<string, React.CSSProperties> = {
-    nw: { top: -4, left: -4, cursor: "nw-resize" },
-    ne: { top: -4, right: -4, cursor: "ne-resize" },
-    sw: { bottom: -4, left: -4, cursor: "sw-resize" },
-    se: { bottom: -4, right: -4, cursor: "se-resize" },
-    e: { top: "50%", right: -4, transform: "translateY(-50%)", cursor: "ew-resize" },
-    w: { top: "50%", left: -4, transform: "translateY(-50%)", cursor: "ew-resize" },
+    nw: { top: -4, left: -4, cursor: "nw-resize", transform: `scale(${handleScale})`, transformOrigin: "top left" },
+    ne: { top: -4, right: -4, cursor: "ne-resize", transform: `scale(${handleScale})`, transformOrigin: "top right" },
+    sw: { bottom: -4, left: -4, cursor: "sw-resize", transform: `scale(${handleScale})`, transformOrigin: "bottom left" },
+    se: { bottom: -4, right: -4, cursor: "se-resize", transform: `scale(${handleScale})`, transformOrigin: "bottom right" },
+    e: { top: "50%", right: -4, transform: `translateY(-50%) scale(${handleScale})`, transformOrigin: "center right", cursor: "ew-resize" },
+    w: { top: "50%", left: -4, transform: `translateY(-50%) scale(${handleScale})`, transformOrigin: "center left", cursor: "ew-resize" },
   };
 
   return (
@@ -1892,14 +2019,19 @@ function TextFontSizeHandle({
     [element, onUpdate, canvasZoom, onResizeStart],
   );
 
+  // Scale handle inversely with zoom to keep it visible at all zoom levels
+  const handleScale = 1 / canvasZoom;
+  const baseScale = isDragging ? 1.25 : 1;
+
   return (
     <div
       className={cn(
         "absolute bottom-0 right-0 w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-nwse-resize transition-all hover:scale-110",
-        isDragging && "scale-125 shadow-lg",
+        isDragging && "shadow-lg",
       )}
       style={{
-        transform: "translate(50%, 50%)",
+        transform: `translate(50%, 50%) scale(${handleScale * baseScale})`,
+        transformOrigin: "bottom right",
       }}
       onMouseDown={handleMouseDown}
       title="Drag to resize text"
@@ -3136,12 +3268,16 @@ function FreeformCard({
   onUpdate,
   isEditing,
   onBlur,
+  isSelected,
+  onStartEdit,
   className,
 }: {
   element: FreeformElement;
   onUpdate: (updates: Partial<FreeformElement>) => void;
   isEditing: boolean;
   onBlur: (e?: React.FocusEvent) => void;
+  isSelected: boolean;
+  onStartEdit: () => void;
   className?: string;
 }) {
   // Use the passed-in onBlur handler (from the parent renderer) to avoid undefined refs.
@@ -3151,16 +3287,126 @@ function FreeformCard({
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
   const textColor = element.style?.textColor || "#ffffff"; // Default white for dark backgrounds
   const fontWeight = element.style?.fontWeight || "normal";
+  const cardRef = useRef<HTMLDivElement>(null);
+  const noteContentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const noteBodyRef = useRef<HTMLDivElement>(null);
   const subtaskRefs = useRef<Map<string, HTMLTextAreaElement | null>>(new Map());
   const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
   const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
+  const [noteEditingField, setNoteEditingField] = useState<"title" | "body" | null>(null);
+  const [isNoteFocusMode, setIsNoteFocusMode] = useState(false);
+  const [showFocusNoteColorPicker, setShowFocusNoteColorPicker] = useState(false);
+  const [noteTextStyle, setNoteTextStyle] = useState<"heading" | "subheading" | "body" | "small">("body");
+  const [noteToolbarMenu, setNoteToolbarMenu] = useState<"none" | "style" | "textColor" | "highlight">("none");
   const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
+  const pendingNoteBodyRef = useRef<string>("");
+  const freeformCardType = getFreeformCardType(element);
+  const isNote = isNoteCard(element);
+  const isTask = freeformCardType === "task";
+  const legacyLines = (element.content || "").split("\n");
+  const noteTitle = element.noteTitle ?? (legacyLines[0] || "Untitled Note");
+  const noteBody = element.noteBody ?? legacyLines.slice(1).join("\n");
+  const renderedNoteBody = useMemo(
+    () => noteBody
+      .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
+      .replace(/>\s*\n+\s*</g, '><'),
+    [noteBody],
+  );
 
   // Get the store methods for navigation
   const setCanvasViewMode = useCXDStore((state) => state.setCanvasViewMode);
   const setViewMode = useCXDStore((state) => state.setViewMode);
+
+  useEffect(() => {
+    if (!isSelected) {
+      setNoteEditingField(null);
+      setNoteToolbarMenu("none");
+    }
+  }, [isSelected]);
+
+  useEffect(() => {
+    pendingNoteBodyRef.current = noteBody;
+  }, [noteBody]);
+
+  useEffect(() => {
+    if (!isNoteFocusMode) {
+      setShowFocusNoteColorPicker(false);
+    }
+  }, [isNoteFocusMode]);
+
+  useEffect(() => {
+    if (!isNoteFocusMode) return;
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowFocusNoteColorPicker(false);
+        setIsNoteFocusMode(false);
+      }
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [isNoteFocusMode]);
+
+  useEffect(() => {
+    if (!isNote) return;
+    if (noteEditingField !== "body") return;
+    if (!noteBodyRef.current) return;
+    const active = document.activeElement;
+    if (active !== noteBodyRef.current) {
+      noteBodyRef.current.innerHTML = noteBody || "";
+    }
+  }, [isNote, noteBody, noteEditingField]);
+
+  const updateNoteStyleFromSelection = useCallback(() => {
+    if (!isNote || noteEditingField !== "body") return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !noteBodyRef.current) return;
+    const anchorNode = sel.anchorNode;
+    if (!anchorNode) return;
+    const anchorElement =
+      anchorNode.nodeType === Node.TEXT_NODE
+        ? anchorNode.parentElement
+        : (anchorNode as HTMLElement);
+    if (!anchorElement || !noteBodyRef.current.contains(anchorElement)) return;
+    const block = anchorElement.closest("h1,h2,h3,h4,small,p,div,li");
+    if (!block) return;
+    const tag = block.tagName.toLowerCase();
+    if (tag === "h1" || tag === "h2") setNoteTextStyle("heading");
+    else if (tag === "h3" || tag === "h4") setNoteTextStyle("subheading");
+    else if (tag === "small") setNoteTextStyle("small");
+    else setNoteTextStyle("body");
+  }, [isNote, noteEditingField]);
+
+  useEffect(() => {
+    if (!isNote || noteEditingField !== "body") return;
+    const onSelectionChange = () => updateNoteStyleFromSelection();
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [isNote, noteEditingField, updateNoteStyleFromSelection]);
+
+  const syncNoteFields = useCallback(
+    (nextTitle: string, nextBody: string) => {
+      const safeTitle = nextTitle.trim() || "Untitled Note";
+      const combined = nextBody.trim().length > 0 ? `${safeTitle}\n${nextBody}` : safeTitle;
+      onUpdate({
+        noteTitle: safeTitle,
+        noteBody: nextBody,
+        content: combined,
+      });
+    },
+    [onUpdate],
+  );
+
+  const handleNoteFieldBlur = useCallback(() => {
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!cardRef.current?.contains(active)) {
+        setNoteEditingField(null);
+        handleBlur();
+      }
+    });
+  }, [handleBlur]);
 
   // Handle description key events - allow normal line breaks
   const handleDescriptionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -3335,6 +3581,114 @@ function FreeformCard({
     }
   };
 
+  const adjustNoteHeight = useCallback(() => {
+    if (!isNote || !noteContentRef.current) return;
+    const measured = Math.ceil(noteContentRef.current.scrollHeight + 24);
+    const nextHeight = Math.max(300, element.height || 300, measured);
+    if (nextHeight !== element.height) {
+      onUpdate({ height: nextHeight });
+    }
+  }, [element.height, isNote, onUpdate]);
+
+  const ensureNoteEditorFocus = useCallback(() => {
+    if (!isNote) return;
+    if (document.activeElement !== noteBodyRef.current) {
+      noteBodyRef.current?.focus();
+    }
+  }, [isNote]);
+
+  const placeCaretAtPoint = useCallback((clientX: number, clientY: number) => {
+    const editor = noteBodyRef.current;
+    if (!editor) return;
+
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    const docWithCaret = document as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+
+    let range: Range | null = null;
+    const caretPos = docWithCaret.caretPositionFromPoint?.(clientX, clientY) ?? null;
+    if (caretPos) {
+      range = document.createRange();
+      range.setStart(caretPos.offsetNode, caretPos.offset);
+      range.collapse(true);
+    } else {
+      range = docWithCaret.caretRangeFromPoint?.(clientX, clientY) ?? null;
+    }
+
+    if (!range || !editor.contains(range.startContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
+  const applyNoteCommand = useCallback(
+    (command: string, value?: string) => {
+      if (!isNote) return;
+      ensureNoteEditorFocus();
+      document.execCommand(command, false, value);
+      const html = noteBodyRef.current?.innerHTML ?? "";
+      pendingNoteBodyRef.current = html;
+      syncNoteFields(noteTitle, html);
+      adjustNoteHeight();
+    },
+    [adjustNoteHeight, ensureNoteEditorFocus, isNote, noteTitle, syncNoteFields],
+  );
+
+  const applyNoteTextStyle = useCallback(
+    (style: "heading" | "subheading" | "body" | "small") => {
+      if (!isNote) return;
+      ensureNoteEditorFocus();
+      if (style === "heading") {
+        document.execCommand("formatBlock", false, "h2");
+      } else if (style === "subheading") {
+        document.execCommand("formatBlock", false, "h4");
+      } else if (style === "small") {
+        document.execCommand("formatBlock", false, "small");
+      } else {
+        document.execCommand("formatBlock", false, "p");
+      }
+      const html = noteBodyRef.current?.innerHTML ?? "";
+      pendingNoteBodyRef.current = html;
+      syncNoteFields(noteTitle, html);
+      setNoteTextStyle(style);
+    },
+    [ensureNoteEditorFocus, isNote, noteTitle, syncNoteFields],
+  );
+
+  const applyNoteLink = useCallback(() => {
+    if (!isNote) return;
+  }, [isNote]);
+
+  const handleNoteKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isNote) return;
+    const isMod = e.ctrlKey || e.metaKey;
+    if (!isMod) return;
+    const key = e.key.toLowerCase();
+    if (key === "b") {
+      e.preventDefault();
+      applyNoteCommand("bold");
+    } else if (key === "i") {
+      e.preventDefault();
+      applyNoteCommand("italic");
+    } else if (key === "u") {
+      e.preventDefault();
+      applyNoteCommand("underline");
+    }
+  }, [isNote, applyNoteCommand]);
+
+  useEffect(() => {
+    if (!isNote) return;
+    adjustNoteHeight();
+  }, [isNote, noteTitle, noteBody, isEditing, adjustNoteHeight]);
+
   // Render content with markdown-like formatting
   const renderContent = (content: string) => {
     if (!content) {
@@ -3446,23 +3800,46 @@ function FreeformCard({
     );
   };
 
-  // Check if this card is actionable (task metadata or markdown tasks or hypercube tags)
-  const isActionable =
-    element.taskMetadata?.isActionable ||
-    element.content?.includes("[ ]") ||
-    element.content?.includes("[x]") ||
-    (element.hypercubeTags && element.hypercubeTags.length > 0);
+  const isActionable = isTask;
+  const taskStatus = element.taskMetadata?.status || "not_started";
+  const statusDisplay = taskStatus.replace("_", " ");
+  const statusClasses: Record<string, string> = {
+    not_started: "bg-slate-500/20 text-slate-300 border-slate-400/30",
+    in_progress: "bg-blue-500/20 text-blue-300 border-blue-400/30",
+    blocked: "bg-rose-500/20 text-rose-300 border-rose-400/30",
+    completed: "bg-emerald-500/20 text-emerald-300 border-emerald-400/30",
+  };
+  const assigneeTagPalette = [
+    "bg-violet-500/20 text-violet-200 border-violet-400/30",
+    "bg-cyan-500/20 text-cyan-200 border-cyan-400/30",
+    "bg-emerald-500/20 text-emerald-200 border-emerald-400/30",
+    "bg-amber-500/20 text-amber-200 border-amber-400/30",
+    "bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/30",
+  ];
+  const assignees = parseAssignees(element.taskMetadata?.assignee);
+  const assigneeTagClass = (name: string) => {
+    let hash = 0;
+    for (let i = 0; i < name.length; i += 1) {
+      hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+    }
+    return assigneeTagPalette[hash % assigneeTagPalette.length];
+  };
 
   return (
     <div
-      className={cn("w-full rounded-lg shadow-md overflow-visible flex flex-col relative", className)}
+      ref={cardRef}
+      className={cn(
+        "w-full rounded-lg shadow-md overflow-visible flex flex-col relative",
+        isNote && "card--note-resizable",
+        className,
+      )}
       style={{
         background: bgColor,
         border: "1px solid rgba(255, 255, 255, 0.1)",
         boxShadow:
           "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
-        minWidth: "250px",
-        minHeight: "300px",
+        minWidth: isNote ? "200px" : "100%",
+        minHeight: isNote ? "300px" : "100%",
       }}
     >
       {/* Task indicator - subtle corner badge */}
@@ -3483,101 +3860,198 @@ function FreeformCard({
         className={`p-3 flex flex-col gap-2 ${element.emoji ? "" : " pt-[0]"}`}
       >
         {isEditing ? (
-          <>
-            {/* Title Input */}
-            <Textarea
-              ref={textareaRef}
-              autoFocus
-              value={element.content}
-              onChange={(e) => onUpdate({ content: e.target.value })}
-              onBlur={handleBlur}
-              onKeyDown={handleTitleKeyDown}
-              onFocus={(e) => {
-                // Select all text when focused if it's still the default placeholder
-                if (element.content === "Task Title") {
-                  e.target.select();
-                }
-              }}
-              className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white placeholder:text-white/40 text-xl font-bold"
-              style={{
-                color: textColor,
-                fontWeight: "bold",
-                fontSize: "1.25rem",
-                lineHeight: "1.75rem",
-                minHeight: "1.75rem",
-                height: "auto",
-                wordWrap: "break-word",
-                overflowWrap: "break-word",
-              }}
-              placeholder="Enter title..."
-              data-no-drag
-              rows={1}
-            />
-
-            {/* Description Input */}
-            <Textarea
-              ref={descriptionRef}
-              value={element.taskMetadata?.description || ""}
-              onChange={(e) => {
-                onUpdate({
-                  taskMetadata: {
-                    ...element.taskMetadata,
-                    description: e.target.value,
-                  },
-                });
-                // Auto-expand textarea
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
-              }}
-              onBlur={handleBlur}
-              onKeyDown={handleDescriptionKeyDown}
-              onClick={(e) => e.stopPropagation()}
-              onFocus={(e) => {
-                e.stopPropagation();
-                // Ensure proper height on focus
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
-              }}
-              placeholder="Add description..."
-              className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white/70 placeholder:text-white/30 text-sm"
-              style={{
-                color: textColor,
-                opacity: 0.7,
-                minHeight: "3rem",
-                height: "auto",
-                wordWrap: "break-word",
-                overflowWrap: "break-word",
-              }}
-              data-no-drag
-              rows={2}
-            />
-          </>
-        ) : (
-          <>
-            {/* Title Display */}
-            <div
-              className="w-full text-xl font-bold break-words whitespace-pre-wrap flex-shrink-0"
-              style={{
-                color: textColor,
-                wordWrap: "break-word",
-                overflowWrap: "break-word",
-              }}
-            >
-              {element.content || "Untitled"}
-            </div>
-
-            {/* Description Display */}
-            {element.taskMetadata?.description && (
+          isNote ? (
+            <div ref={noteContentRef} className="flex min-h-0 flex-1 flex-col gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsNoteFocusMode(true);
+                }}
+                className="absolute right-2 top-2 z-20 rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                title="Focus editor"
+                data-no-drag
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </button>
+              <Input
+                autoFocus={noteEditingField === "title"}
+                value={noteTitle}
+                onChange={(e) => syncNoteFields(e.target.value, noteBody)}
+                onBlur={handleNoteFieldBlur}
+                onFocus={() => setNoteEditingField("title")}
+                className="h-9 border-0 bg-transparent p-0 text-lg font-semibold focus-visible:ring-0"
+                style={{ color: textColor }}
+                data-no-drag
+              />
+              <div className="h-px bg-white/10" />
               <div
-                className="w-full text-sm opacity-70 break-words whitespace-pre-wrap"
+                className="w-full flex-1 min-h-[160px]"
+                onMouseDown={(e) => e.stopPropagation()}
+                data-no-drag
+              >
+                <NoteRichTextEditor
+                  value={noteBody}
+                  textColor={textColor}
+                  isSelected={isSelected}
+                  onChange={(nextHtml) => syncNoteFields(noteTitle, nextHtml)}
+                  onBlurCard={handleNoteFieldBlur}
+                  onFocusBody={() => setNoteEditingField("body")}
+                  onHeightChange={adjustNoteHeight}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Title Input */}
+              <Textarea
+                ref={textareaRef}
+                autoFocus
+                value={element.content}
+                onChange={(e) => onUpdate({ content: e.target.value })}
+                onBlur={handleBlur}
+                onKeyDown={handleTitleKeyDown}
+                onFocus={(e) => {
+                  // Select all text when focused if it's still the default placeholder
+                  if (element.content === "Task Title") {
+                    e.target.select();
+                  }
+                }}
+                className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white placeholder:text-white/40 text-xl font-bold"
                 style={{
                   color: textColor,
+                  fontWeight: "bold",
+                  fontSize: "1.25rem",
+                  lineHeight: "1.75rem",
+                  minHeight: "1.75rem",
+                  height: "auto",
                   wordWrap: "break-word",
                   overflowWrap: "break-word",
                 }}
-              >
-                {element.taskMetadata.description}
+                placeholder="Enter title..."
+                data-no-drag
+                rows={1}
+              />
+
+              {/* Description Input */}
+              <Textarea
+                ref={descriptionRef}
+                value={element.taskMetadata?.description || ""}
+                onChange={(e) => {
+                  onUpdate({
+                    taskMetadata: {
+                      ...element.taskMetadata,
+                      description: e.target.value,
+                    },
+                  });
+                  // Auto-expand textarea
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
+                onBlur={handleBlur}
+                onKeyDown={handleDescriptionKeyDown}
+                onClick={(e) => e.stopPropagation()}
+                onFocus={(e) => {
+                  e.stopPropagation();
+                  // Ensure proper height on focus
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
+                placeholder="Add description..."
+                className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white/70 placeholder:text-white/30 text-sm"
+                style={{
+                  color: textColor,
+                  opacity: 0.7,
+                  minHeight: "3rem",
+                  height: "auto",
+                  wordWrap: "break-word",
+                  overflowWrap: "break-word",
+                }}
+                data-no-drag
+                rows={2}
+              />
+            </>
+          )
+        ) : (
+          <>
+            {isNote ? (
+              <div ref={noteContentRef} className="w-full min-h-0 flex-1 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStartEdit();
+                    setNoteEditingField("body");
+                    setIsNoteFocusMode(true);
+                  }}
+                  className="absolute right-2 top-2 z-20 rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                  title="Focus editor"
+                  data-no-drag
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStartEdit();
+                    setNoteEditingField("title");
+                  }}
+                  className="w-full text-left text-lg font-semibold break-words rounded px-0.5 py-0.5 hover:bg-white/5 cursor-text"
+                  style={{ color: textColor, whiteSpace: "pre-wrap" }}
+                  data-no-drag
+                >
+                  {noteTitle || "Untitled Note"}
+                </div>
+                <div className="h-px bg-white/10" />
+                <div
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    onStartEdit();
+                    setNoteEditingField("body");
+                  }}
+                  className="min-h-0 flex-1 rounded px-0.5 py-0.5 text-left text-sm leading-relaxed hover:bg-white/5 cursor-text w-full overflow-hidden"
+                  style={{ color: textColor }}
+                  data-no-drag
+                >
+                  {noteBody.trim().length > 0 ? (
+                    <div
+                      className="w-full break-words overflow-wrap-anywhere [&_a]:text-purple-300 [&_a]:underline [&_h1]:mt-1 [&_h1]:mb-0.5 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-1 [&_h2]:mb-0.5 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mt-0.5 [&_h3]:mb-0 [&_h3]:text-base [&_h3]:font-semibold [&_p]:my-0.5 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_p]:break-words [&_h1]:break-words [&_h2]:break-words [&_h3]:break-words [&_li]:break-words"
+                      style={{ wordWrap: "break-word", overflowWrap: "anywhere" }}
+                      dangerouslySetInnerHTML={{ __html: renderedNoteBody }}
+                    />
+                  ) : (
+                    <span className="text-white/40">Write your note...</span>
+                  )}
+                </div>
               </div>
+            ) : (
+              <>
+                {/* Title Display */}
+                <div
+                  className="w-full text-xl font-bold break-words whitespace-pre-wrap flex-shrink-0"
+                  style={{
+                    color: textColor,
+                    wordWrap: "break-word",
+                    overflowWrap: "break-word",
+                  }}
+                >
+                  {element.content || "Untitled"}
+                </div>
+
+                {/* Description Display */}
+                {element.taskMetadata?.description && (
+                  <div
+                    className="w-full text-sm opacity-70 break-words whitespace-pre-wrap"
+                    style={{
+                      color: textColor,
+                      wordWrap: "break-word",
+                      overflowWrap: "break-word",
+                    }}
+                  >
+                    {element.taskMetadata.description}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
@@ -3589,10 +4063,10 @@ function FreeformCard({
             data-no-drag
           >
             {/* Existing subtasks */}
-            {element.taskMetadata.subtasks &&
+            {Array.isArray(element.taskMetadata.subtasks) &&
               element.taskMetadata.subtasks.length > 0 && (
                 <div className="space-y-1.5">
-                  {element.taskMetadata.subtasks
+                  {[...element.taskMetadata.subtasks]
                     .sort((a, b) => a.order - b.order)
                     .map((subtask, index) => (
                       <div
@@ -3849,9 +4323,12 @@ function FreeformCard({
               <DropdownMenuTrigger asChild>
                 <button
                   onClick={(e) => e.stopPropagation()}
-                  className="h-6 rounded bg-zinc-900/80 border border-zinc-700/70 px-2 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-purple-400/40"
+                  className={cn(
+                    "h-6 rounded border px-2 text-xs capitalize focus:outline-none focus:ring-1 focus:ring-purple-400/40",
+                    statusClasses[taskStatus] || "bg-zinc-900/80 border-zinc-700/70 text-zinc-100",
+                  )}
                 >
-                  {(element.taskMetadata.status || "not_started").replace("_", " ")}
+                  {statusDisplay}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -3877,7 +4354,18 @@ function FreeformCard({
                       } as Partial<FreeformElement>);
                     }}
                   >
-                    {statusOpt.label}
+                    <span className="inline-flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-block h-2 w-2 rounded-full",
+                          statusOpt.value === "not_started" && "bg-slate-300",
+                          statusOpt.value === "in_progress" && "bg-blue-300",
+                          statusOpt.value === "blocked" && "bg-rose-300",
+                          statusOpt.value === "completed" && "bg-emerald-300",
+                        )}
+                      />
+                      {statusOpt.label}
+                    </span>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -4007,11 +4495,11 @@ function FreeformCard({
           </div>
 
           {/* Assignee - Editable */}
-          <div className="flex items-start gap-2 text-xs">
+          <div className="flex items-center gap-2 text-xs">
             <span className="text-white/50 min-w-[60px]">Assignee:</span>
-            <div className="min-w-0 flex-1 space-y-1">
+            <div className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
               <AssigneeMultiSelect
-                value={parseAssignees(element.taskMetadata.assignee)}
+                value={assignees}
                 onChange={(next) => {
                   onUpdate({
                     taskMetadata: {
@@ -4023,19 +4511,20 @@ function FreeformCard({
                 compact
                 iconOnly
               />
-              <div className="flex flex-wrap gap-1">
-                {parseAssignees(element.taskMetadata.assignee).length === 0 && (
-                  <span className="text-[10px] text-white/45">Unassigned</span>
-                )}
-                {parseAssignees(element.taskMetadata.assignee).map((name) => (
-                  <span
-                    key={name}
-                    className="px-1.5 py-0.5 rounded-md text-[10px] bg-white/10 text-white/85 border border-white/15"
-                  >
-                    {name}
-                  </span>
-                ))}
-              </div>
+              {assignees.length === 0 && (
+                <span className="text-[10px] text-white/45">Unassigned</span>
+              )}
+              {assignees.map((name) => (
+                <span
+                  key={name}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded-md text-[10px] border",
+                    assigneeTagClass(name),
+                  )}
+                >
+                  {name}
+                </span>
+              ))}
             </div>
           </div>
         </div>
@@ -4060,6 +4549,96 @@ function FreeformCard({
           </button>
         </div>
       )}
+      {isNote &&
+        isNoteFocusMode &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-6"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowFocusNoteColorPicker(false);
+                setIsNoteFocusMode(false);
+              }
+            }}
+          >
+            <div
+              className="relative w-full max-w-3xl max-h-[85vh] overflow-visible rounded-xl border border-white/15 p-5 shadow-2xl"
+              style={{
+                background: bgColor,
+                boxShadow: "0 16px 48px rgba(0,0,0,0.45)",
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="absolute right-3 top-3 rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                onClick={() => {
+                  setShowFocusNoteColorPicker(false);
+                  setIsNoteFocusMode(false);
+                }}
+                title="Close focus mode"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <div
+                className="absolute left-6 top-7 z-30"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white",
+                    showFocusNoteColorPicker && "bg-black/55 text-white",
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowFocusNoteColorPicker((prev) => !prev);
+                  }}
+                  title="Change note color"
+                >
+                  <Palette className="h-4 w-4" />
+                </button>
+                {showFocusNoteColorPicker && (
+                  <ColorPicker
+                    currentColor={bgColor}
+                    onColorChange={(color) =>
+                      onUpdate({ style: { ...element.style, bgColor: color } })
+                    }
+                    onClose={() => setShowFocusNoteColorPicker(false)}
+                    position="below"
+                  />
+                )}
+              </div>
+              <div className="max-h-[calc(85vh-2.5rem)] overflow-y-auto pl-[52px] pr-2 [scrollbar-width:thin] [scrollbar-color:rgba(167,139,250,0.65)_rgba(255,255,255,0.08)] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-violet-400/60 [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-white/10">
+                <div className="flex flex-col gap-3">
+                  <Input
+                    autoFocus
+                    value={noteTitle}
+                    onChange={(e) => syncNoteFields(e.target.value, noteBody)}
+                    onFocus={() => setNoteEditingField("title")}
+                    className="h-11 border-0 bg-black/25 p-0 text-2xl font-semibold focus-visible:ring-0"
+                    style={{ color: textColor }}
+                    data-no-drag
+                  />
+                  <div className="h-px bg-white/10" />
+                  <div className="min-h-[420px]">
+                    <NoteRichTextEditor
+                      value={noteBody}
+                      textColor={textColor}
+                      isSelected
+                      onChange={(nextHtml) => syncNoteFields(noteTitle, nextHtml)}
+                      onBlurCard={() => { }}
+                      onFocusBody={() => setNoteEditingField("body")}
+                      onHeightChange={adjustNoteHeight}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -5369,15 +5948,16 @@ function TextCard({
       // Width: use wrapWidth if set, otherwise auto-size to content
       const newWidth = wrapWidth
         ? wrapWidth
-        : Math.max(60, measured.width + 16);
+        : Math.max(60, Math.ceil(measured.width) + 16);
 
       // Height: always auto-size to fit wrapped content
-      const newHeight = Math.max(30, measured.height + 16);
+      const newHeight = Math.max(30, Math.ceil(measured.height) + 16);
 
-      // Only update if size changed significantly (avoid infinite loops)
+      // Only update if size changed significantly (avoid glitching)
+      // Use larger threshold to prevent micro-adjustments that cause visual jumps
       if (
-        Math.abs(element.width - newWidth) > 5 ||
-        Math.abs(element.height - newHeight) > 5
+        Math.abs(element.width - newWidth) > 8 ||
+        Math.abs(element.height - newHeight) > 8
       ) {
         onUpdate({ width: newWidth, height: newHeight });
       }

@@ -24,7 +24,9 @@ import {
   Pencil,
 } from 'lucide-react';
 import { useSubscription } from '@/hooks/use-subscription';
+import { useAICredits } from '@/hooks/use-ai-credits';
 import { UpgradeModal } from '@/components/upgrade-modal';
+import { CreditTopUpModal } from '@/components/cxd/credit-topup-modal';
 import {
   updateNameAction,
   deleteAccountAction,
@@ -60,6 +62,7 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
   const [newName, setNewName] = useState('');
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isCancellingSub, setIsCancellingSub] = useState(false);
+  const [showTopUp, setShowTopUp] = useState(false);
 
   const {
     subscription,
@@ -72,6 +75,15 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
     isActive,
     trialDaysRemaining,
   } = useSubscription();
+
+  const {
+    remainingCredits,
+    totalCredits,
+    isLow: creditsLow,
+    isDepleted: creditsDepleted,
+    selectedModel,
+    isLoading: creditsLoading,
+  } = useAICredits();
 
   const userName = userEmail
     .split('@')[0]
@@ -409,6 +421,68 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
             </div>
           </div>
 
+          {/* AI Credits Card */}
+          {!isFree && !creditsLoading && (
+            <div className="glass-card rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Zap className="w-5 h-5 text-violet-400" />
+                <h2 className="text-lg font-semibold text-white">AI Credits</h2>
+              </div>
+
+              <div className="space-y-4">
+                {/* Credit Balance */}
+                <div className="p-4 rounded-lg bg-white/5 border border-white/10">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm text-white/60">Remaining Credits</span>
+                    <span className="text-sm text-white/80">
+                      {remainingCredits.toLocaleString()}
+                      <span className="text-white/30"> / {totalCredits.toLocaleString()}</span>
+                    </span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        creditsDepleted
+                          ? 'bg-red-500'
+                          : creditsLow
+                            ? 'bg-amber-500'
+                            : totalCredits > 0 && remainingCredits / totalCredits > 0.5
+                              ? 'bg-emerald-500'
+                              : 'bg-violet-500'
+                      }`}
+                      style={{ width: `${totalCredits > 0 ? Math.max((remainingCredits / totalCredits) * 100, 1) : 0}%` }}
+                    />
+                  </div>
+
+                  {creditsDepleted && (
+                    <p className="text-[11px] text-red-400/80 mt-2">
+                      Credits depleted. Top up to continue using AI features.
+                    </p>
+                  )}
+                </div>
+
+                {/* Active Model */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10">
+                  <span className="text-sm text-white/60">Active Model</span>
+                  <Badge className="bg-violet-500/20 text-violet-400 border-violet-500/30">
+                    {selectedModel === 'gpt' ? 'GPT' : selectedModel === 'claude' ? 'Claude' : 'Gemini'}
+                  </Badge>
+                </div>
+
+                {/* Top Up Button */}
+                <Button
+                  onClick={() => setShowTopUp(true)}
+                  className="w-full bg-violet-600 hover:bg-violet-500 text-white"
+                >
+                  <Zap className="w-4 h-4 mr-2" />
+                  Get More Credits
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Account Card */}
           <div className="glass-card rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
@@ -497,6 +571,12 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
       <UpgradeModal
         isOpen={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
+      />
+
+      {/* Credit Top-Up Modal */}
+      <CreditTopUpModal
+        isOpen={showTopUp}
+        onClose={() => setShowTopUp(false)}
       />
     </main>
   );
