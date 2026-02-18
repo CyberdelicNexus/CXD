@@ -180,9 +180,9 @@ const projectBalancedSensory = createMinimalProject({
   sensoryDomains: {
     visual: 50,
     auditory: 50,
-    tactile: 50,
-    spatial: 50,
-    emotional: 50,
+    olfactory: 50,
+    gustatory: 50,
+    haptic: 50,
   },
 });
 const intensitiesBalanced = calculateFaceIntensities(projectBalancedSensory, []);
@@ -197,9 +197,9 @@ const projectUnbalancedSensory = createMinimalProject({
   sensoryDomains: {
     visual: 100,
     auditory: 10,
-    tactile: 10,
-    spatial: 10,
-    emotional: 10,
+    olfactory: 10,
+    gustatory: 10,
+    haptic: 10,
   },
 });
 const intensitiesUnbalanced = calculateFaceIntensities(projectUnbalancedSensory, []);
