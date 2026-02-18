@@ -227,7 +227,7 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
             height: isNaN(element.height) ? existing.height : element.height,
             // Explicitly preserve locked state from existing element if not in update
             locked: element.locked !== undefined ? element.locked : existing.locked,
-          };
+          } as CanvasElement;
         } else {
           newElements = [...elements, element];
         }
