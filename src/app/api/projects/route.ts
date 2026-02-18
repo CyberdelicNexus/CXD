@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
+
+export const dynamic = 'force-dynamic';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 
 // Admin client for bypassing RLS

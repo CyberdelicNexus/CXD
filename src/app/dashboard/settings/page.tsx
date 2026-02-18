@@ -1,10 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { SettingsModal } from "@/components/modals/settings-modal";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function SettingsPage() {
+function SettingsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const defaultTab = (searchParams.get('tab') || 'general') as any;
@@ -19,5 +19,13 @@ export default function SettingsPage() {
       onClose={handleClose}
       defaultTab={defaultTab}
     />
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <SettingsContent />
+    </Suspense>
   );
 }
