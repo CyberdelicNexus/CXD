@@ -82,12 +82,36 @@ function formatTimeAgo(dateString: string): string {
 }
 
 const CANVAS_GRADIENTS = [
-  { name: 'Dark Nebula', value: 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)' },
-  { name: 'Deep Ocean', value: 'radial-gradient(circle at center, #0b101eff 0%, #000000 100%)' },
-  { name: 'Cosmic Fire', value: 'radial-gradient(circle at center, #18061bff 0%, #000000 100%)' },
-  { name: 'Midnight Purple', value: 'radial-gradient(circle at center, #1c093dff 0%, #000000 100%)' },
-  { name: 'Galactic Blue', value: 'radial-gradient(circle at center, #000323ff 0%, #000000 100%)' },
-  { name: 'Void', value: '#000000' },
+  {
+    name: 'Dark Nebula',
+    value: 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)',
+    preview: 'radial-gradient(circle at center, #4a2b6e 0%, #1a0b2e 100%)'
+  },
+  {
+    name: 'Deep Ocean',
+    value: 'radial-gradient(circle at center, #0b101eff 0%, #000000 100%)',
+    preview: 'radial-gradient(circle at center, #2b405e 0%, #0b101e 100%)'
+  },
+  {
+    name: 'Cosmic Fire',
+    value: 'radial-gradient(circle at center, #18061bff 0%, #000000 100%)',
+    preview: 'radial-gradient(circle at center, #48265b 0%, #18061b 100%)'
+  },
+  {
+    name: 'Midnight Purple',
+    value: 'radial-gradient(circle at center, #1c093dff 0%, #000000 100%)',
+    preview: 'radial-gradient(circle at center, #5c397d 0%, #1c093d 100%)'
+  },
+  {
+    name: 'Galactic Blue',
+    value: 'radial-gradient(circle at center, #000323ff 0%, #000000 100%)',
+    preview: 'radial-gradient(circle at center, #303363 0%, #000323 100%)'
+  },
+  {
+    name: 'Void',
+    value: '#000000',
+    preview: 'radial-gradient(circle at center, #333333 0%, #000000 100%)'
+  },
 ];
 
 export function CXDNavbar() {
@@ -309,7 +333,9 @@ export function CXDNavbar() {
                     <div className="flex items-center justify-center w-8 h-8 rounded-full bg-zinc-950 transition-all duration-300">
                       <div
                         className="w-5 h-5 rounded-full border border-white/10 shadow-inner"
-                        style={{ background: project.canvasBackground || CANVAS_GRADIENTS[0].value }}
+                        style={{
+                          background: CANVAS_GRADIENTS.find(g => g.value === project.canvasBackground)?.preview || CANVAS_GRADIENTS[0].preview
+                        }}
                       />
                     </div>
                   </div>
@@ -320,7 +346,7 @@ export function CXDNavbar() {
                       <button
                         key={gradient.name}
                         className="w-full aspect-square rounded-full border border-white/10 hover:border-violet-500/50 hover:scale-110 transition-all relative group overflow-hidden"
-                        style={{ background: gradient.value }}
+                        style={{ background: gradient.preview }}
                         onClick={() => {
                           updateCanvasBackground(gradient.value);
                           setShowColorPicker(false);

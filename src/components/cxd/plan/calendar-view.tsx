@@ -12,14 +12,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { TaskProjection } from '@/types/plan-types';
+import type { Version } from '@/types/version-types';
+import { TYPE_LABEL_COLORS } from '@/types/version-types';
 import { HYPERCUBE_FACE_COLORS } from '@/types/plan-types';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, GripVertical } from 'lucide-react';
 
 interface CalendarViewProps {
   tasks: TaskProjection[];
+  versions?: Version[];
   onTaskClick: (taskId: string) => void;
   onTaskNavigate: (taskId: string) => void;
   onTaskUpdate?: (taskId: string, updates: Partial<TaskProjection>) => void;
+  onVersionClick?: (versionId: string) => void;
 }
 
 type CalendarViewMode = 'month' | 'week' | 'day';
@@ -68,7 +72,7 @@ const parseDayKey = (dayKey: string) => {
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: CalendarViewProps) {
+export function CalendarView({ tasks, versions = [], onTaskClick, onTaskNavigate, onTaskUpdate, onVersionClick }: CalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -145,6 +149,27 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
     return map;
   }, [tasks]);
 
+  const versionsByDate = useMemo(() => {
+    const map = new Map<string, Version[]>();
+
+    versions.forEach((version) => {
+      if (!version.started_at || !version.targetDate) return;
+
+      const start = new Date(version.started_at);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(version.targetDate);
+      end.setHours(0, 0, 0, 0);
+
+      for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+        const key = toDayKey(d);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(version);
+      }
+    });
+
+    return map;
+  }, [versions]);
+
   const selectedDayKey = toDayKey(selectedDate || currentDate);
   const dayPanelTasks = tasksByDate.get(selectedDayKey) || [];
 
@@ -182,6 +207,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
   }, [viewMode, dayPanelTasks, timeViewDays, tasksByDate]);
 
   const tasksById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
+  const monthRowCount = useMemo(() => Math.max(1, Math.ceil(calendarDays.length / 7)), [calendarDays.length]);
 
   const allocationsByDay = useMemo(() => {
     const map = new Map<string, TimeAllocation[]>();
@@ -381,24 +407,35 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
   };
 
   const renderMonthView = () => (
-    <>
-      <div className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4 mb-2">
+    <div className="h-full min-h-0 flex flex-col">
+      <div className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4 mb-2 shrink-0">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
           <div key={day} className="text-center text-xs sm:text-sm font-medium text-muted-foreground py-2">{day}</div>
         ))}
       </div>
-      <div className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4" style={{ gridAutoRows: 'minmax(120px, 160px)' }}>
+      <div
+        className="grid grid-cols-7 gap-2 sm:gap-3 lg:gap-4 flex-1 min-h-0"
+        style={{ gridTemplateRows: `repeat(${monthRowCount}, minmax(0, 1fr))` }}
+      >
         {calendarDays.map((date, i) => {
           const dateKey = toDayKey(date);
           const dayTasks = tasksByDate.get(dateKey) || [];
+          const dayVersions = versionsByDate.get(dateKey) || [];
+          const primaryVersion = dayVersions[0]; // Show the first version if multiple
+          const versionColor = primaryVersion ? (primaryVersion.color || TYPE_LABEL_COLORS[primaryVersion.type_label] || '#8B5CF6') : null;
+
           return (
             <Card
               key={i}
               className={[
-                'p-2 sm:p-3 cursor-pointer transition-all border hover:border-purple-500/40',
+                'h-full min-h-0 p-2 sm:p-3 cursor-pointer transition-all border hover:border-purple-500/40 relative overflow-hidden',
                 isCurrentMonth(date) ? 'bg-gradient-to-br from-black/40 to-black/20 border-white/10' : 'bg-black/10 opacity-55 border-white/5',
                 isToday(date) ? 'ring-1 ring-purple-500/40 border-purple-500/50' : ''
               ].join(' ')}
+              style={versionColor ? {
+                borderTop: `3px solid ${versionColor}`,
+                boxShadow: `inset 0 0 0 1px ${versionColor}20`,
+              } : {}}
               onClick={() => setSelectedDate(date)}
               onDragOver={(e) => {
                 if (draggedMonthTask) e.preventDefault();
@@ -422,9 +459,28 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
                 <span className={isToday(date) ? 'bg-purple-500 text-white rounded-full w-6 h-6 sm:w-7 sm:h-7 text-xs flex items-center justify-center' : 'text-xs sm:text-sm font-medium'}>
                   {date.getDate()}
                 </span>
+                {/* Version indicator */}
+                {primaryVersion && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onVersionClick?.(primaryVersion.id);
+                    }}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold hover:scale-105 transition-transform"
+                    style={{
+                      backgroundColor: `${versionColor}25`,
+                      color: versionColor,
+                      border: `1px solid ${versionColor}60`,
+                    }}
+                  >
+                    {primaryVersion.type_label[0]}
+                    <span className="hidden sm:inline">{primaryVersion.name}</span>
+                  </button>
+                )}
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 overflow-hidden">
+                {/* Tasks */}
                 {dayTasks.slice(0, 4).map(task => (
                   <button
                     key={task.id}
@@ -455,7 +511,7 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
           );
         })}
       </div>
-    </>
+    </div>
   );
 
   const renderTimeView = () => {
@@ -634,8 +690,9 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto gantt-scrollbar">
+      <div className={viewMode === 'month' ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-auto gantt-scrollbar'}>
         <div
+          className={viewMode === 'month' ? 'h-full min-h-0' : undefined}
           onDragOver={(e) => {
             if (viewMode === 'month') e.preventDefault();
           }}
@@ -653,4 +710,3 @@ export function CalendarView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate 
     </div>
   );
 }
-

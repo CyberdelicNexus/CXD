@@ -10,9 +10,72 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.1.0',
+    date: 'February 18, 2026',
+    isLatest: true,
+    changes: [
+      {
+        category: 'feature',
+        description: 'Subtask creation on Enter — pressing Enter inside a Task Note automatically creates a new subtask',
+      },
+      {
+        category: 'feature',
+        description: 'Multi-selection bounding box with proportional resize and optional non-uniform scaling',
+      },
+      {
+        category: 'feature',
+        description: 'Group context menu with alignment tools (left, center, right, top, middle, bottom)',
+      },
+      {
+        category: 'feature',
+        description: 'Shift+click multi-select — holding Shift and clicking elements adds them to group selection',
+      },
+      {
+        category: 'improvement',
+        description: 'Subtask text wrapping — text that exceeds available width now wraps instead of clipping',
+      },
+      {
+        category: 'improvement',
+        description: 'Canvas breadcrumbs relocated to navigation bar for cleaner layout',
+      },
+      {
+        category: 'improvement',
+        description: 'Image resize now fits content properly instead of cropping',
+      },
+      {
+        category: 'improvement',
+        description: 'Inbox blinking animation refined to 3 seconds with light purple color',
+      },
+      {
+        category: 'improvement',
+        description: 'Group bounding box drag — clicking anywhere inside the box now moves entire group',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed Copy shortcut conflict that interfered with C shortcut on cards',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed Framing Wizard "Explore Map" button navigation in last step',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed "Create First Version" button not working in Versions view',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed multi-group alignment tool icons rendering incorrectly',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed infinite render loop when dropping inbox items on canvas',
+      },
+    ],
+  },
+  {
     version: '1.0.0',
     date: 'February 16, 2026',
-    isLatest: true,
+    isLatest: false,
     changes: [
       {
         category: 'feature',

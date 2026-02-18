@@ -2094,7 +2094,6 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return '';
 
-        const { yDoc } = get();
         const existingVersions = currentProject.versions || [];
         const versionId = uuidv4();
         const newVersion: Version = {
@@ -2104,23 +2103,21 @@ export const useCXDStore = create<CXDState>()(
           updatedAt: new Date().toISOString(),
         };
 
-        if (yDoc) {
-          yjsAddVersion(yDoc, newVersion);
-        } else {
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? {
-                  ...p,
-                  versions: [...existingVersions, newVersion],
-                  updatedAt: new Date().toISOString(),
-                }
-                : p
-            ),
-          }));
-          const updatedProject = get().getCurrentProject();
-          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
-        }
+        // Always use direct Zustand update for versions
+        // (Yjs bridge doesn't sync versions yet)
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                versions: [...existingVersions, newVersion],
+                updatedAt: new Date().toISOString(),
+              }
+              : p
+          ),
+        }));
+        const updatedProject = get().getCurrentProject();
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
 
         return versionId;
       },
@@ -2129,25 +2126,21 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
-        const { yDoc } = get();
+        // Always use direct Zustand update for versions
+        // (Yjs bridge doesn't sync versions yet)
+        const versions = (currentProject.versions || []).map((v) =>
+          v.id === versionId ? { ...v, ...updates, updatedAt: new Date().toISOString() } : v
+        );
 
-        if (yDoc) {
-          yjsUpdateVersion(yDoc, versionId, updates);
-        } else {
-          const versions = (currentProject.versions || []).map((v) =>
-            v.id === versionId ? { ...v, ...updates, updatedAt: new Date().toISOString() } : v
-          );
-
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { ...p, versions, updatedAt: new Date().toISOString() }
-                : p
-            ),
-          }));
-          const updatedProject = get().getCurrentProject();
-          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
-        }
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, versions, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+        const updatedProject = get().getCurrentProject();
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
       },
 
       deleteVersion: (versionId) => {

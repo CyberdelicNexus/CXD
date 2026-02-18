@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { DeleteConfirmDialog } from '@/components/cxd/delete-confirm-dialog';
 import { cn } from '@/lib/utils';
 import {
   ChevronDown,
@@ -18,6 +19,9 @@ import {
   FileText,
   Target,
   Lightbulb,
+  CheckSquare,
+  Circle,
+  CheckCircle2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { DEFAULT_TYPE_LABELS, TYPE_LABEL_COLORS } from '@/types/version-types';
@@ -31,9 +35,20 @@ export function VersionDetailPanel({ version }: VersionDetailPanelProps) {
   const updateVersion = useCXDStore((state) => state.updateVersion);
   const deleteVersion = useCXDStore((state) => state.deleteVersion);
   const setVersionStatus = useCXDStore((state) => state.setVersionStatus);
+  const project = useCXDStore((state) => state.getCurrentProject());
+
+  // Get all tasks for this version
+  const versionTasks = (project?.canvasLayout?.elements || [])
+    .filter((el) => el.type === 'freeform' && el.cardType === 'task' && el.taskMetadata?.versionId === version.id)
+    .map((el) => ({
+      id: el.id,
+      title: el.content?.split('\n')[0] || 'Untitled Task',
+      status: el.taskMetadata?.status || 'not_started',
+    }));
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(version.name);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Local state for text areas to allow typing without cursor jump
   const [scopeContent, setScopeContent] = useState(version.description);
@@ -47,7 +62,7 @@ export function VersionDetailPanel({ version }: VersionDetailPanelProps) {
   }, [version.id, version.name, version.description, version.learnings_content]);
 
   // Collapsible sections state
-  const [expandedSection, setExpandedSection] = useState<'scope' | 'okrs' | 'learnings' | null>('okrs');
+  const [expandedSection, setExpandedSection] = useState<'scope' | 'okrs' | 'learnings' | 'tasks' | null>('okrs');
 
   const handleNameSave = () => {
     if (editedName.trim() && editedName !== version.name) {
@@ -80,17 +95,19 @@ export function VersionDetailPanel({ version }: VersionDetailPanelProps) {
     }
   };
 
+  const handleStartDateChange = (date: Date | undefined) => {
+    updateVersion(version.id, { started_at: date?.toISOString() });
+  };
+
   const handleTargetDateChange = (date: Date | undefined) => {
     updateVersion(version.id, { targetDate: date?.toISOString() });
   };
 
   const handleDelete = () => {
-    if (confirm(`Delete version "${version.name}"? All tagged tasks will become unversioned.`)) {
-      deleteVersion(version.id);
-    }
+    deleteVersion(version.id);
   };
 
-  const toggleSection = (section: 'scope' | 'okrs' | 'learnings') => {
+  const toggleSection = (section: 'scope' | 'okrs' | 'learnings' | 'tasks') => {
     setExpandedSection(expandedSection === section ? null : section);
   };
 
@@ -149,7 +166,7 @@ export function VersionDetailPanel({ version }: VersionDetailPanelProps) {
           <Button
             size="sm"
             variant="ghost"
-            onClick={handleDelete}
+            onClick={() => setShowDeleteConfirm(true)}
             className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
           >
             <Trash2 className="w-4 h-4" />
@@ -228,35 +245,79 @@ export function VersionDetailPanel({ version }: VersionDetailPanelProps) {
           </div>
         </div>
 
-        {/* Target Date */}
-        <div className="space-y-2">
-          <Label className="text-white/70 text-sm">Target Release Date</Label>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  'w-full justify-start text-left font-normal',
-                  !version.targetDate && 'text-white/40'
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {version.targetDate ? (
-                  format(new Date(version.targetDate), 'PPP')
-                ) : (
-                  <span>Set target date</span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={version.targetDate ? new Date(version.targetDate) : undefined}
-                onSelect={handleTargetDateChange}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
+        {/* Date Fields */}
+        <div className="flex gap-3">
+          {/* Start Date */}
+          <div className="flex-1">
+            <Label className="text-white/50 text-xs uppercase tracking-wider mb-2 block">Start Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    'w-full justify-start text-left h-auto px-4 py-3 bg-white/5 hover:bg-white/10 border-white/10 hover:border-blue-400/40',
+                    !version.started_at && 'text-white/40'
+                  )}
+                >
+                  <CalendarIcon className="mr-3 h-5 w-5 text-blue-400" />
+                  <div className="flex flex-col items-start">
+                    {version.started_at ? (
+                      <>
+                        <span className="text-xs text-white/40 uppercase tracking-wider">Starts</span>
+                        <span className="text-sm font-medium text-white/90">{format(new Date(version.started_at), 'MMM d, yyyy')}</span>
+                      </>
+                    ) : (
+                      <span className="text-sm">Set start date</span>
+                    )}
+                  </div>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={version.started_at ? new Date(version.started_at) : undefined}
+                  onSelect={handleStartDateChange}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Target Date */}
+          <div className="flex-1">
+            <Label className="text-white/50 text-xs uppercase tracking-wider mb-2 block">Target Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    'w-full justify-start text-left h-auto px-4 py-3 bg-white/5 hover:bg-white/10 border-white/10 hover:border-amber-400/40',
+                    !version.targetDate && 'text-white/40'
+                  )}
+                >
+                  <CalendarIcon className="mr-3 h-5 w-5 text-amber-400" />
+                  <div className="flex flex-col items-start">
+                    {version.targetDate ? (
+                      <>
+                        <span className="text-xs text-white/40 uppercase tracking-wider">Due</span>
+                        <span className="text-sm font-medium text-white/90">{format(new Date(version.targetDate), 'MMM d, yyyy')}</span>
+                      </>
+                    ) : (
+                      <span className="text-sm">Set target date</span>
+                    )}
+                  </div>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={version.targetDate ? new Date(version.targetDate) : undefined}
+                  onSelect={handleTargetDateChange}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
       </div>
 
@@ -306,7 +367,59 @@ export function VersionDetailPanel({ version }: VersionDetailPanelProps) {
             />
           </CollapsibleSection>
         )}
+
+        {/* Related Tasks */}
+        <CollapsibleSection
+          title={`Related Tasks (${versionTasks.length})`}
+          icon={<CheckSquare className="w-4 h-4" />}
+          isExpanded={expandedSection === 'tasks'}
+          onToggle={() => toggleSection('tasks')}
+        >
+          <div className="space-y-2">
+            {versionTasks.length === 0 ? (
+              <div className="text-white/40 text-sm text-center py-4">
+                No tasks tagged with this version yet
+              </div>
+            ) : (
+              versionTasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                >
+                  {task.status === 'completed' ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                  ) : (
+                    <Circle className="w-4 h-4 text-white/40 shrink-0" />
+                  )}
+                  <span className={cn(
+                    "text-sm flex-1",
+                    task.status === 'completed' ? "text-white/60 line-through" : "text-white/90"
+                  )}>
+                    {task.title}
+                  </span>
+                  <span className={cn(
+                    "text-xs px-2 py-0.5 rounded",
+                    task.status === 'completed' && "bg-green-500/20 text-green-400",
+                    task.status === 'in_progress' && "bg-blue-500/20 text-blue-400",
+                    task.status === 'blocked' && "bg-red-500/20 text-red-400",
+                    task.status === 'not_started' && "bg-gray-500/20 text-gray-400"
+                  )}>
+                    {task.status.replace('_', ' ')}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </CollapsibleSection>
       </div>
+
+      <DeleteConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={handleDelete}
+        title="Delete Version"
+        description={`Are you sure you want to delete "${version.name}"? All tagged tasks will become unversioned. This action cannot be undone.`}
+      />
     </div>
   );
 }

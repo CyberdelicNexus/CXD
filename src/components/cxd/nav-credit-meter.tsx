@@ -100,7 +100,6 @@ export function NavCreditMeter() {
         <span>{remainingCredits}</span>
         <span className="opacity-40">|</span>
         <AIProviderIcon provider={selectedModel} className="w-3 h-3 opacity-50" />
-        <span className="opacity-60">{shortLabel}</span>
         <ChevronDown
           className={cn(
             "w-3 h-3 opacity-40 transition-transform",

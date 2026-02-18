@@ -7,9 +7,9 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  AlignStartVertical,
-  AlignCenterVertical,
-  AlignEndVertical,
+  AlignHorizontalJustifyStart,
+  AlignHorizontalJustifyCenter,
+  AlignHorizontalJustifyEnd,
   Group,
   Ungroup,
   Copy,
@@ -342,9 +342,9 @@ export function MultiSelectionBox({
           <ToolButton icon={<AlignCenter className="w-4 h-4" />} title="Align Center" onClick={alignCenterH} />
           <ToolButton icon={<AlignRight className="w-4 h-4" />} title="Align Right" onClick={alignRight} />
           <div className="w-px h-4 bg-border/30 mx-1" />
-          <ToolButton icon={<AlignStartVertical className="w-4 h-4" />} title="Align Top" onClick={alignTop} />
-          <ToolButton icon={<AlignCenterVertical className="w-4 h-4" />} title="Align Middle" onClick={alignMiddle} />
-          <ToolButton icon={<AlignEndVertical className="w-4 h-4" />} title="Align Bottom" onClick={alignBottom} />
+          <ToolButton icon={<AlignHorizontalJustifyStart className="w-4 h-4 rotate-90" />} title="Align Top" onClick={alignTop} />
+          <ToolButton icon={<AlignHorizontalJustifyCenter className="w-4 h-4 rotate-90" />} title="Align Middle" onClick={alignMiddle} />
+          <ToolButton icon={<AlignHorizontalJustifyEnd className="w-4 h-4 rotate-90" />} title="Align Bottom" onClick={alignBottom} />
         </div>
 
         {/* Group/Ungroup */}

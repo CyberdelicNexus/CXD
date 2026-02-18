@@ -3,7 +3,7 @@
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { KanbanView } from './kanban-view';
 import { TableView } from './table-view';
 import { CalendarView } from './calendar-view';
@@ -39,9 +39,10 @@ import type { PlanViewType, TaskFilter, TaskPriority, TaskStatus } from '@/types
 import { FaceTagSelector } from './face-tag-selector';
 import { AssigneeMultiSelect } from './assignee-multi-select';
 import { serializeAssignees } from './assignee-utils';
-import { LayoutGrid, Table as TableIcon, Calendar, GanttChart, Plus, Archive, Milestone } from 'lucide-react';
+import { LayoutGrid, Table as TableIcon, Calendar, GanttChart, Plus, Archive, Milestone, X } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { VersionsView } from './versions-view';
+import { VersionDetailPanel } from './version-detail-panel';
 
 export function PlanView() {
   // Load activeView from localStorage, default to 'kanban'
@@ -62,6 +63,7 @@ export function PlanView() {
     includeTaggedCards: true,
   });
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
   const [newTaskText, setNewTaskText] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
@@ -71,6 +73,9 @@ export function PlanView() {
   const [newTaskDueDate, setNewTaskDueDate] = useState<Date | undefined>(undefined);
   const [newTaskStartDate, setNewTaskStartDate] = useState<Date | undefined>(undefined);
   const [newTaskFaces, setNewTaskFaces] = useState<HypercubeFaceTag[]>([]);
+  const [headerHeight, setHeaderHeight] = useState(72);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const headerOffsetWithinContainer = '1rem'; // fixed header top-20 minus page main pt-16
 
   // Save activeView to localStorage whenever it changes
   useEffect(() => {
@@ -79,7 +84,34 @@ export function PlanView() {
     }
   }, [activeView]);
 
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+
+    const measure = () => {
+      setHeaderHeight(header.getBoundingClientRect().height);
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return () => {
+        window.removeEventListener('resize', measure);
+      };
+    }
+
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(header);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
+
   const project = useCXDStore(state => state.getCurrentProject());
+  const versions = useCXDStore(state => state.getVersions());
   const { syncAddElement, syncRemoveElement } = useCollaborationContext();
 
   const {
@@ -91,6 +123,7 @@ export function PlanView() {
   } = usePlanTasks({ filter });
 
   const selectedTask = selectedTaskId ? getTaskById(selectedTaskId) : undefined;
+  const selectedVersion = selectedVersionId ? versions.find(v => v.id === selectedVersionId) : undefined;
   const activeTasks = tasks.filter(task => !task.isArchived);
   const archivedTasks = tasks.filter(task => task.isArchived);
   const visibleCount = activeView === 'archive' ? archivedTasks.length : activeTasks.length;
@@ -153,12 +186,13 @@ export function PlanView() {
   };
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-1rem)] h-[calc(100vh-1rem)] relative" style={{ background: canvasBackground }}>
+    <div className="flex flex-col h-[calc(100dvh-4rem)] min-h-0 relative overflow-hidden" style={{ background: canvasBackground }}>
       {/* Shimmer Grid - fixed position to cover entire viewport */}
       <ShimmerGrid className="!fixed inset-0 !z-0" />
-      {/* Header - merged view tabs, count, and actions */}
+      {/* Header - merged view tabs, count, and actions - FIXED at top */}
       <div
-        className="flex items-center justify-between my-4 px-6 py-4 border-b border-white/10 backdrop-blur-sm relative z-10"
+        ref={headerRef}
+        className="fixed top-20 left-0 right-0 flex items-center justify-between px-6 py-4 border-b border-white/10 backdrop-blur-sm z-20"
         style={{ backgroundColor: headerBgColor }}
       >
         <div className="flex items-center gap-4">
@@ -298,10 +332,17 @@ export function PlanView() {
         </Dialog>
       </div>
 
+      {/* Spacer for fixed header so content starts below it without page overflow */}
+      <div
+        aria-hidden="true"
+        className="shrink-0"
+        style={{ height: `calc(${headerOffsetWithinContainer} + ${headerHeight}px)` }}
+      />
+
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden relative z-10">
+      <div className="flex-1 flex min-h-0 overflow-hidden relative z-10">
         {/* View Content */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {activeView === 'kanban' && (
             <KanbanView
               tasks={activeTasks}
@@ -322,19 +363,35 @@ export function PlanView() {
           {activeView === 'timeline' && (
             <GanttViewEnhanced
               tasks={activeTasks}
-              onTaskClick={setSelectedTaskId}
+              versions={versions}
+              onTaskClick={(taskId) => {
+                setSelectedTaskId(taskId);
+                setSelectedVersionId(null);
+              }}
               onTaskNavigate={navigateToTask}
               onTaskUpdate={updateTaskMetadata}
               onTaskDelete={handleDeleteTask}
-              detailPanelOpen={!!selectedTask}
+              detailPanelOpen={!!selectedTask || !!selectedVersion}
+              onVersionClick={(versionId) => {
+                setSelectedVersionId(versionId);
+                setSelectedTaskId(null);
+              }}
             />
           )}
           {activeView === 'calendar' && (
             <CalendarView
               tasks={activeTasks}
-              onTaskClick={setSelectedTaskId}
+              versions={versions}
+              onTaskClick={(taskId) => {
+                setSelectedTaskId(taskId);
+                setSelectedVersionId(null);
+              }}
               onTaskNavigate={navigateToTask}
               onTaskUpdate={updateTaskMetadata}
+              onVersionClick={(versionId) => {
+                setSelectedVersionId(versionId);
+                setSelectedTaskId(null);
+              }}
             />
           )}
           {activeView === 'archive' && (
@@ -367,6 +424,27 @@ export function PlanView() {
               onUpdate={(updates) => updateTaskMetadata(selectedTask.id, updates)}
               onNavigate={() => navigateToTask(selectedTask.id)}
             />
+          </div>
+        )}
+
+        {/* Version Detail Panel - Overlay */}
+        {selectedVersion && (
+          <div
+            className="absolute right-0 top-0 bottom-0 w-96 border-l border-white/10 overflow-y-auto gantt-scrollbar z-20 shadow-2xl shadow-black/50"
+            style={{ backgroundColor: panelBgColor, backdropFilter: 'blur(12px)' }}
+          >
+            <div className="sticky top-0 bg-black/60 backdrop-blur-sm z-10 px-4 py-3 flex items-center justify-between border-b border-white/10">
+              <h3 className="text-sm font-medium text-white/90">Version Details</h3>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSelectedVersionId(null)}
+                className="h-8 w-8 p-0"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <VersionDetailPanel version={selectedVersion} />
           </div>
         )}
       </div>

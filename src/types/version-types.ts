@@ -63,14 +63,15 @@ export interface Version {
 
 /**
  * Represents a key result within an OKR
- * Measurable outcome with target and current values
+ * Simple checkbox-based completion tracking
  */
 export interface KeyResult {
   id: string;                     // UUID
   description: string;            // Key result description
-  targetValue: number;            // Target metric (e.g., 100 for 100%)
-  currentValue: number;           // Current progress
-  unit: string;                   // Unit of measurement (e.g., "%", "users", "features")
+  completed: boolean;             // Completion status (checkbox toggle)
+  targetValue?: number;           // Legacy: Target metric (kept for backward compat)
+  currentValue?: number;          // Legacy: Current progress (kept for backward compat)
+  unit?: string;                  // Legacy: Unit of measurement (kept for backward compat)
   createdAt: string;              // ISO timestamp
   updatedAt: string;              // ISO timestamp
 }
@@ -104,6 +105,7 @@ export interface OKR {
   name?: string;                  // OKR name/title (optional for backward compat)
   description?: string;           // OKR description
   status?: OKRStatus;             // OKR health status
+  startDate?: string;             // Optional start date (ISO string)
   dueDate?: string;               // Optional due date (ISO string)
   assignees?: string[];           // Optional assignees
   objectives: Objective[];        // Array of objectives (each with key results)
@@ -213,9 +215,7 @@ export function createDefaultObjective(title: string): Omit<Objective, 'id' | 'c
 export function createDefaultKeyResult(description: string): Omit<KeyResult, 'id' | 'createdAt' | 'updatedAt'> {
   return {
     description,
-    targetValue: 100,
-    currentValue: 0,
-    unit: '%',
+    completed: false,
   };
 }
 
@@ -223,8 +223,18 @@ export function createDefaultKeyResult(description: string): Omit<KeyResult, 'id
  * Helper to calculate key result completion percentage
  */
 export function calculateKeyResultProgress(kr: KeyResult): number {
-  if (kr.targetValue === 0) return 0;
-  return Math.min(100, Math.round((kr.currentValue / kr.targetValue) * 100));
+  // New checkbox-based system
+  if (kr.completed !== undefined) {
+    return kr.completed ? 100 : 0;
+  }
+
+  // Legacy: fallback to targetValue/currentValue if present
+  if (kr.targetValue !== undefined && kr.currentValue !== undefined) {
+    if (kr.targetValue === 0) return 0;
+    return Math.min(100, Math.round((kr.currentValue / kr.targetValue) * 100));
+  }
+
+  return 0;
 }
 
 /**

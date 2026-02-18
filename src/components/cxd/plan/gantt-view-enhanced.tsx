@@ -5,6 +5,9 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { TaskProjection, TaskStatus } from '@/types/plan-types';
+import type { Version } from '@/types/version-types';
+import { TYPE_LABEL_COLORS, calculateOKRProgress } from '@/types/version-types';
+import { useCXDStore } from '@/store/cxd-store';
 import { HYPERCUBE_FACE_COLORS, HYPERCUBE_FACE_TAGS } from '@/types/plan-types';
 import {
   ChevronLeft,
@@ -38,11 +41,13 @@ import {
 
 interface GanttViewProps {
   tasks: TaskProjection[];
+  versions?: Version[];
   onTaskClick: (taskId: string) => void;
   onTaskNavigate: (taskId: string) => void;
   onTaskUpdate?: (taskId: string, updates: Partial<TaskProjection>) => void;
   onTaskDelete?: (taskId: string) => void;
   detailPanelOpen?: boolean;
+  onVersionClick?: (versionId: string) => void;
 }
 
 type ZoomLevel = 'day' | 'week' | 'month';
@@ -99,7 +104,10 @@ const readLocalStorageJson = <T,>(key: string, fallback: T): T => {
   }
 };
 
-export function GanttViewEnhanced({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate, onTaskDelete, detailPanelOpen }: GanttViewProps) {
+export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNavigate, onTaskUpdate, onTaskDelete, detailPanelOpen, onVersionClick }: GanttViewProps) {
+  // Get OKRs from store for version progress calculation
+  const allOKRs = useCXDStore((state) => state.getCurrentProject()?.okrs || []);
+
   // Persisted settings (localStorage)
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(() => {
     if (typeof window !== 'undefined') {
@@ -659,6 +667,37 @@ export function GanttViewEnhanced({ tasks, onTaskClick, onTaskNavigate, onTaskUp
       };
     });
   }, [tasksWithDates, startDate, endDate]);
+
+  // Position Versions on timeline (Versions with target dates)
+  const positionedVersions = useMemo(() => {
+    const totalDuration = endDate.getTime() - startDate.getTime();
+    if (totalDuration <= 0) return [];
+
+    return versions
+      .filter((version) => version.started_at && version.targetDate)
+      .map((version) => {
+        const versionStart = new Date(version.started_at!);
+        versionStart.setHours(0, 0, 0, 0);
+
+        const versionEnd = new Date(version.targetDate!);
+        versionEnd.setHours(0, 0, 0, 0);
+        versionEnd.setDate(versionEnd.getDate() + 1);
+
+        const versionStartOffset = versionStart.getTime() - startDate.getTime();
+        const versionDuration = Math.max(versionEnd.getTime() - versionStart.getTime(), 24 * 60 * 60 * 1000);
+
+        const leftPct = (versionStartOffset / totalDuration) * 100;
+        const widthPct = (versionDuration / totalDuration) * 100;
+
+        return {
+          version,
+          left: `${leftPct}%`,
+          width: `${widthPct}%`,
+          leftPct,
+          widthPct,
+        };
+      });
+  }, [versions, startDate, endDate]);
 
   // Post-layout pass: measure actual task bar DOM positions for connector accuracy.
   // Task bars are positioned with CSS percentages; reading offsetLeft/offsetWidth after
@@ -1856,6 +1895,9 @@ export function GanttViewEnhanced({ tasks, onTaskClick, onTaskNavigate, onTaskUp
               </button>
             </div>
 
+            {/* Spacer to align with version lanes on timeline */}
+            <div style={{ height: `${positionedVersions.length * 48}px` }} />
+
             <div className="py-2">
               {flattenedTasks.map((task, index) => {
                 const isHovered = hoveredTaskId === task.id;
@@ -2124,11 +2166,74 @@ export function GanttViewEnhanced({ tasks, onTaskClick, onTaskNavigate, onTaskUp
                 </div>
               )}
 
+              {/* Version Bars - Pipeline markers in dedicated lanes */}
+              {positionedVersions.map(({ version, left, width }, idx) => {
+                const versionColor = version.color || TYPE_LABEL_COLORS[version.type_label] || '#8B5CF6';
+                // Calculate progress based on OKRs
+                const versionOKRs = allOKRs.filter(okr => okr.versionId === version.id);
+                const progressPercent = versionOKRs.length > 0
+                  ? Math.round(versionOKRs.reduce((sum, okr) => sum + calculateOKRProgress(okr), 0) / versionOKRs.length)
+                  : 0;
+
+                return (
+                  <div
+                    key={version.id}
+                    className="absolute h-10 z-10 group/version"
+                    style={{
+                      left,
+                      width,
+                      top: `${idx * 48}px`, // Stack versions in dedicated lanes below date header
+                    }}
+                  >
+                    <Card
+                      className="h-full px-3 py-2 border-2 hover:shadow-xl transition-all relative select-none cursor-pointer"
+                      style={{
+                        background: `linear-gradient(135deg, ${versionColor}20 0%, ${versionColor}08 100%)`,
+                        borderColor: `${versionColor}80`,
+                        overflow: 'visible',
+                      }}
+                      onClick={() => onVersionClick?.(version.id)}
+                    >
+                      {/* Progress fill */}
+                      <div
+                        className="absolute inset-0 transition-all pointer-events-none"
+                        style={{
+                          width: `${progressPercent}%`,
+                          background: `linear-gradient(90deg, ${versionColor}30, ${versionColor}15)`,
+                        }}
+                      />
+
+                      {/* Sticky version info container */}
+                      <div className="sticky left-0 flex items-center gap-2 h-full relative z-[1] pr-3 bg-gradient-to-r from-black/60 to-transparent" style={{ width: 'fit-content', maxWidth: '300px' }}>
+                        <div
+                          className="flex items-center justify-center w-6 h-6 rounded-md shrink-0 font-bold text-[10px]"
+                          style={{
+                            backgroundColor: `${versionColor}25`,
+                            borderColor: `${versionColor}`,
+                            border: '2px solid',
+                            color: versionColor,
+                          }}
+                        >
+                          {version.type_label[0]}
+                        </div>
+                        <span className="text-sm font-semibold truncate" style={{ color: versionColor }}>
+                          {version.name}
+                        </span>
+                        <span className="text-[10px] opacity-70 ml-auto shrink-0 font-medium" style={{ color: versionColor }}>
+                          {progressPercent}%
+                        </span>
+                      </div>
+                    </Card>
+                  </div>
+                );
+              })}
+
               {/* Task Bars */}
               {positionedTasks.map(({ task, left, width }, i) => {
                 const isSelected = selectedTaskIds.has(task.id);
                 const isSubtask = task.id.includes('-subtask-');
                 const taskIndex = flattenedTasks.findIndex(t => t.id === task.id);
+                const versionLanesOffset = positionedVersions.length * 48; // Offset for version lanes
 
                 return (
                   <div
@@ -2142,7 +2247,7 @@ export function GanttViewEnhanced({ tasks, onTaskClick, onTaskNavigate, onTaskUp
                     style={{
                       left,
                       width,
-                      top: `${taskIndex * 60 + 4}px`,
+                      top: `${taskIndex * 60 + versionLanesOffset + 4}px`,
                     }}
                   >
                     <Card
