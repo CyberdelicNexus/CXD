@@ -2252,9 +2252,11 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
+        const existingEl = currentProject.canvasLayout?.elements?.find((el) => el.id === elementId);
+        const existingMeta = (existingEl as { taskMetadata?: Record<string, unknown> })?.taskMetadata || {};
         get().updateCanvasElement(elementId, {
           taskMetadata: {
-            ...(currentProject.canvasLayout?.elements?.find((el) => el.id === elementId)?.taskMetadata || {}),
+            ...existingMeta,
             versionId: versionId || undefined,
           },
         } as Partial<CanvasElement>);
