@@ -268,12 +268,12 @@ interface CXDState {
 
   // Objective Management
   addObjective: (okrId: string, title?: string) => string;
-  updateObjective: (okrId: string, objectiveId: string, updates: Partial<Omit<import('./version-types').Objective, 'id' | 'createdAt'>>) => void;
+  updateObjective: (okrId: string, objectiveId: string, updates: Partial<Omit<Objective, 'id' | 'createdAt'>>) => void;
   deleteObjective: (okrId: string, objectiveId: string) => void;
 
   // Key Result Management
   addKeyResult: (okrId: string, objectiveId: string, description?: string) => string;
-  updateKeyResult: (okrId: string, objectiveId: string, krId: string, updates: Partial<Omit<import('./version-types').KeyResult, 'id' | 'createdAt'>>) => void;
+  updateKeyResult: (okrId: string, objectiveId: string, krId: string, updates: Partial<Omit<KeyResult, 'id' | 'createdAt'>>) => void;
   deleteKeyResult: (okrId: string, objectiveId: string, krId: string) => void;
 
   // OKR Carry-Forward
