@@ -256,7 +256,7 @@ interface CXDState {
   updateVersion: (versionId: string, updates: Partial<Omit<Version, 'id' | 'createdAt'>>) => void;
   deleteVersion: (versionId: string) => void;
   reorderVersions: (newOrder: string[]) => void;
-  setVersionStatus: (versionId: string, status: import('./version-types').VersionStatus) => void;
+  setVersionStatus: (versionId: string, status: VersionStatus) => void;
   tagTaskWithVersion: (elementId: string, versionId: string | null) => void;
 
   // Actions - OKR Management (Refactored for new structure)
