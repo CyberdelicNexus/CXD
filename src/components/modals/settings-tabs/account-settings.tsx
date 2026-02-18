@@ -235,11 +235,11 @@ export function AccountSettings() {
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">{planConfig.description}</p>
               </div>
-              {!isFree && planConfig.price && (
+              {'price' in planConfig && planConfig.price && (
                 <div className="text-right">
                   <div className="text-xl font-bold text-foreground">${planConfig.price}</div>
                   <div className="text-xs text-muted-foreground">
-                    {planConfig.interval === 'month' ? '/month' : 'one-time'}
+                    {'interval' in planConfig && planConfig.interval === 'month' ? '/month' : 'one-time'}
                   </div>
                 </div>
               )}
