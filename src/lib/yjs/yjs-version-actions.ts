@@ -82,13 +82,13 @@ export function yjsReorderVersions(doc: Y.Doc, newOrder: string[]): void {
 
     // Clear and rebuild array in new order
     yVersions.delete(0, yVersions.length);
-    for (const [index, versionId] of newOrder.entries()) {
+    newOrder.forEach((versionId, index) => {
       const yVersion = versionMap.get(versionId);
       if (yVersion) {
         yVersion.set('order', index);
         yVersions.push([yVersion]);
       }
-    }
+    });
   }, 'local');
 }
 
