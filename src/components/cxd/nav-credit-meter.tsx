@@ -157,7 +157,13 @@ export function NavCreditMeter() {
               Active Model
             </span>
           </div>
-          <div className="max-h-64 overflow-y-auto">
+          <div
+            className="max-h-64 overflow-y-auto"
+            style={{
+              scrollbarWidth: "thin",
+              scrollbarColor: "rgba(255,255,255,0.08) transparent",
+            }}
+          >
             {allowedModels.map((modelId) => {
               const model = AI_MODELS[modelId];
               if (!model) return null;
@@ -170,17 +176,38 @@ export function NavCreditMeter() {
                   key={modelId}
                   onClick={() => setSelectedModel(modelId)}
                   className={cn(
-                    "w-full px-4 py-2 text-left flex items-center justify-between hover:bg-white/5 transition-colors",
-                    isSelected && "bg-white/[0.04]",
+                    "w-full px-4 py-2.5 text-left flex items-center justify-between transition-colors",
+                    isSelected
+                      ? "bg-violet-500/10"
+                      : "hover:bg-white/[0.04]",
                   )}
                 >
-                  <div className="flex items-center gap-2">
-                    <AIProviderIcon provider={modelId} className="w-3.5 h-3.5 shrink-0 text-white/50" />
-                    <span className="text-sm text-white/90">{model.name}</span>
-                    <span className="text-[10px] text-white/30">{creditWeight}x</span>
+                  <div className="flex items-center gap-2.5">
+                    <div className={cn(
+                      "flex items-center justify-center w-6 h-6 rounded-md border",
+                      isSelected
+                        ? "bg-violet-500/10 border-violet-500/20"
+                        : "bg-white/[0.03] border-white/[0.06]",
+                    )}>
+                      <AIProviderIcon provider={modelId} className={cn(
+                        "w-3.5 h-3.5 shrink-0",
+                        isSelected ? "text-violet-300" : "text-white/40",
+                      )} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className={cn(
+                        "text-[13px] leading-tight",
+                        isSelected ? "text-white font-medium" : "text-white/80",
+                      )}>
+                        {model.name}
+                      </span>
+                      <span className="text-[10px] text-white/25 leading-tight">
+                        {creditWeight} credit{creditWeight !== 1 ? "s" : ""} per message
+                      </span>
+                    </div>
                   </div>
                   {isSelected && (
-                    <Check className="w-3.5 h-3.5 text-violet-400" />
+                    <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                   )}
                 </button>
               );

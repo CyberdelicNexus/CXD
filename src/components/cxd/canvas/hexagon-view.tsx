@@ -5,10 +5,25 @@ import { useCXDStore } from "@/store/cxd-store";
 import { CXDSectionId } from "@/types/cxd-schema";
 import { HypercubeFaceTag, CanvasElement } from "@/types/canvas-elements";
 import { ChevronRight, Home, Layout, Box, Type, Link2, Image, Layers, ExternalLink } from "lucide-react";
+import dynamic from "next/dynamic";
 import { HexagonDetailPanel } from "./hexagon-detail-panel";
 import { NavigationToolkit } from "./navigation-toolkit";
-import { Hypercube3D } from "./hypercube-3d";
 import { QuickViewModal } from "./quick-view-modal";
+
+const Hypercube3D = dynamic(
+  () => import("./hypercube-3d").then((m) => ({ default: m.Hypercube3D })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="fixed inset-0 top-16 flex items-center justify-center bg-black/80">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" />
+          <span className="text-white/50 text-sm">Loading map...</span>
+        </div>
+      </div>
+    ),
+  }
+);
 import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 import { extractCenterColor, hexToRgba } from "@/lib/utils";
 
@@ -240,49 +255,38 @@ export function HexagonView() {
 
   // Navigate to element on canvas
   const handleNavigateToElement = useCallback((elementId: string) => {
-    console.log('handleNavigateToElement called with:', elementId);
-    
-    // canvasElements can be undefined during initial load/hydration or if store state changes
     const safeElements = Array.isArray(canvasElements) ? canvasElements : [];
     const element = safeElements.find((el: CanvasElement) => el.id === elementId);
-    
-    console.log('Found element:', element);
-    console.log('All elements:', safeElements);
-    
-    if (!element) {
-      console.warn('Element not found:', elementId);
+    if (!element) return;
+
+    // If element is in the inbox (not placed on canvas), switch to canvas and pulse inbox
+    if (element.inInbox) {
+      setCanvasViewMode('canvas');
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent('cxd:pulse-task-inbox', { detail: { durationMs: 5000 } }),
+        );
+      }, 150);
       return;
     }
 
-    // Find the board path to this element
+    // Navigate to the element's board (or root canvas)
     const elementBoardId = element.boardId;
-    
-    // If element is in a board, navigate to that board first
     if (elementBoardId) {
-      console.log('Element is in board:', elementBoardId);
-      
-      // Build the path to the board
       const buildBoardPath = (targetBoardId: string): { id: string; title: string }[] => {
         const path: { id: string; title: string }[] = [];
         let currentBoardId: string | null = targetBoardId;
-        
         while (currentBoardId) {
           const board = boards.find(b => b.id === currentBoardId);
           if (!board) break;
-          
           path.unshift({ id: board.id, title: board.title });
           currentBoardId = board.parentBoardId;
         }
-        
         return path;
       };
-      
+
       const boardPath = buildBoardPath(elementBoardId);
-      console.log('Board path:', boardPath);
-      
-      // Set the board path in the store first
       if (boardPath.length > 0) {
-        // We need to set the board path manually before calling navigateToBoardPath
         useCXDStore.setState({
           boardPath,
           activeBoardId: elementBoardId,
@@ -290,42 +294,31 @@ export function HexagonView() {
         });
       }
     } else {
-      // Element is on root canvas, navigate to root
-      console.log('Element is on root canvas');
-      navigateToBoardPath(-1); // -1 navigates to root
+      navigateToBoardPath(-1);
     }
 
     // Center canvas on element
     const elementCenterX = element.x + (element.width || 200) / 2;
     const elementCenterY = element.y + (element.height || 100) / 2;
-    
-    // Calculate new canvas position to center the element
     const viewportCenterX = window.innerWidth / 2;
-    const viewportCenterY = (window.innerHeight - 64) / 2; // Account for navbar
-    
+    const viewportCenterY = (window.innerHeight - 64) / 2;
+
     const targetPosition = {
       x: viewportCenterX - elementCenterX * canvasZoom,
       y: viewportCenterY - elementCenterY * canvasZoom,
     };
-    
-    console.log('Switching to canvas view mode, target position:', targetPosition);
-    
-    // Switch to canvas view mode - this should trigger a re-render and show CXDCanvas
+
+    // Switch to canvas view, then center + highlight.
+    // Use store.getState() inside the timeout because this component unmounts
+    // when the view switches from hexagon → canvas.
     setCanvasViewMode('canvas');
-    
-    // Set position AFTER switching modes (on next tick) to avoid being overridden by restoreViewport
+
     setTimeout(() => {
-      console.log('Setting canvas position after mode switch');
-      setCanvasPosition(targetPosition);
-      
-      // Briefly highlight element (flash effect)
-      const originalElement = { ...element };
-      updateCanvasElement(elementId, { ...element, highlighted: true } as any);
-      setTimeout(() => {
-        updateCanvasElement(elementId, originalElement);
-      }, 1000);
-    }, 100); // Increased timeout to ensure view mode switch completes
-  }, [canvasElements, boards, canvasZoom, setCanvasPosition, updateCanvasElement, setCanvasViewMode, navigateToBoardPath]);
+      const store = useCXDStore.getState();
+      store.setCanvasPosition(targetPosition);
+      store.highlightElementBriefly(elementId, 5000); // 1s delay + 4s animation
+    }, 150);
+  }, [canvasElements, boards, canvasZoom, setCanvasViewMode, navigateToBoardPath]);
 
   // Show quick view modal
   const handlePreviewElement = useCallback((element: CanvasElement) => {
@@ -442,6 +435,34 @@ export function HexagonView() {
       return allElements.filter((el) => el.hypercubeTags?.includes(faceTag));
     };
   }, [project.canvasLayout?.elements]);
+
+  // Compute tagged elements list for the quick view modal navigation
+  const quickViewTaggedElements = useMemo(() => {
+    if (!quickViewElement) return [];
+
+    // Find which face(s) this element is tagged to
+    const elementTags = (quickViewElement as any).hypercubeTags || [];
+    if (elementTags.length === 0) return [];
+
+    // Use the first tag to get all tagged elements for that face
+    const faceTag = elementTags[0] as HypercubeFaceTag;
+    return getTaggedElementsForFace(faceTag);
+  }, [quickViewElement, getTaggedElementsForFace]);
+
+  const quickViewCurrentIndex = useMemo(() => {
+    if (!quickViewElement || quickViewTaggedElements.length === 0) return -1;
+    return quickViewTaggedElements.findIndex(el => el.id === quickViewElement.id);
+  }, [quickViewElement, quickViewTaggedElements]);
+
+  const handleQuickViewNavigate = useCallback((direction: 'prev' | 'next') => {
+    if (quickViewCurrentIndex < 0 || quickViewTaggedElements.length === 0) return;
+
+    const newIndex = direction === 'next'
+      ? (quickViewCurrentIndex + 1) % quickViewTaggedElements.length
+      : (quickViewCurrentIndex - 1 + quickViewTaggedElements.length) % quickViewTaggedElements.length;
+
+    setQuickViewElement(quickViewTaggedElements[newIndex]);
+  }, [quickViewCurrentIndex, quickViewTaggedElements]);
 
   // Soft constraint checking - detect structural misalignments
   // Returns constraint info with visual cues and optional tooltip
@@ -878,6 +899,9 @@ export function HexagonView() {
               handleNavigateToElement(quickViewElement.id);
               setQuickViewElement(null);
             }}
+            allElements={quickViewTaggedElements}
+            currentIndex={quickViewCurrentIndex}
+            onNavigate={handleQuickViewNavigate}
           />
         )}
       </div>

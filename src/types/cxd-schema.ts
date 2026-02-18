@@ -307,6 +307,10 @@ export interface CXDProject {
     boards?: import('./canvas-elements').CanvasBoard[];
   };
 
+  // Version Management (Strategic release planning)
+  versions?: import('./version-types').Version[];
+  okrs?: import('./version-types').OKR[];
+
   // Wizard progress
   wizardCompleted: boolean;
   currentWizardStep: number;

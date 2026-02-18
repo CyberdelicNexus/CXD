@@ -13,8 +13,9 @@ export function exportToMarkdown(content: string, filename: string): void {
 /**
  * Export content as a PDF file using jspdf.
  * Uses a simple text-based approach for Markdown content.
+ * @param returnBlob - If true, returns the Blob instead of downloading
  */
-export async function exportToPDF(content: string, filename: string): Promise<void> {
+export async function exportToPDF(content: string, filename: string, returnBlob?: boolean): Promise<Blob | void> {
   const { default: jsPDF } = await import("jspdf");
 
   const doc = new jsPDF({
@@ -94,7 +95,11 @@ export async function exportToPDF(content: string, filename: string): Promise<vo
     }
   }
 
-  doc.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
+  if (returnBlob) {
+    return doc.output('blob') as Blob;
+  } else {
+    doc.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
+  }
 }
 
 /**

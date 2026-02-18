@@ -35,19 +35,7 @@ export function TaskInbox({
 
   // Filter inbox items with useMemo to prevent unnecessary re-renders
   const inboxItems = useMemo(() => {
-    const items = allElements.filter((el) => el.inInbox === true);
-    console.log('[TaskInbox] Inbox items from allElements:', {
-      allElementsCount: allElements.length,
-      inboxCount: items.length,
-      inbox: items.map(el => ({
-        id: el.id,
-        type: el.type,
-        cardType: (el as any).cardType,
-        emoji: (el as any).emoji,
-        inInbox: el.inInbox,
-      })),
-    });
-    return items;
+    return allElements.filter((el) => el.inInbox === true);
   }, [allElements]);
 
   const [isOpen, setIsOpen] = useState(false);
@@ -63,31 +51,16 @@ export function TaskInbox({
   const inboxButtonBg = hexToRgba(centerColor, 0.72);
   const inboxPanelBg = hexToRgba(centerColor, 0.86);
 
-  // Separate tasks and notes
-  const taskItems = inboxItems.filter(item => {
-    const freeform = item as FreeformElement;
-    return freeform.cardType === 'task';
-  });
+  // Separate tasks and notes — task check must come first so items
+  // with both task markers AND note-like fields (emoji '🤖', noteTitle)
+  // are only categorised as tasks, not duplicated into notes.
+  const isTask = (item: CanvasElement) => {
+    const f = item as FreeformElement;
+    return f.cardType === 'task' || (!f.cardType && !!f.taskMetadata);
+  };
 
-  const noteItems = inboxItems.filter(item => {
-    const freeform = item as FreeformElement;
-    // Include items with cardType 'note', OR items that look like notes (noteTitle, noteBody, or AI emoji)
-    const isNote = freeform.cardType === 'note' ||
-                   freeform.noteTitle !== undefined ||
-                   freeform.noteBody !== undefined ||
-                   freeform.emoji === '🤖';
-
-    console.log('[TaskInbox] Checking if item is note:', {
-      id: item.id,
-      cardType: freeform.cardType,
-      hasNoteTitle: freeform.noteTitle !== undefined,
-      hasNoteBody: freeform.noteBody !== undefined,
-      emoji: freeform.emoji,
-      isNote,
-    });
-
-    return isNote;
-  });
+  const taskItems = inboxItems.filter(isTask);
+  const noteItems = inboxItems.filter(item => !isTask(item));
 
   // Filter items by active tab and status
   const filteredItems = (activeTab === 'tasks' ? taskItems : noteItems).filter(item => {
@@ -98,19 +71,6 @@ export function TaskInbox({
     return status === statusFilter;
   });
 
-  // Debug: Log filtered items
-  useEffect(() => {
-    console.log('[TaskInbox] Filtered items:', {
-      activeTab,
-      count: filteredItems.length,
-      items: filteredItems.map(item => ({
-        id: item.id,
-        type: item.type,
-        cardType: (item as any).cardType,
-        emoji: (item as any).emoji,
-      })),
-    });
-  }, [filteredItems, activeTab]);
 
   // Glow effect when new tasks are added
   useEffect(() => {
@@ -1043,20 +1003,8 @@ function NoteInboxCard({
   const noteTitle = freeformElement.noteTitle || 'Untitled Note';
   const sourceFaces = freeformElement.hypercubeTags || [];
 
-  // Debug: Log when component renders
-  useEffect(() => {
-    console.log('[NoteInboxCard] Rendered for note:', {
-      id: element.id,
-      title: noteTitle,
-      cardType: freeformElement.cardType,
-      emoji: freeformElement.emoji,
-      hasOnStartDrag: typeof onStartDrag === 'function',
-    });
-  }, [element.id, noteTitle, freeformElement.cardType, freeformElement.emoji, onStartDrag]);
-
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
-      console.log('[NoteInboxCard] Drag started for note:', element.id);
       e.preventDefault();
       e.stopPropagation();
       onStartDrag(element.id, e);
@@ -1068,12 +1016,6 @@ function NoteInboxCard({
     <div
       className="group relative bg-gradient-to-br from-cyan-500/[0.08] to-purple-500/[0.02] rounded-xl border border-cyan-500/20 hover:border-cyan-500/30 transition-all cursor-grab active:cursor-grabbing"
       onMouseDown={handleDragStart}
-      onClick={(e) => {
-        console.log('[NoteInboxCard] Card clicked:', element.id);
-      }}
-      onMouseEnter={() => {
-        console.log('[NoteInboxCard] Mouse entered card:', element.id);
-      }}
     >
       {/* Card gradient accent */}
       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyan-400/50 via-blue-400/50 to-purple-400/50 pointer-events-none rounded-t-xl" />
@@ -1101,12 +1043,10 @@ function NoteInboxCard({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    console.log('[NoteInboxCard] Delete button clicked');
                     onRemove();
                   }}
                   onMouseDown={(e) => {
                     e.stopPropagation();
-                    console.log('[NoteInboxCard] Delete button mousedown');
                   }}
                   className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all min-h-[24px] min-w-[24px]"
                   title="Delete note"

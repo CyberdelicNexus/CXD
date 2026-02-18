@@ -12,6 +12,18 @@ import { checkRateLimit, recordRequest } from "@/lib/ai/rate-limiter";
 import type { AIProviderKey, AIProjectContext, FaceContext } from "@/types/ai-types";
 import { CREDIT_COSTS } from "@/types/ai-types";
 
+// Map model IDs to provider keys (model IDs may arrive from client as provider)
+const modelToProvider: Record<string, AIProviderKey> = {
+  'gemini-2.0-flash': 'gemini',
+  'gpt-4o-mini': 'gpt',
+  'kimi': 'kimi',
+  'claude-haiku-4.5': 'claude',
+  'gpt-4o': 'gpt',
+  'gemini-2.5-pro': 'gemini',
+  'claude-sonnet-4.5': 'claude',
+  'claude-opus-4.6': 'claude',
+};
+
 export const maxDuration = 180;
 
 // Check if a Supabase error indicates a missing table/RPC
@@ -58,6 +70,9 @@ export async function POST(request: Request) {
       );
     }
 
+    // 2b. Resolve provider (client may send a ModelId instead of AIProviderKey)
+    const resolvedProvider: AIProviderKey = modelToProvider[provider] || (provider as AIProviderKey);
+
     // 3. Rate limit check
     const rateCheck = checkRateLimit(user.id, "analysis");
     if (!rateCheck.allowed) {
@@ -69,7 +84,7 @@ export async function POST(request: Request) {
 
     // 4. Credit deduction — gracefully skip if tables/RPC not deployed yet
     const costKey = analysisType === "erd" ? "erd" : "analyze";
-    const creditCost = (CREDIT_COSTS as Record<string, Record<string, number>>)[costKey]?.[provider] || 5;
+    const creditCost = (CREDIT_COSTS as Record<string, Record<string, number>>)[costKey]?.[resolvedProvider] || 5;
     const { error: creditError } = await supabase.rpc(
       "deduct_ai_credits",
       { p_user_id: user.id, p_cost: creditCost },
@@ -112,8 +127,8 @@ export async function POST(request: Request) {
     }
 
     // 6. Get model instance + config
-    const modelConfig = getModelConfig(provider as AIProviderKey, "analysis");
-    const model = getModelInstance(provider as AIProviderKey, "analysis");
+    const modelConfig = getModelConfig(resolvedProvider, "analysis");
+    const model = getModelInstance(resolvedProvider, "analysis");
 
     // 7. Record the request
     recordRequest(user.id, "analysis");

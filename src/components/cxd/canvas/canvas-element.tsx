@@ -632,7 +632,8 @@ export function CanvasElementRenderer({
       : null;
   const isResizableNoteCard =
     element.type === "freeform" &&
-    freeformCardType === "note";
+    freeformCardType === "note" &&
+    !(element as FreeformElement).isDocument;
 
   return (
     <div
@@ -641,12 +642,13 @@ export function CanvasElementRenderer({
       draggable={false}
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
-        isDragging && "opacity-80 shadow-2xl cursor-grabbing",
+        isDragging && !((element as FreeformElement).isDocument) && "opacity-80 shadow-2xl cursor-grabbing",
+        isDragging && (element as FreeformElement).isDocument && "cursor-grabbing",
         // Locked state indicator
         element.locked && "opacity-60 cursor-not-allowed",
-        // Highlight effect (from hypercube navigation)
+        // Highlight effect (from hypercube navigation) — soft 4s fade glow with 1s delay
         isHighlighted &&
-        "ring-2 ring-purple-400/70 shadow-[0_0_24px_rgba(167,139,250,0.35)] animate-pulse",
+        "ring-2 ring-purple-400/70 shadow-[0_0_24px_rgba(167,139,250,0.35)] animate-[highlightGlow_4s_cubic-bezier(0.4,0,0.2,1)_1s_forwards]",
         // Selection ring for non-text elements (excluding lines which handle their own visualization)
         isSelected &&
         !isHighlighted &&
@@ -655,10 +657,11 @@ export function CanvasElementRenderer({
         element.type !== "line" &&
         element.type !== "freeform" &&
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
-        // Selection ring for freeform cards - rounded
+        // Selection ring for freeform cards - rounded (except documents)
         isSelected &&
         !isHighlighted &&
         element.type === "freeform" &&
+        !(element as FreeformElement).isDocument &&
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
         element.type === "freeform" &&
         freeformCardType === "note" &&
@@ -699,13 +702,19 @@ export function CanvasElementRenderer({
             : element.width,
         minWidth:
           element.type === "freeform"
-            ? isResizableNoteCard
-              ? "200px"
-              : "300px"
+            ? (element as FreeformElement).isDocument
+              ? "100px"
+              : isResizableNoteCard
+                ? "200px"
+                : "300px"
             : undefined,
         maxWidth:
-          element.type === "freeform" && !isResizableNoteCard
-            ? "300px"
+          element.type === "freeform"
+            ? (element as FreeformElement).isDocument
+              ? "100px"
+              : !isResizableNoteCard
+                ? "300px"
+                : undefined
             : undefined,
         height:
           element.type === "freeform"
@@ -715,9 +724,11 @@ export function CanvasElementRenderer({
             : element.height,
         minHeight:
           element.type === "freeform"
-            ? isResizableNoteCard
-              ? "300px"
-              : "300px"
+            ? (element as FreeformElement).isDocument
+              ? "100px"
+              : isResizableNoteCard
+                ? "300px"
+                : "300px"
             : undefined,
         zIndex: Number.isFinite(element.zIndex) ? element.zIndex : 0,
         transform: element.rotation
@@ -734,10 +745,11 @@ export function CanvasElementRenderer({
       onMouseUp={onDragEnd}
       onDoubleClick={handleDoubleClick}
     >
-      {/* Connection anchors - shown when connecting or hovering (not for line elements) */}
+      {/* Connection anchors - shown when connecting or hovering (not for line elements or documents) */}
       {(showConnectorAnchors || isConnecting || isSelected) &&
         onStartConnector &&
-        element.type !== "line" && (
+        element.type !== "line" &&
+        !(element.type === "freeform" && (element as FreeformElement).isDocument) && (
           <>
             <ConnectionAnchor
               position="top"
@@ -1076,7 +1088,8 @@ export function CanvasElementRenderer({
               {/* Send to Inbox button */}
               {onSendToInbox &&
                 element.type === "freeform" &&
-                getFreeformCardType(element as FreeformElement) === "task" && (
+                getFreeformCardType(element as FreeformElement) === "task" &&
+                !(element as FreeformElement).isDocument && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1540,8 +1553,8 @@ export function CanvasElementRenderer({
           >
             <Copy className="w-4 h-4" />
           </button>
-          {/* Send to Inbox button - only for note cards */}
-          {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle || (element as any).emoji === '🤖') && !element.inInbox && (
+          {/* Send to Inbox button - only for note cards (not documents) */}
+          {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle || (element as any).emoji === '🤖') && !element.inInbox && !(element as FreeformElement).isDocument && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -3319,6 +3332,9 @@ function FreeformCard({
   const setCanvasViewMode = useCXDStore((state) => state.setCanvasViewMode);
   const setViewMode = useCXDStore((state) => state.setViewMode);
 
+  // Document mode state
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false);
+
   useEffect(() => {
     if (!isSelected) {
       setNoteEditingField(null);
@@ -3357,6 +3373,26 @@ function FreeformCard({
       noteBodyRef.current.innerHTML = noteBody || "";
     }
   }, [isNote, noteBody, noteEditingField]);
+
+  // Handle clicks outside document to blur title input
+  useEffect(() => {
+    if (!element.isDocument) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+        // Click was outside the card, blur any focused input
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLInputElement) {
+          if (cardRef.current.contains(activeElement)) {
+            activeElement.blur();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [element.isDocument]);
 
   const updateNoteStyleFromSelection = useCallback(() => {
     if (!isNote || noteEditingField !== "body") return;
@@ -3407,6 +3443,37 @@ function FreeformCard({
       }
     });
   }, [handleBlur]);
+
+  // Convert note to document
+  const handleToggleDocumentMode = useCallback(() => {
+    if (element.isDocument) {
+      // Revert to note
+      onUpdate({
+        isDocument: false,
+        wordCount: undefined,
+        width: 300,
+        height: 300,
+      });
+    } else {
+      // Convert to document
+      // Calculate word count from noteBody
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = noteBody;
+      const textContent = tempDiv.textContent || tempDiv.innerText || '';
+      const wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
+
+      // Update element to be a document
+      onUpdate({
+        isDocument: true,
+        wordCount,
+        width: 100,
+        height: 100,
+      });
+
+      // Exit editing mode
+      handleBlur();
+    }
+  }, [element.isDocument, noteBody, onUpdate, handleBlur]);
 
   // Handle description key events - allow normal line breaks
   const handleDescriptionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -3829,51 +3896,114 @@ function FreeformCard({
     <div
       ref={cardRef}
       className={cn(
-        "w-full rounded-lg shadow-md overflow-visible flex flex-col relative",
+        "w-full overflow-visible flex flex-col relative",
+        !element.isDocument && "rounded-lg shadow-md",
         isNote && "card--note-resizable",
         className,
       )}
       style={{
-        background: bgColor,
-        border: "1px solid rgba(255, 255, 255, 0.1)",
-        boxShadow:
-          "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
-        minWidth: isNote ? "200px" : "100%",
-        minHeight: isNote ? "300px" : "100%",
+        background: element.isDocument ? "transparent" : bgColor,
+        border: element.isDocument ? "none" : "1px solid rgba(255, 255, 255, 0.1)",
+        boxShadow: element.isDocument ? "none" : "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
+        minWidth: element.isDocument ? "100px" : isNote ? "200px" : "100%",
+        maxWidth: element.isDocument ? "100px" : undefined,
+        minHeight: element.isDocument ? "100px" : isNote ? "300px" : "100%",
       }}
     >
       {/* Task indicator - subtle corner badge */}
-      {isActionable && (
+      {isActionable && !element.isDocument && (
         <div
           className="absolute top-2 right-2 w-2 h-2 rounded-full bg-purple-400 ring-2 ring-purple-400/30 z-10"
           title="Actionable task"
         />
       )}
-      {/* Emoji display (top-left) */}
-      {element.emoji && (
+      {/* Emoji display (top-left) - hide for documents */}
+      {element.emoji && !element.isDocument && (
         <div className="top-2 text-lg leading-none z-10 right-[auto] left-[50%] static w-full text-center py-[7px]">
           {element.emoji}
         </div>
       )}
       {/* Content */}
       <div
-        className={`p-3 flex flex-col gap-2 ${element.emoji ? "" : " pt-[0]"}`}
+        className={`${element.isDocument ? "" : "p-3"} flex flex-col gap-2 ${element.emoji && !element.isDocument ? "" : " pt-[0]"}`}
       >
-        {isEditing ? (
-          isNote ? (
-            <div ref={noteContentRef} className="flex min-h-0 flex-1 flex-col gap-2">
-              <button
-                type="button"
+        {element.isDocument && !isEditing ? (
+          // Document icon view (compact - no padding/margin)
+          <div
+            className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105"
+            onDoubleClick={() => setIsNoteFocusMode(true)}
+          >
+            <div className="text-4xl mb-1">{element.emoji || '📄'}</div>
+            <div className="w-full px-1">
+              <textarea
+                value={noteTitle}
+                onChange={(e) => {
+                  onUpdate({ noteTitle: e.target.value });
+                  // Auto-resize height
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsNoteFocusMode(true);
+                  // Auto-select all text on click
+                  (e.target as HTMLTextAreaElement).select();
                 }}
-                className="absolute right-2 top-2 z-20 rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
-                title="Focus editor"
-                data-no-drag
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </button>
+                onDoubleClick={(e) => {
+                  e.stopPropagation(); // Prevent opening focus mode
+                }}
+                onFocus={(e) => {
+                  // Auto-select all text when focused
+                  e.target.select();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onBlur={() => {
+                  // Deselect when clicking outside - handled by browser
+                }}
+                className="text-[10px] font-semibold text-center text-white bg-transparent border-none outline-none w-full hover:bg-white/5 rounded focus:bg-white/10 resize-none overflow-y-hidden"
+                style={{
+                  lineHeight: "0.875rem",
+                  wordWrap: "break-word",
+                  whiteSpace: "pre-wrap",
+                  minHeight: "0.875rem"
+                }}
+              />
+            </div>
+            <div className="text-[9px] text-white/50 mt-0.5">
+              {element.wordCount || 0} words
+            </div>
+          </div>
+        ) : isEditing ? (
+          isNote ? (
+            <div ref={noteContentRef} className="flex min-h-0 flex-1 flex-col gap-2">
+              {/* Toolbar buttons */}
+              <div className="absolute right-2 top-2 z-20 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleDocumentMode();
+                  }}
+                  className="rounded p-1 bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-500 hover:to-purple-700 text-white transition-all"
+                  title={element.isDocument ? "Revert to Note" : "Convert to Document"}
+                  data-no-drag
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsNoteFocusMode(true);
+                  }}
+                  className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                  title="Focus editor"
+                  data-no-drag
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
               <Input
                 autoFocus={noteEditingField === "title"}
                 value={noteTitle}
@@ -3976,20 +4106,35 @@ function FreeformCard({
           <>
             {isNote ? (
               <div ref={noteContentRef} className="w-full min-h-0 flex-1 flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStartEdit();
-                    setNoteEditingField("body");
-                    setIsNoteFocusMode(true);
-                  }}
-                  className="absolute right-2 top-2 z-20 rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
-                  title="Focus editor"
-                  data-no-drag
-                >
-                  <Maximize2 className="h-3.5 w-3.5" />
-                </button>
+                {/* Toolbar buttons - always visible */}
+                <div className="absolute right-2 top-2 z-20 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleDocumentMode();
+                    }}
+                    className="rounded p-1 bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-500 hover:to-purple-700 text-white transition-all"
+                    title={element.isDocument ? "Revert to Note" : "Convert to Document"}
+                    data-no-drag
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStartEdit();
+                      setNoteEditingField("body");
+                      setIsNoteFocusMode(true);
+                    }}
+                    className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                    title="Focus editor"
+                    data-no-drag
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
@@ -4635,10 +4780,38 @@ function FreeformCard({
                   </div>
                 </div>
               </div>
+              {/* Convert/Revert button - bottom left */}
+              <div className="absolute left-6 bottom-6">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleDocumentMode();
+                  }}
+                  className="rounded p-1 bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-500 hover:to-purple-700 text-white transition-all shadow-md"
+                  title={element.isDocument ? "Revert to Note" : "Convert to Document"}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           </div>,
           document.body,
         )}
+      {/* Document Viewer Modal */}
+      {showDocumentViewer && (
+        <>
+          {(() => {
+            const { DocumentViewerModal } = require('./document-viewer-modal');
+            return (
+              <DocumentViewerModal
+                element={element}
+                onClose={() => setShowDocumentViewer(false)}
+              />
+            );
+          })()}
+        </>
+      )}
     </div>
   );
 }

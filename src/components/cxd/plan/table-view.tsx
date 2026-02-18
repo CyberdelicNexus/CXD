@@ -33,6 +33,7 @@ import {
   Archive,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCXDStore } from '@/store/cxd-store';
 import type { HypercubeFaceTag } from '@/types/canvas-elements';
 
 interface TableViewProps {
@@ -43,7 +44,7 @@ interface TableViewProps {
 }
 
 type SortDirection = 'asc' | 'desc';
-type BuiltInColumnId = 'status' | 'title' | 'hypercubeTags' | 'priority' | 'dueDate' | 'progress' | 'assignee';
+type BuiltInColumnId = 'status' | 'title' | 'hypercubeTags' | 'priority' | 'dueDate' | 'progress' | 'assignee' | 'version';
 type ColumnId = BuiltInColumnId | `custom:${string}`;
 
 interface TableColumnDef {
@@ -78,6 +79,7 @@ const BASE_COLUMNS: TableColumnDef[] = [
   { id: 'dueDate', label: 'Due Date', sortable: true, minWidth: 180, defaultWidth: 210 },
   { id: 'progress', label: 'Progress', sortable: true, minWidth: 150, defaultWidth: 180 },
   { id: 'assignee', label: 'Assignee', sortable: true, minWidth: 150, defaultWidth: 180 },
+  { id: 'version', label: 'Version', sortable: true, minWidth: 140, defaultWidth: 170 },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['status', 'title', 'hypercubeTags', 'priority', 'dueDate', 'progress'];
@@ -136,6 +138,7 @@ const formatValue = (value: unknown): string => {
 };
 
 export function TableView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: TableViewProps) {
+  const versions = useCXDStore((state) => state.getVersions());
   const [sortField, setSortField] = useState<ColumnId>('dueDate');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [groupBy, setGroupBy] = useState<string>(() => {
@@ -280,6 +283,12 @@ export function TableView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: 
         return task.completionPercent;
       case 'assignee':
         return task.assignee || 'Unassigned';
+      case 'version': {
+        const versionId = task.taskMetadata?.versionId;
+        if (!versionId) return 'Unversioned';
+        const version = versions.find((v) => v.id === versionId);
+        return version?.name || 'Unknown';
+      }
       default:
         return '';
     }
@@ -813,6 +822,32 @@ export function TableView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: 
               </Badge>
             ))}
           </div>
+        </div>
+      );
+    }
+
+    if (column.id === 'version') {
+      const versionId = task.taskMetadata?.versionId;
+      const version = versionId ? versions.find((v) => v.id === versionId) : null;
+      return (
+        <div className="flex items-center gap-2">
+          {version ? (
+            <>
+              <div
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{ backgroundColor: version.color }}
+              />
+              <span className="text-xs text-white/80">{version.name}</span>
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] font-medium text-white/70 uppercase tracking-wider"
+                style={{ backgroundColor: `${version.color}30` }}
+              >
+                {version.type_label}
+              </span>
+            </>
+          ) : (
+            <span className="text-xs text-muted-foreground italic">Unversioned</span>
+          )}
         </div>
       );
     }

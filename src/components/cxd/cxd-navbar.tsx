@@ -273,6 +273,7 @@ export function CXDNavbar() {
               width={28}
               height={28}
               className="object-contain"
+              priority
             />
           </NextLink>
 

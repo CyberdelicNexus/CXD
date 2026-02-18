@@ -164,6 +164,7 @@ export interface TaskMetadata {
   customProperties?: Record<string, string | number | boolean>; // User-defined properties
   subtasks?: Subtask[];              // Direct subtask storage (not markdown)
   dependencies?: TaskDependencyMeta[]; // Gantt chart task dependencies
+  versionId?: string;                // Link to Version.id (version management)
 }
 
 // Freeform Card (Post-it style)
@@ -176,6 +177,8 @@ export interface FreeformElement extends CanvasElementBase {
   emoji?: string;
   style?: ElementStyle;
   taskMetadata?: TaskMetadata;       // Plan Tab task extension
+  isDocument?: boolean;              // Document mode (compact icon representation)
+  wordCount?: number;                // Word count for document preview
 }
 
 // Image element with upload support

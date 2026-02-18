@@ -887,4 +887,48 @@
     from { opacity: 0; transform: scale(0.92); }
     to { opacity: 1; transform: scale(1); }
   }
+
+  @keyframes highlightGlow {
+    0%   { box-shadow: 0 0 0 rgba(167,139,250,0); }
+    15%  { box-shadow: 0 0 20px rgba(167,139,250,0.4); }
+    30%  { box-shadow: 0 0 36px rgba(167,139,250,0.6); }
+    50%  { box-shadow: 0 0 42px rgba(167,139,250,0.65); }
+    70%  { box-shadow: 0 0 36px rgba(167,139,250,0.5); }
+    85%  { box-shadow: 0 0 20px rgba(167,139,250,0.3); }
+    100% { box-shadow: 0 0 0 rgba(167,139,250,0); }
+  }
+
+  /* Custom scrollbar for Versions view - matches UI colors */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 92, 246, 0.5) rgba(0, 0, 0, 0.2);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      180deg,
+      rgba(167, 139, 250, 0.6),
+      rgba(139, 92, 246, 0.5)
+    );
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(196, 181, 253, 0.8),
+      rgba(167, 139, 250, 0.7)
+    );
+  }
 }

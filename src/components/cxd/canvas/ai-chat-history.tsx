@@ -16,6 +16,7 @@ const FACE_META: Record<string, { label: string; hue: number }> = {
   contextAndMeaning: { label: "Meaning", hue: 320 },
   core: { label: "Core", hue: 195 },
   general: { label: "General", hue: 220 },
+  erd: { label: "ERD", hue: 270 },
 };
 
 function getFaceLabel(faceKey: string, storedLabel?: string | null): string {

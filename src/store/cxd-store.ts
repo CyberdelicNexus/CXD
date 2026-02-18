@@ -23,6 +23,17 @@ import {
   DEFAULT_STAGE_PRESENCE_TYPES,
 } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
+import {
+  Version, OKR, KeyResult, Objective,
+  createDefaultVersion, createDefaultOKR, createDefaultObjective, createDefaultKeyResult,
+} from '@/types/version-types';
+import {
+  yjsAddVersion, yjsUpdateVersion, yjsDeleteVersion, yjsReorderVersions,
+  yjsSetVersionStatus,
+  yjsAddOKR, yjsUpdateOKR, yjsDeleteOKR,
+  yjsAddObjective, yjsUpdateObjective, yjsDeleteObjective,
+  yjsAddKeyResult, yjsUpdateKeyResult, yjsDeleteKeyResult,
+} from '@/lib/yjs/yjs-version-actions';
 import { saveProject, deleteProjectFromDb, updateProjectShareToken } from '@/lib/supabase-projects';
 import type * as Y from 'yjs';
 import {
@@ -239,6 +250,35 @@ interface CXDState {
   getGroupElements: (groupId: string) => CanvasElement[];
   updateGroupElements: (groupId: string, updates: Partial<CanvasElement>) => void;
 
+  // Actions - Version Management
+  getVersions: () => Version[];
+  addVersion: (name?: string, parentVersionId?: string) => string;
+  updateVersion: (versionId: string, updates: Partial<Omit<Version, 'id' | 'createdAt'>>) => void;
+  deleteVersion: (versionId: string) => void;
+  reorderVersions: (newOrder: string[]) => void;
+  setVersionStatus: (versionId: string, status: import('./version-types').VersionStatus) => void;
+  tagTaskWithVersion: (elementId: string, versionId: string | null) => void;
+
+  // Actions - OKR Management (Refactored for new structure)
+  getOKRs: () => OKR[];
+  getVersionOKRs: (versionId: string) => OKR[];
+  addOKR: (versionId: string) => string;
+  updateOKR: (okrId: string, updates: Partial<Omit<OKR, 'id' | 'createdAt'>>) => void;
+  deleteOKR: (okrId: string) => void;
+
+  // Objective Management
+  addObjective: (okrId: string, title?: string) => string;
+  updateObjective: (okrId: string, objectiveId: string, updates: Partial<Omit<import('./version-types').Objective, 'id' | 'createdAt'>>) => void;
+  deleteObjective: (okrId: string, objectiveId: string) => void;
+
+  // Key Result Management
+  addKeyResult: (okrId: string, objectiveId: string, description?: string) => string;
+  updateKeyResult: (okrId: string, objectiveId: string, krId: string, updates: Partial<Omit<import('./version-types').KeyResult, 'id' | 'createdAt'>>) => void;
+  deleteKeyResult: (okrId: string, objectiveId: string, krId: string) => void;
+
+  // OKR Carry-Forward
+  carryForwardOKRs: (sourceVersionId: string, targetVersionId: string, okrIds: string[]) => void;
+
   // Actions - Share
   generateShareToken: () => string;
 
@@ -437,6 +477,14 @@ export const useCXDStore = create<CXDState>()(
           // Migration: ensure experienceFlowDescription exists
           if (project.experienceFlowDescription === undefined) {
             project.experienceFlowDescription = '';
+          }
+          // Migration: ensure versions array exists
+          if (!project.versions) {
+            project.versions = [];
+          }
+          // Migration: ensure okrs array exists
+          if (!project.okrs) {
+            project.okrs = [];
           }
         }
         return project;
@@ -1680,8 +1728,6 @@ export const useCXDStore = create<CXDState>()(
         const { activeBoardId, activeSurface } = get();
         // Filter edges to only show those belonging to the active board AND surface
         const allEdges = currentProject?.canvasLayout?.edges || [];
-        console.log('[STORE] getCanvasEdges - All edges:', allEdges);
-        console.log('[STORE] getCanvasEdges - Filtering for board:', activeBoardId, 'surface:', activeSurface);
 
         const filtered = allEdges.filter((edge) => {
           // Handle migration: edges without boardId belong to root (null)
@@ -1689,13 +1735,9 @@ export const useCXDStore = create<CXDState>()(
           // Handle migration: edges without surface belong to 'canvas'
           const edgeSurface = edge.surface !== undefined ? edge.surface : 'canvas';
 
-          const matches = edgeBoardId === activeBoardId && edgeSurface === activeSurface;
-          console.log('[STORE] Edge', edge.id, '- boardId:', edgeBoardId, 'surface:', edgeSurface, 'matches:', matches);
-
-          return matches;
+          return edgeBoardId === activeBoardId && edgeSurface === activeSurface;
         });
 
-        console.log('[STORE] getCanvasEdges - Filtered result:', filtered);
         return filtered;
       },
 
@@ -2028,6 +2070,477 @@ export const useCXDStore = create<CXDState>()(
           return token;
         }
         return '';
+      },
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // VERSION MANAGEMENT
+      // ═══════════════════════════════════════════════════════════════════════
+
+      getVersions: () => {
+        const project = get().getCurrentProject();
+        return project?.versions || [];
+      },
+
+      addVersion: (name = 'New Version', parentVersionId?: string) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return '';
+
+        const { yDoc } = get();
+        const existingVersions = currentProject.versions || [];
+        const versionId = uuidv4();
+        const newVersion: Version = {
+          ...createDefaultVersion(name, existingVersions.length, parentVersionId),
+          id: versionId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (yDoc) {
+          yjsAddVersion(yDoc, newVersion);
+        } else {
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                  ...p,
+                  versions: [...existingVersions, newVersion],
+                  updatedAt: new Date().toISOString(),
+                }
+                : p
+            ),
+          }));
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
+
+        return versionId;
+      },
+
+      updateVersion: (versionId, updates) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsUpdateVersion(yDoc, versionId, updates);
+        } else {
+          const versions = (currentProject.versions || []).map((v) =>
+            v.id === versionId ? { ...v, ...updates, updatedAt: new Date().toISOString() } : v
+          );
+
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? { ...p, versions, updatedAt: new Date().toISOString() }
+                : p
+            ),
+          }));
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
+      },
+
+      deleteVersion: (versionId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsDeleteVersion(yDoc, versionId);
+        } else {
+          const versions = (currentProject.versions || []).filter((v) => v.id !== versionId);
+
+          // Also remove versionId from all tasks
+          const elements = (currentProject.canvasLayout?.elements || []).map((el) => {
+            if (el.taskMetadata?.versionId === versionId) {
+              return {
+                ...el,
+                taskMetadata: { ...el.taskMetadata, versionId: undefined },
+              };
+            }
+            return el;
+          });
+
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                  ...p,
+                  versions,
+                  canvasLayout: { ...(p.canvasLayout || {}), elements },
+                  updatedAt: new Date().toISOString(),
+                }
+                : p
+            ),
+          }));
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
+      },
+
+      reorderVersions: (newOrder) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsReorderVersions(yDoc, newOrder);
+        } else {
+          const versionMap = new Map((currentProject.versions || []).map((v) => [v.id, v]));
+          const versions = newOrder
+            .map((id, index) => {
+              const version = versionMap.get(id);
+              return version ? { ...version, order: index } : null;
+            })
+            .filter((v): v is Version => v !== null);
+
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? { ...p, versions, updatedAt: new Date().toISOString() }
+                : p
+            ),
+          }));
+        }
+      },
+
+      setVersionStatus: (versionId, status) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+        const now = new Date().toISOString();
+
+        // Calculate timestamps based on status transitions
+        const version = (currentProject.versions || []).find((v) => v.id === versionId);
+        if (!version) return;
+
+        const updates: Partial<Version> = { status, updatedAt: now };
+
+        // Set started_at when transitioning to 'active' (only if not already set)
+        if (status === 'active' && !version.started_at) {
+          updates.started_at = now;
+        }
+
+        // Set completed_at when transitioning to 'complete'
+        if (status === 'complete' && !version.completed_at) {
+          updates.completed_at = now;
+        }
+
+        if (yDoc) {
+          yjsSetVersionStatus(yDoc, versionId, status, updates);
+        } else {
+          const versions = (currentProject.versions || []).map((v) =>
+            v.id === versionId ? { ...v, ...updates } : v
+          );
+
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? { ...p, versions, updatedAt: now }
+                : p
+            ),
+          }));
+        }
+      },
+
+      tagTaskWithVersion: (elementId, versionId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        get().updateCanvasElement(elementId, {
+          taskMetadata: {
+            ...(currentProject.canvasLayout?.elements?.find((el) => el.id === elementId)?.taskMetadata || {}),
+            versionId: versionId || undefined,
+          },
+        } as Partial<CanvasElement>);
+      },
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // OKR MANAGEMENT (Refactored - OKRs belong to versions)
+      // ═══════════════════════════════════════════════════════════════════════
+
+      getOKRs: () => {
+        const project = get().getCurrentProject();
+        return project?.okrs || [];
+      },
+
+      getVersionOKRs: (versionId) => {
+        const project = get().getCurrentProject();
+        return (project?.okrs || []).filter((okr) => okr.versionId === versionId);
+      },
+
+      addOKR: (versionId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return '';
+
+        const { yDoc } = get();
+        const okrId = uuidv4();
+        const newOKR: OKR = {
+          ...createDefaultOKR(versionId),
+          id: okrId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (yDoc) {
+          yjsAddOKR(yDoc, newOKR);
+        } else {
+          const okrs = [...(currentProject.okrs || []), newOKR];
+
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? { ...p, okrs, updatedAt: new Date().toISOString() }
+                : p
+            ),
+          }));
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
+
+        return okrId;
+      },
+
+      updateOKR: (okrId, updates) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsUpdateOKR(yDoc, okrId, updates);
+        } else {
+          const okrs = (currentProject.okrs || []).map((okr) =>
+            okr.id === okrId ? { ...okr, ...updates, updatedAt: new Date().toISOString() } : okr
+          );
+
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? { ...p, okrs, updatedAt: new Date().toISOString() }
+                : p
+            ),
+          }));
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
+      },
+
+      deleteOKR: (okrId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsDeleteOKR(yDoc, okrId);
+        } else {
+          const okrs = (currentProject.okrs || []).filter((okr) => okr.id !== okrId);
+
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? { ...p, okrs, updatedAt: new Date().toISOString() }
+                : p
+            ),
+          }));
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
+      },
+
+      // Objective Management
+      addObjective: (okrId, title = 'New Objective') => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return '';
+
+        const okr = (currentProject.okrs || []).find((o) => o.id === okrId);
+        if (!okr) return '';
+
+        const { yDoc } = get();
+        const objectiveId = uuidv4();
+        const newObjective: Objective = {
+          ...createDefaultObjective(title),
+          id: objectiveId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (yDoc) {
+          yjsAddObjective(yDoc, okrId, newObjective);
+        } else {
+          const updatedObjectives = [...okr.objectives, newObjective];
+          get().updateOKR(okrId, { objectives: updatedObjectives });
+        }
+
+        return objectiveId;
+      },
+
+      updateObjective: (okrId, objectiveId, updates) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const okr = (currentProject.okrs || []).find((o) => o.id === okrId);
+        if (!okr) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsUpdateObjective(yDoc, okrId, objectiveId, updates);
+        } else {
+          const updatedObjectives = okr.objectives.map((obj) =>
+            obj.id === objectiveId
+              ? { ...obj, ...updates, updatedAt: new Date().toISOString() }
+              : obj
+          );
+          get().updateOKR(okrId, { objectives: updatedObjectives });
+        }
+      },
+
+      deleteObjective: (okrId, objectiveId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const okr = (currentProject.okrs || []).find((o) => o.id === okrId);
+        if (!okr) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsDeleteObjective(yDoc, okrId, objectiveId);
+        } else {
+          const updatedObjectives = okr.objectives.filter((obj) => obj.id !== objectiveId);
+          get().updateOKR(okrId, { objectives: updatedObjectives });
+        }
+      },
+
+      // Key Result Management
+      addKeyResult: (okrId, objectiveId, description = 'New Key Result') => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return '';
+
+        const okr = (currentProject.okrs || []).find((o) => o.id === okrId);
+        if (!okr) return '';
+
+        const objective = okr.objectives.find((obj) => obj.id === objectiveId);
+        if (!objective) return '';
+
+        const { yDoc } = get();
+        const krId = uuidv4();
+        const newKR: KeyResult = {
+          ...createDefaultKeyResult(description),
+          id: krId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (yDoc) {
+          yjsAddKeyResult(yDoc, okrId, objectiveId, newKR);
+        } else {
+          const updatedObjectives = okr.objectives.map((obj) =>
+            obj.id === objectiveId
+              ? { ...obj, keyResults: [...obj.keyResults, newKR] }
+              : obj
+          );
+          get().updateOKR(okrId, { objectives: updatedObjectives });
+        }
+
+        return krId;
+      },
+
+      updateKeyResult: (okrId, objectiveId, krId, updates) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const okr = (currentProject.okrs || []).find((o) => o.id === okrId);
+        if (!okr) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsUpdateKeyResult(yDoc, okrId, objectiveId, krId, updates);
+        } else {
+          const updatedObjectives = okr.objectives.map((obj) =>
+            obj.id === objectiveId
+              ? {
+                  ...obj,
+                  keyResults: obj.keyResults.map((kr) =>
+                    kr.id === krId
+                      ? { ...kr, ...updates, updatedAt: new Date().toISOString() }
+                      : kr
+                  ),
+                }
+              : obj
+          );
+          get().updateOKR(okrId, { objectives: updatedObjectives });
+        }
+      },
+
+      deleteKeyResult: (okrId, objectiveId, krId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const okr = (currentProject.okrs || []).find((o) => o.id === okrId);
+        if (!okr) return;
+
+        const { yDoc } = get();
+
+        if (yDoc) {
+          yjsDeleteKeyResult(yDoc, okrId, objectiveId, krId);
+        } else {
+          const updatedObjectives = okr.objectives.map((obj) =>
+            obj.id === objectiveId
+              ? { ...obj, keyResults: obj.keyResults.filter((kr) => kr.id !== krId) }
+              : obj
+          );
+          get().updateOKR(okrId, { objectives: updatedObjectives });
+        }
+      },
+
+      // OKR Carry-Forward (for version chains)
+      carryForwardOKRs: (sourceVersionId, targetVersionId, okrIds) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const sourceOKRs = (currentProject.okrs || []).filter(
+          (okr) => okr.versionId === sourceVersionId && okrIds.includes(okr.id)
+        );
+
+        const newOKRs: OKR[] = sourceOKRs.map((okr) => ({
+          ...okr,
+          id: uuidv4(),
+          versionId: targetVersionId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          // Deep copy objectives and key results with new IDs
+          objectives: okr.objectives.map((obj) => ({
+            ...obj,
+            id: uuidv4(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            keyResults: obj.keyResults.map((kr) => ({
+              ...kr,
+              id: uuidv4(),
+              currentValue: 0, // Reset progress for new version
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            })),
+          })),
+        }));
+
+        const okrs = [...(currentProject.okrs || []), ...newOKRs];
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, okrs, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
       },
 
       // Undo/Redo

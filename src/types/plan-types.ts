@@ -104,6 +104,9 @@ export interface TaskProjection {
   // Timestamps
   createdAt?: string;
   updatedAt?: string;
+
+  // Raw task metadata (includes versionId and other metadata)
+  taskMetadata?: TaskMetadata;
 }
 
 /**
@@ -232,7 +235,7 @@ export type PlanViewConfig =
   | TimelineViewConfig 
   | CalendarViewConfig;
 
-export type PlanViewType = 'kanban' | 'table' | 'timeline' | 'calendar' | 'archive';
+export type PlanViewType = 'kanban' | 'table' | 'timeline' | 'calendar' | 'archive' | 'versions';
 
 // ============================================================================
 // FILTER & QUERY TYPES

@@ -391,10 +391,15 @@ export function AIChatPanel({
           {onGenerateERD && (
             <button
               onClick={onGenerateERD}
-              className="p-1.5 hover:bg-white/10 rounded-md text-muted-foreground/60 hover:text-foreground transition-colors"
+              className="px-2.5 py-1 text-[11px] font-medium rounded-md transition-all flex items-center gap-1.5 text-white/90 hover:text-white active:scale-95"
+              style={{
+                background: "linear-gradient(135deg, hsl(270 60% 40%), hsl(200 70% 40%))",
+                boxShadow: "0 0 8px rgba(139,92,246,0.25), inset 0 1px 0 rgba(255,255,255,0.1)",
+              }}
               title="Generate Experience Requirement Document"
             >
-              <FileText className="w-3.5 h-3.5" />
+              <FileText className="w-3 h-3" />
+              ERD
             </button>
           )}
           {onConfigure && (
@@ -697,16 +702,9 @@ export function AIChatPanel({
             style={{
               "--chat-scrollbar-hue": accentHue,
               borderColor: `hsl(${accentHue} 40% 40% / 0.5)`,
-              width:
-                sizeVariant === "assistant" ? "min(72vw, 900px)" : "min(75vw, 800px)",
-              height:
-                sizeVariant === "assistant"
-                  ? "min(calc(100vh - 150px), 760px)"
-                  : "min(calc(100vh - 140px), 900px)",
-              background:
-                sizeVariant === "assistant"
-                  ? "radial-gradient(120% 120% at 0% 0%, rgba(167,139,250,0.18) 0%, rgba(0,0,0,0) 45%), radial-gradient(100% 100% at 100% 0%, rgba(45,212,191,0.16) 0%, rgba(0,0,0,0) 42%), linear-gradient(180deg, rgba(30,24,48,0.98) 0%, rgba(11,10,22,0.98) 100%)"
-                  : "hsl(var(--card) / 0.98)",
+              width: "min(75vw, 800px)",
+              height: "min(calc(100vh - 140px), 900px)",
+              background: "hsl(var(--card) / 0.98)",
               boxShadow: `0 40px 80px -20px rgba(0,0,0,0.8), 0 0 0 1px hsl(${accentHue} 60% 60% / 0.3), 0 0 30px 8px hsl(${accentHue} 70% 58% / 0.15)`,
             } as React.CSSProperties}
           >
@@ -725,7 +723,7 @@ export function AIChatPanel({
       style={{
         "--chat-scrollbar-hue": accentHue,
         borderColor: `hsl(${accentHue} 40% 40% / 0.5)`,
-        height: sizeVariant === "assistant" ? "70vh" : "64vh",
+        height: "64vh",
         transition: "box-shadow 260ms ease, border-color 260ms ease",
         boxShadow: isFocused
           ? `0 24px 50px -24px rgba(0,0,0,0.9), 0 0 0 1px hsl(${accentHue} 60% 60% / 0.35), 0 0 14px 3px hsl(${accentHue} 70% 58% / 0.45)`

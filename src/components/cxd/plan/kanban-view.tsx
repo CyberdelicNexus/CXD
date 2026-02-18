@@ -25,6 +25,8 @@ import {
   Tag,
   ChevronDown,
   Archive,
+  Milestone,
+  X,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -102,6 +104,15 @@ export function KanbanView({
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [groupBy, setGroupBy] = useState<GroupByMode>(() => readGroupBy());
   const [manualOrder, setManualOrder] = useState<Record<string, number>>(() => readLocalStorageJson<Record<string, number>>(ORDER_STORAGE_KEY, {}));
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+
+  const versions = useCXDStore((state) => state.getVersions());
+
+  // Filter tasks by selected version
+  const filteredTasks = useMemo(() => {
+    if (!selectedVersionId) return tasks;
+    return tasks.filter(task => task.taskMetadata?.versionId === selectedVersionId);
+  }, [tasks, selectedVersionId]);
 
   const columns = useMemo(() => {
     if (groupBy === 'status') {
@@ -112,7 +123,7 @@ export function KanbanView({
     }
 
     const keys = new Set<string>();
-    tasks.forEach((task) => {
+    filteredTasks.forEach((task) => {
       if (groupBy === 'assignee') {
         const firstAssignee = parseAssignees(task.assignee)[0];
         if (firstAssignee) keys.add(firstAssignee);
@@ -131,13 +142,13 @@ export function KanbanView({
     }));
 
     return [...dynamic, { id: '__ungrouped__', label: 'Ungrouped', color: '#A78BFA', icon: Circle }];
-  }, [groupBy, tasks]);
+  }, [groupBy, filteredTasks]);
 
   const tasksByColumn = useMemo(() => {
     const map = new Map<string, TaskProjection[]>();
     columns.forEach((col) => map.set(col.id, []));
 
-    tasks.forEach((task) => {
+    filteredTasks.forEach((task) => {
       let key = '__ungrouped__';
       if (groupBy === 'status') key = task.status;
       if (groupBy === 'priority') key = task.priority || '__ungrouped__';
@@ -159,7 +170,7 @@ export function KanbanView({
     });
 
     return map;
-  }, [columns, groupBy, tasks, manualOrder]);
+  }, [columns, groupBy, filteredTasks, manualOrder]);
 
   const taskToColumn = useMemo(() => {
     const map = new Map<string, string>();
@@ -238,7 +249,7 @@ export function KanbanView({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="sticky top-0 z-20 border-b border-white/10 bg-black/40 backdrop-blur-sm px-6 py-3 flex items-center justify-start">
+      <div className="sticky top-0 z-20 border-b border-white/10 bg-black/40 backdrop-blur-sm px-6 py-3 flex items-center justify-start gap-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="text-xs">
@@ -261,6 +272,49 @@ export function KanbanView({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Version Filter */}
+        {versions.length > 0 && (
+          selectedVersionId ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs gap-2"
+              onClick={() => setSelectedVersionId(null)}
+            >
+              <Milestone className="w-3.5 h-3.5" />
+              {versions.find(v => v.id === selectedVersionId)?.name || 'Version'}
+              <X className="w-3 h-3" />
+            </Button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="text-xs gap-1.5">
+                  <Milestone className="w-3.5 h-3.5" />
+                  Filter by Version
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="z-[220] bg-black/95 border border-white/15 rounded-xl p-1 min-w-[180px] text-white">
+                {versions.map((version) => (
+                  <DropdownMenuItem
+                    key={version.id}
+                    onClick={() => setSelectedVersionId(version.id)}
+                    className="rounded-lg text-xs text-white/90"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: version.color }}
+                      />
+                      {version.name}
+                    </div>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        )}
       </div>
 
       <div className="flex-1 overflow-x-auto overflow-y-hidden gantt-scrollbar">
@@ -294,31 +348,38 @@ export function KanbanView({
                 </div>
 
                 <div className={`flex-1 space-y-3 overflow-y-auto gantt-scrollbar rounded-lg p-2 transition-colors ${dragOverColumn === column.id ? 'bg-white/5' : ''}`}>
-                  {columnTasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      isDragging={draggedTaskId === task.id}
-                      onClick={() => onTaskClick(task.id)}
-                      onNavigate={() => onTaskNavigate(task.id)}
-                      onDragStart={() => setDraggedTaskId(task.id)}
-                      onDragOverCard={() => {
-                        if (draggedTaskId && draggedTaskId !== task.id) {
-                          reorderWithinColumn(column.id, draggedTaskId, task.id);
-                        }
-                      }}
-                      onArchive={() => onTaskUpdate?.(task.id, { isArchived: true })}
-                      onSubtaskToggle={(subtaskId, isCompleted) => {
-                        if (!onTaskUpdate) return;
-                        const updatedSubtasks = task.subtasks.map(st => st.id === subtaskId ? { ...st, isCompleted } : st);
-                        onTaskUpdate(task.id, {
-                          subtasks: updatedSubtasks,
-                          status: updatedSubtasks.every(st => st.isCompleted) ? 'completed' : task.status,
-                        });
-                      }}
-                      onTaskUpdate={onTaskUpdate ? (updates) => onTaskUpdate(task.id, updates) : undefined}
-                    />
-                  ))}
+                  {columnTasks.map((task) => {
+                    const taskVersion = task.taskMetadata?.versionId
+                      ? versions.find(v => v.id === task.taskMetadata?.versionId)
+                      : null;
+
+                    return (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        version={taskVersion}
+                        isDragging={draggedTaskId === task.id}
+                        onClick={() => onTaskClick(task.id)}
+                        onNavigate={() => onTaskNavigate(task.id)}
+                        onDragStart={() => setDraggedTaskId(task.id)}
+                        onDragOverCard={() => {
+                          if (draggedTaskId && draggedTaskId !== task.id) {
+                            reorderWithinColumn(column.id, draggedTaskId, task.id);
+                          }
+                        }}
+                        onArchive={() => onTaskUpdate?.(task.id, { isArchived: true })}
+                        onSubtaskToggle={(subtaskId, isCompleted) => {
+                          if (!onTaskUpdate) return;
+                          const updatedSubtasks = task.subtasks.map(st => st.id === subtaskId ? { ...st, isCompleted } : st);
+                          onTaskUpdate(task.id, {
+                            subtasks: updatedSubtasks,
+                            status: updatedSubtasks.every(st => st.isCompleted) ? 'completed' : task.status,
+                          });
+                        }}
+                        onTaskUpdate={onTaskUpdate ? (updates) => onTaskUpdate(task.id, updates) : undefined}
+                      />
+                    );
+                  })}
                   {columnTasks.length === 0 && (
                     <div className="text-center text-sm text-muted-foreground py-8">No tasks</div>
                   )}
@@ -334,6 +395,7 @@ export function KanbanView({
 
 interface TaskCardProps {
   task: TaskProjection;
+  version?: { id: string; name: string; color: string } | null;
   isDragging: boolean;
   onClick: () => void;
   onNavigate: () => void;
@@ -344,7 +406,7 @@ interface TaskCardProps {
   onTaskUpdate?: (updates: Partial<TaskProjection>) => void;
 }
 
-function TaskCard({ task, isDragging, onClick, onNavigate, onDragStart, onDragOverCard, onArchive, onSubtaskToggle, onTaskUpdate }: TaskCardProps) {
+function TaskCard({ task, version, isDragging, onClick, onNavigate, onDragStart, onDragOverCard, onArchive, onSubtaskToggle, onTaskUpdate }: TaskCardProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task.title);
 
@@ -380,6 +442,13 @@ function TaskCard({ task, isDragging, onClick, onNavigate, onDragStart, onDragOv
       style={{ backgroundColor: cardBgColor }}
       onClick={onClick}
     >
+      {/* Version Color Stripe */}
+      {version && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1"
+          style={{ backgroundColor: version.color }}
+        />
+      )}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-black/55 via-purple-950/18 to-transparent" />
       <div className="relative z-10">
         {task.priority && (
@@ -512,8 +581,18 @@ function TaskCard({ task, isDragging, onClick, onNavigate, onDragStart, onDragOv
           </div>
         </div>
 
-        {task.hypercubeTags.length > 0 && (
+        {(task.hypercubeTags.length > 0 || version) && (
           <div className="mt-2 flex flex-wrap gap-1">
+            {version && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 border-white/20"
+                style={{ borderColor: version.color, color: version.color }}
+              >
+                <Milestone className="w-2.5 h-2.5 mr-0.5" />
+                {version.name}
+              </Badge>
+            )}
             {task.hypercubeTags.map((tag) => (
               <Badge
                 key={tag}

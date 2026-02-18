@@ -2,11 +2,26 @@
 
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 
+import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
 import { KanbanView } from './kanban-view';
 import { TableView } from './table-view';
-import { GanttViewEnhanced } from './gantt-view-enhanced';
 import { CalendarView } from './calendar-view';
+
+const GanttViewEnhanced = dynamic(
+  () => import('./gantt-view-enhanced').then((m) => ({ default: m.GanttViewEnhanced })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-6 h-6 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+          <span className="text-white/40 text-sm">Loading timeline...</span>
+        </div>
+      </div>
+    ),
+  }
+);
 import { ArchiveView } from './archive-view';
 import { TaskDetailPanel } from './task-detail-panel';
 import { Button } from '@/components/ui/button';
@@ -24,15 +39,16 @@ import type { PlanViewType, TaskFilter, TaskPriority, TaskStatus } from '@/types
 import { FaceTagSelector } from './face-tag-selector';
 import { AssigneeMultiSelect } from './assignee-multi-select';
 import { serializeAssignees } from './assignee-utils';
-import { LayoutGrid, Table as TableIcon, Calendar, GanttChart, Plus, Archive } from 'lucide-react';
+import { LayoutGrid, Table as TableIcon, Calendar, GanttChart, Plus, Archive, Milestone } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { VersionsView } from './versions-view';
 
 export function PlanView() {
   // Load activeView from localStorage, default to 'kanban'
   const [activeView, setActiveView] = useState<PlanViewType>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('cxd-plan-view');
-      if (saved && ['kanban', 'table', 'timeline', 'calendar', 'archive'].includes(saved)) {
+      if (saved && ['kanban', 'table', 'timeline', 'calendar', 'archive', 'versions'].includes(saved)) {
         return saved as PlanViewType;
       }
     }
@@ -167,6 +183,10 @@ export function PlanView() {
               <TabsTrigger value="archive" className="gap-2">
                 <Archive className="w-4 h-4" />
                 Archive
+              </TabsTrigger>
+              <TabsTrigger value="versions" className="gap-2">
+                <Milestone className="w-4 h-4" />
+                Versions
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -319,6 +339,14 @@ export function PlanView() {
               onTaskClick={setSelectedTaskId}
               onNavigate={navigateToTask}
               onRestore={(taskId) => updateTaskMetadata(taskId, { isArchived: false })}
+            />
+          )}
+          {activeView === 'versions' && (
+            <VersionsView
+              tasks={activeTasks}
+              onTaskClick={setSelectedTaskId}
+              onTaskNavigate={navigateToTask}
+              onTaskUpdate={updateTaskMetadata}
             />
           )}
         </div>

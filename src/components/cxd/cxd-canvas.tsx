@@ -526,15 +526,6 @@ export function CXDCanvas() {
     return { horizontal, vertical, snapX, snapY };
   }, [showAlignmentGuides, canvasElements, selectedElementIds]);
 
-  // Debug: log edges
-  console.log(
-    "[CANVAS] Active board:",
-    activeBoardId,
-    "Active surface:",
-    activeSurface,
-  );
-  console.log("[CANVAS] All edges in project:", project?.canvasLayout?.edges || []);
-  console.log("[CANVAS] Filtered edges for current view:", canvasEdges);
 
   // Line creation callback from LineLayer
   const handleCreateLine = useCallback(
@@ -1139,7 +1130,7 @@ export function CXDCanvas() {
       options?: {
         shapeType?: ShapeType;
         linkMode?: "bookmark" | "embed" | "file";
-        cardType?: "note" | "task";
+        cardType?: "note" | "task" | "document";
       },
     ) => {
       const size = DEFAULT_ELEMENT_SIZES[type];
@@ -1166,16 +1157,19 @@ export function CXDCanvas() {
         case "freeform":
           const isTaskCard = options?.cardType === "task";
           const isNoteCard = options?.cardType === "note";
+          const isDocument = options?.cardType === "document";
           newElement = {
             ...baseElement,
-            width: isTaskCard ? 250 : 300,
-            height: isTaskCard ? baseElement.height : 300,
+            width: isTaskCard ? 250 : isDocument ? 100 : 300,
+            height: isTaskCard ? baseElement.height : isDocument ? 100 : 300,
             type: "freeform",
             cardType: isTaskCard ? "task" : "note",
             content: isTaskCard ? "Task Title" : "",
-            noteTitle: isTaskCard ? undefined : "Untitled Note",
+            noteTitle: isTaskCard ? undefined : isDocument ? "Untitled Document" : "Untitled Note",
             noteBody: isTaskCard ? undefined : "",
-            emoji: isTaskCard ? "✅" : isNoteCard ? "📌" : undefined,
+            emoji: isTaskCard ? "✅" : isNoteCard ? "📌" : isDocument ? "📄" : undefined,
+            isDocument: isDocument || undefined,
+            wordCount: isDocument ? 0 : undefined,
             style: {
               bgColor:
                 "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
@@ -1472,11 +1466,69 @@ export function CXDCanvas() {
     [],
   );
 
-  // Handle inbox item drag start
+  // Handle inbox item drag start.
+  // Registers mouseup/pointerup handlers SYNCHRONOUSLY at mousedown time so there
+  // is no race condition with React's async re-render cycle — if the user releases
+  // quickly, the handler is already listening before the first re-render commits.
   const handleInboxItemDragStart = useCallback(
     (elementId: string, e: React.MouseEvent) => {
       setDraggingInboxItem(elementId);
       setInboxDragPos({ x: e.clientX, y: e.clientY });
+
+      let dropped = false; // Guard against double-fire from mouseup + pointerup
+
+      const handleMove = (ev: MouseEvent) => {
+        setInboxDragPos({ x: ev.clientX, y: ev.clientY });
+      };
+
+      const handleDrop = (ev: MouseEvent | PointerEvent) => {
+        if (dropped) return;
+        dropped = true;
+
+        // Always tear down listeners first
+        document.removeEventListener("mousemove", handleMove);
+        document.removeEventListener("mouseup", handleDrop, true);
+        document.removeEventListener("pointerup", handleDrop as EventListener, true);
+
+        const {
+          canvasPosition: pos,
+          canvasZoom: zoom,
+          inboxItems: items,
+          handlePlaceInboxItem: placeItem,
+        } = experienceDropCtxRef.current;
+
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const canvasX = (ev.clientX - rect.left - pos.x) / zoom;
+          const canvasY = (ev.clientY - rect.top - pos.y) / zoom;
+
+          if (
+            ev.clientX >= rect.left &&
+            ev.clientX <= rect.right &&
+            ev.clientY >= rect.top &&
+            ev.clientY <= rect.bottom
+          ) {
+            const element = items?.find((el: any) => el.id === elementId);
+            if (element && placeItem) {
+              placeItem(
+                elementId,
+                canvasX - (element.width ?? 0) / 2,
+                canvasY - (element.height ?? 0) / 2
+              );
+            }
+          }
+        }
+
+        // Always clear drag state
+        setDraggingInboxItem(null);
+        setInboxDragPos(null);
+      };
+
+      // Capture phase so child stopPropagation / SVG pointer capture cannot swallow the event.
+      // Listen to both mouseup and pointerup for maximum reliability.
+      document.addEventListener("mousemove", handleMove);
+      document.addEventListener("mouseup", handleDrop, true);
+      document.addEventListener("pointerup", handleDrop as EventListener, true);
     },
     []
   );
@@ -1619,59 +1671,9 @@ export function CXDCanvas() {
     };
   }, [draggingExperienceBlock]);
 
-  // Handle inbox item drag move and drop.
-  // Uses bubble-phase mouseup at document level (fires after React synthetic events
-  // but reads from ref so values are always current — no stale-closure issues).
-  useEffect(() => {
-    if (!draggingInboxItem) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      setInboxDragPos({ x: e.clientX, y: e.clientY });
-    };
-
-    const handleMouseUp = (e: MouseEvent) => {
-      const {
-        canvasPosition: pos,
-        canvasZoom: zoom,
-        inboxItems: items,
-        handlePlaceInboxItem: placeItem,
-      } = experienceDropCtxRef.current;
-
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const canvasX = (e.clientX - rect.left - pos.x) / zoom;
-        const canvasY = (e.clientY - rect.top - pos.y) / zoom;
-
-        // Place if dropped anywhere inside the canvas container
-        if (
-          e.clientX >= rect.left &&
-          e.clientX <= rect.right &&
-          e.clientY >= rect.top &&
-          e.clientY <= rect.bottom
-        ) {
-          const element = items?.find((el: any) => el.id === draggingInboxItem);
-          if (element && placeItem) {
-            placeItem(
-              draggingInboxItem,
-              canvasX - element.width / 2,
-              canvasY - element.height / 2
-            );
-          }
-        }
-      }
-
-      setDraggingInboxItem(null);
-      setInboxDragPos(null);
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [draggingInboxItem]);
+  // NOTE: Inbox item drag move/drop handlers are registered SYNCHRONOUSLY in
+  // handleInboxItemDragStart (above) so there is no race condition with React's
+  // async re-render cycle. No separate useEffect needed here.
 
   // Handle connector creation start
   const handleStartConnector = useCallback(

@@ -15,7 +15,7 @@ interface CanvasToolkitProps {
   onPlaceElement: (
     type: CanvasElementType,
     position: { x: number; y: number },
-    options?: { shapeType?: ShapeType; linkMode?: LinkMode; cardType?: "note" | "task" },
+    options?: { shapeType?: ShapeType; linkMode?: LinkMode; cardType?: "note" | "task" | "document" },
   ) => void;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   canvasPosition: { x: number; y: number };
@@ -93,6 +93,12 @@ const CARD_TYPE_OPTIONS = [
     icon: "✅",
     description: "Task card with checkbox",
   },
+  {
+    type: "document" as const,
+    label: "Document",
+    icon: "📄",
+    description: "Compact document icon",
+  },
 ];
 
 const SHAPE_PALETTE = [
@@ -168,7 +174,7 @@ export function CanvasToolkit({
   const [selectedLinkMode, setSelectedLinkMode] =
     useState<LinkMode>("bookmark");
   const [showCardTypeMenu, setShowCardTypeMenu] = useState(false);
-  const [selectedCardType, setSelectedCardType] = useState<"note" | "task">("note");
+  const [selectedCardType, setSelectedCardType] = useState<"note" | "task" | "document">("note");
   // Toolbar collapse state
   const [isCollapsed, setIsCollapsed] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -290,7 +296,7 @@ export function CanvasToolkit({
     [activeTool, showShapePalette, showLinkPalette, showCardTypeMenu, setActiveTool],
   );
 
-  const handleCardTypeSelect = useCallback((cardType: "note" | "task") => {
+  const handleCardTypeSelect = useCallback((cardType: "note" | "task" | "document") => {
     setSelectedCardType(cardType);
     setShowCardTypeMenu(false);
     setActiveTool("freeform");

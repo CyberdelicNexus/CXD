@@ -466,3 +466,24 @@ export function yjsToggleExperienceFlowStageRealityPlane(
     }
   }, 'local');
 }
+
+// ─── Version Management Actions (re-export) ──────────────────────────────────
+
+export {
+  yjsAddVersion,
+  yjsUpdateVersion,
+  yjsDeleteVersion,
+  yjsReorderVersions,
+  yjsAdvanceVersionStage,
+  yjsRevertVersionStage,
+  yjsAddVersionStage,
+  yjsRemoveVersionStage,
+  yjsUpdateVersionStage,
+  yjsReorderVersionStages,
+  yjsSaveDefaultStageTemplate,
+  yjsAddOKR,
+  yjsUpdateOKR,
+  yjsDeleteOKR,
+  yjsLinkVersionToOKR,
+  yjsUnlinkVersionFromOKR,
+} from './yjs-version-actions';

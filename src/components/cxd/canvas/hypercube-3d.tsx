@@ -1809,54 +1809,6 @@ export function Hypercube3D({
 
         {/* Top Navigation Bar - Upgraded Hypercube Faces Menu */}
         <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 items-center p-2 rounded-xl">
-          {/* Mode indicator */}
-          <div
-            className={cn(
-              "w-[88px] h-[72px] rounded-lg flex items-center justify-center transition-all duration-300 cursor-default relative overflow-hidden group",
-              interactionMode === "default" &&
-              "bg-gradient-to-br from-purple-900/60 via-purple-950/80 to-indigo-950/60 border border-purple-500/30",
-              interactionMode === "explore" &&
-              "bg-gradient-to-br from-amber-900/60 via-amber-950/80 to-orange-950/60 border border-amber-500/30",
-            )}
-          >
-            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-            <div className="flex flex-col items-center gap-1 relative z-10">
-              <div
-                className={cn(
-                  "w-2 h-2 rounded-full",
-                  interactionMode === "default" &&
-                  focusedFaceIndex === null &&
-                  !isCoreSelected &&
-                  !isGeneralChatActive &&
-                  "bg-purple-400 animate-pulse shadow-lg shadow-purple-400/50",
-                  interactionMode === "default" &&
-                  (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive) &&
-                  "bg-cyan-400 shadow-lg shadow-cyan-400/50",
-                  interactionMode === "explore" &&
-                  "bg-amber-400 animate-pulse shadow-lg shadow-amber-400/50",
-                )}
-              />
-              <span
-                className={cn(
-                  "text-[11px] font-bold uppercase tracking-wide",
-                  interactionMode === "default"
-                    ? "text-purple-300"
-                    : "text-amber-300",
-                )}
-              >
-                {interactionMode === "default" &&
-                  (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive) &&
-                  "Active"}
-                {interactionMode === "default" &&
-                  focusedFaceIndex === null &&
-                  !isCoreSelected &&
-                  !isGeneralChatActive &&
-                  "Default"}
-                {interactionMode === "explore" && "Explore"}
-              </span>
-            </div>
-          </div>
-
           {/* General AI Chat button */}
           <button
             onClick={(e) => {
@@ -2332,7 +2284,7 @@ export function Hypercube3D({
                   return (
                   <aside
                     className={cn(
-                      "pointer-events-auto absolute left-full top-1/2 ml-3 -translate-y-1/2 rounded-2xl border backdrop-blur-sm bg-black/10 overflow-hidden transition-all duration-300",
+                      "pointer-events-auto absolute left-full bottom-0 ml-3 rounded-2xl border backdrop-blur-sm bg-black/10 overflow-hidden transition-all duration-300",
                       isTaggedRailCollapsed ? "w-[36px]" : "w-[240px]",
                     )}
                     style={{

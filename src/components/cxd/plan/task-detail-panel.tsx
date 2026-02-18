@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -12,10 +12,11 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { FaceTagSelector } from './face-tag-selector';
 import { AssigneeMultiSelect } from './assignee-multi-select';
 import { parseAssignees, serializeAssignees } from './assignee-utils';
-import type { HypercubeFaceTag } from '@/types/canvas-elements';
+import { useCXDStore } from '@/store/cxd-store';
+import type { HypercubeFaceTag, TaskMetadata } from '@/types/canvas-elements';
 import type { TaskProjection, TaskStatus, TaskPriority, TaskType } from '@/types/plan-types';
 import { HYPERCUBE_FACE_COLORS } from '@/types/plan-types';
-import { X, Calendar, User, Clock, Tag, ExternalLink, CheckCircle2, Circle, Plus, Trash2, Archive, RotateCcw } from 'lucide-react';
+import { X, Calendar, User, Clock, Tag, ExternalLink, CheckCircle2, Circle, Plus, Trash2, Archive, RotateCcw, Milestone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface TaskDetailPanelProps {
@@ -56,6 +57,15 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate }: TaskDet
   const [description, setDescription] = useState(task.description || '');
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
   const [draggedSubtaskIndex, setDraggedSubtaskIndex] = useState<number | null>(null);
+
+  const versions = useCXDStore((state) => state.getVersions());
+
+  // Memoize the selected version to avoid recomputing on every render
+  const selectedVersion = useMemo(() => {
+    if (!task.taskMetadata?.versionId) return null;
+    return versions.find(v => v.id === task.taskMetadata?.versionId) || null;
+  }, [task.taskMetadata?.versionId, versions]);
+
   const handleStatusChange = (status: TaskStatus) => {
     onUpdate({ status });
   };
@@ -87,6 +97,14 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate }: TaskDet
 
   const handleFaceTagsChange = (faces: HypercubeFaceTag[]) => {
     onUpdate({ hypercubeTags: faces });
+  };
+
+  const handleVersionChange = (versionId: string) => {
+    const updatedTaskMetadata: TaskMetadata = {
+      ...(task.taskMetadata || {}),
+      versionId: versionId || undefined,
+    };
+    onUpdate({ taskMetadata: updatedTaskMetadata });
   };
 
   const handleSubtaskToggle = (subtaskId: string, isCompleted: boolean) => {
@@ -320,6 +338,44 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate }: TaskDet
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Version */}
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground flex items-center gap-2">
+            <Milestone className="w-3 h-3" />
+            Version / Release
+          </Label>
+          <select
+            value={task.taskMetadata?.versionId || ''}
+            onChange={(e) => handleVersionChange(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-black/40 border border-white/10 text-sm hover:border-purple-500/50 transition-colors"
+            style={{ colorScheme: 'dark' }}
+          >
+            <option value="">Unversioned</option>
+            {versions.map((version) => (
+              <option key={version.id} value={version.id}>
+                {version.name} - {version.type_label}
+              </option>
+            ))}
+          </select>
+          {selectedVersion && (
+            <div className="flex items-center gap-2 mt-2">
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: selectedVersion.color }}
+              />
+              <span className="text-xs text-white/70">{selectedVersion.name}</span>
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 border-white/20"
+                style={{ borderColor: selectedVersion.color, color: selectedVersion.color }}
+              >
+                {selectedVersion.type_label}
+              </Badge>
+              <span className="text-[10px] text-white/50 uppercase">{selectedVersion.status}</span>
+            </div>
+          )}
         </div>
 
         {/* Assignee */}
