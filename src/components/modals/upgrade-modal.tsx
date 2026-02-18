@@ -41,7 +41,7 @@ const LIFETIME_FEATURES = [
 ];
 
 export function UpgradeModal({ isOpen, onClose, feature, onUpgrade }: UpgradeModalProps) {
-  const { plan, isTrialing, trialDaysRemaining } = useSubscription();
+  const { isFree, isTrialing, trialDaysRemaining } = useSubscription();
 
   // Upgrade context based on feature
   const getUpgradeContext = (feature: string) => {
@@ -204,7 +204,7 @@ export function UpgradeModal({ isOpen, onClose, feature, onUpgrade }: UpgradeMod
                 ))}
               </ul>
 
-              {plan === 'free' ? (
+              {isFree ? (
                 <button
                   onClick={handleStartTrial}
                   className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-all"
