@@ -222,6 +222,9 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     if (updates.customProperties) metadataUpdates.customProperties = updates.customProperties;
     if (updates.dependencies) metadataUpdates.dependencies = updates.dependencies;
     if (updates.isArchived !== undefined) metadataUpdates.isArchived = updates.isArchived;
+    if (updates.taskMetadata !== undefined && 'versionId' in updates.taskMetadata) {
+      metadataUpdates.versionId = updates.taskMetadata.versionId;
+    }
     const newMetadata = createTaskMetadataUpdate(existingMetadata, metadataUpdates);
 
     const elementUpdates: Partial<CanvasElement> = { taskMetadata: newMetadata };

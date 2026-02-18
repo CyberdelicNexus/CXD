@@ -24,7 +24,7 @@ import {
 } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
 import {
-  Version, OKR, KeyResult, Objective,
+  Version, OKR, KeyResult, Objective, VersionStatus,
   createDefaultVersion, createDefaultOKR, createDefaultObjective, createDefaultKeyResult,
 } from '@/types/version-types';
 import {

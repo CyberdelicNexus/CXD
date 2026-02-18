@@ -63,27 +63,29 @@ export function OKRManager({ versionId }: OKRManagerProps) {
         {/* Toolbar */}
         <div className="flex items-center justify-between">
           <span className="text-xs text-white/50">{okrs.length} OKR{okrs.length !== 1 ? 's' : ''}</span>
-          <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setIsGrouped(false)}
-              className="h-7 px-2 gap-1 text-xs text-white/60 hover:text-white"
-            >
-              <List className="w-3 h-3" />
-              List
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setIsGrouped(true)}
-              className="h-7 px-2 gap-1 text-xs bg-white/10 text-white"
-            >
-              <LayoutGrid className="w-3 h-3" />
-              Board
-            </Button>
-            <Button onClick={handleAddOKR} size="sm" variant="ghost" className="h-7 px-2 gap-1 text-xs text-white/60 hover:text-white">
-              <Plus className="w-3 h-3" />
+          <div className="flex items-center gap-2">
+            <div className="flex items-center rounded-lg border border-white/15 bg-white/5 p-0.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsGrouped(false)}
+                className="h-7 px-3 gap-1.5 text-xs text-white/50 hover:text-white hover:bg-transparent"
+              >
+                <List className="w-3.5 h-3.5" />
+                List
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsGrouped(true)}
+                className="h-7 px-3 gap-1.5 text-xs rounded-md bg-white/15 text-white hover:bg-white/20"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                Board
+              </Button>
+            </div>
+            <Button onClick={handleAddOKR} size="sm" variant="ghost" className="h-7 w-7 p-0 text-white/60 hover:text-white">
+              <Plus className="w-3.5 h-3.5" />
             </Button>
           </div>
         </div>
@@ -127,27 +129,29 @@ export function OKRManager({ versionId }: OKRManagerProps) {
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <span className="text-xs text-white/50">{okrs.length} OKR{okrs.length !== 1 ? 's' : ''}</span>
-        <div className="flex items-center gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setIsGrouped(false)}
-            className="h-7 px-2 gap-1 text-xs bg-white/10 text-white"
-          >
-            <List className="w-3 h-3" />
-            List
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setIsGrouped(true)}
-            className="h-7 px-2 gap-1 text-xs text-white/60 hover:text-white"
-          >
-            <LayoutGrid className="w-3 h-3" />
-            Board
-          </Button>
-          <Button onClick={handleAddOKR} size="sm" variant="ghost" className="h-7 px-2 gap-1 text-xs text-white/60 hover:text-white">
-            <Plus className="w-3 h-3" />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg border border-white/15 bg-white/5 p-0.5">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsGrouped(false)}
+              className="h-7 px-3 gap-1.5 text-xs rounded-md bg-white/15 text-white hover:bg-white/20"
+            >
+              <List className="w-3.5 h-3.5" />
+              List
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsGrouped(true)}
+              className="h-7 px-3 gap-1.5 text-xs text-white/50 hover:text-white hover:bg-transparent"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Board
+            </Button>
+          </div>
+          <Button onClick={handleAddOKR} size="sm" variant="ghost" className="h-7 w-7 p-0 text-white/60 hover:text-white">
+            <Plus className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>
@@ -171,7 +175,7 @@ function OKRCard({ okr, compact = false }: OKRCardProps) {
   const addObjective = useCXDStore((state) => state.addObjective);
   const addKeyResult = useCXDStore((state) => state.addKeyResult);
 
-  const [isExpanded, setIsExpanded] = useState(!compact);
+  const [isExpanded, setIsExpanded] = useState(true);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(okr.name || 'New OKR');
   const [editedDescription, setEditedDescription] = useState(okr.description || '');

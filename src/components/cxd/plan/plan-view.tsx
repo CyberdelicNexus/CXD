@@ -52,7 +52,7 @@ export function PlanView() {
         return saved as PlanViewType;
       }
     }
-    return 'kanban';
+    return 'versions';
   });
 
   const [filter, setFilter] = useState<TaskFilter>({
@@ -164,6 +164,10 @@ export function PlanView() {
         <div className="flex items-center gap-4">
           <Tabs value={activeView} onValueChange={(v) => setActiveView(v as PlanViewType)}>
             <TabsList className="bg-black/40">
+              <TabsTrigger value="versions" className="gap-2">
+                <Milestone className="w-4 h-4" />
+                Roadmap
+              </TabsTrigger>
               <TabsTrigger value="kanban" className="gap-2">
                 <LayoutGrid className="w-4 h-4" />
                 Kanban
@@ -184,10 +188,6 @@ export function PlanView() {
                 <Archive className="w-4 h-4" />
                 Archive
               </TabsTrigger>
-              <TabsTrigger value="versions" className="gap-2">
-                <Milestone className="w-4 h-4" />
-                Versions
-              </TabsTrigger>
             </TabsList>
           </Tabs>
           <span className="text-sm text-muted-foreground">
@@ -195,14 +195,18 @@ export function PlanView() {
           </span>
         </div>
 
-        <Dialog open={isAddTaskOpen} onOpenChange={setIsAddTaskOpen}>
+        <Dialog open={isAddTaskOpen} onOpenChange={setIsAddTaskOpen} modal={false}>
           <DialogTrigger asChild>
             <Button variant="default" size="sm">
               <Plus className="w-4 h-4 mr-2" />
               Add Task
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-black/90 border-white/20 overflow-visible">
+          <DialogContent
+            className="bg-black/90 border-white/20 overflow-visible"
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+          >
             <DialogHeader>
               <DialogTitle>Add New Task</DialogTitle>
             </DialogHeader>

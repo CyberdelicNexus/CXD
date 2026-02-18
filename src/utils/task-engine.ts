@@ -259,8 +259,10 @@ export function projectElementAsTasks(
         inInbox: Boolean((element as any).inInbox),
         
         hypercubeTags: element.hypercubeTags ?? [],
-        
+
         canvasPosition: { x: element.x, y: element.y },
+
+        taskMetadata: metadata,
       };
     });
   }
@@ -317,6 +319,8 @@ export function projectElementAsTasks(
     hypercubeTags: element.hypercubeTags ?? [],
 
     canvasPosition: { x: element.x, y: element.y },
+
+    taskMetadata: metadata,
   }];
 }
 

@@ -421,6 +421,7 @@ function TaskCard({ task, version, isDragging, onClick, onNavigate, onDragStart,
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
   const centerColor = extractCenterColor(canvasBackground);
   const cardBgColor = hexToRgba(centerColor, 0.32);
+  const versions = useCXDStore(state => state.getVersions());
 
   const saveTitle = () => {
     const next = titleDraft.trim();
@@ -553,6 +554,45 @@ function TaskCard({ task, version, isDragging, onClick, onNavigate, onDragStart,
                   value={task.hypercubeTags}
                   onChange={(next) => onTaskUpdate({ hypercubeTags: next })}
                 />
+                {versions.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        title="Tag version"
+                      >
+                        <Milestone
+                          className="w-3.5 h-3.5"
+                          style={version ? { color: version.color } : undefined}
+                        />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="z-[220] bg-black/95 border border-white/15 rounded-xl p-1 min-w-[160px] text-white">
+                      {task.taskMetadata?.versionId && (
+                        <DropdownMenuItem
+                          onClick={() => onTaskUpdate({ taskMetadata: { versionId: undefined } })}
+                          className="rounded-lg text-xs text-white/60"
+                        >
+                          Remove version
+                        </DropdownMenuItem>
+                      )}
+                      {versions.map((v) => (
+                        <DropdownMenuItem
+                          key={v.id}
+                          onClick={() => onTaskUpdate({ taskMetadata: { versionId: v.id } })}
+                          className="rounded-lg text-xs text-white/90"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: v.color }} />
+                            {v.name}
+                          </div>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
