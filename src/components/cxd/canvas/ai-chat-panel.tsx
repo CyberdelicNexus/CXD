@@ -21,6 +21,7 @@ import { useAICredits } from "@/hooks/use-ai-credits";
 import { AIChatHistory } from "./ai-chat-history";
 import { ChatMarkdown } from "./ai-chat-markdown";
 import type { AIProviderKey } from "@/types/ai-types";
+import type { ModelId } from "@/lib/ai-credit-config";
 import { formatCompletion, clampToUnit } from "@/lib/display-utils";
 import { classifyResponse } from "@/lib/ai/ai-response-classifier";
 import { AIActionBar } from "./ai-action-bar";
@@ -141,7 +142,7 @@ interface AIChatPanelProps {
     userQuestion?: string; // If present, use only this question instead of full diagnostic
   };
   onInsightConsumed?: () => void;
-  provider?: AIProviderKey;
+  provider?: AIProviderKey | ModelId;
   sizeVariant?: "default" | "assistant";
   /** Called when a history entry from a different face is clicked */
   onNavigateToFace?: (faceKey: string) => void;

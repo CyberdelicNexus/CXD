@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { getFullProjectContext, getFaceContext } from "@/utils/ai-context-aggregator";
 import type { AIProviderKey, AIChatMessage } from "@/types/ai-types";
+import type { ModelId } from "@/lib/ai-credit-config";
 import type { UIMessage } from "ai";
 
 // ─── Module-level in-memory cache ───────────────────────────────────
@@ -56,7 +57,7 @@ function saveToAPI(
 interface UseAIChatOptions {
   faceKey: string;
   projectId: string;
-  provider?: AIProviderKey;
+  provider?: AIProviderKey | ModelId;
   enabled?: boolean;
   faceLabel?: string;
   faceHue?: number;
