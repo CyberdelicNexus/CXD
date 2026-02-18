@@ -28,7 +28,7 @@ export const VERSION_YDOC_KEYS = {
  */
 export function yjsAddVersion(doc: Y.Doc, version: Version): void {
   doc.transact(() => {
-    const yVersions = doc.getArray(VERSION_YDOC_KEYS.VERSIONS);
+    const yVersions = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.VERSIONS);
     const yVersion = versionToYMap(version);
     yVersions.push([yVersion]);
   }, 'local');
@@ -39,7 +39,7 @@ export function yjsAddVersion(doc: Y.Doc, version: Version): void {
  */
 export function yjsUpdateVersion(doc: Y.Doc, versionId: string, updates: Partial<Version>): void {
   doc.transact(() => {
-    const yVersions = doc.getArray(VERSION_YDOC_KEYS.VERSIONS);
+    const yVersions = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.VERSIONS);
     const versionIndex = findVersionIndex(yVersions, versionId);
 
     if (versionIndex >= 0) {
@@ -56,7 +56,7 @@ export function yjsUpdateVersion(doc: Y.Doc, versionId: string, updates: Partial
  */
 export function yjsDeleteVersion(doc: Y.Doc, versionId: string): void {
   doc.transact(() => {
-    const yVersions = doc.getArray(VERSION_YDOC_KEYS.VERSIONS);
+    const yVersions = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.VERSIONS);
     const versionIndex = findVersionIndex(yVersions, versionId);
 
     if (versionIndex >= 0) {
@@ -70,7 +70,7 @@ export function yjsDeleteVersion(doc: Y.Doc, versionId: string): void {
  */
 export function yjsReorderVersions(doc: Y.Doc, newOrder: string[]): void {
   doc.transact(() => {
-    const yVersions = doc.getArray(VERSION_YDOC_KEYS.VERSIONS);
+    const yVersions = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.VERSIONS);
 
     // Create a map of versionId -> Y.Map
     const versionMap = new Map<string, Y.Map<unknown>>();
@@ -102,7 +102,7 @@ export function yjsSetVersionStatus(
   updates: Partial<Version>
 ): void {
   doc.transact(() => {
-    const yVersions = doc.getArray(VERSION_YDOC_KEYS.VERSIONS);
+    const yVersions = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.VERSIONS);
     const versionIndex = findVersionIndex(yVersions, versionId);
 
     if (versionIndex >= 0) {
@@ -119,7 +119,7 @@ export function yjsSetVersionStatus(
  */
 export function yjsAddOKR(doc: Y.Doc, okr: OKR): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const yOKR = okrToYMap(okr);
     yOKRs.push([yOKR]);
   }, 'local');
@@ -130,7 +130,7 @@ export function yjsAddOKR(doc: Y.Doc, okr: OKR): void {
  */
 export function yjsUpdateOKR(doc: Y.Doc, okrId: string, updates: Partial<OKR>): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
@@ -147,7 +147,7 @@ export function yjsUpdateOKR(doc: Y.Doc, okrId: string, updates: Partial<OKR>): 
  */
 export function yjsDeleteOKR(doc: Y.Doc, okrId: string): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
@@ -163,7 +163,7 @@ export function yjsDeleteOKR(doc: Y.Doc, okrId: string): void {
  */
 export function yjsAddObjective(doc: Y.Doc, okrId: string, objective: Objective): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
@@ -186,7 +186,7 @@ export function yjsUpdateObjective(
   updates: Partial<Objective>
 ): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
@@ -211,7 +211,7 @@ export function yjsUpdateObjective(
  */
 export function yjsDeleteObjective(doc: Y.Doc, okrId: string, objectiveId: string): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
@@ -242,7 +242,7 @@ export function yjsAddKeyResult(
   keyResult: KeyResult
 ): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
@@ -275,7 +275,7 @@ export function yjsUpdateKeyResult(
   updates: Partial<KeyResult>
 ): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
@@ -314,7 +314,7 @@ export function yjsDeleteKeyResult(
   krId: string
 ): void {
   doc.transact(() => {
-    const yOKRs = doc.getArray(VERSION_YDOC_KEYS.OKRS);
+    const yOKRs = doc.getArray<Y.Map<unknown>>(VERSION_YDOC_KEYS.OKRS);
     const okrIndex = findOKRIndex(yOKRs, okrId);
 
     if (okrIndex >= 0) {
