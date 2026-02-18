@@ -2154,10 +2154,11 @@ export const useCXDStore = create<CXDState>()(
 
           // Also remove versionId from all tasks
           const elements = (currentProject.canvasLayout?.elements || []).map((el) => {
-            if (el.taskMetadata?.versionId === versionId) {
+            const elWithMeta = el as { taskMetadata?: { versionId?: string } };
+            if (elWithMeta.taskMetadata?.versionId === versionId) {
               return {
                 ...el,
-                taskMetadata: { ...el.taskMetadata, versionId: undefined },
+                taskMetadata: { ...elWithMeta.taskMetadata, versionId: undefined },
               };
             }
             return el;
