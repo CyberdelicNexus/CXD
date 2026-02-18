@@ -52,7 +52,7 @@ console.log('\n🧪 Layer 0 Verification: Intensity Model Fixes\n');
 console.log('📝 Test 1: State Mapping Completion (No Binary Cliffs)');
 
 const project1Word = createMinimalProject({
-  stateMapping: { field1: 'Hello' }, // 1 word
+  stateMapping: { cognitive: 'Hello', emotional: '', somatic: '', relational: '' }, // 1 word
 });
 const intensities1Word = calculateFaceIntensities(project1Word, []);
 assertApprox(
@@ -64,8 +64,10 @@ assertApprox(
 
 const project50Words = createMinimalProject({
   stateMapping: {
-    field1: 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua',
-    field2: 'Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat',
+    cognitive: 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua',
+    emotional: 'Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat',
+    somatic: '',
+    relational: '',
   }, // ~36 words total (actual count varies by parser)
 });
 const intensities50Words = calculateFaceIntensities(project50Words, []);
@@ -81,7 +83,7 @@ if (intensities50Words.stateMapping.completion < 0.6 || intensities50Words.state
 console.log('\n📝 Test 2: Trait Mapping Completion (No Binary Cliffs)');
 
 const projectTraits1 = createMinimalProject({
-  traitMapping: { trait1: 'Fast' }, // 1 word
+  traitMapping: { cognitive: 'Fast', emotional: '', somatic: '', relational: '' }, // 1 word
 });
 const intensitiesTraits1 = calculateFaceIntensities(projectTraits1, []);
 assertApprox(
@@ -128,19 +130,20 @@ assertApprox(
 console.log('\n📝 Test 4: Coherence Gradation (No Binary Cliffs)');
 
 const projectWithState = createMinimalProject({
-  stateMapping: { state1: 'Engaged user state' },
+  stateMapping: { cognitive: 'Engaged user state', emotional: '', somatic: '', relational: '' },
 });
 
 const elements1Tagged: CanvasElement[] = [
   {
     id: 'el1',
-    type: 'freeform',
+    type: 'freeform' as const,
     x: 0,
     y: 0,
     width: 100,
     height: 100,
+    zIndex: 1,
     content: 'Test',
-    hypercubeTags: ['State Mapping'],
+    hypercubeTags: ['State Mapping' as const],
   },
 ];
 const intensities1Tagged = calculateFaceIntensities(projectWithState, elements1Tagged);
@@ -153,13 +156,14 @@ assertApprox(
 
 const elements5Tagged: CanvasElement[] = Array.from({ length: 5 }, (_, i) => ({
   id: `el${i}`,
-  type: 'freeform',
+  type: 'freeform' as const,
   x: 0,
   y: 0,
   width: 100,
   height: 100,
+  zIndex: i,
   content: 'Test',
-  hypercubeTags: ['State Mapping'],
+  hypercubeTags: ['State Mapping' as const],
 }));
 const intensities5Tagged = calculateFaceIntensities(projectWithState, elements5Tagged);
 assertApprox(
