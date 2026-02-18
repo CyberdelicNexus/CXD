@@ -470,20 +470,19 @@ export function yjsToggleExperienceFlowStageRealityPlane(
 // ─── Version Management Actions (re-export) ──────────────────────────────────
 
 export {
+  VERSION_YDOC_KEYS,
   yjsAddVersion,
   yjsUpdateVersion,
   yjsDeleteVersion,
   yjsReorderVersions,
-  yjsAdvanceVersionStage,
-  yjsRevertVersionStage,
-  yjsAddVersionStage,
-  yjsRemoveVersionStage,
-  yjsUpdateVersionStage,
-  yjsReorderVersionStages,
-  yjsSaveDefaultStageTemplate,
+  yjsSetVersionStatus,
   yjsAddOKR,
   yjsUpdateOKR,
   yjsDeleteOKR,
-  yjsLinkVersionToOKR,
-  yjsUnlinkVersionFromOKR,
+  yjsAddObjective,
+  yjsUpdateObjective,
+  yjsDeleteObjective,
+  yjsAddKeyResult,
+  yjsUpdateKeyResult,
+  yjsDeleteKeyResult,
 } from './yjs-version-actions';

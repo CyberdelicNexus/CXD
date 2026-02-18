@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useSubscription } from '@/hooks/use-subscription';
 import { useAICredits } from '@/hooks/use-ai-credits';
+import { AI_MODELS } from '@/lib/ai-credit-config';
 import { UpgradeModal } from '@/components/upgrade-modal';
 import { CreditTopUpModal } from '@/components/cxd/credit-topup-modal';
 import {
@@ -467,7 +468,7 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
                 <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10">
                   <span className="text-sm text-white/60">Active Model</span>
                   <Badge className="bg-violet-500/20 text-violet-400 border-violet-500/30">
-                    {selectedModel === 'gpt' ? 'GPT' : selectedModel === 'claude' ? 'Claude' : 'Gemini'}
+                    {AI_MODELS[selectedModel]?.name ?? selectedModel}
                   </Badge>
                 </div>
 
