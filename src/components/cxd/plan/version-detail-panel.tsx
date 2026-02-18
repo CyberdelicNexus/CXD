@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useCXDStore } from '@/store/cxd-store';
 import type { Version, VersionStatus, VersionTypeLabel } from '@/types/version-types';
+import type { FreeformElement } from '@/types/canvas-elements';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -40,11 +41,14 @@ export function VersionDetailPanel({ version }: VersionDetailPanelProps) {
   // Get all tasks for this version
   const versionTasks = (project?.canvasLayout?.elements || [])
     .filter((el) => el.type === 'freeform' && el.cardType === 'task' && el.taskMetadata?.versionId === version.id)
-    .map((el) => ({
-      id: el.id,
-      title: el.content?.split('\n')[0] || 'Untitled Task',
-      status: el.taskMetadata?.status || 'not_started',
-    }));
+    .map((el) => {
+      const freeform = el as FreeformElement;
+      return {
+        id: freeform.id,
+        title: freeform.content?.split('\n')[0] || 'Untitled Task',
+        status: freeform.taskMetadata?.status || 'not_started',
+      };
+    });
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(version.name);
