@@ -58,7 +58,7 @@ export function useAICredits() {
         total,
         used: creditsData.usedThisPeriod,
         periodEnd: creditsData.periodEnd ? new Date(creditsData.periodEnd) : null,
-        selectedModel: creditsData.selectedModel,
+        selectedModel: (creditsData.selectedModel as ModelId) || 'gemini-2.0-flash',
       });
     } catch (error) {
       console.error('Error fetching AI credits:', error);
