@@ -7,7 +7,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { ExtractedTask } from './ai-response-classifier';
-import type { CanvasElement, HypercubeFaceTag, TaskMetadata } from '@/types/canvas-elements';
+import type { CanvasElement, FreeformElement, HypercubeFaceTag, TaskMetadata } from '@/types/canvas-elements';
 import type { TaskStatus } from '@/types/plan-types';
 import { FACE_DISPLAY_NAMES } from '@/lib/display-utils';
 
@@ -61,12 +61,12 @@ function createTaskElement(
     assignee: task.metadata?.assignee,
     // Add provenance metadata
     customProperties: {
-      source: {
+      source: JSON.stringify({
         type: 'ai_chat',
         chatMessageId: options.chatMessageId,
         sourceInsightId: options.sourceInsightId,
         extractedAt: new Date().toISOString(),
-      },
+      }),
     },
   };
 
@@ -79,7 +79,7 @@ function createTaskElement(
     .filter(Boolean); // Remove any undefined values
 
   // Create freeform element for inbox
-  const element: CanvasElement = {
+  const element: FreeformElement = {
     id: uuidv4(),
     type: 'freeform',
     cardType: 'task',
@@ -93,7 +93,7 @@ function createTaskElement(
     hypercubeTags,
     inInbox: true, // Mark as inbox item - not yet placed on canvas
     taskMetadata,
-  } as CanvasElement;
+  };
 
   return element;
 }
