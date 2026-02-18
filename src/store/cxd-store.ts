@@ -474,6 +474,15 @@ export const useCXDStore = create<CXDState>()(
           if (!project.canvasLayout) {
             project.canvasLayout = {};
           }
+          // Migration: ensure canvasLayout.elements and edges exist
+          // CRITICAL: prevents infinite loop in selectors that return `elements || []`
+          // (returning new [] on every call causes Zustand re-render loop)
+          if (!project.canvasLayout.elements) {
+            project.canvasLayout.elements = [];
+          }
+          if (!project.canvasLayout.edges) {
+            project.canvasLayout.edges = [];
+          }
           // Migration: ensure experienceFlowDescription exists
           if (project.experienceFlowDescription === undefined) {
             project.experienceFlowDescription = '';

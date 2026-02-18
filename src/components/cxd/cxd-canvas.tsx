@@ -402,10 +402,13 @@ export function CXDCanvas() {
   const allCanvasElements = getCanvasElements();
   const canvasEdges = getCanvasEdges();
 
-  // Get inbox items from all boards (not filtered by current board)
+  // Get inbox items from all boards (not filtered by current board).
+  // Note: the drop handler reads element data from useCXDStore.getState() directly
+  // so stale memoisation here is fine — the ref is only used for TaskInbox badge counts.
   const inboxItems = useMemo(
     () => getAllInboxItems(),
-    [getAllInboxItems]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []  // intentionally compute once; handleDrop bypasses this via live store read
   );
   const canvasElements = useMemo(
     () => allCanvasElements.filter((el) => !el.inInbox),
@@ -1508,12 +1511,15 @@ export function CXDCanvas() {
             ev.clientY >= rect.top &&
             ev.clientY <= rect.bottom
           ) {
-            const element = items?.find((el: any) => el.id === elementId);
-            if (element && placeItem) {
+            if (placeItem) {
+              // Read element dimensions directly from the live store to avoid
+              // stale-ref issues (inboxItems in the ref may lag behind new adds).
+              const liveElements = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+              const element = liveElements.find((el: any) => el.id === elementId);
               placeItem(
                 elementId,
-                canvasX - (element.width ?? 0) / 2,
-                canvasY - (element.height ?? 0) / 2
+                canvasX - ((element?.width ?? 0) / 2),
+                canvasY - ((element?.height ?? 0) / 2)
               );
             }
           }

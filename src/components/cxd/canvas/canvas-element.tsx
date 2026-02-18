@@ -189,7 +189,7 @@ interface CanvasElementRendererProps {
 
 export function CanvasElementRenderer({
   element,
-  onUpdate,
+  onUpdate: onUpdateProp,
   onDelete,
   onDuplicate,
   onDragStart,
@@ -215,6 +215,15 @@ export function CanvasElementRenderer({
   isReadOnly = false,
   snapToGrid = false,
 }: CanvasElementRendererProps) {
+  // Stabilize onUpdate via ref so that effects and sub-component callbacks
+  // that depend on onUpdate don't re-fire just because the parent re-rendered
+  // with a new inline arrow function reference.
+  const onUpdateRef = useRef(onUpdateProp);
+  useEffect(() => { onUpdateRef.current = onUpdateProp; });
+  const onUpdate = useCallback((updates: Partial<CanvasElement>) => {
+    onUpdateRef.current(updates);
+  }, []); // stable — never recreated
+
   // Get canvas elements for z-index calculations
   const getCanvasElements = useCXDStore((state) => state.getCanvasElements);
   // Get pushCanvasHistory for undo support on resize operations
