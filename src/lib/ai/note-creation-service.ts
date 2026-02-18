@@ -6,7 +6,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
-import type { CanvasElement, HypercubeFaceTag } from '@/types/canvas-elements';
+import type { CanvasElement, FreeformElement, HypercubeFaceTag } from '@/types/canvas-elements';
 import { FACE_DISPLAY_NAMES } from '@/lib/display-utils';
 
 export interface NoteCreationOptions {
@@ -68,7 +68,7 @@ export async function createNoteFromAI(
 
     // Create freeform note element - identical structure to user-created notes
     // The 🤖 emoji indicates AI source; otherwise it's a standard editable note
-    const noteElement: CanvasElement = {
+    const noteElement: FreeformElement = {
       id: uuidv4(),
       type: 'freeform',
       cardType: 'note',
@@ -87,7 +87,7 @@ export async function createNoteFromAI(
         bgColor: "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
         textColor: "#ffffff",
       },
-    } as CanvasElement;
+    };
 
     // Add to canvas via collaboration sync
     console.log('[NoteCreationService] Creating AI note:', {
