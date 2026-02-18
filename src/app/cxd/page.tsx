@@ -340,7 +340,7 @@ export default function CXDPage() {
     <CollaborationProvider onRemoteUpdate={handleRemoteUpdate}>
       <div className="min-h-screen bg-gradient-radial">
         <CXDNavbar />
-        <main className="pt-16">
+        <main className="pt-20">
           {isRestoring ? (
             <div className="flex items-center justify-center min-h-[80vh]">
               <div className="text-muted-foreground">Restoring project...</div>

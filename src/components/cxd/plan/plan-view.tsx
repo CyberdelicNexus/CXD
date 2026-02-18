@@ -186,13 +186,13 @@ export function PlanView() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-4rem)] min-h-0 relative overflow-hidden" style={{ background: canvasBackground }}>
+    <div className="flex flex-col h-[calc(100dvh-5rem)] min-h-0 relative overflow-hidden" style={{ background: canvasBackground }}>
       {/* Shimmer Grid - fixed position to cover entire viewport */}
       <ShimmerGrid className="!fixed inset-0 !z-0" />
-      {/* Header - merged view tabs, count, and actions - FIXED at top */}
+      {/* Header - always-visible tabs bar as a flex item so it never scrolls away */}
       <div
         ref={headerRef}
-        className="fixed top-20 left-0 right-0 flex items-center justify-between px-6 py-4 border-b border-white/10 backdrop-blur-sm z-20"
+        className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-white/10 backdrop-blur-sm z-10 relative"
         style={{ backgroundColor: headerBgColor }}
       >
         <div className="flex items-center gap-4">
@@ -331,13 +331,6 @@ export function PlanView() {
           </DialogContent>
         </Dialog>
       </div>
-
-      {/* Spacer for fixed header so content starts below it without page overflow */}
-      <div
-        aria-hidden="true"
-        className="shrink-0"
-        style={{ height: `calc(${headerOffsetWithinContainer} + ${headerHeight}px)` }}
-      />
 
       {/* Main Content */}
       <div className="flex-1 flex min-h-0 overflow-hidden relative z-10">

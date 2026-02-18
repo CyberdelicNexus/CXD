@@ -422,7 +422,7 @@ export function CalendarView({ tasks, versions = [], onTaskClick, onTaskNavigate
           const dayTasks = tasksByDate.get(dateKey) || [];
           const dayVersions = versionsByDate.get(dateKey) || [];
           const primaryVersion = dayVersions[0]; // Show the first version if multiple
-          const versionColor = primaryVersion ? (primaryVersion.color || TYPE_LABEL_COLORS[primaryVersion.type_label] || '#8B5CF6') : null;
+          const versionColor = primaryVersion ? (primaryVersion.color || TYPE_LABEL_COLORS[primaryVersion.type_label] || '#8B5CF6') : undefined;
 
           return (
             <Card
