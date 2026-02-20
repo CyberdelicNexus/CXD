@@ -290,16 +290,56 @@ export function CXDNavbar() {
             </div>
           </div>
 
-          <NextLink href="/dashboard" className="flex items-center gap-2 transition-all duration-300">
-            <Image
-              src="/images/hypercube-logo.webp"
-              alt="CXD"
-              width={28}
-              height={28}
-              className="object-contain"
-              priority
-            />
-          </NextLink>
+          {/* Color Picker with Gradient Outline - replaces logo */}
+          {project && viewMode !== "home" ? (
+            <DropdownMenu open={showColorPicker} onOpenChange={setShowColorPicker}>
+              <DropdownMenuTrigger asChild>
+                <div className="relative group cursor-pointer active:scale-95 transition-all p-[1px] rounded-full bg-gradient-to-r from-violet-500 via-purple-500 to-cyan-500">
+                  <div className="flex items-center justify-center w-9 h-9 rounded-full bg-zinc-950 transition-all duration-300">
+                    <div
+                      className="w-5 h-5 rounded-full border border-white/10 shadow-inner"
+                      style={{
+                        background: CANVAS_GRADIENTS.find(g => g.value === project.canvasBackground)?.preview || CANVAS_GRADIENTS[0].preview
+                      }}
+                    />
+                  </div>
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48 bg-zinc-900/95 backdrop-blur-xl border-white/10 p-2 shadow-2xl">
+                <div className="grid grid-cols-3 gap-2">
+                  {CANVAS_GRADIENTS.map((gradient) => (
+                    <button
+                      key={gradient.name}
+                      className="w-full aspect-square rounded-full border border-white/10 hover:border-violet-500/50 hover:scale-110 transition-all relative group overflow-hidden"
+                      style={{ background: gradient.preview }}
+                      onClick={() => {
+                        updateCanvasBackground(gradient.value);
+                        setShowColorPicker(false);
+                      }}
+                      title={gradient.name}
+                    >
+                      {project.canvasBackground === gradient.value && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                          <Check className="w-3 h-3 text-white" />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <NextLink href="/dashboard" className="flex items-center gap-2 transition-all duration-300">
+              <Image
+                src="/images/hypercube-logo.webp"
+                alt="CXD"
+                width={28}
+                height={28}
+                className="object-contain"
+                priority
+              />
+            </NextLink>
+          )}
 
           {project && viewMode !== "home" && (
             <div className="flex items-center gap-2">
@@ -325,47 +365,6 @@ export function CXDNavbar() {
                   </span>
                 )}
               </div>
-
-              {/* Color Picker with Gradient Outline */}
-              <DropdownMenu open={showColorPicker} onOpenChange={setShowColorPicker}>
-                <DropdownMenuTrigger asChild>
-                  <div className="relative group cursor-pointer active:scale-95 transition-all p-[1px] rounded-full bg-gradient-to-r from-violet-500 via-purple-500 to-cyan-500">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-zinc-950 transition-all duration-300">
-                      <div
-                        className="w-5 h-5 rounded-full border border-white/10 shadow-inner"
-                        style={{
-                          background: CANVAS_GRADIENTS.find(g => g.value === project.canvasBackground)?.preview || CANVAS_GRADIENTS[0].preview
-                        }}
-                      />
-                    </div>
-                  </div>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-48 bg-zinc-900/95 backdrop-blur-xl border-white/10 p-2 shadow-2xl">
-                  <div className="grid grid-cols-3 gap-2">
-                    {CANVAS_GRADIENTS.map((gradient) => (
-                      <button
-                        key={gradient.name}
-                        className="w-full aspect-square rounded-full border border-white/10 hover:border-violet-500/50 hover:scale-110 transition-all relative group overflow-hidden"
-                        style={{ background: gradient.preview }}
-                        onClick={() => {
-                          updateCanvasBackground(gradient.value);
-                          setShowColorPicker(false);
-                        }}
-                        title={gradient.name}
-                      >
-                        {project.canvasBackground === gradient.value && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                            <Check className="w-3 h-3 text-white" />
-                          </div>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* AI Credit Meter */}
-              <NavCreditMeter />
 
               {/* Breadcrumbs - shown when inside a board */}
               {boardPath && boardPath.length > 0 && (
@@ -509,6 +508,10 @@ export function CXDNavbar() {
 
         {/* Right section */}
         <div className="flex items-center gap-2 flex-1 justify-end">
+          {project && viewMode !== "home" && (
+            <NavCreditMeter />
+          )}
+
           {/* Shortcuts Guide - Always visible */}
           <ShortcutsGuide />
 

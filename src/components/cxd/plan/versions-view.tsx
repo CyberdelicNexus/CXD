@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useCXDStore } from '@/store/cxd-store';
 import { VersionTimeline } from './version-timeline';
 import { VersionDetailPanel } from './version-detail-panel';
@@ -15,6 +15,7 @@ interface VersionsViewProps {
   onTaskClick: (taskId: string) => void;
   onTaskNavigate: (taskId: string) => void;
   onTaskUpdate: (taskId: string, updates: Partial<TaskProjection>) => void;
+  onVersionSelect?: (versionId: string | null) => void;
 }
 
 export function VersionsView({
@@ -22,13 +23,27 @@ export function VersionsView({
   onTaskClick,
   onTaskNavigate,
   onTaskUpdate,
+  onVersionSelect,
 }: VersionsViewProps) {
   const versions = useCXDStore((state) => state.getVersions());
   const addVersion = useCXDStore((state) => state.addVersion);
 
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(
+  const [selectedVersionId, setSelectedVersionIdInternal] = useState<string | null>(
     versions[0]?.id || null
   );
+
+  const setSelectedVersionId = (id: string | null) => {
+    setSelectedVersionIdInternal(id);
+    onVersionSelect?.(id);
+  };
+
+  // Notify parent of initial selection on mount
+  useEffect(() => {
+    if (selectedVersionId) {
+      onVersionSelect?.(selectedVersionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectedVersion = useMemo(
     () => versions.find((v) => v.id === selectedVersionId) || null,

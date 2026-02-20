@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { getPlan } from '@/lib/plans';
-import { Resend } from 'resend';
+import { sendEmail } from '@/lib/email';
+import { render } from '@react-email/render';
+import CanvasInviteEmail from '../../../../../emails/canvas-invite';
 
 // Admin client for checking subscriptions and sending invites
 function getSupabaseAdmin() {
@@ -196,81 +198,26 @@ export async function POST(request: Request) {
         });
     }
 
-    // Send invitation email using Resend
-    if (process.env.RESEND_API_KEY) {
-      try {
-        const resend = new Resend(process.env.RESEND_API_KEY);
+    // Send invitation email using Resend + React Email
+    try {
+      const emailHtml = await render(
+        CanvasInviteEmail({
+          inviterName,
+          canvasName: canvas.name,
+          inviteUrl,
+        })
+      );
 
-        await resend.emails.send({
-          from: process.env.RESEND_FROM_EMAIL || 'CXD Canvas <noreply@cyberdelic.design>',
-          to: email.toLowerCase(),
-          subject: `${inviterName} invited you to collaborate on "${canvas.name}"`,
-          html: `
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              </head>
-              <body style="margin: 0; padding: 0; background-color: #0a0a0f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-                <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0a0a0f; padding: 40px 20px;">
-                  <tr>
-                    <td align="center">
-                      <table width="100%" max-width="600" cellpadding="0" cellspacing="0" style="max-width: 600px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
-                        <!-- Header -->
-                        <tr>
-                          <td style="padding: 40px 40px 20px; text-align: center;">
-                            <h1 style="margin: 0; color: #fff; font-size: 28px; font-weight: 600;">You're Invited!</h1>
-                          </td>
-                        </tr>
-                        <!-- Content -->
-                        <tr>
-                          <td style="padding: 20px 40px;">
-                            <p style="margin: 0 0 20px; color: #a0a0b0; font-size: 16px; line-height: 1.6;">
-                              <strong style="color: #fff;">${inviterName}</strong> has invited you to collaborate on their canvas:
-                            </p>
-                            <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-bottom: 24px; border: 1px solid rgba(255,255,255,0.1);">
-                              <h2 style="margin: 0; color: #10b981; font-size: 22px; font-weight: 600;">${canvas.name}</h2>
-                            </div>
-                            <p style="margin: 0 0 30px; color: #a0a0b0; font-size: 14px; line-height: 1.6;">
-                              As a collaborator, you'll be able to view and edit this canvas in real-time with the team.
-                            </p>
-                          </td>
-                        </tr>
-                        <!-- Button -->
-                        <tr>
-                          <td style="padding: 0 40px 40px; text-align: center;">
-                            <a href="${inviteUrl}" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);">
-                              Accept Invitation
-                            </a>
-                          </td>
-                        </tr>
-                        <!-- Footer -->
-                        <tr>
-                          <td style="padding: 20px 40px 30px; border-top: 1px solid rgba(255,255,255,0.1);">
-                            <p style="margin: 0; color: #6b6b7b; font-size: 12px; text-align: center;">
-                              This invitation expires in 7 days. If you didn't expect this invitation, you can safely ignore this email.
-                            </p>
-                          </td>
-                        </tr>
-                      </table>
-                      <!-- Brand -->
-                      <p style="margin: 20px 0 0; color: #4b4b5b; font-size: 12px;">
-                        Sent from <a href="${baseUrl}" style="color: #10b981; text-decoration: none;">CXD Canvas</a>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-              </body>
-            </html>
-          `,
-        });
+      await sendEmail({
+        to: email.toLowerCase(),
+        subject: `${inviterName} invited you to collaborate on "${canvas.name}"`,
+        html: emailHtml,
+      });
 
-        console.log(`Invitation email sent to ${email}`);
-      } catch (emailError) {
-        // Log but don't fail the request if email fails
-        console.error('Failed to send invitation email:', emailError);
-      }
+      console.log(`Invitation email sent to ${email}`);
+    } catch (emailError) {
+      // Log but don't fail the request if email fails
+      console.error('Failed to send invitation email:', emailError);
     }
 
     return NextResponse.json({

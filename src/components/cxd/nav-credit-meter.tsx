@@ -74,36 +74,27 @@ export function NavCreditMeter() {
 
   return (
     <div className="relative" ref={ref}>
-      {/* Pill trigger */}
+      {/* Circular trigger - matches other nav buttons */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-all active:scale-95",
+          "h-10 w-10 flex items-center justify-center rounded-full transition-all active:scale-95 group",
           isDepleted
-            ? "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/15"
+            ? "bg-red-500/10 border border-red-500/20 hover:bg-red-500/15"
             : isLow
-              ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/15"
-              : "bg-white/[0.05] text-white/60 border border-white/10 hover:bg-white/[0.08] hover:text-white/80",
+              ? "bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/15"
+              : "bg-white/[0.05] border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)]",
         )}
         title={`${remainingCredits} / ${totalCredits} credits remaining`}
       >
         <Zap
           className={cn(
-            "w-3 h-3",
+            "w-4 h-4 transition-colors",
             isDepleted
               ? "text-red-400"
               : isLow
                 ? "text-amber-400"
-                : "text-violet-400",
-          )}
-        />
-        <span>{remainingCredits}</span>
-        <span className="opacity-40">|</span>
-        <AIProviderIcon provider={selectedModel} className="w-3 h-3 opacity-50" />
-        <ChevronDown
-          className={cn(
-            "w-3 h-3 opacity-40 transition-transform",
-            isOpen && "rotate-180",
+                : "text-violet-400 group-hover:text-violet-300",
           )}
         />
       </button>

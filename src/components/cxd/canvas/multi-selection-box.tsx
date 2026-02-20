@@ -331,7 +331,8 @@ export function MultiSelectionBox({
         style={{
           left: minX + width / 2,
           top: minY - 52,
-          transform: "translateX(-50%)",
+          transform: `translateX(-50%) scale(${1 / canvasZoom})`,
+          transformOrigin: 'center bottom',
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}

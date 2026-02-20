@@ -17,8 +17,12 @@ const SHORTCUTS: ShortcutItem[] = [
   {
     category: "Navigation",
     shortcuts: [
-      { keys: ["Space + Drag"], description: "Pan canvas" },
-      { keys: ["Scroll"], description: "Zoom in/out" },
+      { keys: ["Ctrl/Cmd", "+", "Scroll"], description: "Zoom in/out" },
+      { keys: ["Scroll"], description: "Pan canvas vertically" },
+      { keys: ["Shift", "+", "Scroll"], description: "Pan canvas horizontally" },
+      { keys: ["Space", "+", "Drag"], description: "Hand tool (pan canvas)" },
+      { keys: ["Middle Mouse", "+", "Drag"], description: "Pan canvas" },
+      { keys: ["Right Click"], description: "Context menu" },
       { keys: ["Esc"], description: "Cancel current action" },
     ],
   },
@@ -48,7 +52,8 @@ const SHORTCUTS: ShortcutItem[] = [
       { keys: ["Ctrl/Cmd", "Z"], description: "Undo" },
       { keys: ["Ctrl/Cmd", "Shift", "Z"], description: "Redo" },
       { keys: ["Ctrl/Cmd", "C"], description: "Copy selected" },
-      { keys: ["Ctrl/Cmd", "V"], description: "Paste" },
+      { keys: ["Ctrl/Cmd", "X"], description: "Cut selected" },
+      { keys: ["Ctrl/Cmd", "V"], description: "Paste at cursor" },
       { keys: ["Ctrl/Cmd", "D"], description: "Duplicate selected" },
       { keys: ["Delete"], description: "Delete selected" },
     ],
@@ -57,8 +62,15 @@ const SHORTCUTS: ShortcutItem[] = [
     category: "Selection",
     shortcuts: [
       { keys: ["Click"], description: "Select element" },
-      { keys: ["Shift", "+", "Click"], description: "Multi-select" },
-      { keys: ["Shift", "+", "Drag"], description: "Marquee select" },
+      { keys: ["Shift", "+", "Click"], description: "Add to selection" },
+      { keys: ["Drag"], description: "Marquee select" },
+    ],
+  },
+  {
+    category: "Canvas",
+    shortcuts: [
+      { keys: ["Drag Image"], description: "Drop images onto canvas" },
+      { keys: ["Double Click Board"], description: "Enter board" },
     ],
   },
 ];
@@ -95,7 +107,7 @@ export function ShortcutsGuide() {
         >
           {/* Modal Content */}
           <div
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl overflow-y-auto max-h-[80vh] rounded-xl shadow-[0_0_30px_rgba(168,85,247,0.4)] outline outline-2 outline-purple-500/50"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl overflow-y-auto max-h-[80vh] rounded-xl shadow-[0_0_30px_rgba(168,85,247,0.4)] outline outline-2 outline-purple-500/50 custom-scrollbar"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="bg-card border border-border rounded-lg shadow-2xl h-fit">

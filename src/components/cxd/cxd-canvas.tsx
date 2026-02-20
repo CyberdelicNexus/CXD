@@ -14,7 +14,7 @@ import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
 import { MultiSelectionBox } from "./canvas/multi-selection-box";
 import { Button } from "@/components/ui/button";
-import { Minus, Trash2, Circle, ArrowRight, Square, Diamond } from "lucide-react";
+import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   CanvasElement,
@@ -52,6 +52,191 @@ const DEFAULT_SECTION_POSITIONS: Record<string, { x: number; y: number }> = {
 
 // Filter out experienceFlow from sections displayed as cards (it's in the timeline now)
 const CANVAS_SECTIONS = CXD_SECTIONS.filter((s) => s.id !== "experienceFlow");
+
+// Canvas Context Menu Component
+function CanvasContextMenu({
+  position,
+  target,
+  onClose,
+  onCreateElement,
+  onCopy,
+  onCut,
+  onPaste,
+  onDuplicate,
+  onDelete,
+  onDownloadImage,
+  hasSelection,
+  hasClipboard,
+  isImageSelected,
+}: {
+  position: { x: number; y: number };
+  target: { type: 'canvas' | 'element'; elementId?: string };
+  onClose: () => void;
+  onCreateElement: (type: CanvasElementType) => void;
+  onCopy: () => void;
+  onCut: () => void;
+  onPaste: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onDownloadImage?: () => void;
+  hasSelection: boolean;
+  hasClipboard: boolean;
+  isImageSelected?: boolean;
+}) {
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    // Mark as ready after a small delay to prevent immediate close
+    const readyTimer = setTimeout(() => setIsReady(true), 50);
+
+    const handleClick = (e: MouseEvent) => {
+      if (!isReady) return;
+      const target = e.target as HTMLElement;
+      // Don't close if clicking inside the menu
+      if (target.closest('[data-context-menu]')) return;
+      // Close on any click outside the menu
+      onClose();
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      if (!isReady) return;
+      const target = e.target as HTMLElement;
+      // Don't close if right-clicking inside the menu
+      if (target.closest('[data-context-menu]')) return;
+      // Close and let new context menu open
+      onClose();
+    };
+
+    // Use capture phase to catch events before they're stopped
+    document.addEventListener('mousedown', handleClick, true);
+    document.addEventListener('contextmenu', handleContextMenu, true);
+
+    return () => {
+      clearTimeout(readyTimer);
+      document.removeEventListener('mousedown', handleClick, true);
+      document.removeEventListener('contextmenu', handleContextMenu, true);
+    };
+  }, [onClose, isReady]);
+
+  return (
+    <div
+      data-context-menu
+      className="fixed z-[100] min-w-[180px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+      style={{
+        left: position.x,
+        top: position.y,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {target.type === 'canvas' && (
+        <>
+          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+            Create Element
+          </div>
+          <button
+            onClick={() => onCreateElement('freeform')}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <Square className="w-4 h-4" />
+            Card
+          </button>
+          <button
+            onClick={() => onCreateElement('text')}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <Type className="w-4 h-4" />
+            Text
+          </button>
+          <button
+            onClick={() => onCreateElement('image')}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <ImageIcon className="w-4 h-4" />
+            Image
+          </button>
+          <button
+            onClick={() => onCreateElement('shape')}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <Circle className="w-4 h-4" />
+            Shape
+          </button>
+          <button
+            onClick={() => onCreateElement('container')}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <Square className="w-4 h-4" />
+            Container
+          </button>
+          <div className="-mx-1 my-1 h-px bg-muted" />
+        </>
+      )}
+
+      {hasSelection && (
+        <>
+          <button
+            onClick={onCopy}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <Copy className="w-4 h-4" />
+            Copy
+            <span className="ml-auto text-xs text-muted-foreground">Ctrl+C</span>
+          </button>
+          <button
+            onClick={onCut}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <Scissors className="w-4 h-4" />
+            Cut
+            <span className="ml-auto text-xs text-muted-foreground">Ctrl+X</span>
+          </button>
+          {isImageSelected && onDownloadImage && (
+            <button
+              onClick={onDownloadImage}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Download Image
+            </button>
+          )}
+        </>
+      )}
+
+      {hasClipboard && (
+        <button
+          onClick={onPaste}
+          className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+        >
+          <ClipboardPaste className="w-4 h-4" />
+          Paste
+          <span className="ml-auto text-xs text-muted-foreground">Ctrl+V</span>
+        </button>
+      )}
+
+      {hasSelection && (
+        <>
+          <button
+            onClick={onDuplicate}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+          >
+            <Files className="w-4 h-4" />
+            Duplicate
+            <span className="ml-auto text-xs text-muted-foreground">Ctrl+D</span>
+          </button>
+          <div className="-mx-1 my-1 h-px bg-muted" />
+          <button
+            onClick={onDelete}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete
+            <span className="ml-auto text-xs text-muted-foreground">Del</span>
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function CXDCanvas() {
   const {
@@ -273,6 +458,9 @@ export function CXDCanvas() {
   const zoomAccumulator = useRef(0); // Accumulate trackpad zoom delta for incremental steps
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false); // Track spacebar for pan mode
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenuTarget, setContextMenuTarget] = useState<{ type: 'canvas' | 'element'; elementId?: string } | null>(null);
   const [draggingSection, setDraggingSection] = useState<string | null>(null);
   const [dragSectionStart, setDragSectionStart] = useState({ x: 0, y: 0 });
   const [localPositions, setLocalPositions] = useState<
@@ -578,14 +766,37 @@ export function CXDCanvas() {
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
-      // Only pan if clicking on background or canvas-background
+      // Only handle if clicking on background or canvas-background
       if (
         target === containerRef.current ||
         target.classList.contains("canvas-background") ||
         target.classList.contains("dot-grid")
       ) {
-        // Shift+click OR right-click starts marquee selection
-        if ((e.shiftKey && e.button === 0) || e.button === 2) {
+        // Right-click: Show context menu
+        if (e.button === 2) {
+          setContextMenuPos({ x: e.clientX, y: e.clientY });
+          setContextMenuTarget({ type: 'canvas' });
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+
+        // Middle mouse button OR Spacebar + left click: Start panning
+        if (e.button === 1 || (isSpacePressed && e.button === 0)) {
+          // Close context menu when starting to pan
+          setContextMenuPos(null);
+          setContextMenuTarget(null);
+          setIsPanning(true);
+          setPanStart({
+            x: e.clientX - canvasPosition.x,
+            y: e.clientY - canvasPosition.y,
+          });
+          e.preventDefault();
+          return;
+        }
+
+        // Left click without spacebar: Start marquee selection
+        if (e.button === 0 && !isSpacePressed) {
           if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
@@ -593,32 +804,23 @@ export function CXDCanvas() {
             setIsMarqueeSelecting(true);
             setMarqueeStart({ x, y });
             setMarqueeEnd({ x, y });
+
+            // GLOBAL RULE: Clicking background deselects all elements and closes all menus
+            setSelectedElementId(null);
+            setSelectedElementIds(new Set());
+            setSelectedEdgeId(null);
+            // Close context menu
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+
             e.preventDefault();
             e.stopPropagation();
             return;
           }
         }
-
-        // Don't start panning if right-click
-        if (e.button === 2) {
-          e.preventDefault();
-          return;
-        }
-
-        // GLOBAL RULE: Clicking background deselects all elements and closes all menus
-        setSelectedElementId(null);
-        setSelectedElementIds(new Set());
-        setSelectedEdgeId(null); // Also deselect connector/edge
-
-        setIsPanning(true);
-        setPanStart({
-          x: e.clientX - canvasPosition.x,
-          y: e.clientY - canvasPosition.y,
-        });
-        e.preventDefault();
       }
     },
-    [canvasPosition, canvasZoom, setSelectedElementId],
+    [canvasPosition, canvasZoom, setSelectedElementId, isSpacePressed],
   );
 
   const handleCanvasMouseMove = useCallback(
@@ -747,6 +949,21 @@ export function CXDCanvas() {
                   }
                 }
               }
+            }
+          });
+
+          // Move bend points of edges connecting two selected elements
+          canvasEdges.forEach((edge) => {
+            const fromSelected = selectedElementIds.has(edge.fromNodeId);
+            const toSelected = selectedElementIds.has(edge.toNodeId);
+            // Only move bend if BOTH endpoints are selected
+            if (fromSelected && toSelected && edge.bend) {
+              syncUpdateEdge(edge.id, {
+                bend: {
+                  x: edge.bend.x + snappedDeltaX,
+                  y: edge.bend.y + snappedDeltaY,
+                },
+              });
             }
           });
 
@@ -968,6 +1185,7 @@ export function CXDCanvas() {
       removeNodeFromContainer,
       canvasEdges,
       updateCanvasEdge,
+      syncUpdateEdge,
       updateCursor,
     ],
   );
@@ -1277,6 +1495,15 @@ export function CXDCanvas() {
   // Handle element drag start
   const handleElementDragStart = useCallback(
     (elementId: string, e: React.MouseEvent) => {
+      // Prevent drag on right-click (context menu)
+      if (e.button === 2) {
+        return;
+      }
+
+      // Close context menu when clicking/dragging an element
+      setContextMenuPos(null);
+      setContextMenuTarget(null);
+
       e.stopPropagation();
       const element = canvasElements.find((el) => el.id === elementId);
 
@@ -1882,6 +2109,23 @@ export function CXDCanvas() {
             }
           });
 
+          // Move bend points of edges connecting two selected elements
+          if (selectedElementIds.size > 1) {
+            canvasEdges.forEach((edge) => {
+              const fromSelected = selectedElementIds.has(edge.fromNodeId);
+              const toSelected = selectedElementIds.has(edge.toNodeId);
+              // Only move bend if BOTH endpoints are selected
+              if (fromSelected && toSelected && edge.bend) {
+                syncUpdateEdge(edge.id, {
+                  bend: {
+                    x: edge.bend.x + deltaX,
+                    y: edge.bend.y + deltaY,
+                  },
+                });
+              }
+            });
+          }
+
           // Move selected edge bend point if only one edge is selected
           if (selectedEdgeId && selectedElementIds.size === 0) {
             const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
@@ -2148,82 +2392,136 @@ export function CXDCanvas() {
     setActiveTool,
   ]);
 
-  // Smooth zoom with scroll wheel - zoom towards cursor position
+  // Smooth zoom with scroll wheel (Ctrl+scroll) or pan (regular scroll)
   const handleWheel = useCallback(
     (e: WheelEvent) => {
-      // If target is within an element that should prevent canvas wheeling (like sidebar panels), skip zoom
+      // If target is within an element that should prevent canvas wheeling (like sidebar panels), skip
       const target = e.target as HTMLElement;
       if (target.closest('[data-prevent-canvas-wheel="true"]')) {
         return;
       }
 
-      e.preventDefault();
-
       const container = containerRef.current;
       if (!container) return;
 
-      const rect = container.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      // Ctrl+scroll = zoom, regular scroll = pan
+      if (e.ctrlKey || e.metaKey) {
+        // ZOOM MODE - always prevent default to stop browser zoom and scrolling
+        e.preventDefault();
+        e.stopPropagation();
 
-      // Normalize deltaY based on deltaMode
-      // deltaMode 0: pixels, 1: lines (~40px), 2: pages (~800px)
-      let normalizedDelta = e.deltaY;
-      if (e.deltaMode === 1) {
-        normalizedDelta *= 40;
-      } else if (e.deltaMode === 2) {
-        normalizedDelta *= 800;
-      }
+        // Check if we're at zoom limits - if so, do nothing
+        // Use epsilon margin for hard stop with no sliding
+        const ZOOM_EPSILON = 0.001;
+        const isZoomingIn = e.deltaY < 0;
+        const isZoomingOut = e.deltaY > 0;
+        const atMaxZoom = canvasZoom >= MAX_ZOOM - ZOOM_EPSILON;
+        const atMinZoom = canvasZoom <= MIN_ZOOM + ZOOM_EPSILON;
 
-      // For trackpad, use incremental zoom steps to prevent grid sliding
-      const isTrackpad = e.ctrlKey || Math.abs(normalizedDelta) < 10;
+        // HARD STOP: If at zoom limit, block ALL events and return immediately
+        // This prevents any scrolling, panning, or position updates
+        if ((atMaxZoom && isZoomingIn) || (atMinZoom && isZoomingOut)) {
+          // Reset accumulator to prevent buildup
+          zoomAccumulator.current = 0;
+          e.stopImmediatePropagation();
+          return;
+        }
 
-      if (isTrackpad) {
-        // Accumulate delta for trackpad
-        zoomAccumulator.current += normalizedDelta;
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
 
-        // Threshold for zoom step (adjust for sensitivity)
-        const zoomThreshold = 10;
+        // Normalize deltaY based on deltaMode
+        // deltaMode 0: pixels, 1: lines (~40px), 2: pages (~800px)
+        let normalizedDelta = e.deltaY;
+        if (e.deltaMode === 1) {
+          normalizedDelta *= 40;
+        } else if (e.deltaMode === 2) {
+          normalizedDelta *= 800;
+        }
 
-        if (Math.abs(zoomAccumulator.current) >= zoomThreshold) {
-          const zoomDirection = zoomAccumulator.current > 0 ? -1 : 1;
-          const zoomStep = 1.1; // 10% per step
+        // For trackpad with pinch gesture, use incremental zoom steps to prevent grid sliding
+        const isTrackpad = Math.abs(normalizedDelta) < 10;
+
+        if (isTrackpad) {
+          // Accumulate delta for trackpad
+          zoomAccumulator.current += normalizedDelta;
+
+          // Threshold for zoom step (adjust for sensitivity)
+          const zoomThreshold = 10;
+
+          if (Math.abs(zoomAccumulator.current) >= zoomThreshold) {
+            const zoomDirection = zoomAccumulator.current > 0 ? -1 : 1;
+            const zoomStep = 1.1; // 10% per step
+
+            const newZoom = Math.min(
+              MAX_ZOOM,
+              Math.max(MIN_ZOOM, canvasZoom * (zoomDirection > 0 ? zoomStep : 1 / zoomStep)),
+            );
+
+            // Only update if zoom actually changed significantly (prevents sliding at max/min zoom)
+            // Use a small epsilon to avoid floating point precision issues
+            const zoomChanged = Math.abs(newZoom - canvasZoom) > 0.001;
+            if (zoomChanged) {
+              const zoomRatio = newZoom / canvasZoom;
+
+              // Zoom towards cursor position
+              const newPosX = Math.round((mouseX - (mouseX - canvasPosition.x) * zoomRatio) * 100) / 100;
+              const newPosY = Math.round((mouseY - (mouseY - canvasPosition.y) * zoomRatio) * 100) / 100;
+
+              setCanvasZoom(newZoom);
+              setCanvasPosition({ x: newPosX, y: newPosY });
+            }
+
+            // Reset accumulator
+            zoomAccumulator.current = 0;
+          }
+        } else {
+          // Mouse wheel - use continuous zoom with user's sensitivity setting
+          const delta = -normalizedDelta * zoomSensitivity;
 
           const newZoom = Math.min(
             MAX_ZOOM,
-            Math.max(MIN_ZOOM, canvasZoom * (zoomDirection > 0 ? zoomStep : 1 / zoomStep)),
+            Math.max(MIN_ZOOM, canvasZoom * (1 + delta)),
           );
-          const zoomRatio = newZoom / canvasZoom;
 
-          // Zoom towards cursor position
-          const newPosX = Math.round((mouseX - (mouseX - canvasPosition.x) * zoomRatio) * 100) / 100;
-          const newPosY = Math.round((mouseY - (mouseY - canvasPosition.y) * zoomRatio) * 100) / 100;
+          // Only update if zoom actually changed significantly (prevents sliding at max/min zoom)
+          // Use a small epsilon to avoid floating point precision issues
+          const zoomChanged = Math.abs(newZoom - canvasZoom) > 0.001;
+          if (zoomChanged) {
+            const zoomRatio = newZoom / canvasZoom;
 
-          setCanvasZoom(newZoom);
-          setCanvasPosition({ x: newPosX, y: newPosY });
+            // Zoom towards cursor position
+            const newPosX = Math.round((mouseX - (mouseX - canvasPosition.x) * zoomRatio) * 100) / 100;
+            const newPosY = Math.round((mouseY - (mouseY - canvasPosition.y) * zoomRatio) * 100) / 100;
 
-          // Reset accumulator
-          zoomAccumulator.current = 0;
+            setCanvasZoom(newZoom);
+            setCanvasPosition({ x: newPosX, y: newPosY });
+          }
         }
       } else {
-        // Mouse wheel - use continuous zoom with user's sensitivity setting
-        const delta = -normalizedDelta * zoomSensitivity;
+        // PAN MODE - only prevent default for pan mode
+        e.preventDefault();
+        // PAN MODE - scroll to pan X/Y
+        // Shift+scroll = horizontal pan, regular scroll = vertical pan
+        const panSpeed = 1;
 
-        const newZoom = Math.min(
-          MAX_ZOOM,
-          Math.max(MIN_ZOOM, canvasZoom * (1 + delta)),
-        );
-        const zoomRatio = newZoom / canvasZoom;
-
-        // Zoom towards cursor position
-        const newPosX = Math.round((mouseX - (mouseX - canvasPosition.x) * zoomRatio) * 100) / 100;
-        const newPosY = Math.round((mouseY - (mouseY - canvasPosition.y) * zoomRatio) * 100) / 100;
-
-        setCanvasZoom(newZoom);
-        setCanvasPosition({ x: newPosX, y: newPosY });
+        if (e.shiftKey) {
+          // Horizontal pan
+          setCanvasPosition({
+            x: canvasPosition.x - e.deltaY * panSpeed,
+            y: canvasPosition.y
+          });
+        } else {
+          // Vertical pan (or both if deltaX exists)
+          setCanvasPosition({
+            x: canvasPosition.x - (e.deltaX || 0) * panSpeed,
+            y: canvasPosition.y - e.deltaY * panSpeed
+          });
+        }
       }
     },
-    [canvasZoom, canvasPosition, setCanvasZoom, setCanvasPosition],
+    [canvasZoom, canvasPosition, setCanvasZoom, setCanvasPosition, zoomSensitivity],
   );
 
   // Attach wheel event with passive: false
@@ -2234,6 +2532,40 @@ export function CXDCanvas() {
       return () => container.removeEventListener("wheel", handleWheel);
     }
   }, [handleWheel]);
+
+  // Spacebar detection for pan mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        // Don't trigger if typing in an input/textarea
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setIsSpacePressed(false);
+        // If we were panning with space, stop panning
+        if (isPanning) {
+          setIsPanning(false);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isPanning]);
 
   const handleZoomIn = () => {
     const newZoom = Math.min(MAX_ZOOM, canvasZoom * 1.2);
@@ -2246,37 +2578,57 @@ export function CXDCanvas() {
   };
 
   const handleResetView = () => {
-    setCanvasPosition({ x: 100, y: 100 });
-    setCanvasZoom(0.8);
+    // Reset to 100% zoom (1.0) and center the view
+    setCanvasPosition({ x: 0, y: 0 });
+    setCanvasZoom(1.0);
   };
 
   const handleFitAll = () => {
-    // Calculate bounding box of all sections
-    const positions = Object.values(sectionPositions);
-    if (positions.length === 0) return;
-
-    const minX = Math.min(...positions.map((p) => p.x)) - 50;
-    const maxX = Math.max(...positions.map((p) => p.x)) + 350;
-    const minY = Math.min(...positions.map((p) => p.y)) - 50;
-    const maxY = Math.max(...positions.map((p) => p.y)) + 350;
+    // Calculate bounding box of all canvas elements
+    if (canvasElements.length === 0) return;
 
     const container = containerRef.current;
     if (!container) return;
 
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
+    // Find bounds of all elements with padding
+    const padding = 60;
+    const minX = Math.min(...canvasElements.map((el) => el.x)) - padding;
+    const maxX = Math.max(...canvasElements.map((el) => el.x + el.width)) + padding;
+    const minY = Math.min(...canvasElements.map((el) => el.y)) - padding;
+    const maxY = Math.max(...canvasElements.map((el) => el.y + el.height)) + padding;
+
+    // Use getBoundingClientRect for accurate visible dimensions
+    const rect = container.getBoundingClientRect();
+    const containerWidth = rect.width;
+    const containerHeight = rect.height;
+
+    // The container starts at rect.top (64px) but navbar is 80px,
+    // so the top portion is hidden behind the navbar
+    const NAVBAR_HEIGHT = 80;
+    const navbarOverlap = Math.max(0, NAVBAR_HEIGHT - rect.top);
+    const visibleHeight = containerHeight - navbarOverlap;
 
     const contentWidth = maxX - minX;
     const contentHeight = maxY - minY;
 
+    // Calculate zoom to fit all content
     const scaleX = containerWidth / contentWidth;
-    const scaleY = containerHeight / contentHeight;
-    const newZoom = Math.min(scaleX, scaleY, 1) * 0.9;
+    const scaleY = visibleHeight / contentHeight;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(scaleX, scaleY, MAX_ZOOM) * 0.95);
 
+    // Calculate center point of content
+    const contentCenterX = minX + contentWidth / 2;
+    const contentCenterY = minY + contentHeight / 2;
+
+    // Calculate the visible center of the container (accounting for navbar overlap)
+    const visibleCenterX = containerWidth / 2;
+    const visibleCenterY = navbarOverlap + visibleHeight / 2;
+
+    // Calculate position to center the content in the visible viewport
     setCanvasZoom(newZoom);
     setCanvasPosition({
-      x: (containerWidth - contentWidth * newZoom) / 2 - minX * newZoom,
-      y: (containerHeight - contentHeight * newZoom) / 2 - minY * newZoom,
+      x: visibleCenterX - contentCenterX * newZoom,
+      y: visibleCenterY - contentCenterY * newZoom,
     });
   };
 
@@ -2548,6 +2900,162 @@ export function CXDCanvas() {
     [canvasElements, activeBoardId, activeSurface, pushCanvasHistory, syncAddElement, syncAddEdge]
   );
 
+  // Drag and drop file handling
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const files = Array.from(e.dataTransfer.files).filter(file =>
+        file.type.startsWith('image/')
+      );
+
+      if (files.length === 0) return;
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const dropX = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
+      const dropY = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+
+      // Calculate grid layout for multiple images
+      const gridCols = Math.ceil(Math.sqrt(files.length));
+      const spacing = 60; // Increased spacing between images
+      const imageSize = 200;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const row = Math.floor(i / gridCols);
+        const col = i % gridCols;
+
+        const x = dropX + col * (imageSize + spacing);
+        const y = dropY + row * (imageSize + spacing);
+
+        // Create image element
+        const newElement: CanvasElement = {
+          id: uuidv4(),
+          type: 'image',
+          x,
+          y,
+          width: imageSize,
+          height: imageSize,
+          src: '', // Will be updated after upload
+          alt: file.name,
+          boardId: activeBoardId || undefined,
+          surface: activeSurface || 'main',
+          zIndex: 1,
+        };
+
+        syncAddElement(newElement);
+
+        // Upload the image
+        try {
+          // Create image element to read dimensions
+          const img = document.createElement("img");
+          const objectUrl = URL.createObjectURL(file);
+
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = reject;
+            img.src = objectUrl;
+          });
+
+          // Compress if needed
+          const maxWidth = 1600;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, width, height);
+
+          URL.revokeObjectURL(objectUrl);
+
+          // Convert to blob
+          const blob = await new Promise<Blob>((resolve) => {
+            canvas.toBlob((b) => resolve(b!), "image/webp", 0.8);
+          });
+
+          // Upload to Supabase Storage
+          const supabase = (await import('../../../supabase/client')).createClient();
+          const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.webp`;
+
+          const { data, error } = await supabase.storage
+            .from("canvas-uploads")
+            .upload(fileName, blob, {
+              contentType: "image/webp",
+              cacheControl: "3600",
+            });
+
+          if (error) {
+            console.error("Upload error:", error);
+            syncRemoveElement(newElement.id);
+            continue;
+          }
+
+          // Get public URL
+          const { data: urlData } = supabase.storage
+            .from("canvas-uploads")
+            .getPublicUrl(data.path);
+
+          // Calculate element dimensions based on image aspect ratio
+          const maxElementWidth = 400;
+          const maxElementHeight = 400;
+          const aspectRatio = width / height;
+
+          let elementWidth = width;
+          let elementHeight = height;
+
+          if (elementWidth > maxElementWidth) {
+            elementWidth = maxElementWidth;
+            elementHeight = elementWidth / aspectRatio;
+          }
+
+          if (elementHeight > maxElementHeight) {
+            elementHeight = maxElementHeight;
+            elementWidth = elementHeight * aspectRatio;
+          }
+
+          const minSize = 100;
+          if (elementWidth < minSize) {
+            elementWidth = minSize;
+            elementHeight = elementWidth / aspectRatio;
+          }
+
+          // Update element with image data
+          syncUpdateElement(newElement.id, {
+            src: urlData.publicUrl,
+            imageMeta: {
+              width,
+              height,
+              bytes: blob.size,
+              originalName: file.name,
+            },
+            width: Math.round(elementWidth),
+            height: Math.round(elementHeight),
+          });
+        } catch (error) {
+          console.error('Failed to upload image:', error);
+          syncRemoveElement(newElement.id);
+        }
+      }
+    },
+    [canvasPosition, canvasZoom, activeBoardId, activeSurface, syncAddElement, syncUpdateElement, syncRemoveElement],
+  );
+
   // Touch handling for mobile
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
@@ -2610,9 +3118,11 @@ export function CXDCanvas() {
       ref={containerRef}
       className={`fixed inset-0 top-16 overflow-hidden select-none transition-[right] duration-300 ${isPanning
         ? "cursor-grabbing"
-        : draggingElement
-          ? "cursor-move"
-          : "cursor-grab w-full h-full"
+        : isSpacePressed
+          ? "cursor-grab"
+          : draggingElement
+            ? "cursor-move"
+            : "cursor-default w-full h-full"
         }`}
       style={{ right: canvasRightMargin, background: canvasBackground }}
       onMouseDown={handleCanvasMouseDown}
@@ -2622,10 +3132,31 @@ export function CXDCanvas() {
         handleCanvasMouseUp();
         clearCursor?.();
       }}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        // Check if right-clicking on an element
+        const target = e.target as HTMLElement;
+        const elementDiv = target.closest('[data-node-id]');
+
+        if (elementDiv) {
+          // Right-click on element
+          const elementId = elementDiv.getAttribute('data-node-id');
+          if (elementId) {
+            setSelectedElementId(elementId);
+            if (!selectedElementIds.has(elementId)) {
+              setSelectedElementIds(new Set([elementId]));
+            }
+            setContextMenuPos({ x: e.clientX, y: e.clientY });
+            setContextMenuTarget({ type: 'element', elementId });
+          }
+        }
+        // Canvas right-click is handled in handleCanvasMouseDown
+        e.preventDefault();
+      }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       {/* Canvas Background with dot grid */}
       <div
@@ -2683,31 +3214,31 @@ export function CXDCanvas() {
           .filter((el) => el.type !== "line")
           .map((element) => (
             <CanvasElementRenderer
-              key={element.id}
-              element={element}
-              onUpdate={(updates) => syncUpdateElement(element.id, updates)}
-              onDelete={() => syncRemoveElement(element.id)}
-              onDuplicate={() => duplicateCanvasElement(element.id)}
-              onDragStart={(e) => {
-                // Prevent dragging while connecting
-                if (!isConnecting) {
-                  handleElementDragStart(element.id, e);
+                key={element.id}
+                element={element}
+                onUpdate={(updates) => syncUpdateElement(element.id, updates)}
+                onDelete={() => syncRemoveElement(element.id)}
+                onDuplicate={() => duplicateCanvasElement(element.id)}
+                onDragStart={(e) => {
+                  // Prevent dragging while connecting
+                  if (!isConnecting) {
+                    handleElementDragStart(element.id, e);
+                  }
+                }}
+                onDragEnd={handleElementDragEnd}
+                isDragging={draggingElement === element.id}
+                isSelected={
+                  selectedElementId === element.id ||
+                  selectedElementIds.has(element.id)
                 }
-              }}
-              onDragEnd={handleElementDragEnd}
-              isDragging={draggingElement === element.id}
-              isSelected={
-                selectedElementId === element.id ||
-                selectedElementIds.has(element.id)
-              }
-              isMultiSelected={selectedElementIds.size > 1}
-              isDropTarget={
-                dropTargetBoardId === element.id ||
-                dropTargetContainerId === element.id
-              }
-              isHighlighted={highlightedElementId === element.id}
-              isHoverTarget={hoverTargetNodeId === element.id}
-              onSelect={(e) => {
+                isMultiSelected={selectedElementIds.size > 1}
+                isDropTarget={
+                  dropTargetBoardId === element.id ||
+                  dropTargetContainerId === element.id
+                }
+                isHighlighted={highlightedElementId === element.id}
+                isHoverTarget={hoverTargetNodeId === element.id}
+                onSelect={(e) => {
                 if (e?.shiftKey || e?.ctrlKey || e?.metaKey) {
                   // Multi-select with Shift/Ctrl/Cmd
                   const newSelected = new Set(selectedElementIds);
@@ -3424,6 +3955,201 @@ export function CXDCanvas() {
             </span>
           </div>
         </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenuPos && contextMenuTarget && (
+        <CanvasContextMenu
+          position={contextMenuPos}
+          target={contextMenuTarget}
+          onClose={() => {
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+          onCreateElement={(type: CanvasElementType) => {
+            if (containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              const x = (contextMenuPos.x - rect.left - canvasPosition.x) / canvasZoom;
+              const y = (contextMenuPos.y - rect.top - canvasPosition.y) / canvasZoom;
+
+              const baseElement = {
+                id: uuidv4(),
+                type,
+                x,
+                y,
+                width: DEFAULT_ELEMENT_SIZES[type].width,
+                height: DEFAULT_ELEMENT_SIZES[type].height,
+                boardId: activeBoardId || undefined,
+                surface: activeSurface || 'main',
+                zIndex: 1,
+              };
+
+              // Add type-specific properties
+              let newElement: CanvasElement;
+              switch (type) {
+                case 'text':
+                  newElement = { ...baseElement, type: 'text', content: '' };
+                  break;
+                case 'image':
+                  newElement = { ...baseElement, type: 'image', src: '', alt: '' };
+                  break;
+                case 'shape':
+                  newElement = { ...baseElement, type: 'shape', shapeType: 'rectangle' as ShapeType, style: {} };
+                  break;
+                case 'link':
+                  newElement = { ...baseElement, type: 'link', url: '', title: '', linkMode: 'embed' };
+                  break;
+                case 'container':
+                  newElement = { ...baseElement, type: 'container' };
+                  break;
+                case 'board':
+                  newElement = { ...baseElement, type: 'board', label: 'Board', icon: '📋', childBoardId: uuidv4() };
+                  break;
+                default:
+                  newElement = { ...baseElement, type: 'freeform', content: '' };
+              }
+
+              syncAddElement(newElement);
+              setSelectedElementId(newElement.id);
+            }
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+          onCopy={() => {
+            if (selectedElementId) {
+              const element = canvasElements.find(el => el.id === selectedElementId);
+              if (element) {
+                setClipboard([element]);
+              }
+            } else if (selectedElementIds.size > 0) {
+              const elements = canvasElements.filter(el => selectedElementIds.has(el.id));
+              setClipboard(elements);
+            }
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+          onCut={() => {
+            if (selectedElementId) {
+              const element = canvasElements.find(el => el.id === selectedElementId);
+              if (element) {
+                setClipboard([element]);
+                syncRemoveElement(selectedElementId);
+              }
+            } else if (selectedElementIds.size > 0) {
+              const elements = canvasElements.filter(el => selectedElementIds.has(el.id));
+              setClipboard(elements);
+              elements.forEach(el => syncRemoveElement(el.id));
+            }
+            setSelectedElementId(null);
+            setSelectedElementIds(new Set());
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+          onPaste={() => {
+            if (clipboard.length > 0 && containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              const pasteX = (contextMenuPos.x - rect.left - canvasPosition.x) / canvasZoom;
+              const pasteY = (contextMenuPos.y - rect.top - canvasPosition.y) / canvasZoom;
+
+              const newIds = clipboard.map((el, i) => {
+                const newElement = {
+                  ...el,
+                  id: uuidv4(),
+                  x: pasteX + i * 20,
+                  y: pasteY + i * 20,
+                };
+                syncAddElement(newElement);
+                return newElement.id;
+              });
+
+              setSelectedElementIds(new Set(newIds));
+              if (newIds.length > 0) {
+                setSelectedElementId(newIds[0]);
+              }
+            }
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+          onDuplicate={() => {
+            if (selectedElementId) {
+              const element = canvasElements.find(el => el.id === selectedElementId);
+              if (element) {
+                const newElement = {
+                  ...element,
+                  id: uuidv4(),
+                  x: element.x + 20,
+                  y: element.y + 20,
+                };
+                syncAddElement(newElement);
+                setSelectedElementId(newElement.id);
+              }
+            } else if (selectedElementIds.size > 0) {
+              const newIds: string[] = [];
+              selectedElementIds.forEach(id => {
+                const element = canvasElements.find(el => el.id === id);
+                if (element) {
+                  const newElement = {
+                    ...element,
+                    id: uuidv4(),
+                    x: element.x + 20,
+                    y: element.y + 20,
+                  };
+                  syncAddElement(newElement);
+                  newIds.push(newElement.id);
+                }
+              });
+              setSelectedElementIds(new Set(newIds));
+              if (newIds.length > 0) {
+                setSelectedElementId(newIds[0]);
+              }
+            }
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+          onDelete={() => {
+            if (selectedElementId) {
+              syncRemoveElement(selectedElementId);
+              setSelectedElementId(null);
+            } else if (selectedElementIds.size > 0) {
+              selectedElementIds.forEach(id => syncRemoveElement(id));
+              setSelectedElementIds(new Set());
+            }
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+          hasSelection={!!(selectedElementId || selectedElementIds.size > 0)}
+          hasClipboard={clipboard.length > 0}
+          isImageSelected={(() => {
+            if (selectedElementId) {
+              const element = canvasElements.find(el => el.id === selectedElementId);
+              return element?.type === 'image';
+            }
+            return false;
+          })()}
+          onDownloadImage={async () => {
+            if (selectedElementId) {
+              const element = canvasElements.find(el => el.id === selectedElementId);
+              if (element && element.type === 'image' && (element as any).src) {
+                try {
+                  const response = await fetch((element as any).src);
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = (element as any).imageMeta?.originalName || 'image.png';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  window.URL.revokeObjectURL(url);
+                } catch (error) {
+                  console.error('Failed to download image:', error);
+                }
+              }
+            }
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
+        />
       )}
     </div>
   );

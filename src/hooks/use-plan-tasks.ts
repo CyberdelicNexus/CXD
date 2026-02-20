@@ -101,16 +101,22 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   // Get all elements from project (including boards)
   const allElements = useMemo(() => {
     if (!project) return [];
-    
+
     const elements: CanvasElement[] = [...(project.canvasLayout?.elements || [])];
-    
+
     // Include elements from all boards
     if (project.canvasLayout?.boards) {
       project.canvasLayout.boards.forEach(board => {
         elements.push(...board.nodes);
       });
     }
-    
+
+    console.log('[usePlanTasks] Total elements:', elements.length);
+    console.log('[usePlanTasks] Elements with taskMetadata:',
+      elements.filter(el => 'taskMetadata' in el).length);
+    console.log('[usePlanTasks] Elements with isActionable=true:',
+      elements.filter(el => 'taskMetadata' in el && (el as any).taskMetadata?.isActionable === true).length);
+
     return elements;
   }, [project]);
   
@@ -124,7 +130,12 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   
   // Execute query
   const { tasks, total } = useMemo(() => {
-    return queryTasks(allElements, query);
+    const result = queryTasks(allElements, query);
+    console.log('[usePlanTasks] Qualified tasks:', result.tasks.length, 'of', result.total, 'total');
+    if (result.tasks.length > 0) {
+      console.log('[usePlanTasks] Sample task:', result.tasks[0]);
+    }
+    return result;
   }, [allElements, query]);
   
   // Pre-computed groupings for views

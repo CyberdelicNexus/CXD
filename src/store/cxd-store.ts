@@ -509,7 +509,7 @@ export const useCXDStore = create<CXDState>()(
         }
       },
       setCanvasZoom: (zoom) => {
-        set({ canvasZoom: Math.max(0.1, Math.min(2, zoom)) });
+        set({ canvasZoom: Math.max(0.1, Math.min(3, zoom)) });
         // Auto-save viewport when zoom changes (only for canvas view, not hypercube)
         const { canvasViewMode } = get();
         if (canvasViewMode !== 'hexagon') {
@@ -542,21 +542,12 @@ export const useCXDStore = create<CXDState>()(
       },
 
       restoreViewport: (canvasId: string) => {
-        const { viewportByCanvasId } = get();
-        const savedViewport = viewportByCanvasId[canvasId];
-
-        if (savedViewport) {
-          set({
-            canvasPosition: { x: savedViewport.x, y: savedViewport.y },
-            canvasZoom: savedViewport.zoom,
-          });
-        } else {
-          // Use default viewport if none saved
-          set({
-            canvasPosition: { x: CANVAS_DEFAULT_VIEWPORT.x, y: CANVAS_DEFAULT_VIEWPORT.y },
-            canvasZoom: CANVAS_DEFAULT_VIEWPORT.zoom,
-          });
-        }
+        // Always start at root position (default viewport)
+        // This ensures consistent starting point regardless of previous session
+        set({
+          canvasPosition: { x: CANVAS_DEFAULT_VIEWPORT.x, y: CANVAS_DEFAULT_VIEWPORT.y },
+          canvasZoom: CANVAS_DEFAULT_VIEWPORT.zoom,
+        });
       },
 
       resetHypercubeViewport: () => {

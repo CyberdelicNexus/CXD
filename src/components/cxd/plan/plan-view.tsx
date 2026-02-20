@@ -73,6 +73,8 @@ export function PlanView() {
   const [newTaskDueDate, setNewTaskDueDate] = useState<Date | undefined>(undefined);
   const [newTaskStartDate, setNewTaskStartDate] = useState<Date | undefined>(undefined);
   const [newTaskFaces, setNewTaskFaces] = useState<HypercubeFaceTag[]>([]);
+  const [newTaskVersionId, setNewTaskVersionId] = useState<string | null>(null);
+  const [roadmapVersionId, setRoadmapVersionId] = useState<string | null>(null);
   const [headerHeight, setHeaderHeight] = useState(72);
   const headerRef = useRef<HTMLDivElement>(null);
   const headerOffsetWithinContainer = '1rem'; // fixed header top-20 minus page main pt-16
@@ -114,6 +116,19 @@ export function PlanView() {
   const versions = useCXDStore(state => state.getVersions());
   const { syncAddElement, syncRemoveElement } = useCollaborationContext();
 
+  // Pre-select roadmap version when opening Add Task dialog from versions view
+  const handleOpenAddTask = (open: boolean) => {
+    if (open) {
+      // Set version before opening dialog
+      if (activeView === 'versions' && roadmapVersionId) {
+        setNewTaskVersionId(roadmapVersionId);
+      } else if (versions.length > 0) {
+        setNewTaskVersionId(versions[0].id);
+      }
+    }
+    setIsAddTaskOpen(open);
+  };
+
   const {
     tasks,
     updateTaskStatus,
@@ -128,6 +143,17 @@ export function PlanView() {
   const archivedTasks = tasks.filter(task => task.isArchived);
   const visibleCount = activeView === 'archive' ? archivedTasks.length : activeTasks.length;
 
+  // Debug logging for task visibility
+  console.log('[PlanView] Active view:', activeView);
+  console.log('[PlanView] Total tasks:', tasks.length);
+  console.log('[PlanView] Active tasks (not archived):', activeTasks.length);
+  console.log('[PlanView] Archived tasks:', archivedTasks.length);
+  if (activeView === 'versions') {
+    console.log('[PlanView] Versions - selected version:', selectedVersionId);
+    const tasksForVersion = activeTasks.filter(t => t.taskMetadata?.versionId === selectedVersionId);
+    console.log('[PlanView] Versions - tasks for selected version:', tasksForVersion.length);
+  }
+
   // Dynamic background based on canvas background
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
   const centerColor = extractCenterColor(canvasBackground);
@@ -136,6 +162,9 @@ export function PlanView() {
 
   const handleAddTask = () => {
     if (!newTaskText.trim() || !project) return;
+
+    const yDoc = useCXDStore.getState().yDoc;
+    console.log('[PlanView] Creating task - Y.js CRDT enabled:', !!yDoc);
 
     // Create a new freeform element with task checkbox syntax
     // Tasks go to the Task Inbox instead of random canvas positions
@@ -163,10 +192,21 @@ export function PlanView() {
         startDate: newTaskStartDate?.toISOString(),
         dueDate: newTaskDueDate?.toISOString(),
         description: newTaskDescription.trim() || undefined,
+        versionId: newTaskVersionId || undefined,
       },
     };
 
+    console.log('[PlanView] Adding task element:', newElement);
     syncAddElement(newElement as any);
+
+    // Log store state after add (with small delay to allow Y.js sync)
+    setTimeout(() => {
+      const currentProject = useCXDStore.getState().getCurrentProject();
+      const elements = currentProject?.canvasLayout?.elements || [];
+      console.log('[PlanView] After add - total elements:', elements.length);
+      console.log('[PlanView] After add - task found:', elements.some(el => el.id === newElement.id));
+    }, 100);
+
     setNewTaskText('');
     setNewTaskDescription('');
     setNewTaskStatus('not_started');
@@ -175,6 +215,7 @@ export function PlanView() {
     setNewTaskDueDate(undefined);
     setNewTaskStartDate(undefined);
     setNewTaskFaces([]);
+    setNewTaskVersionId(null);
     setIsAddTaskOpen(false);
   };
 
@@ -229,7 +270,7 @@ export function PlanView() {
           </span>
         </div>
 
-        <Dialog open={isAddTaskOpen} onOpenChange={setIsAddTaskOpen} modal={false}>
+        <Dialog open={isAddTaskOpen} onOpenChange={handleOpenAddTask} modal={false}>
           <DialogTrigger asChild>
             <Button variant="default" size="sm">
               <Plus className="w-4 h-4 mr-2" />
@@ -319,6 +360,22 @@ export function PlanView() {
                 <label className="text-xs text-muted-foreground">Hypercube Faces</label>
                 <FaceTagSelector value={newTaskFaces} onChange={setNewTaskFaces} />
               </div>
+              {versions.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Version / Release</label>
+                  <select
+                    value={newTaskVersionId || ''}
+                    onChange={(e) => setNewTaskVersionId(e.target.value || null)}
+                    className="w-full h-9 rounded-md bg-black/40 border border-white/10 px-3 text-sm text-white"
+                    style={{ colorScheme: 'dark' }}
+                  >
+                    <option value="">Unassigned</option>
+                    {versions.map((v) => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex gap-2">
                 <Button onClick={handleAddTask} className="flex-1">
                   Create Task
@@ -401,6 +458,7 @@ export function PlanView() {
               onTaskClick={setSelectedTaskId}
               onTaskNavigate={navigateToTask}
               onTaskUpdate={updateTaskMetadata}
+              onVersionSelect={setRoadmapVersionId}
             />
           )}
         </div>

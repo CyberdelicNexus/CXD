@@ -375,6 +375,10 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     const rootTasks: TaskHierarchy[] = [];
     const taskIndexMap = new Map<string, number>(tasks.map((task, idx) => [task.id, idx]));
 
+    console.log('[GanttView] Received tasks:', tasks.length);
+    console.log('[GanttView] Active filters:', filters);
+    console.log('[GanttView] Search query:', searchQuery);
+
     // Filter by search query
     let filteredTasks = tasks;
 
@@ -401,6 +405,11 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
       filteredTasks = filteredTasks.filter(task =>
         task.hypercubeTags && task.hypercubeTags.some(tag => filters.hypercubeFaces.includes(tag))
       );
+    }
+
+    console.log('[GanttView] After filters - remaining tasks:', filteredTasks.length);
+    if (filteredTasks.length === 0 && tasks.length > 0) {
+      console.warn('[GanttView] All tasks filtered out! Check active filters.');
     }
 
     // First pass: create task hierarchy nodes
@@ -1992,7 +2001,14 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                         </div>
                       ) : (
                         <>
-                          <div className="text-sm font-medium truncate">{task.title}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-medium truncate">{task.title}</div>
+                            {!task.startDate && !task.dueDate && (
+                              <div className="flex items-center gap-1 text-[10px] text-purple-400/60 shrink-0" title="Click timeline to schedule">
+                                <Calendar className="w-3 h-3" />
+                              </div>
+                            )}
+                          </div>
                           {task.hypercubeTags && task.hypercubeTags.length > 0 && (
                             <div className="flex gap-1 mt-1">
                               {task.hypercubeTags.slice(0, 3).map((tag) => (
@@ -2060,6 +2076,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                 <Calendar className="w-12 h-12 mb-4 opacity-50" />
                 <p>No tasks found</p>
+                <p className="text-xs mt-2">Click "Add Task" button above to create your first task</p>
               </div>
             )}
           </div>

@@ -93,34 +93,75 @@ export default function DashboardNavbar() {
     if (!supportMessage.trim()) return
     setIsSubmitting(true)
 
-    // Send email via mailto
-    const subject = encodeURIComponent('CXD Canvas Support Request')
-    const body = encodeURIComponent(`Support Message:\n\n${supportMessage}`)
-    window.location.href = `mailto:contact@cyberdelic.design?subject=${subject}&body=${body}`
+    try {
+      // Get browser info
+      const browserInfo = `${navigator.userAgent} | Screen: ${window.screen.width}x${window.screen.height}`
 
-    setIsSubmitting(false)
-    setSubmitSuccess(true)
-    // Close dialog after brief success display
-    setTimeout(() => {
-      setShowSupportModal(false)
-    }, 1500)
+      const response = await fetch('/api/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Support Request',
+          description: supportMessage,
+          browserInfo,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setSubmitSuccess(true)
+        // Close dialog after brief success display
+        setTimeout(() => {
+          setShowSupportModal(false)
+        }, 1500)
+      } else {
+        throw new Error(data.error || 'Failed to submit support request')
+      }
+    } catch (error) {
+      console.error('Support submission error:', error)
+      alert('Failed to submit support request. Please try again or email contact@cyberdelic.design')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleBugSubmit = async () => {
     if (!bugDescription.trim()) return
     setIsSubmitting(true)
 
-    // Send email via mailto
-    const subject = encodeURIComponent('CXD Canvas Bug Report')
-    const body = encodeURIComponent(`Bug Description:\n${bugDescription}\n\nSteps to Reproduce:\n${bugSteps || 'Not provided'}`)
-    window.location.href = `mailto:contact@cyberdelic.design?subject=${subject}&body=${body}`
+    try {
+      // Get browser info
+      const browserInfo = `${navigator.userAgent} | Screen: ${window.screen.width}x${window.screen.height}`
 
-    setIsSubmitting(false)
-    setSubmitSuccess(true)
-    // Close dialog after brief success display
-    setTimeout(() => {
-      setShowBugModal(false)
-    }, 1500)
+      const response = await fetch('/api/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Bug Report',
+          description: bugDescription,
+          stepsToReproduce: bugSteps || undefined,
+          browserInfo,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setSubmitSuccess(true)
+        // Close dialog after brief success display
+        setTimeout(() => {
+          setShowBugModal(false)
+        }, 1500)
+      } else {
+        throw new Error(data.error || 'Failed to submit bug report')
+      }
+    } catch (error) {
+      console.error('Bug report submission error:', error)
+      alert('Failed to submit bug report. Please try again or email contact@cyberdelic.design')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleSignOut = async () => {

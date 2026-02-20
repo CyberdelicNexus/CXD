@@ -113,6 +113,7 @@ import {
   Calendar,
   Tag,
   AlertCircle,
+  Download,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
@@ -806,9 +807,13 @@ export function CanvasElementRenderer({
       {isSelected && !isDragging && element.type !== "line" && !isReadOnly && !isMultiSelected && (
         <div
           className={cn(
-            "absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl",
+            "absolute -top-10 left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl",
             "bg-white/10 backdrop-blur-3xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)] z-50 top-[-57px]",
           )}
+          style={{
+            transform: `translateX(-50%) scale(${1 / canvasZoom})`,
+            transformOrigin: 'center bottom',
+          }}
           onMouseDown={(e) => e.stopPropagation()}
         >
           {/* Element-specific actions */}
@@ -1577,6 +1582,33 @@ export function CanvasElementRenderer({
               title="Send to Inbox"
             >
               <Inbox className="w-4 h-4" />
+            </button>
+          )}
+          {/* Download Image button - only for image elements */}
+          {element.type === 'image' && (element as ImageElement).src && (
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                const imageElement = element as ImageElement;
+                try {
+                  const response = await fetch(imageElement.src);
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = imageElement.imageMeta?.originalName || 'image.png';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  window.URL.revokeObjectURL(url);
+                } catch (error) {
+                  console.error('Failed to download image:', error);
+                }
+              }}
+              className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+              title="Download Image"
+            >
+              <Download className="w-4 h-4" />
             </button>
           )}
           <button
@@ -4923,6 +4955,33 @@ function ImageCard({
         .from("canvas-uploads")
         .getPublicUrl(data.path);
 
+      // Calculate element dimensions based on image aspect ratio
+      // Max size constraints for the canvas element
+      const maxElementWidth = 400;
+      const maxElementHeight = 400;
+      const aspectRatio = width / height;
+
+      let elementWidth = width;
+      let elementHeight = height;
+
+      // Scale down if image is too large
+      if (elementWidth > maxElementWidth) {
+        elementWidth = maxElementWidth;
+        elementHeight = elementWidth / aspectRatio;
+      }
+
+      if (elementHeight > maxElementHeight) {
+        elementHeight = maxElementHeight;
+        elementWidth = elementHeight * aspectRatio;
+      }
+
+      // Ensure minimum size
+      const minSize = 100;
+      if (elementWidth < minSize) {
+        elementWidth = minSize;
+        elementHeight = elementWidth / aspectRatio;
+      }
+
       onUpdate({
         src: urlData.publicUrl,
         imageMeta: {
@@ -4931,6 +4990,9 @@ function ImageCard({
           bytes: blob.size,
           originalName: file.name,
         },
+        // Update element dimensions to match image aspect ratio
+        width: Math.round(elementWidth),
+        height: Math.round(elementHeight),
       });
       setHasImage(true);
     } catch (err) {
