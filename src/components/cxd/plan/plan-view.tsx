@@ -474,6 +474,7 @@ export function PlanView() {
               onClose={() => setSelectedTaskId(null)}
               onUpdate={(updates) => updateTaskMetadata(selectedTask.id, updates)}
               onNavigate={() => navigateToTask(selectedTask.id)}
+              onDelete={handleDeleteTask}
             />
           </div>
         )}

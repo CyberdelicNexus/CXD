@@ -18,12 +18,23 @@ import type { TaskProjection, TaskStatus, TaskPriority, TaskType } from '@/types
 import { HYPERCUBE_FACE_COLORS } from '@/types/plan-types';
 import { X, Calendar, User, Clock, Tag, ExternalLink, CheckCircle2, Circle, Plus, Trash2, Archive, RotateCcw, Milestone } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface TaskDetailPanelProps {
   task: TaskProjection;
   onClose: () => void;
   onUpdate: (updates: Partial<TaskProjection>) => void;
   onNavigate: () => void;
+  onDelete?: (taskId: string) => void;
 }
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
@@ -48,10 +59,11 @@ const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
   { value: 'Custom', label: 'Custom' },
 ];
 
-export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate }: TaskDetailPanelProps) {
+export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate, onDelete }: TaskDetailPanelProps) {
   const [newPropertyKey, setNewPropertyKey] = useState('');
   const [newPropertyValue, setNewPropertyValue] = useState('');
   const [showAddProperty, setShowAddProperty] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description || '');
@@ -75,11 +87,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate }: TaskDet
   };
 
   const handleDueDateChange = (date: Date | undefined) => {
-    onUpdate({ dueDate: date?.toISOString() });
+    onUpdate({ dueDate: date ? date.toISOString() : undefined });
   };
 
   const handleStartDateChange = (date: Date | undefined) => {
-    onUpdate({ startDate: date?.toISOString() });
+    onUpdate({ startDate: date ? date.toISOString() : undefined });
   };
 
   const handleAssigneeChange = (assignees: string[]) => {
@@ -201,6 +213,17 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate }: TaskDet
           >
             {task.isArchived ? <RotateCcw className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
           </Button>
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDeleteDialog(true)}
+              title="Delete task"
+              className="hover:text-red-500"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
@@ -621,6 +644,45 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onNavigate }: TaskDet
           View in Canvas
         </Button>
       </div>
+
+      {/* Delete/Archive Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent className="bg-black/95 border-purple-500/30">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-purple-400">What would you like to do with this task?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/70">
+              Choose how to handle <span className="font-semibold text-white">"{task.title}"</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel className="bg-white/10 border-white/20 hover:bg-white/20 mt-0">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                onUpdate({ isArchived: true });
+                setShowDeleteDialog(false);
+                onClose();
+              }}
+              className="bg-purple-500 hover:bg-purple-600 text-white mt-0"
+            >
+              Archive
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                if (onDelete) {
+                  onDelete(task.id);
+                  setShowDeleteDialog(false);
+                  onClose();
+                }
+              }}
+              className="bg-red-500 hover:bg-red-600 text-white mt-0"
+            >
+              Permanently Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

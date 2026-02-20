@@ -1,13 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useCXDStore } from "@/store/cxd-store";
-import { CXDWizard } from "@/components/cxd/cxd-wizard";
-import { CXDCanvas } from "@/components/cxd/cxd-canvas";
-import { CXDFocusMode } from "@/components/cxd/cxd-focus-mode";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
-import { HexagonView } from "@/components/cxd/canvas/hexagon-view";
-import { PlanView } from "@/components/cxd/plan/plan-view";
+import { LoadingScreen } from "@/components/cxd/loading-screen";
 import { useProjectSync, getLocalBackup, clearLocalBackup } from "@/hooks/use-project-sync";
 import { fetchUserProjects, saveProject } from "@/lib/supabase-projects";
 import { createClient } from "../../../supabase/client";
@@ -16,6 +13,24 @@ import { CollaborationProvider } from "@/contexts/collaboration-context";
 import { YjsProjectProvider } from "@/contexts/yjs-project-context";
 import { CreditTopUpSuccess } from "@/components/cxd/credit-topup-success";
 import type { CanvasUpdate } from "@/hooks/use-collaboration";
+
+// Dynamically import heavy components to improve initial load time
+// No loading fallback to prevent showing loading screen when switching tabs
+const CXDWizard = dynamic(() => import("@/components/cxd/cxd-wizard").then(mod => ({ default: mod.CXDWizard })), {
+  ssr: false
+});
+const CXDCanvas = dynamic(() => import("@/components/cxd/cxd-canvas").then(mod => ({ default: mod.CXDCanvas })), {
+  ssr: false
+});
+const CXDFocusMode = dynamic(() => import("@/components/cxd/cxd-focus-mode").then(mod => ({ default: mod.CXDFocusMode })), {
+  ssr: false
+});
+const HexagonView = dynamic(() => import("@/components/cxd/canvas/hexagon-view").then(mod => ({ default: mod.HexagonView })), {
+  ssr: false
+});
+const PlanView = dynamic(() => import("@/components/cxd/plan/plan-view").then(mod => ({ default: mod.PlanView })), {
+  ssr: false
+});
 
 export default function CXDPage() {
   const router = useRouter();
@@ -90,7 +105,7 @@ export default function CXDPage() {
     // Small delay to ensure persist middleware has hydrated
     const timer = setTimeout(() => {
       setHasHydrated(true);
-    }, 100);
+    }, 50); // Reduced from 100ms to 50ms for faster loading
     return () => clearTimeout(timer);
   }, []);
 
@@ -339,12 +354,10 @@ export default function CXDPage() {
     <YjsProjectProvider>
     <CollaborationProvider onRemoteUpdate={handleRemoteUpdate}>
       <div className="min-h-screen bg-gradient-radial">
-        <CXDNavbar />
-        <main className="pt-20">
+        {!isRestoring && <CXDNavbar />}
+        <main className={!isRestoring ? "pt-20" : ""}>
           {isRestoring ? (
-            <div className="flex items-center justify-center min-h-[80vh]">
-              <div className="text-muted-foreground">Restoring project...</div>
-            </div>
+            <LoadingScreen />
           ) : (
             <>
               {viewMode === "wizard" && <CXDWizard />}

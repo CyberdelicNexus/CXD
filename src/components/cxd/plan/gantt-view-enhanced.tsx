@@ -38,6 +38,16 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface GanttViewProps {
   tasks: TaskProjection[];
@@ -68,6 +78,15 @@ interface DependencyDragState {
   sourceNode: 'start' | 'end';
   mouseX: number;
   mouseY: number;
+}
+
+interface VersionDragState {
+  versionId: string;
+  edge: 'start' | 'end' | 'move';
+  initialX: number;
+  initialStartDate: Date;
+  initialEndDate: Date;
+  startX: number;
 }
 
 interface HoverPreview {
@@ -107,6 +126,7 @@ const readLocalStorageJson = <T,>(key: string, fallback: T): T => {
 export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNavigate, onTaskUpdate, onTaskDelete, detailPanelOpen, onVersionClick }: GanttViewProps) {
   // Get OKRs from store for version progress calculation
   const allOKRs = useCXDStore((state) => state.getCurrentProject()?.okrs || []);
+  const updateVersion = useCXDStore((state) => state.updateVersion);
 
   // Persisted settings (localStorage)
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(() => {
@@ -171,6 +191,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [versionDragState, setVersionDragState] = useState<VersionDragState | null>(null);
   const [dependencyDragState, setDependencyDragState] = useState<DependencyDragState | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
@@ -187,7 +208,9 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
   const [newlyCreatedDependency, setNewlyCreatedDependency] = useState<string | null>(null);
   const [manualOrder, setManualOrder] = useState<Record<string, number>>(() => readLocalStorageJson<Record<string, number>>('gantt-manual-order', {}));
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [draggedVersionId, setDraggedVersionId] = useState<string | null>(null);
   const [timelineExtension, setTimelineExtension] = useState({ before: 0, after: 0 });
+  const [taskToDelete, setTaskToDelete] = useState<{ id: string; title: string } | null>(null);
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const timelineContentRef = useRef<HTMLDivElement>(null);
@@ -1042,6 +1065,55 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
   };
 
   const handleDragMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Handle version dragging
+    if (versionDragState && timelineRef.current && updateVersion) {
+      console.log('[Version Drag] Moving version:', versionDragState.versionId, versionDragState.edge);
+      const contentWidth = timelineRef.current.scrollWidth;
+      const totalDuration = endDate.getTime() - startDate.getTime();
+      const deltaX = e.clientX - versionDragState.startX;
+      const msPerPixel = totalDuration / contentWidth;
+
+      // Snap to day boundaries
+      const daysMoved = Math.round((deltaX * msPerPixel) / (24 * 60 * 60 * 1000));
+      if (daysMoved === 0) return;
+      console.log('[Version Drag] Days moved:', daysMoved);
+
+      if (versionDragState.edge === 'move') {
+        let newStartDate = new Date(versionDragState.initialStartDate);
+        newStartDate.setDate(newStartDate.getDate() + daysMoved);
+        newStartDate.setHours(0, 0, 0, 0);
+
+        const duration = versionDragState.initialEndDate.getTime() - versionDragState.initialStartDate.getTime();
+        let newEndDate = new Date(newStartDate.getTime() + duration);
+
+        updateVersion(versionDragState.versionId, {
+          started_at: newStartDate.toISOString(),
+          targetDate: newEndDate.toISOString()
+        });
+      } else if (versionDragState.edge === 'start') {
+        let newStartDate = new Date(versionDragState.initialStartDate);
+        newStartDate.setDate(newStartDate.getDate() + daysMoved);
+        newStartDate.setHours(0, 0, 0, 0);
+
+        if (newStartDate < versionDragState.initialEndDate) {
+          updateVersion(versionDragState.versionId, {
+            started_at: newStartDate.toISOString()
+          });
+        }
+      } else if (versionDragState.edge === 'end') {
+        let newEndDate = new Date(versionDragState.initialEndDate);
+        newEndDate.setDate(newEndDate.getDate() + daysMoved);
+        newEndDate.setHours(0, 0, 0, 0);
+
+        if (newEndDate > versionDragState.initialStartDate) {
+          updateVersion(versionDragState.versionId, {
+            targetDate: newEndDate.toISOString()
+          });
+        }
+      }
+      return;
+    }
+
     if (sortBy === 'manual' && handleManualTimelineGestureMove(e)) return;
     if (!dragState || !timelineRef.current || !onTaskUpdate) return;
 
@@ -1296,9 +1368,14 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     // Dependency drag is handled by window-level useEffect
     manualTimelineGestureRef.current = null;
     setDraggedTaskId(null);
+    setDraggedVersionId(null);
     lastManualDragTargetRef.current = null;
     if (dragState) {
       setDragState(null);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    } else if (versionDragState) {
+      setVersionDragState(null);
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
     } else {
@@ -1443,7 +1520,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     snappedDate.setHours(0, 0, 0, 0);
 
     const previewWidth = 200;
-    const previewHeight = 56;
+    const previewHeight = 48;
     const offset = 14;
     const timelineRect = timelineRef.current.getBoundingClientRect();
     const minX = Math.max(8, timelineRect.left + 8);
@@ -1573,6 +1650,35 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
       // Fallback: mark as completed if no delete handler
       onTaskUpdate(taskId, { status: 'completed' as TaskStatus });
     }
+  };
+
+  // Version drag handlers
+  const beginVersionDrag = useCallback((versionId: string, edge: 'start' | 'end' | 'move', clientX: number) => {
+    const version = versions.find(v => v.id === versionId);
+    if (!version || !updateVersion || !timelineRef.current) return;
+
+    const initialStartDate = version.started_at ? new Date(version.started_at) : new Date();
+    const initialEndDate = version.targetDate ? new Date(version.targetDate) : new Date();
+
+    setVersionDragState({
+      versionId,
+      edge,
+      initialX: clientX,
+      initialStartDate,
+      initialEndDate,
+      startX: clientX
+    });
+
+    setDraggedVersionId(versionId);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ew-resize';
+  }, [versions, updateVersion]);
+
+  const handleVersionDragStart = (versionId: string, edge: 'start' | 'end' | 'move', e: React.MouseEvent) => {
+    console.log('[Version Drag] Starting drag:', versionId, edge);
+    e.stopPropagation();
+    e.preventDefault();
+    beginVersionDrag(versionId, edge, e.clientX);
   };
 
   const getReorderableTaskId = useCallback((index: number): string | null => {
@@ -1746,9 +1852,22 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
           {/* Filter */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className={filters.status.length > 0 || filters.priority.length > 0 || filters.hypercubeFaces.length > 0 ? 'bg-purple-500/20' : ''}>
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn(
+                  "relative",
+                  (filters.status.length > 0 || filters.priority.length > 0 || filters.hypercubeFaces.length > 0) &&
+                  "bg-purple-500/20 border-purple-500 border-2 shadow-lg shadow-purple-500/20"
+                )}
+              >
                 <Filter className="w-4 h-4 mr-2" />
                 Filter
+                {(filters.status.length > 0 || filters.priority.length > 0 || filters.hypercubeFaces.length > 0) && (
+                  <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-purple-500 text-white rounded-full">
+                    {filters.status.length + filters.priority.length + filters.hypercubeFaces.length}
+                  </span>
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="bg-black/90 border-white/20 gantt-scrollbar max-h-80 overflow-y-auto w-56">
@@ -2057,9 +2176,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                           className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (confirm(`Delete task "${task.title}"?`)) {
-                              deleteTask(task.id);
-                            }
+                            setTaskToDelete({ id: task.id, title: task.title });
                           }}
                           title="Delete task"
                         >
@@ -2141,16 +2258,19 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
               </div>
 
               {/* Row backgrounds for hover */}
-              {flattenedTasks.map((task, i) => (
-                <div
-                  key={`row-${task.id}`}
-                  className="absolute inset-x-0 h-[60px] hover:bg-white/5 transition-colors"
-                  style={{ top: `${i * 60}px` }}
-                  onMouseMove={(e) => handleTimelineHover(e, i)}
-                  onMouseLeave={() => setHoverPreview(null)}
-                  onClick={(e) => handleTimelineClick(e, i)}
-                />
-              ))}
+              {flattenedTasks.map((task, i) => {
+                const versionLanesOffset = positionedVersions.length * 48;
+                return (
+                  <div
+                    key={`row-${task.id}`}
+                    className="absolute inset-x-0 h-[60px] hover:bg-white/5 transition-colors"
+                    style={{ top: `${i * 60 + versionLanesOffset}px` }}
+                    onMouseMove={(e) => handleTimelineHover(e, i)}
+                    onMouseLeave={() => setHoverPreview(null)}
+                    onClick={(e) => handleTimelineClick(e, i)}
+                  />
+                );
+              })}
 
               {/* Today Indicator - gradient purple line */}
               <div
@@ -2169,11 +2289,12 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
               {/* Hover Preview */}
               {hoverPreview?.show && (
                 <div
-                  className="fixed h-12 pointer-events-none z-[120]"
+                  className="fixed pointer-events-none z-[120]"
                   style={{
                     left: `${hoverPreview.cursorX}px`,
                     top: `${hoverPreview.cursorY}px`,
                     width: '200px',
+                    height: '48px',
                   }}
                 >
                   <Card className="h-full border-purple-500 border-dashed bg-purple-500/10 flex items-center justify-between px-3">
@@ -2195,7 +2316,10 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                 return (
                   <div
                     key={version.id}
-                    className="absolute h-10 z-10 group/version"
+                    className={cn(
+                      "absolute h-10 z-10 group/version",
+                      draggedVersionId === version.id && "opacity-50"
+                    )}
                     style={{
                       left,
                       width,
@@ -2203,14 +2327,39 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                     }}
                   >
                     <Card
-                      className="h-full px-3 py-2 border-2 hover:shadow-xl transition-all relative select-none cursor-pointer"
+                      className="h-full px-3 py-2 border-2 hover:shadow-xl transition-all relative select-none cursor-move group"
                       style={{
                         background: `linear-gradient(135deg, ${versionColor}20 0%, ${versionColor}08 100%)`,
                         borderColor: `${versionColor}80`,
                         overflow: 'visible',
                       }}
-                      onClick={() => onVersionClick?.(version.id)}
+                      onClick={(e) => {
+                        // Don't trigger click if we just finished dragging
+                        if (versionDragState || draggedVersionId) {
+                          e.stopPropagation();
+                          return;
+                        }
+                        onVersionClick?.(version.id);
+                      }}
+                      onMouseDown={(e) => {
+                        if (!(e.target as HTMLElement).closest('.drag-handle')) {
+                          handleVersionDragStart(version.id, 'move', e);
+                        }
+                      }}
                     >
+                      {/* Left drag handle (start date) */}
+                      <div
+                        className="drag-handle absolute left-0 top-0 bottom-0 w-4 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
+                        style={{ background: `linear-gradient(to right, ${versionColor}80, transparent)` }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleVersionDragStart(version.id, 'start', e);
+                        }}
+                        title="Drag to adjust start date"
+                      >
+                        <div className="w-1 h-6 rounded-full" style={{ backgroundColor: versionColor }} />
+                      </div>
+
                       {/* Progress fill */}
                       <div
                         className="absolute inset-0 transition-all pointer-events-none"
@@ -2240,6 +2389,19 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                           {progressPercent}%
                         </span>
                       </div>
+
+                      {/* Right drag handle (end date) */}
+                      <div
+                        className="drag-handle absolute right-0 top-0 bottom-0 w-4 cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
+                        style={{ background: `linear-gradient(to left, ${versionColor}80, transparent)` }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleVersionDragStart(version.id, 'end', e);
+                        }}
+                        title="Drag to adjust end date"
+                      >
+                        <div className="w-1 h-6 rounded-full" style={{ backgroundColor: versionColor }} />
+                      </div>
                     </Card>
                   </div>
                 );
@@ -2257,14 +2419,16 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                     key={task.id}
                     data-task-id={task.id}
                     className={cn(
-                      "absolute h-12 group task-bar",
+                      "absolute group task-bar",
                       draggedTaskId === task.id && "opacity-50",
                       isSelected && "z-10"
                     )}
                     style={{
                       left,
                       width,
-                      top: `${taskIndex * 60 + versionLanesOffset + 4}px`,
+                      top: `${taskIndex * 60 + versionLanesOffset}px`,
+                      height: '60px',
+                      padding: '6px 0',
                     }}
                   >
                     <Card
@@ -2657,6 +2821,46 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
           )}
         </div>
       </div>
+
+      {/* Delete/Archive Task Confirmation Dialog */}
+      <AlertDialog open={!!taskToDelete} onOpenChange={(open) => !open && setTaskToDelete(null)}>
+        <AlertDialogContent className="bg-black/95 border-purple-500/30">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-purple-400">What would you like to do with this task?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/70">
+              Choose how to handle <span className="font-semibold text-white">"{taskToDelete?.title}"</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel className="bg-white/10 border-white/20 hover:bg-white/20 mt-0">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (taskToDelete && onTaskUpdate) {
+                  // Archive the task
+                  onTaskUpdate(taskToDelete.id, { isArchived: true });
+                  setTaskToDelete(null);
+                }
+              }}
+              className="bg-purple-500 hover:bg-purple-600 text-white mt-0"
+            >
+              Archive
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                if (taskToDelete) {
+                  deleteTask(taskToDelete.id);
+                  setTaskToDelete(null);
+                }
+              }}
+              className="bg-red-500 hover:bg-red-600 text-white mt-0"
+            >
+              Permanently Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -4003,7 +4003,7 @@ export function CXDCanvas() {
                   newElement = { ...baseElement, type: 'container' };
                   break;
                 case 'board':
-                  newElement = { ...baseElement, type: 'board', label: 'Board', icon: '📋', childBoardId: uuidv4() };
+                  newElement = { ...baseElement, type: 'board', title: 'Board', icon: '📋', childBoardId: uuidv4() };
                   break;
                 default:
                   newElement = { ...baseElement, type: 'freeform', content: '' };
