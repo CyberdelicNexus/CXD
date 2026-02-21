@@ -463,8 +463,8 @@ export function PlanView() {
           )}
         </div>
 
-        {/* Detail Panel - Overlay */}
-        {selectedTask && (
+        {/* Detail Panel - Overlay (hide in versions view - it has its own internal panels) */}
+        {selectedTask && activeView !== 'versions' && (
           <div
             className="absolute right-0 top-0 bottom-0 w-96 border-l border-white/10 overflow-y-auto gantt-scrollbar z-20 shadow-2xl shadow-black/50"
             style={{ backgroundColor: panelBgColor, backdropFilter: 'blur(12px)' }}
@@ -479,8 +479,8 @@ export function PlanView() {
           </div>
         )}
 
-        {/* Version Detail Panel - Overlay */}
-        {selectedVersion && (
+        {/* Version Detail Panel - Overlay (hide in versions view - it has its own internal panel) */}
+        {selectedVersion && activeView !== 'versions' && (
           <div
             className="absolute right-0 top-0 bottom-0 w-96 border-l border-white/10 overflow-y-auto gantt-scrollbar z-20 shadow-2xl shadow-black/50"
             style={{ backgroundColor: panelBgColor, backdropFilter: 'blur(12px)' }}

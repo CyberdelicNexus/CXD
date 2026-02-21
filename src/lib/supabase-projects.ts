@@ -121,7 +121,7 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
       console.warn('[saveProject] User is neither owner nor collaborator - authenticated:', user.id, 'project owner:', project.ownerId);
       return false;
     }
-    console.log('[saveProject] User is a collaborator, allowing save');
+    console.log('[saveProject] User is a verified collaborator (found in canvas_collaborators table)');
   }
 
   // Store the complete project object in project_data
@@ -134,17 +134,23 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
   // - stateMapping, traitMapping
   // - experienceFlow (legacy) and experienceFlowStages (V2 with engagement, presence, narrative, time)
   // - wizard state
+
+  // Use UPDATE instead of UPSERT to allow collaborators to save
+  // UPSERT fails for collaborators because:
+  // 1. UPSERT tries INSERT first
+  // 2. INSERT policy requires auth.uid() = owner_id (collaborators fail here)
+  // 3. Even though UPDATE policy allows collaborators, it never gets to try UPDATE
+  // By using UPDATE directly, collaborators can save their changes
   const { error } = await supabase
     .from('cxd_projects')
-    .upsert({
-      id: project.id,
-      owner_id: project.ownerId,
+    .update({
       name: project.name,
       description: project.description,
       project_data: project, // Full CXDProject object
       share_token: project.shareToken || null, // Persist share token
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' });
+    })
+    .eq('id', project.id);
 
   if (error) {
     // In Tempo preview / blocked-network scenarios, Supabase calls can throw "TypeError: Failed to fetch".

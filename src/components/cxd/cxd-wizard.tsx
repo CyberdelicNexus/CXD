@@ -161,7 +161,12 @@ export function CXDWizard() {
   const cardBgColor = hexToRgba(centerColor, 0.7);
 
   const currentStepData = WIZARD_STEPS[currentStep];
-  const progress = ((currentStep + 1) / WIZARD_STEPS.length) * 100;
+
+  // Progress starts at 0% for first step and reaches 100% on last step
+  // Map steps 0-10 to 0%-100% progress
+  const progress = currentStep === WIZARD_STEPS.length - 1
+    ? 100  // Last step shows 100%
+    : (currentStep / (WIZARD_STEPS.length - 1)) * 100;
 
   const handleNext = () => {
     if (currentStep < WIZARD_STEPS.length - 1) {
@@ -610,7 +615,7 @@ export function CXDWizard() {
   };
 
   return (
-    <div className="min-h-screen px-4 py-8 relative" style={{ background: canvasBackground }}>
+    <div className="min-h-screen relative flex justify-center py-8" style={{ background: canvasBackground }}>
       {/* Interactive Shimmer Grid Background */}
       <ShimmerGrid
         dotSize={1.5}
@@ -620,41 +625,94 @@ export function CXDWizard() {
         hoverSize={400}
         smoothing={60}
       />
-      {/* 3-Column Layout: Previous Button | Main Frame | Next Button */}
-      <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-5xl mx-auto relative z-10 grid grid-cols-[auto_1fr_auto] gap-6 items-start">
-        {/* Left Column - Previous Arrow Button */}
-        <div className="sticky top-1/2 -translate-y-1/2 pt-32">
-          <button
-            onClick={handlePrevious}
-            disabled={currentStep === 0}
-            className={cn(
-              "w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300",
-              "border border-border/50 backdrop-blur-sm",
-              currentStep === 0
-                ? "opacity-30 cursor-not-allowed bg-secondary/30"
-                : "bg-secondary/50 hover:bg-gradient-to-br hover:from-indigo-600/30 hover:to-purple-600/30 hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/20 cursor-pointer"
-            )}
-          >
-            <ChevronLeft className={cn(
-              "w-6 h-6 transition-colors",
-              currentStep === 0 ? "text-muted-foreground/50" : "text-foreground"
-            )} />
-          </button>
-          {/* Label below button */}
-          <span className={cn(
-            "block text-center text-xs mt-2 transition-colors",
-            currentStep === 0 ? "text-muted-foreground/50" : "text-muted-foreground"
-          )}>
-            Previous
-          </span>
+
+      {/* Left Sidebar - Vertical Progress Bar (Fixed, centered vertically) */}
+      <div className="fixed left-[180px] top-1/2 -translate-y-1/2 z-20 flex flex-col items-start gap-3">
+        {/* Progress bar with phase dots and labels */}
+        <div className="relative flex items-center gap-3 h-[500px]">
+          {/* Phase labels (horizontal text) - LEFT SIDE */}
+          <div className="relative h-full w-24">
+            {WIZARD_PHASES.map((phase, index) => {
+              const phaseStartStep = phase.steps[0];
+              const totalSteps = WIZARD_STEPS.length;
+              const position = (phaseStartStep / totalSteps) * 100;
+
+              const isCurrentPhase = phase.steps.includes(currentStep);
+              const isCompletedPhase = phase.steps.every(s => s < currentStep);
+              const isReached = progress >= position;
+
+              return (
+                <div
+                  key={phase.name}
+                  className="absolute right-0 -translate-y-1/2"
+                  style={{ top: `${position}%` }}
+                >
+                  <span
+                    className={cn(
+                      "text-xs font-medium uppercase tracking-wider whitespace-nowrap transition-all duration-300",
+                      isCurrentPhase
+                        ? "text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500 font-bold"
+                        : isReached
+                          ? "text-indigo-300"
+                          : "text-muted-foreground/60"
+                    )}
+                  >
+                    {phase.name}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Main vertical progress bar */}
+          <div className="relative w-2 bg-secondary/50 rounded-full overflow-visible backdrop-blur-sm border border-white/5 h-full">
+            <div
+              className="absolute top-0 w-full rounded-full bg-gradient-to-b from-indigo-600 via-violet-500 to-indigo-400 transition-all duration-500 ease-out overflow-hidden"
+              style={{ height: `${progress}%` }}
+            />
+
+            {/* Phase dots positioned along the bar */}
+            {WIZARD_PHASES.map((phase, index) => {
+              // Calculate position based on phase steps
+              const phaseStartStep = phase.steps[0];
+              const totalSteps = WIZARD_STEPS.length;
+              const position = (phaseStartStep / totalSteps) * 100;
+
+              const isCurrentPhase = phase.steps.includes(currentStep);
+              const isCompletedPhase = phase.steps.every(s => s < currentStep);
+              const isReached = progress >= position;
+
+              return (
+                <div
+                  key={phase.name}
+                  className="absolute left-1/2 -translate-x-1/2"
+                  style={{ top: `${position}%` }}
+                >
+                  <div
+                    className={cn(
+                      "w-3 h-3 rounded-full border-2 transition-all duration-300",
+                      isCurrentPhase
+                        ? "bg-gradient-to-br from-indigo-400 to-purple-500 border-white shadow-lg shadow-purple-500/50 scale-125"
+                        : isReached
+                          ? "bg-indigo-500 border-indigo-300"
+                          : "bg-secondary border-border"
+                    )}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
+      </div>
+
+      {/* Content Container with gap */}
+      <div className="flex gap-[10px] max-w-4xl w-full px-4 relative z-10">
 
         {/* Center Column - Main Content */}
-        <div className="max-w-3xl lg:max-w-4xl mx-auto w-full">
-        {/* Progress Header with Phase indicator */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
+        <div className="flex-1 overflow-y-auto">
+          <div className="w-full">
+            {/* Current step indicator */}
+            <div className="mb-6 flex items-center justify-center gap-2">
               <span className="text-xs text-muted-foreground uppercase tracking-wider">
                 {getCurrentPhase()}
               </span>
@@ -663,147 +721,148 @@ export function CXDWizard() {
                 Step {currentStep + 1} of {WIZARD_STEPS.length}
               </span>
             </div>
-            <span className="text-sm text-muted-foreground">
-              {Math.round(progress)}% Complete
-            </span>
-          </div>
-          <Progress
-            value={progress}
-            className="h-2"
-            indicatorClassName="from-indigo-600 via-violet-500 to-indigo-400"
-          />
 
-          {/* Phase Progress Indicators */}
-          <div className="flex gap-1 mt-3">
-            {WIZARD_PHASES.map((phase, idx) => {
-              const isCurrentPhase = phase.steps.includes(currentStep);
-              const isCompletedPhase = phase.steps.every(
-                (s) => s < currentStep,
-              );
-              return (
-                <div key={phase.name} className="flex-1 flex flex-col gap-1">
-                  <div
-                    className={`h-1.5 rounded-full transition-all ${isCurrentPhase
-                      ? "bg-gradient-to-r from-indigo-700 via-purple-600 to-purple-400 glow-purple"
-                      : isCompletedPhase
-                        ? "bg-indigo-700/60"
-                        : "bg-secondary"
-                      }`}
-                  />
-                  <span
-                    className={`text-[10px] text-center ${isCurrentPhase
-                      ? "text-primary font-medium"
-                      : "text-muted-foreground"
+            {/* Step Navigation - Horizontal scroll with hidden scrollbar */}
+            <div
+              ref={stepNavRef}
+              className="w-full mb-8 overflow-x-auto scrollbar-hide"
+              style={{
+                scrollbarWidth: "none",
+                msOverflowStyle: "none",
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              <div className="flex gap-2 pb-2 min-w-max">
+                {WIZARD_STEPS.map((step, index) => (
+                  <button
+                    key={step.id}
+                    ref={(el) => {
+                      stepButtonRefs.current[index] = el;
+                    }}
+                    onClick={() => {
+                      setCurrentStep(index);
+                      setWizardStep(index);
+                    }}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap transition-all flex-shrink-0 ${index === currentStep
+                      ? "bg-gradient-to-r from-indigo-700 to-purple-600 text-white glow-purple"
+                      : index < currentStep
+                        ? "bg-indigo-900/30 text-indigo-300 border border-purple-500/20"
+                        : "bg-secondary text-muted-foreground hover:bg-secondary/80"
                       }`}
                   >
-                    {phase.name}
-                  </span>
+                    {index < currentStep ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      stepIcons[step.title] || <Sparkles className="w-4 h-4" />
+                    )}
+                    {step.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Main Content Card */}
+            <Card
+              className="gradient-border backdrop-blur h-fit overflow-visible"
+              style={{ backgroundColor: cardBgColor }}
+            >
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center">
+                    {stepIcons[currentStepData.title] || (
+                      <Sparkles className="w-6 h-6 text-primary" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <CardTitle className="text-xl">
+                      {currentStepData.title}
+                    </CardTitle>
+                    <CardDescription>{currentStepData.question}</CardDescription>
+                  </div>
                 </div>
-              );
-            })}
+                {/* Step Intent - explains why this step matters */}
+                {currentStepData.intent && (
+                  <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/10">
+                    <p className="text-sm text-muted-foreground italic">
+                      <span className="text-primary font-medium">Intent:</span>{" "}
+                      {currentStepData.intent}
+                    </p>
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="overflow-visible h-full flex">
+                <div className="pr-4 pb-4 flex h-full w-full items-center justify-center flex-col mx-[0px] overflow-visible">
+                  {renderStepContent()}
+                </div>
+              </CardContent>
+            </Card>
+
           </div>
         </div>
 
-        {/* Step Navigation - Horizontal scroll with hidden scrollbar */}
-        <div
-          ref={stepNavRef}
-          className="w-full mb-8 overflow-x-auto scrollbar-hide"
-          style={{
-            scrollbarWidth: "none",
-            msOverflowStyle: "none",
-            WebkitOverflowScrolling: "touch",
-          }}
-        >
-          <div className="flex gap-2 pb-2 min-w-max">
-            {WIZARD_STEPS.map((step, index) => (
+        {/* Right Sidebar - Navigation Buttons (Fixed, centered vertically) */}
+        <div className="fixed right-[230px] top-1/2 -translate-y-1/2 z-20 w-16 flex flex-col items-center">
+          <div className="flex flex-col gap-4 items-center">
+            {/* Previous Button */}
+            <div className="flex flex-col items-center gap-2">
               <button
-                key={step.id}
-                ref={(el) => {
-                  stepButtonRefs.current[index] = el;
-                }}
-                onClick={() => {
-                  setCurrentStep(index);
-                  setWizardStep(index);
-                }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap transition-all flex-shrink-0 ${index === currentStep
-                  ? "bg-gradient-to-r from-indigo-700 to-purple-600 text-white glow-purple"
-                  : index < currentStep
-                    ? "bg-indigo-900/30 text-indigo-300 border border-purple-500/20"
-                    : "bg-secondary text-muted-foreground hover:bg-secondary/80"
-                  }`}
+                onClick={handlePrevious}
+                disabled={currentStep === 0}
+                className={cn(
+                  "w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300",
+                  "border backdrop-blur-sm",
+                  currentStep === 0
+                    ? "opacity-30 cursor-not-allowed bg-secondary/30 border-border/50"
+                    : "bg-secondary/50 hover:bg-gradient-to-br hover:from-indigo-600/30 hover:to-purple-600/30 border-border/50 hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/20 cursor-pointer hover:scale-105 active:scale-95"
+                )}
               >
-                {index < currentStep ? (
-                  <Check className="w-4 h-4" />
-                ) : (
-                  stepIcons[step.title] || <Sparkles className="w-4 h-4" />
-                )}
-                {step.title}
+                <ChevronLeft className={cn(
+                  "w-6 h-6 transition-colors",
+                  currentStep === 0 ? "text-muted-foreground/50" : "text-foreground"
+                )} />
               </button>
-            ))}
-          </div>
-        </div>
+              <span className={cn(
+                "text-[10px] text-center transition-colors uppercase tracking-wider",
+                currentStep === 0 ? "text-muted-foreground/50" : "text-muted-foreground"
+              )}>
+                Previous
+              </span>
+            </div>
 
-        {/* Main Content Card */}
-        <Card
-          className="gradient-border backdrop-blur h-fit overflow-visible"
-          style={{ backgroundColor: cardBgColor }}
-        >
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center">
-                {stepIcons[currentStepData.title] || (
-                  <Sparkles className="w-6 h-6 text-primary" />
+            {/* Current step indicator */}
+            <div className="my-4 px-3 py-2 rounded-lg bg-secondary/50 backdrop-blur-sm border border-white/5">
+              <div className="text-2xl font-bold text-center text-primary">
+                {currentStep + 1}
+              </div>
+              <div className="text-[8px] text-muted-foreground text-center uppercase tracking-wider">
+                of {WIZARD_STEPS.length}
+              </div>
+            </div>
+
+            {/* Next/Complete Button */}
+            <div className="flex flex-col items-center gap-2">
+              <button
+                onClick={handleNext}
+                className={cn(
+                  "w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300",
+                  "border border-purple-500/50 backdrop-blur-sm cursor-pointer",
+                  "bg-gradient-to-br from-indigo-600 to-purple-600",
+                  "hover:from-indigo-500 hover:to-purple-500",
+                  "hover:shadow-lg hover:shadow-purple-500/40",
+                  "hover:scale-105 active:scale-95"
                 )}
-              </div>
-              <div className="flex-1">
-                <CardTitle className="text-xl">
-                  {currentStepData.title}
-                </CardTitle>
-                <CardDescription>{currentStepData.question}</CardDescription>
-              </div>
+              >
+                {currentStep === WIZARD_STEPS.length - 1 ? (
+                  <Check className="w-6 h-6 text-white" />
+                ) : (
+                  <ChevronRight className="w-6 h-6 text-white" />
+                )}
+              </button>
+              <span className="text-[10px] text-center text-muted-foreground uppercase tracking-wider">
+                {currentStep === WIZARD_STEPS.length - 1 ? "Complete" : "Next"}
+              </span>
             </div>
-            {/* Step Intent - explains why this step matters */}
-            {currentStepData.intent && (
-              <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                <p className="text-sm text-muted-foreground italic">
-                  <span className="text-primary font-medium">Intent:</span>{" "}
-                  {currentStepData.intent}
-                </p>
-              </div>
-            )}
-          </CardHeader>
-          <CardContent className="overflow-visible h-full flex">
-            <div className="pr-4 pb-4 flex h-full w-full items-center justify-center flex-col mx-[0px] overflow-visible">
-              {renderStepContent()}
-            </div>
-          </CardContent>
-        </Card>
-
-        </div>
-
-        {/* Right Column - Next Arrow Button */}
-        <div className="sticky top-1/2 -translate-y-1/2 pt-32">
-          <button
-            onClick={handleNext}
-            className={cn(
-              "w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300",
-              "border border-purple-500/50 backdrop-blur-sm cursor-pointer",
-              "bg-gradient-to-br from-indigo-600 to-purple-600",
-              "hover:from-indigo-500 hover:to-purple-500",
-              "hover:shadow-lg hover:shadow-purple-500/40",
-              "hover:scale-105 active:scale-95"
-            )}
-          >
-            {currentStep === WIZARD_STEPS.length - 1 ? (
-              <Check className="w-6 h-6 text-white" />
-            ) : (
-              <ChevronRight className="w-6 h-6 text-white" />
-            )}
-          </button>
-          {/* Label below button */}
-          <span className="block text-center text-xs text-muted-foreground mt-2">
-            {currentStep === WIZARD_STEPS.length - 1 ? "Complete" : "Next"}
-          </span>
+          </div>
         </div>
       </div>
 

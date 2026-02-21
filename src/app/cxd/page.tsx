@@ -99,6 +99,7 @@ export default function CXDPage() {
   } = useCXDStore();
   const [isRestoring, setIsRestoring] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Wait for Zustand to hydrate from localStorage
   useEffect(() => {
@@ -108,6 +109,13 @@ export default function CXDPage() {
     }, 50); // Reduced from 100ms to 50ms for faster loading
     return () => clearTimeout(timer);
   }, []);
+
+  // Add transition effect when switching views
+  useEffect(() => {
+    setIsTransitioning(true);
+    const timer = setTimeout(() => setIsTransitioning(false), 300);
+    return () => clearTimeout(timer);
+  }, [viewMode, canvasViewMode]);
 
   // Handle remote updates from collaborators (shared across all views)
   // In CRDT mode, the Yjs provider handles all sync — skip LWW dispatch
@@ -345,10 +353,27 @@ export default function CXDPage() {
   useEffect(() => {
     // Wait for Zustand to hydrate before checking currentProjectId
     if (!isRestoring && hasHydrated && !currentProjectId) {
+      console.log('[CXD] No project selected, redirecting to dashboard');
       // Use window.location for full page navigation to avoid RSC fetch issues
       window.location.href = "/dashboard";
     }
   }, [isRestoring, hasHydrated, currentProjectId, router]);
+
+  // Failsafe: if loading takes too long, force show content
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (isRestoring) {
+        console.warn('[CXD] Loading timeout, forcing content display');
+        setIsRestoring(false);
+      }
+    }, 10000); // 10 second timeout
+
+    return () => clearTimeout(timeout);
+  }, [isRestoring]);
+
+  // Create a unique key for the current view to trigger transitions (only for wizard and plan)
+  const viewKey = `${viewMode}-${canvasViewMode}`;
+  const shouldAnimate = viewMode === "wizard" || (viewMode === "canvas" && canvasViewMode === "plan");
 
   return (
     <YjsProjectProvider>
@@ -359,7 +384,13 @@ export default function CXDPage() {
           {isRestoring ? (
             <LoadingScreen />
           ) : (
-            <>
+            <div
+              key={shouldAnimate ? viewKey : undefined}
+              className="relative w-full h-full"
+              style={{
+                animation: shouldAnimate ? 'viewFadeIn 300ms ease-out' : 'none'
+              }}
+            >
               {viewMode === "wizard" && <CXDWizard />}
               {viewMode === "canvas" && canvasViewMode === "canvas" && (
                 <CXDCanvas />
@@ -373,8 +404,21 @@ export default function CXDPage() {
               {viewMode === "focus" && focusedSection && (
                 <CXDFocusMode sectionId={focusedSection} />
               )}
-            </>
+            </div>
           )}
+          {/* CSS animation keyframes */}
+          <style jsx>{`
+            @keyframes viewFadeIn {
+              from {
+                opacity: 0;
+                transform: translateY(8px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+          `}</style>
         </main>
       </div>
       {showTopUpSuccess && (
