@@ -29,7 +29,7 @@ import {
   CanvasEdge,
   LineEndStyle,
 } from "@/types/canvas-elements";
-import { useCollaboration } from "@/hooks/use-collaboration";
+import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorCursors } from "@/components/collaboration";
 import { useCanvasSettings } from "@/hooks/use-canvas-settings";
 
@@ -287,99 +287,11 @@ export function CXDCanvas() {
   // Canvas settings from user preferences
   const { settings, zoomSensitivity } = useCanvasSettings();
 
-  // Handle remote canvas updates from collaborators
-  // In CRDT mode, Yjs provider handles sync — skip LWW dispatch
-  const handleRemoteUpdate = useCallback((update: any) => {
-    if (useCXDStore.getState().yDoc) return;
-    console.log('[Collab] Received remote update:', update.type);
-
-    switch (update.type) {
-      case 'element_add':
-        if (update.element) {
-          addCanvasElement(update.element);
-        }
-        break;
-      case 'element_update':
-        if (update.elementId && update.changes) {
-          updateCanvasElement(update.elementId, update.changes);
-        }
-        break;
-      case 'element_delete':
-        if (update.elementId) {
-          removeCanvasElement(update.elementId);
-        }
-        break;
-      case 'edge_add':
-        if (update.edge) {
-          addCanvasEdge(update.edge);
-        }
-        break;
-      case 'edge_delete':
-        if (update.edgeId) {
-          removeCanvasEdge(update.edgeId);
-        }
-        break;
-      case 'edge_update':
-        if (update.edgeId && update.edgeChanges) {
-          updateCanvasEdge(update.edgeId, update.edgeChanges);
-        }
-        break;
-      case 'container_move':
-        // Handle container movement with all children
-        if (update.childUpdates) {
-          update.childUpdates.forEach((u: { elementId: string; changes: Record<string, unknown> }) => {
-            updateCanvasElement(u.elementId, u.changes);
-          });
-        }
-        break;
-      case 'state_sync':
-        // Full state sync from undo/redo - update all elements and edges
-        if (update.elements && update.edges) {
-          // Remove all current elements and edges, then add the synced ones
-          const currentElements = getCanvasElements();
-          const currentEdges = getCanvasEdges();
-
-          // Remove elements that don't exist in the synced state
-          currentElements.forEach(el => {
-            if (!update.elements.find((e: any) => e.id === el.id)) {
-              removeCanvasElement(el.id);
-            }
-          });
-
-          // Remove edges that don't exist in the synced state
-          currentEdges.forEach(edge => {
-            if (!update.edges.find((e: any) => e.id === edge.id)) {
-              removeCanvasEdge(edge.id);
-            }
-          });
-
-          // Add or update elements from synced state
-          update.elements.forEach((el: any) => {
-            const existing = currentElements.find(e => e.id === el.id);
-            if (existing) {
-              updateCanvasElement(el.id, el);
-            } else {
-              addCanvasElement(el);
-            }
-          });
-
-          // Add edges that don't exist
-          update.edges.forEach((edge: any) => {
-            const existing = currentEdges.find(e => e.id === edge.id);
-            if (!existing) {
-              addCanvasEdge(edge);
-            }
-          });
-        }
-        break;
-    }
-  }, [addCanvasElement, updateCanvasElement, removeCanvasElement, addCanvasEdge, removeCanvasEdge, getCanvasElements, getCanvasEdges]);
-
-  // Collaboration - realtime cursors and presence
-  const { collaborators, updateCursor, clearCursor, broadcastUpdate } = useCollaboration(
-    project?.id || null,
-    { onRemoteUpdate: handleRemoteUpdate }
-  );
+  // Collaboration - realtime cursors, presence, and broadcast.
+  // Uses the shared CollaborationProvider channel (from page.tsx) — avoids
+  // creating a duplicate canvas:{projectId} subscription which would cause
+  // presence key conflicts and broken cursor visibility.
+  const { collaborators, updateCursor, clearCursor, broadcastUpdate } = useCollaborationContext();
 
   // Wrapper functions that sync changes to collaborators
   // In CRDT mode, the store action mutates Y.Doc which auto-broadcasts via SupabaseYjsProvider
