@@ -95,7 +95,9 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     localPersistenceRef.current = localPersist;
 
     // Set up Supabase persistence (binary Y.Doc state to DB)
-    const supabasePersist = new SupabasePersistence(newDoc, currentProjectId);
+    const supabasePersist = new SupabasePersistence(newDoc, currentProjectId, {
+      onError: (msg) => console.warn('[YjsProject] Persistence warning:', msg),
+    });
     supabasePersistenceRef.current = supabasePersist;
 
     // Flush Yjs state immediately when the tab is hidden or the page is unloading

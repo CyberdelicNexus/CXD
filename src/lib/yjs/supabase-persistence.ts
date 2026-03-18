@@ -8,12 +8,20 @@
  * - On load: fetch yjs_state from DB → apply to Y.Doc
  * - On save: read-merge-write (CRDT merge) to never overwrite concurrent changes
  * - Debounced saves (2s) to avoid excessive DB writes
+ * - Retry on network failure: up to 3 attempts with exponential backoff (1s, 2s, 4s)
+ * - onError callback fires when consecutiveFailures >= 5
  */
 
 import * as Y from 'yjs';
 import { createClient } from '@/supabase/client';
 
 const SAVE_DEBOUNCE_MS = 2000;
+const MAX_RETRIES = 3;
+const CONSECUTIVE_FAILURES_THRESHOLD = 5;
+
+export interface SupabasePersistenceOpts {
+  onError?: (error: string) => void;
+}
 
 export class SupabasePersistence {
   private doc: Y.Doc;
@@ -22,10 +30,13 @@ export class SupabasePersistence {
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private updateHandler: (update: Uint8Array, origin: unknown) => void;
   private isSaving = false;
+  private consecutiveFailures = 0;
+  private onPersistenceError?: (error: string) => void;
 
-  constructor(doc: Y.Doc, projectId: string) {
+  constructor(doc: Y.Doc, projectId: string, opts?: SupabasePersistenceOpts) {
     this.doc = doc;
     this.projectId = projectId;
+    this.onPersistenceError = opts?.onError;
 
     // Schedule save on every local or remote change
     this.updateHandler = (_update: Uint8Array, _origin: unknown) => {
@@ -74,7 +85,7 @@ export class SupabasePersistence {
    *   3. Apply local doc state to mergeDoc (CRDT merge — never loses data)
    *   4. Encode merged result and write back
    */
-  async save(): Promise<void> {
+  async save(retryAttempt = 0): Promise<void> {
     if (this.destroyed || this.isSaving) return;
 
     this.isSaving = true;
@@ -117,12 +128,66 @@ export class SupabasePersistence {
         .eq('id', this.projectId);
 
       if (error) {
-        console.error('[SupabasePersistence] Failed to save Y.Doc state:', error);
+        // Do NOT retry on RLS/permission errors — they won't resolve on their own
+        const isPermissionError =
+          (error as { code?: string }).code === '42501' ||
+          error.message?.toLowerCase().includes('permission denied') ||
+          error.message?.toLowerCase().includes('row-level security');
+
+        if (isPermissionError) {
+          console.error('[SupabasePersistence] Permission error saving Y.Doc state (no retry):', error);
+          this.recordFailure(`Permission denied: ${error.message}`);
+        } else {
+          console.error('[SupabasePersistence] Failed to save Y.Doc state:', error);
+          this.isSaving = false;
+          this.scheduleRetry(retryAttempt);
+          return;
+        }
+      } else {
+        // Success — reset failure counter
+        this.consecutiveFailures = 0;
       }
     } catch (err) {
+      const isNetworkError = err instanceof TypeError && err.message.includes('fetch');
+
+      if (isNetworkError) {
+        console.warn(`[SupabasePersistence] Network error on save (attempt ${retryAttempt + 1}):`, err);
+        this.isSaving = false;
+        this.scheduleRetry(retryAttempt);
+        return;
+      }
+
       console.error('[SupabasePersistence] Save error:', err);
+      this.recordFailure(String(err));
     } finally {
       this.isSaving = false;
+    }
+  }
+
+  /**
+   * Schedule a retry with exponential backoff.
+   * Retries up to MAX_RETRIES times: 1s, 2s, 4s.
+   * Does NOT retry on RLS/permission errors.
+   */
+  private scheduleRetry(attempt: number): void {
+    if (attempt >= MAX_RETRIES) {
+      this.recordFailure(`Save failed after ${MAX_RETRIES} retries`);
+      return;
+    }
+    const delay = Math.pow(2, attempt) * 1000;
+    console.warn(`[SupabasePersistence] Retrying save in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+    setTimeout(() => this.save(attempt + 1), delay);
+  }
+
+  /**
+   * Record a persistence failure and fire onError if threshold exceeded.
+   */
+  private recordFailure(message: string): void {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= CONSECUTIVE_FAILURES_THRESHOLD) {
+      const errMsg = `[SupabasePersistence] ${this.consecutiveFailures} consecutive save failures. Last error: ${message}`;
+      console.error(errMsg);
+      this.onPersistenceError?.(errMsg);
     }
   }
 
