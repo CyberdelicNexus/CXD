@@ -30,11 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. An owner edits a card, reloads the page, and sees their change still present
   3. A user edits content, loses network connection for 30 seconds, reconnects, and their change is not lost
   4. Both owner and collaborator can work simultaneously and both sets of changes survive reload
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Diagnose and fix Supabase persistence layer for collaborator-originated Yjs changes
-- [ ] 01-02: Verify owner persistence and network-interruption recovery
+- [ ] 01-01-PLAN.md — Diagnose and fix SupabasePersistence read-merge-write for collaborator data loss
+- [ ] 01-02-PLAN.md — Verify owner persistence, add retry/backoff, harden network recovery
 
 ---
 
