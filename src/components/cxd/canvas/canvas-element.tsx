@@ -5207,10 +5207,43 @@ function ImageCard({
   }, [dragState, cropBox]);
 
   const applyCrop = () => {
+    // Use preCropBounds if re-cropping, otherwise current element bounds
+    const base = element.imageEdits?.preCropBounds || {
+      x: element.x,
+      y: element.y,
+      width: element.width,
+      height: element.height,
+    };
+
+    // The cropBox is relative to the current element view.
+    // If re-cropping (preCropBounds exists), compound with existing crop.
+    const existingCrop = element.imageEdits?.preCropBounds
+      ? (element.imageEdits.crop || { x: 0, y: 0, width: 100, height: 100 })
+      : { x: 0, y: 0, width: 100, height: 100 };
+
+    // Convert cropBox (relative to current view) to absolute crop (relative to original)
+    const absoluteCrop = {
+      x: existingCrop.x + (cropBox.x / 100) * existingCrop.width,
+      y: existingCrop.y + (cropBox.y / 100) * existingCrop.height,
+      width: (cropBox.width / 100) * existingCrop.width,
+      height: (cropBox.height / 100) * existingCrop.height,
+    };
+
+    // Resize element to match the cropped area
+    const newWidth = Math.max(20, base.width * (absoluteCrop.width / 100));
+    const newHeight = Math.max(20, base.height * (absoluteCrop.height / 100));
+    const newX = base.x + base.width * (absoluteCrop.x / 100);
+    const newY = base.y + base.height * (absoluteCrop.y / 100);
+
     onUpdate({
+      x: newX,
+      y: newY,
+      width: newWidth,
+      height: newHeight,
       imageEdits: {
         ...element.imageEdits,
-        crop: cropBox,
+        crop: absoluteCrop,
+        preCropBounds: base,
       },
     });
     setIsCropping(false);
@@ -5219,7 +5252,9 @@ function ImageCard({
 
   const cancelCrop = () => {
     setCropBox(
-      element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 },
+      element.imageEdits?.preCropBounds
+        ? { x: 0, y: 0, width: 100, height: 100 }
+        : (element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 }),
     );
     setIsCropping(false);
   };
@@ -5243,7 +5278,19 @@ function ImageCard({
   };
 
   const resetImage = () => {
-    onUpdate({ imageEdits: undefined });
+    const preCrop = element.imageEdits?.preCropBounds;
+    if (preCrop) {
+      // Restore original element bounds
+      onUpdate({
+        x: preCrop.x,
+        y: preCrop.y,
+        width: preCrop.width,
+        height: preCrop.height,
+        imageEdits: undefined,
+      });
+    } else {
+      onUpdate({ imageEdits: undefined });
+    }
     setCropBox({ x: 0, y: 0, width: 100, height: 100 });
     setIsEditMode(false);
   };
@@ -5320,25 +5367,38 @@ function ImageCard({
           isCropping && "ring-2 ring-cyan-400",
         )}
       >
-        <div
-          className="w-full h-full"
-          style={{
-            clipPath: `inset(${crop.y}% ${100 - crop.x - crop.width}% ${100 - crop.y - crop.height}% ${crop.x}%)`,
-          }}
-        >
-          <img
-            src={element.src}
-            alt={element.alt || ""}
-            className="w-full h-full object-contain"
+        {element.imageEdits?.preCropBounds ? (
+          <div
+            className="w-full h-full"
             style={{
-              objectFit: "contain",
+              backgroundImage: `url("${element.src}")`,
+              backgroundSize: `${element.imageEdits.preCropBounds.width}px ${element.imageEdits.preCropBounds.height}px`,
+              backgroundPosition: `${-(crop.x / 100) * element.imageEdits.preCropBounds.width}px ${-(crop.y / 100) * element.imageEdits.preCropBounds.height}px`,
+              backgroundRepeat: "no-repeat",
               transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
             }}
-            onError={() => setHasImage(false)}
-            draggable={false}
-            onDragStart={(e) => e.preventDefault()}
           />
-        </div>
+        ) : (
+          <div
+            className="w-full h-full"
+            style={{
+              clipPath: `inset(${crop.y}% ${100 - crop.x - crop.width}% ${100 - crop.y - crop.height}% ${crop.x}%)`,
+            }}
+          >
+            <img
+              src={element.src}
+              alt={element.alt || ""}
+              className="w-full h-full object-contain"
+              style={{
+                objectFit: "contain",
+                transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+              }}
+              onError={() => setHasImage(false)}
+              draggable={false}
+              onDragStart={(e) => e.preventDefault()}
+            />
+          </div>
+        )}
 
         {/* Crop overlay */}
         {isCropping && (
@@ -5465,7 +5525,12 @@ function ImageCard({
             <button
               onClick={() => {
                 setIsCropping(true);
-                setCropBox(crop);
+                // If element was already resized for crop, start fresh within current view
+                setCropBox(
+                  element.imageEdits?.preCropBounds
+                    ? { x: 0, y: 0, width: 100, height: 100 }
+                    : crop,
+                );
               }}
               className="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-primary/10 hover:bg-primary/20 text-sm transition-colors"
             >

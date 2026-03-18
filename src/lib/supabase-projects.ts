@@ -83,6 +83,54 @@ export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
   });
 }
 
+export async function insertProject(project: CXDProject): Promise<boolean> {
+  if (!project.ownerId || project.ownerId === 'local-user' || !isValidUUID(project.ownerId)) {
+    console.warn('[insertProject] Skipping insert - invalid ownerId:', project.ownerId);
+    return false;
+  }
+
+  if (!project.id || !isValidUUID(project.id)) {
+    console.warn('[insertProject] Skipping insert - invalid project id:', project.id);
+    return false;
+  }
+
+  console.log('[insertProject] Inserting new project:', project.id, 'Owner:', project.ownerId);
+
+  const supabase = createClient();
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    console.warn('[insertProject] User not authenticated, skipping insert');
+    return false;
+  }
+
+  const { error } = await supabase
+    .from('cxd_projects')
+    .insert({
+      id: project.id,
+      owner_id: project.ownerId,
+      name: project.name,
+      description: project.description || '',
+      project_data: project,
+      share_token: project.shareToken || null,
+      created_at: project.createdAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+  if (error) {
+    const msg = String((error as any)?.message ?? '');
+    if (msg.includes('Failed to fetch')) {
+      console.warn('[insertProject] Network error - Failed to fetch');
+      return false;
+    }
+    console.error('[insertProject] Error inserting project:', error);
+    return false;
+  }
+
+  console.log('[insertProject] Successfully inserted project:', project.id);
+  return true;
+}
+
 export async function saveProject(project: CXDProject): Promise<boolean> {
   // Skip saving if ownerId is not a valid UUID (e.g., 'local-user')
   if (!project.ownerId || project.ownerId === 'local-user' || !isValidUUID(project.ownerId)) {

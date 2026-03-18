@@ -34,7 +34,7 @@ import {
   yjsAddObjective, yjsUpdateObjective, yjsDeleteObjective,
   yjsAddKeyResult, yjsUpdateKeyResult, yjsDeleteKeyResult,
 } from '@/lib/yjs/yjs-version-actions';
-import { saveProject, deleteProjectFromDb, updateProjectShareToken } from '@/lib/supabase-projects';
+import { saveProject, insertProject, deleteProjectFromDb, updateProjectShareToken } from '@/lib/supabase-projects';
 import type * as Y from 'yjs';
 import {
   yjsAddElement, yjsUpdateElement, yjsRemoveElement, yjsDuplicateElement,
@@ -386,8 +386,8 @@ export const useCXDStore = create<CXDState>()(
           currentProjectId: id,
           viewMode: 'wizard',
         }));
-        // Sync to database (async)
-        saveProject(project).catch(err => console.error('Failed to save new project:', err));
+        // Insert new project into database (async)
+        insertProject(project).catch(err => console.error('Failed to insert new project:', err));
         return id;
       },
 
@@ -1428,27 +1428,6 @@ export const useCXDStore = create<CXDState>()(
           const elements = currentProject.canvasLayout?.elements || [];
           const element = elements.find(el => el.id === elementId);
 
-          // Container expansion logic in Yjs path
-          if (element?.containerId) {
-            const container = elements.find(el => el.id === element.containerId);
-            if (container && container.type === 'container') {
-              const newX = updates.x !== undefined ? updates.x : element.x;
-              const newY = updates.y !== undefined ? updates.y : element.y;
-              const newWidth = updates.width !== undefined ? updates.width : element.width;
-              const newHeight = updates.height !== undefined ? updates.height : element.height;
-              const padding = 20;
-              const headerHeight = 40;
-              const neededWidth = Math.max(container.width, newX + newWidth - container.x + padding);
-              const neededHeight = Math.max(container.height, newY + newHeight - container.y + padding + headerHeight);
-
-              yjsUpdateElement(yDoc, elementId, updates);
-              if (neededWidth > container.width || neededHeight > container.height) {
-                yjsUpdateElement(yDoc, element.containerId, { width: neededWidth, height: neededHeight });
-              }
-              return;
-            }
-          }
-
           yjsUpdateElement(yDoc, elementId, updates);
 
           // Board title sync — boards aren't in Y.Doc yet, update Zustand directly
@@ -1476,57 +1455,6 @@ export const useCXDStore = create<CXDState>()(
           const elements = currentProject.canvasLayout?.elements || [];
           const element = elements.find(el => el.id === elementId);
 
-          // If element has a container, check if we need to expand the container
-          if (element?.containerId) {
-            const container = elements.find(el => el.id === element.containerId);
-            if (container && container.type === 'container') {
-              const newX = updates.x !== undefined ? updates.x : element.x;
-              const newY = updates.y !== undefined ? updates.y : element.y;
-              const newWidth = updates.width !== undefined ? updates.width : element.width;
-              const newHeight = updates.height !== undefined ? updates.height : element.height;
-
-              const padding = 20;
-              const headerHeight = 40;
-
-              const neededWidth = Math.max(
-                container.width,
-                newX + newWidth - container.x + padding
-              );
-              const neededHeight = Math.max(
-                container.height,
-                newY + newHeight - container.y + padding + headerHeight
-              );
-
-              set((state) => ({
-                projects: state.projects.map((p) =>
-                  p.id === currentProject.id
-                    ? {
-                      ...p,
-                      canvasLayout: {
-                        ...(p.canvasLayout || {}),
-                        elements: (p.canvasLayout?.elements || []).map((el) => {
-                          if (el.id === elementId) {
-                            return { ...el, ...updates } as typeof el;
-                          }
-                          if (el.id === element.containerId &&
-                            (neededWidth > container.width || neededHeight > container.height)) {
-                            return {
-                              ...el,
-                              width: neededWidth,
-                              height: neededHeight
-                            };
-                          }
-                          return el;
-                        })
-                      },
-                      updatedAt: new Date().toISOString()
-                    }
-                    : p
-                ),
-              }));
-              return;
-            }
-          }
 
           const isBoardElement = element?.type === 'board';
           const isTitleUpdate = updates.hasOwnProperty('title');
@@ -1856,47 +1784,24 @@ export const useCXDStore = create<CXDState>()(
 
         const { yDoc } = get();
         if (yDoc) {
-          const elements = currentProject.canvasLayout?.elements || [];
-          const container = elements.find((el) => el.id === containerId);
-          const node = elements.find((el) => el.id === nodeId);
-          if (container && node) {
-            const padding = 20;
-            const headerHeight = 40;
-            const neededWidth = Math.max(container.width, node.x + node.width - container.x + padding);
-            const neededHeight = Math.max(container.height, node.y + node.height - container.y + padding + headerHeight);
-            yjsUpdateElement(yDoc, nodeId, { containerId });
-            if (neededWidth > container.width || neededHeight > container.height) {
-              yjsUpdateElement(yDoc, containerId, { width: neededWidth, height: neededHeight });
-            }
-          }
+          yjsUpdateElement(yDoc, nodeId, { containerId });
         } else {
-          const elements = currentProject.canvasLayout?.elements || [];
-          const container = elements.find((el) => el.id === containerId);
-          const node = elements.find((el) => el.id === nodeId);
-          if (container && node) {
-            const padding = 20;
-            const headerHeight = 40;
-            const neededWidth = Math.max(container.width, node.x + node.width - container.x + padding);
-            const neededHeight = Math.max(container.height, node.y + node.height - container.y + padding + headerHeight);
-            set((state) => ({
-              projects: state.projects.map((p) =>
-                p.id === currentProject.id
-                  ? {
-                    ...p,
-                    canvasLayout: {
-                      ...(p.canvasLayout || {}),
-                      elements: (p.canvasLayout?.elements || []).map((el) => {
-                        if (el.id === nodeId) return { ...el, containerId };
-                        if (el.id === containerId) return { ...el, width: neededWidth, height: neededHeight };
-                        return el;
-                      }),
-                    },
-                    updatedAt: new Date().toISOString()
-                  }
-                  : p
-              ),
-            }));
-          }
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                  ...p,
+                  canvasLayout: {
+                    ...(p.canvasLayout || {}),
+                    elements: (p.canvasLayout?.elements || []).map((el) =>
+                      el.id === nodeId ? { ...el, containerId } : el
+                    ),
+                  },
+                  updatedAt: new Date().toISOString()
+                }
+                : p
+            ),
+          }));
         }
       },
 

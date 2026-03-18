@@ -921,30 +921,6 @@ export function CXDCanvas() {
 
                     if (isCompletelyOutside) {
                       removeNodeFromContainer(id);
-                    } else {
-                      // Auto-expand container if element extends beyond bounds
-                      const padding = 20;
-                      const neededWidth = Math.max(
-                        container.width,
-                        newX + el.width - container.x + padding
-                      );
-                      const neededHeight = Math.max(
-                        container.height,
-                        newY + el.height - container.y + padding
-                      );
-
-                      if (neededWidth > container.width || neededHeight > container.height) {
-                        // Use a timeout to batch the update after drag completes
-                        setTimeout(() => {
-                          const currentContainer = canvasElements.find(c => c.id === container.id);
-                          if (currentContainer) {
-                            updateCanvasElement(container.id, {
-                              width: Math.max(currentContainer.width, neededWidth),
-                              height: Math.max(currentContainer.height, neededHeight),
-                            });
-                          }
-                        }, 0);
-                      }
                     }
                   }
                 }
@@ -1045,30 +1021,6 @@ export function CXDCanvas() {
 
                   if (isCompletelyOutside) {
                     removeNodeFromContainer(draggingElement);
-                  } else {
-                    // Auto-expand container if element extends beyond bounds
-                    const padding = 20;
-                    const neededWidth = Math.max(
-                      container.width,
-                      newX + element.width - container.x + padding
-                    );
-                    const neededHeight = Math.max(
-                      container.height,
-                      newY + element.height - container.y + padding
-                    );
-
-                    if (neededWidth > container.width || neededHeight > container.height) {
-                      // Use a timeout to batch the update after drag completes
-                      setTimeout(() => {
-                        const currentContainer = canvasElements.find(c => c.id === container.id);
-                        if (currentContainer) {
-                          updateCanvasElement(container.id, {
-                            width: Math.max(currentContainer.width, neededWidth),
-                            height: Math.max(currentContainer.height, neededHeight),
-                          });
-                        }
-                      }, 0);
-                    }
                   }
                 }
               }
@@ -1500,6 +1452,18 @@ export function CXDCanvas() {
         return;
       }
 
+      // Middle mouse button or spacebar held: start panning instead of dragging elements
+      if (e.button === 1 || isSpacePressed) {
+        e.stopPropagation();
+        e.preventDefault();
+        setIsPanning(true);
+        setPanStart({
+          x: e.clientX - canvasPosition.x,
+          y: e.clientY - canvasPosition.y,
+        });
+        return;
+      }
+
       // Close context menu when clicking/dragging an element
       setContextMenuPos(null);
       setContextMenuTarget(null);
@@ -1560,7 +1524,7 @@ export function CXDCanvas() {
       setDragElementStart({ x: e.clientX, y: e.clientY });
       setSelectedElementId(elementId);
     },
-    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory],
+    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition],
   );
 
   // Handle element drag end
@@ -1627,31 +1591,9 @@ export function CXDCanvas() {
               ? [draggingElement]
               : [];
 
-        // Attach all dropped elements to the container and expand if needed
+        // Attach all dropped elements to the container (no auto-expansion)
         elementsToDrop.forEach((id) => {
-          const el = canvasElements.find((e) => e.id === id);
-          if (el) {
-            // Add to container (this will trigger auto-expansion in addNodeToContainer)
-            addNodeToContainer(id, targetContainer.id);
-
-            // Double check container expansion on drag end
-            const padding = 20;
-            const neededWidth = Math.max(
-              targetContainer.width,
-              el.x + el.width - targetContainer.x + padding
-            );
-            const neededHeight = Math.max(
-              targetContainer.height,
-              el.y + el.height - targetContainer.y + padding
-            );
-
-            if (neededWidth > targetContainer.width || neededHeight > targetContainer.height) {
-              updateCanvasElement(targetContainer.id, {
-                width: neededWidth,
-                height: neededHeight,
-              });
-            }
-          }
+          addNodeToContainer(id, targetContainer.id);
         });
       }
     }
@@ -2241,6 +2183,47 @@ export function CXDCanvas() {
           selectedElementIds.has(el.id)
         );
         setClipboard(selectedElements);
+
+        // Also copy single image to system clipboard
+        if (selectedElements.length === 1 && selectedElements[0].type === "image") {
+          const imgEl = selectedElements[0] as any;
+          if (imgEl.src) {
+            fetch(imgEl.src)
+              .then((res) => res.blob())
+              .then((blob) => {
+                const mimeType = blob.type.startsWith("image/") ? blob.type : "image/png";
+                // Browsers require image/png for ClipboardItem in most cases
+                if (mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp") {
+                  navigator.clipboard.write([
+                    new ClipboardItem({ [mimeType]: blob }),
+                  ]).catch(() => {
+                    // Silently fail — system clipboard copy is best-effort
+                  });
+                } else {
+                  // Convert to PNG via canvas for broader clipboard compatibility
+                  const img = new Image();
+                  img.crossOrigin = "anonymous";
+                  img.onload = () => {
+                    const cvs = document.createElement("canvas");
+                    cvs.width = img.naturalWidth;
+                    cvs.height = img.naturalHeight;
+                    cvs.getContext("2d")?.drawImage(img, 0, 0);
+                    cvs.toBlob((pngBlob) => {
+                      if (pngBlob) {
+                        navigator.clipboard.write([
+                          new ClipboardItem({ "image/png": pngBlob }),
+                        ]).catch(() => {});
+                      }
+                    }, "image/png");
+                  };
+                  img.src = imgEl.src;
+                }
+              })
+              .catch(() => {
+                // Silently fail if fetch fails (e.g. CORS)
+              });
+          }
+        }
         return;
       }
 
@@ -2404,6 +2387,11 @@ export function CXDCanvas() {
       const container = containerRef.current;
       if (!container) return;
 
+      // Always read fresh values from store to avoid stale closure during rapid scrolling
+      const storeState = useCXDStore.getState();
+      const currentZoom = storeState.canvasZoom;
+      const currentPos = storeState.canvasPosition;
+
       // Ctrl+scroll = zoom, regular scroll = pan
       if (e.ctrlKey || e.metaKey) {
         // ZOOM MODE - always prevent default to stop browser zoom and scrolling
@@ -2415,8 +2403,8 @@ export function CXDCanvas() {
         const ZOOM_EPSILON = 0.001;
         const isZoomingIn = e.deltaY < 0;
         const isZoomingOut = e.deltaY > 0;
-        const atMaxZoom = canvasZoom >= MAX_ZOOM - ZOOM_EPSILON;
-        const atMinZoom = canvasZoom <= MIN_ZOOM + ZOOM_EPSILON;
+        const atMaxZoom = currentZoom >= MAX_ZOOM - ZOOM_EPSILON;
+        const atMinZoom = currentZoom <= MIN_ZOOM + ZOOM_EPSILON;
 
         // HARD STOP: If at zoom limit, block ALL events and return immediately
         // This prevents any scrolling, panning, or position updates
@@ -2456,18 +2444,18 @@ export function CXDCanvas() {
 
             const newZoom = Math.min(
               MAX_ZOOM,
-              Math.max(MIN_ZOOM, canvasZoom * (zoomDirection > 0 ? zoomStep : 1 / zoomStep)),
+              Math.max(MIN_ZOOM, currentZoom * (zoomDirection > 0 ? zoomStep : 1 / zoomStep)),
             );
 
             // Only update if zoom actually changed significantly (prevents sliding at max/min zoom)
             // Use a small epsilon to avoid floating point precision issues
-            const zoomChanged = Math.abs(newZoom - canvasZoom) > 0.001;
+            const zoomChanged = Math.abs(newZoom - currentZoom) > 0.001;
             if (zoomChanged) {
-              const zoomRatio = newZoom / canvasZoom;
+              const zoomRatio = newZoom / currentZoom;
 
               // Zoom towards cursor position
-              const newPosX = Math.round((mouseX - (mouseX - canvasPosition.x) * zoomRatio) * 100) / 100;
-              const newPosY = Math.round((mouseY - (mouseY - canvasPosition.y) * zoomRatio) * 100) / 100;
+              const newPosX = Math.round((mouseX - (mouseX - currentPos.x) * zoomRatio) * 100) / 100;
+              const newPosY = Math.round((mouseY - (mouseY - currentPos.y) * zoomRatio) * 100) / 100;
 
               setCanvasZoom(newZoom);
               setCanvasPosition({ x: newPosX, y: newPosY });
@@ -2482,18 +2470,18 @@ export function CXDCanvas() {
 
           const newZoom = Math.min(
             MAX_ZOOM,
-            Math.max(MIN_ZOOM, canvasZoom * (1 + delta)),
+            Math.max(MIN_ZOOM, currentZoom * (1 + delta)),
           );
 
           // Only update if zoom actually changed significantly (prevents sliding at max/min zoom)
           // Use a small epsilon to avoid floating point precision issues
-          const zoomChanged = Math.abs(newZoom - canvasZoom) > 0.001;
+          const zoomChanged = Math.abs(newZoom - currentZoom) > 0.001;
           if (zoomChanged) {
-            const zoomRatio = newZoom / canvasZoom;
+            const zoomRatio = newZoom / currentZoom;
 
             // Zoom towards cursor position
-            const newPosX = Math.round((mouseX - (mouseX - canvasPosition.x) * zoomRatio) * 100) / 100;
-            const newPosY = Math.round((mouseY - (mouseY - canvasPosition.y) * zoomRatio) * 100) / 100;
+            const newPosX = Math.round((mouseX - (mouseX - currentPos.x) * zoomRatio) * 100) / 100;
+            const newPosY = Math.round((mouseY - (mouseY - currentPos.y) * zoomRatio) * 100) / 100;
 
             setCanvasZoom(newZoom);
             setCanvasPosition({ x: newPosX, y: newPosY });
@@ -2509,19 +2497,19 @@ export function CXDCanvas() {
         if (e.shiftKey) {
           // Horizontal pan
           setCanvasPosition({
-            x: canvasPosition.x - e.deltaY * panSpeed,
-            y: canvasPosition.y
+            x: currentPos.x - e.deltaY * panSpeed,
+            y: currentPos.y
           });
         } else {
           // Vertical pan (or both if deltaX exists)
           setCanvasPosition({
-            x: canvasPosition.x - (e.deltaX || 0) * panSpeed,
-            y: canvasPosition.y - e.deltaY * panSpeed
+            x: currentPos.x - (e.deltaX || 0) * panSpeed,
+            y: currentPos.y - e.deltaY * panSpeed
           });
         }
       }
     },
-    [canvasZoom, canvasPosition, setCanvasZoom, setCanvasPosition, zoomSensitivity],
+    [setCanvasZoom, setCanvasPosition, zoomSensitivity],
   );
 
   // Attach wheel event with passive: false
@@ -3239,6 +3227,8 @@ export function CXDCanvas() {
                 isHighlighted={highlightedElementId === element.id}
                 isHoverTarget={hoverTargetNodeId === element.id}
                 onSelect={(e) => {
+                // Don't select when space is held (hand/pan tool active)
+                if (isSpacePressed) return;
                 if (e?.shiftKey || e?.ctrlKey || e?.metaKey) {
                   // Multi-select with Shift/Ctrl/Cmd
                   const newSelected = new Set(selectedElementIds);

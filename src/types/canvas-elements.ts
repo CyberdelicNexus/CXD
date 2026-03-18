@@ -201,6 +201,13 @@ export interface ImageElement extends CanvasElementBase {
       width: number; // Percentage of image width
       height: number; // Percentage of image height
     };
+    // Original element bounds before crop resize (for restore and re-crop)
+    preCropBounds?: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
     flipH?: boolean; // Horizontal flip
     flipV?: boolean; // Vertical flip
   };
