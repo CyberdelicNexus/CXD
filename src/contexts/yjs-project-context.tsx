@@ -85,10 +85,15 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     const newDoc = createProjectYDoc();
     const newAwareness = new Awareness(newDoc);
 
-    // Set up the bridge callbacks that push Y.Doc changes into Zustand
+    // Set up the bridge callbacks that push Y.Doc changes into Zustand.
+    // Bridge is started IMMEDIATELY so it observes all Y.Doc changes from
+    // this point forward — including those triggered by persistence load.
+    // This prevents a race condition where remote updates applied to Y.Doc
+    // before bridge.start() would never propagate to Zustand.
     const callbacks = createBridgeCallbacks(currentProjectId);
     const bridge = new YjsZustandBridge(newDoc, callbacks);
     bridgeRef.current = bridge;
+    bridge.start(); // Must be before persistence setup
 
     // Set up IndexedDB local persistence (offline support)
     const localPersist = new LocalPersistence(newDoc, currentProjectId);
@@ -124,6 +129,11 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     // recreated after load (which would discard IndexedDB state). Sequential
     // load is NOT required; CRDT merge produces the same result regardless
     // of which source resolves first.
+    //
+    // Since bridge.start() was called before persistence setup, the bridge
+    // observes Y.Doc changes from persistence load via observeDeep callbacks.
+    // We additionally call forceInitialSync() after load completes to ensure
+    // all persisted elements are in Zustand even if RAF hasn't fired yet.
     Promise.all([
       localPersist.whenSynced(),
       supabasePersist.load(),
@@ -136,8 +146,11 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
         console.log('[YjsProject] Loaded persisted Yjs state from Supabase');
       }
 
-      // Start the bridge after all persistence layers are ready
-      bridge.start();
+      // Force-sync all current Y.Doc state to Zustand immediately.
+      // This handles two cases:
+      // 1. Elements from persistence that arrived before RAF flush
+      // 2. Elements in yjs_state that aren't in the JSON project_data
+      bridge.forceInitialSync();
 
       // Mark as ready after successful hydration
       setIsReady(true);
@@ -145,7 +158,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       console.error('[YjsProject] Failed to load persisted state:', err);
       // Fallback to project data on error
       initializeYDoc(newDoc, project);
-      bridge.start();
+      bridge.forceInitialSync();
       setIsReady(true);
     });
 

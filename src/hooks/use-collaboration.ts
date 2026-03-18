@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react';
 import { createClient } from '@/supabase/client';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -80,6 +80,18 @@ export function useCollaboration(
   const cursorThrottleRef = useRef<NodeJS.Timeout | null>(null);
   const lastCursorRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Stable refs for callbacks — updated every render without causing channel reconnection.
+  // This prevents the channel from being torn down and recreated whenever the parent
+  // re-renders with a new function reference for these callbacks.
+  const onRemoteUpdateRef = useRef(options.onRemoteUpdate);
+  const onCollaboratorJoinRef = useRef(options.onCollaboratorJoin);
+  const onCollaboratorLeaveRef = useRef(options.onCollaboratorLeave);
+  useLayoutEffect(() => {
+    onRemoteUpdateRef.current = options.onRemoteUpdate;
+    onCollaboratorJoinRef.current = options.onCollaboratorJoin;
+    onCollaboratorLeaveRef.current = options.onCollaboratorLeave;
+  });
+
   // Get current user on mount
   useEffect(() => {
     async function getUser() {
@@ -137,7 +149,7 @@ export function useCollaboration(
       newPresences.forEach((p) => {
         const presence = p as unknown as CollaboratorPresence;
         if (presence.id !== currentUser.id) {
-          options.onCollaboratorJoin?.(presence);
+          onCollaboratorJoinRef.current?.(presence);
         }
       });
     });
@@ -146,7 +158,7 @@ export function useCollaboration(
     channel.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
       leftPresences.forEach((p) => {
         const presence = p as unknown as CollaboratorPresence;
-        options.onCollaboratorLeave?.(presence.id);
+        onCollaboratorLeaveRef.current?.(presence.id);
       });
     });
 
@@ -155,7 +167,7 @@ export function useCollaboration(
       const update = payload as CanvasUpdate;
       // Don't process our own updates
       if (update.userId !== currentUser.id) {
-        options.onRemoteUpdate?.(update);
+        onRemoteUpdateRef.current?.(update);
       }
     });
 
@@ -185,7 +197,10 @@ export function useCollaboration(
       channelRef.current = null;
       setIsConnected(false);
     };
-  }, [canvasId, currentUser, options.onRemoteUpdate, options.onCollaboratorJoin, options.onCollaboratorLeave]);
+  // Only canvasId and currentUser drive channel reconnection.
+  // Callbacks are accessed via refs so they never cause reconnection.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasId, currentUser]);
 
   // Update cursor position (throttled to 16ms / ~60fps for smooth movement)
   const updateCursor = useCallback((x: number, y: number) => {

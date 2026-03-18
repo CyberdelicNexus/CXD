@@ -295,6 +295,43 @@ export class YjsZustandBridge {
     this.unsubscribers.push(() => yMeta.unobserve(handler));
   }
 
+  /**
+   * Force an immediate full sync of all elements and edges from Y.Doc to Zustand.
+   * Call this after bridge.start() to ensure initial Y.Doc state (loaded from
+   * IndexedDB or Supabase persistence) is reflected in Zustand — the deep
+   * observers only fire for future changes, not for state that was already
+   * present when the bridge started.
+   */
+  forceInitialSync(): void {
+    if (this.destroyed) return;
+
+    const yElements = this.doc.getMap(YDOC_KEYS.ELEMENTS);
+    const yEdges = this.doc.getMap(YDOC_KEYS.EDGES);
+
+    const elements: CanvasElement[] = [];
+    yElements.forEach((yEl) => {
+      if (yEl instanceof Y.Map) {
+        elements.push(yMapToCanvasElement(yEl as Y.Map<unknown>));
+      }
+    });
+
+    const edges: CanvasEdge[] = [];
+    yEdges.forEach((yEdge) => {
+      if (yEdge instanceof Y.Map) {
+        edges.push(yMapToCanvasEdge(yEdge as Y.Map<unknown>));
+      }
+    });
+
+    // Replace the full arrays — this surfaces any elements that arrived
+    // during persistence load before the bridge was observing.
+    if (elements.length > 0) {
+      this.callbacks.setElements(elements);
+    }
+    if (edges.length > 0) {
+      this.callbacks.setEdges(edges);
+    }
+  }
+
   // ── Batched Flush (RAF) ─────────────────────────────────────────────────
 
   private scheduleFlush(): void {

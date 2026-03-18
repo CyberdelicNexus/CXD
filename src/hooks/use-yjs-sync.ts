@@ -33,25 +33,42 @@ export function useYjsSync(projectId: string | null, userId: string | null) {
       },
     });
 
-    // Subscribe to channel, then create provider
+    // Subscribe to channel, then create provider.
+    // The subscribe callback may fire multiple times (e.g. on network reconnect).
+    // Always destroy the old provider before creating a new one to prevent
+    // duplicate Y.Doc update listeners and double-broadcast of local changes.
     console.log('[useYjsSync] Subscribing to channel:', channelName);
+    let syncedTimer: ReturnType<typeof setTimeout> | null = null;
     channel.subscribe((status) => {
       console.log('[useYjsSync] Channel status:', status);
       if (status === 'SUBSCRIBED') {
+        // Destroy previous provider if channel reconnected
+        if (providerRef.current) {
+          console.log('[useYjsSync] Channel reconnected — destroying old provider');
+          providerRef.current.destroy();
+          providerRef.current = null;
+        }
+        if (syncedTimer) {
+          clearTimeout(syncedTimer);
+          syncedTimer = null;
+        }
+
         console.log('[useYjsSync] Creating YjsProvider for user:', userId);
         const provider = new SupabaseYjsProvider(yDoc, channel, userId);
         providerRef.current = provider;
 
         // Mark synced after a short delay (enough for SyncStep1/2 exchange)
-        const timer = setTimeout(() => {
+        syncedTimer = setTimeout(() => {
           setIsSynced(true);
         }, 500);
-
-        return () => clearTimeout(timer);
       }
     });
 
     return () => {
+      if (syncedTimer) {
+        clearTimeout(syncedTimer);
+        syncedTimer = null;
+      }
       if (providerRef.current) {
         providerRef.current.destroy();
         providerRef.current = null;
