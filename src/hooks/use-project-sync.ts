@@ -53,11 +53,12 @@ export async function flushPendingSave(): Promise<boolean> {
 
   if (!currentProject) return true;
 
-  // In CRDT mode, flush the Y.Doc binary state as well as JSON
+  // In CRDT mode, flush the Y.Doc binary state as well as JSON.
+  // destroy() is async: it awaits the final save() before marking destroyed,
+  // so awaiting destroy() ensures the save completes with no race condition.
   if (yDoc && currentProjectId) {
     const persist = new SupabasePersistence(yDoc, currentProjectId);
-    await persist.save();
-    persist.destroy();
+    await persist.destroy();
   }
 
   const projectHash = JSON.stringify(currentProject);
