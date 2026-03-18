@@ -116,6 +116,14 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     // 1. IndexedDB (local, fastest, for offline)
     // 2. Supabase (remote, latest shared state)
     // 3. Project data (fallback if no persisted state)
+    //
+    // LOAD ORDER AUDIT (2026-03-18): Promise.all is safe here because both
+    // sources apply state via Y.applyUpdate on the same Y.Doc. Y.js CRDT
+    // semantics guarantee that concurrent applyUpdate calls are merged
+    // idempotently — neither source "replaces" the doc. The doc is never
+    // recreated after load (which would discard IndexedDB state). Sequential
+    // load is NOT required; CRDT merge produces the same result regardless
+    // of which source resolves first.
     Promise.all([
       localPersist.whenSynced(),
       supabasePersist.load(),
