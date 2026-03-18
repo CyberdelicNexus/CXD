@@ -82,40 +82,42 @@
 
 ## Traceability
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| REL-01 | Phase 1 | Pending |
-| REL-02 | Phase 1 | Pending |
-| REL-03 | Phase 1 | Pending |
-| REL-04 | Phase 1 | Pending |
-| QA-01 | Phase 2 | Pending |
-| QA-02 | Phase 2 | Pending |
-| QA-03 | Phase 2 | Pending |
-| QA-04 | Phase 2 | Pending |
-| TPL-01 | Phase 3 | Pending |
-| TPL-02 | Phase 3 | Pending |
-| TPL-03 | Phase 3 | Pending |
-| TPL-04 | Phase 3 | Pending |
-| CON-01 | Phase 4 | Pending |
-| CON-02 | Phase 4 | Pending |
-| CON-03 | Phase 4 | Pending |
-| CON-04 | Phase 4 | Pending |
-| CAN-01 | Phase 4 | Pending |
-| CAN-02 | Phase 4 | Pending |
-| CAN-03 | Phase 4 | Pending |
-| CMT-01 | Phase 5 | Pending |
-| CMT-02 | Phase 5 | Pending |
-| CMT-03 | Phase 5 | Pending |
-| CMT-04 | Phase 5 | Pending |
-| LND-01 | Phase 6 | Pending |
-| LND-02 | Phase 6 | Pending |
-| LND-03 | Phase 6 | Pending |
+See: .planning/ROADMAP.md for full phase goals and success criteria.
+
+| Requirement | Phase | Phase Name | Status |
+|-------------|-------|------------|--------|
+| REL-01 | Phase 1 | Save Reliability | Pending |
+| REL-02 | Phase 1 | Save Reliability | Pending |
+| REL-03 | Phase 1 | Save Reliability | Pending |
+| REL-04 | Phase 1 | Save Reliability | Pending |
+| QA-01 | Phase 2 | QA Gate | Pending |
+| QA-02 | Phase 2 | QA Gate | Pending |
+| QA-03 | Phase 2 | QA Gate | Pending |
+| QA-04 | Phase 2 | QA Gate | Pending |
+| TPL-01 | Phase 3 | Templates | Pending |
+| TPL-02 | Phase 3 | Templates | Pending |
+| TPL-03 | Phase 3 | Templates | Pending |
+| TPL-04 | Phase 3 | Templates | Pending |
+| CON-01 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CON-02 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CON-03 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CON-04 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CAN-01 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CAN-02 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CAN-03 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CMT-01 | Phase 5 | Comments | Pending |
+| CMT-02 | Phase 5 | Comments | Pending |
+| CMT-03 | Phase 5 | Comments | Pending |
+| CMT-04 | Phase 5 | Comments | Pending |
+| LND-01 | Phase 6 | Landing Page Assets | Pending |
+| LND-02 | Phase 6 | Landing Page Assets | Pending |
+| LND-03 | Phase 6 | Landing Page Assets | Pending |
 
 **Coverage:**
 - v1 requirements: 26 total
 - Mapped to phases: 26
-- Unmapped: 0 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-18*
-*Last updated: 2026-03-18 after initial definition*
+*Last updated: 2026-03-18 after roadmap creation*
