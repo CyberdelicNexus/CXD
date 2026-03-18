@@ -98,6 +98,18 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     const supabasePersist = new SupabasePersistence(newDoc, currentProjectId);
     supabasePersistenceRef.current = supabasePersist;
 
+    // Flush Yjs state immediately when the tab is hidden or the page is unloading
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        supabasePersistenceRef.current?.flush();
+      }
+    };
+    const handleBeforeUnload = () => {
+      supabasePersistenceRef.current?.flush();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     // Load persisted state in order of priority:
     // 1. IndexedDB (local, fastest, for offline)
     // 2. Supabase (remote, latest shared state)
@@ -135,6 +147,8 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     setAwareness(newAwareness);
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,6 +156,8 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
 
   function cleanup() {
     if (supabasePersistenceRef.current) {
+      // destroy() is async: it flushes the final save before marking destroyed.
+      // Fire-and-forget is intentional here — we cannot await in a React cleanup.
       supabasePersistenceRef.current.destroy();
       supabasePersistenceRef.current = null;
     }

@@ -6,7 +6,7 @@
  *
  * Strategy:
  * - On load: fetch yjs_state from DB → apply to Y.Doc
- * - On save: encode Y.Doc state → upsert to yjs_state column
+ * - On save: read-merge-write (CRDT merge) to never overwrite concurrent changes
  * - Debounced saves (2s) to avoid excessive DB writes
  */
 
@@ -19,7 +19,7 @@ export class SupabasePersistence {
   private doc: Y.Doc;
   private projectId: string;
   private destroyed = false;
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private updateHandler: (update: Uint8Array, origin: unknown) => void;
   private isSaving = false;
 
@@ -27,10 +27,9 @@ export class SupabasePersistence {
     this.doc = doc;
     this.projectId = projectId;
 
-    // Schedule save on every local change
-    this.updateHandler = (_update: Uint8Array, origin: unknown) => {
+    // Schedule save on every local or remote change
+    this.updateHandler = (_update: Uint8Array, _origin: unknown) => {
       if (this.destroyed) return;
-      // Save on both local and remote changes (remote = peer updates we receive)
       this.scheduleSave();
     };
 
@@ -65,22 +64,50 @@ export class SupabasePersistence {
   }
 
   /**
-   * Save Y.Doc state to Supabase immediately.
+   * Save Y.Doc state to Supabase using read-merge-write so that concurrent
+   * changes from other clients (collaborators or owner on another tab) are
+   * never silently overwritten.
+   *
+   * Steps:
+   *   1. Read current yjs_state from DB
+   *   2. Apply it to a temporary mergeDoc
+   *   3. Apply local doc state to mergeDoc (CRDT merge — never loses data)
+   *   4. Encode merged result and write back
    */
   async save(): Promise<void> {
     if (this.destroyed || this.isSaving) return;
 
     this.isSaving = true;
     try {
-      const state = Y.encodeStateAsUpdate(this.doc);
+      const supabase = createClient();
+
+      // Step 1: fetch current persisted state
+      const { data } = await supabase
+        .from('cxd_projects')
+        .select('yjs_state')
+        .eq('id', this.projectId)
+        .single();
+
+      // Step 2 & 3: merge persisted state with local state
+      const mergeDoc = new Y.Doc();
+      if (data?.yjs_state) {
+        const persisted = Uint8Array.from(atob(data.yjs_state), (c) => c.charCodeAt(0));
+        Y.applyUpdate(mergeDoc, persisted);
+      }
+      const localState = Y.encodeStateAsUpdate(this.doc);
+      Y.applyUpdate(mergeDoc, localState);
+
+      // Step 4: encode merged result
+      const merged = Y.encodeStateAsUpdate(mergeDoc);
+      mergeDoc.destroy();
+
       // Convert Uint8Array to base64 without spread (avoids downlevelIteration issue)
       let binary = '';
-      for (let i = 0; i < state.length; i++) {
-        binary += String.fromCharCode(state[i]);
+      for (let i = 0; i < merged.length; i++) {
+        binary += String.fromCharCode(merged[i]);
       }
       const base64 = btoa(binary);
 
-      const supabase = createClient();
       const { error } = await supabase
         .from('cxd_projects')
         .update({
@@ -100,30 +127,47 @@ export class SupabasePersistence {
   }
 
   /**
+   * Cancel any pending debounce and save immediately.
+   * Call this on visibilitychange (tab hidden) and beforeunload.
+   */
+  flush(): void {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+    this.save();
+  }
+
+  /**
    * Schedule a debounced save.
    */
   private scheduleSave(): void {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
     }
-    this.saveTimer = setTimeout(() => {
+    this.saveTimeout = setTimeout(() => {
       this.save();
     }, SAVE_DEBOUNCE_MS);
   }
 
   /**
    * Clean up listeners and flush pending saves.
+   * Awaits the final save BEFORE marking destroyed so save() is not skipped.
    */
-  destroy(): void {
-    this.destroyed = true;
-    this.doc.off('update', this.updateHandler);
-
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
+  async destroy(): Promise<void> {
+    // Cancel pending debounce
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
     }
 
-    // Final save before destroy
-    this.save();
+    // Detach update listener before the final save to avoid re-scheduling
+    this.doc.off('update', this.updateHandler);
+
+    // Perform the final save while destroyed is still false
+    await this.save();
+
+    // Only now mark as destroyed
+    this.destroyed = true;
   }
 }
