@@ -305,6 +305,17 @@ export class YjsZustandBridge {
   forceInitialSync(): void {
     if (this.destroyed) return;
 
+    // Cancel any pending RAF flush — we're replacing the full arrays right now,
+    // so the individual patchElement/removeElement calls it would make are redundant.
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    this.pendingElementChanges.clear();
+    this.pendingElementRemovals.clear();
+    this.pendingEdgeChanges.clear();
+    this.pendingEdgeRemovals.clear();
+
     const yElements = this.doc.getMap(YDOC_KEYS.ELEMENTS);
     const yEdges = this.doc.getMap(YDOC_KEYS.EDGES);
 

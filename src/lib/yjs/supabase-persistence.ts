@@ -5,8 +5,13 @@
  * Replaces the old full project_data JSON approach with compact binary diffs.
  *
  * Strategy:
- * - On load: fetch yjs_state from DB → apply to Y.Doc
- * - On save: read-merge-write (CRDT merge) to never overwrite concurrent changes
+ * - On load: fetch yjs_state from DB → apply to Y.Doc → cache as lastLoadedState
+ * - On save: merge local Y.Doc with lastLoadedState (no extra SELECT per save)
+ *   The local Y.Doc already contains all remote changes via real-time Yjs sync.
+ *   Merging with lastLoadedState handles the edge case where a remote client
+ *   saved to DB before our Yjs channel was established (e.g., initial load race).
+ * - After each successful save: update lastLoadedState cache so next save merges
+ *   from the latest known-good DB state.
  * - Debounced saves (2s) to avoid excessive DB writes
  * - Retry on network failure: up to 3 attempts with exponential backoff (1s, 2s, 4s)
  * - onError callback fires when consecutiveFailures >= 5
@@ -32,6 +37,12 @@ export class SupabasePersistence {
   private isSaving = false;
   private consecutiveFailures = 0;
   private onPersistenceError?: (error: string) => void;
+  /**
+   * Cached state from the last load() or successful save().
+   * Used as the merge base in save() to avoid a DB SELECT on every write.
+   * null means no state has been loaded yet — first save just writes local state.
+   */
+  private lastLoadedState: Uint8Array | null = null;
 
   constructor(doc: Y.Doc, projectId: string, opts?: SupabasePersistenceOpts) {
     this.doc = doc;
@@ -67,6 +78,8 @@ export class SupabasePersistence {
       // yjs_state is stored as a base64-encoded binary
       const binary = Uint8Array.from(atob(data.yjs_state), (c) => c.charCodeAt(0));
       Y.applyUpdate(this.doc, binary, 'persistence');
+      // Cache the loaded state — save() uses this instead of re-fetching from DB
+      this.lastLoadedState = binary;
       return true;
     } catch (err) {
       console.error('[SupabasePersistence] Failed to load Y.Doc state:', err);
@@ -75,15 +88,17 @@ export class SupabasePersistence {
   }
 
   /**
-   * Save Y.Doc state to Supabase using read-merge-write so that concurrent
-   * changes from other clients (collaborators or owner on another tab) are
-   * never silently overwritten.
+   * Save Y.Doc state to Supabase.
+   *
+   * Uses cached state from load() (or the previous successful save) as the merge
+   * base — no SELECT per save. The local Y.Doc already contains all remote changes
+   * via real-time Yjs sync. The cache merge handles the narrow edge case where a
+   * remote client's changes reached DB before our Yjs channel was established.
    *
    * Steps:
-   *   1. Read current yjs_state from DB
-   *   2. Apply it to a temporary mergeDoc
-   *   3. Apply local doc state to mergeDoc (CRDT merge — never loses data)
-   *   4. Encode merged result and write back
+   *   1. Merge local doc with lastLoadedState (cached — no DB round trip)
+   *   2. Encode merged result and write back
+   *   3. Update lastLoadedState cache on success
    */
   async save(retryAttempt = 0): Promise<void> {
     if (this.destroyed || this.isSaving) return;
@@ -92,23 +107,15 @@ export class SupabasePersistence {
     try {
       const supabase = createClient();
 
-      // Step 1: fetch current persisted state
-      const { data } = await supabase
-        .from('cxd_projects')
-        .select('yjs_state')
-        .eq('id', this.projectId)
-        .single();
-
-      // Step 2 & 3: merge persisted state with local state
+      // Merge local state with cached last-loaded state (no SELECT needed)
       const mergeDoc = new Y.Doc();
-      if (data?.yjs_state) {
-        const persisted = Uint8Array.from(atob(data.yjs_state), (c) => c.charCodeAt(0));
-        Y.applyUpdate(mergeDoc, persisted);
+      if (this.lastLoadedState) {
+        Y.applyUpdate(mergeDoc, this.lastLoadedState);
       }
       const localState = Y.encodeStateAsUpdate(this.doc);
       Y.applyUpdate(mergeDoc, localState);
 
-      // Step 4: encode merged result
+      // Encode merged result
       const merged = Y.encodeStateAsUpdate(mergeDoc);
       mergeDoc.destroy();
 
@@ -144,8 +151,9 @@ export class SupabasePersistence {
           return;
         }
       } else {
-        // Success — reset failure counter
+        // Success — reset failure counter and update cache for next save
         this.consecutiveFailures = 0;
+        this.lastLoadedState = merged;
       }
     } catch (err) {
       const isNetworkError = err instanceof TypeError && err.message.includes('fetch');

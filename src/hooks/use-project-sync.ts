@@ -1,10 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import * as Y from 'yjs';
 import { useCXDStore } from '@/store/cxd-store';
 import { saveProject } from '@/lib/supabase-projects';
-import { SupabasePersistence } from '@/lib/yjs/supabase-persistence';
 import { CXDProject } from '@/types/cxd-schema';
 
 // Global state for sync status - accessible from other components
@@ -48,18 +46,15 @@ export function clearLocalBackup() {
 
 // Immediately save current project - call before navigation
 export async function flushPendingSave(): Promise<boolean> {
-  const { projects, currentProjectId, yDoc } = useCXDStore.getState();
+  const { projects, currentProjectId } = useCXDStore.getState();
   const currentProject = projects.find(p => p.id === currentProjectId);
 
   if (!currentProject) return true;
 
-  // In CRDT mode, flush the Y.Doc binary state as well as JSON.
-  // destroy() is async: it awaits the final save() before marking destroyed,
-  // so awaiting destroy() ensures the save completes with no race condition.
-  if (yDoc && currentProjectId) {
-    const persist = new SupabasePersistence(yDoc, currentProjectId);
-    await persist.destroy();
-  }
+  // Note: Yjs binary state (yjs_state column) is flushed by YjsProjectContext's
+  // cleanup, which calls supabasePersist.destroy() on unmount. We don't block here
+  // because creating a new SupabasePersistence instance would double-save and delay
+  // this function by one extra DB round-trip. The context cleanup handles it.
 
   const projectHash = JSON.stringify(currentProject);
   if (projectHash === lastSavedHash) return true;
