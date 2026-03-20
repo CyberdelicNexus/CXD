@@ -60,8 +60,15 @@ export function useSubscription(): UseSubscriptionReturn {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  // Prevent hammering Supabase when it's down — track last fetch time
+  const lastFetchRef = { current: 0 };
 
   const fetchSubscription = useCallback(async () => {
+    // Debounce: skip if fetched within the last 5 seconds
+    const now = Date.now();
+    if (now - lastFetchRef.current < 5000) return;
+    lastFetchRef.current = now;
+
     try {
       setIsLoading(true);
       setError(null);
@@ -96,12 +103,13 @@ export function useSubscription(): UseSubscriptionReturn {
     } finally {
       setIsLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     fetchSubscription();
 
-    // Listen for auth changes
+    // Listen for auth changes — debounced by fetchSubscription to avoid storms
     const supabase = createClient();
     const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(() => {
       fetchSubscription();
