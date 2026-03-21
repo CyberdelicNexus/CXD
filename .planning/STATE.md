@@ -10,24 +10,25 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 2 of 6 (QA Gate)
-Plan: 0 of 3 in current phase
-Status: Not started
-Last activity: 2026-03-21 — Completed Phase 1 (01-02-PLAN.md approved)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-03-21 — Completed 02-01-PLAN.md
 
 Progress: [██░░░░░░░░] ~17%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: ~27 min
-- Total execution time: ~53 min
+- Total plans completed: 3
+- Average duration: ~24 min
+- Total execution time: ~73 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-save-reliability | 2/2 | ~53 min | ~27 min |
+| 02-qa-gate | 1/3 | ~20 min | ~20 min |
 
 **Recent Trend:**
 - Last 5 plans: ~27 min avg
@@ -47,6 +48,7 @@ Recent decisions affecting current work:
 - Templates as blank scaffolds — faster to build, gives structure without prescribing content
 - Connector v1 = visual refinement + tag propagation — nail the feel before full logic engine
 - Comments before drawing/annotation — more collaborative utility for the launch audience
+- Create board selector: 'Create New Canvas' button on dashboard; add note selector: toolbar Card > Note Card dropdown
 
 **From 01-01 execution:**
 - Use read-merge-write (not optimistic overwrite) in SupabasePersistence.save() — CRDT merge preserves all concurrent edits
@@ -71,5 +73,5 @@ None. Phase 1 complete and human-verified.
 ## Session Continuity
 
 Last session: 2026-03-21
-Stopped at: Phase 1 complete. Phase 2 (QA Gate) not yet started — plans not yet created.
+Stopped at: Completed 02-01-PLAN.md (solo happy path test suite, human-verified green)
 Resume file: None
