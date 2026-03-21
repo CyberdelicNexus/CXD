@@ -7,10 +7,10 @@
 
 ### Reliability
 
-- [ ] **REL-01**: Collaborator changes are persisted to the database (not just synced in-session)
-- [ ] **REL-02**: Owner changes are persisted reliably after every edit
-- [ ] **REL-03**: Changes survive page reload for both owner and collaborator roles
-- [ ] **REL-04**: No progress is lost on network interruption (reconnection recovers pending changes)
+- [x] **REL-01**: Collaborator changes are persisted to the database (not just synced in-session)
+- [x] **REL-02**: Owner changes are persisted reliably after every edit
+- [x] **REL-03**: Changes survive page reload for both owner and collaborator roles
+- [x] **REL-04**: No progress is lost on network interruption (reconnection recovers pending changes)
 
 ### Quality Assurance
 
@@ -86,10 +86,10 @@ See: .planning/ROADMAP.md for full phase goals and success criteria.
 
 | Requirement | Phase | Phase Name | Status |
 |-------------|-------|------------|--------|
-| REL-01 | Phase 1 | Save Reliability | Pending |
-| REL-02 | Phase 1 | Save Reliability | Pending |
-| REL-03 | Phase 1 | Save Reliability | Pending |
-| REL-04 | Phase 1 | Save Reliability | Pending |
+| REL-01 | Phase 1 | Save Reliability | Complete |
+| REL-02 | Phase 1 | Save Reliability | Complete |
+| REL-03 | Phase 1 | Save Reliability | Complete |
+| REL-04 | Phase 1 | Save Reliability | Complete |
 | QA-01 | Phase 2 | QA Gate | Pending |
 | QA-02 | Phase 2 | QA Gate | Pending |
 | QA-03 | Phase 2 | QA Gate | Pending |
@@ -120,4 +120,4 @@ See: .planning/ROADMAP.md for full phase goals and success criteria.
 
 ---
 *Requirements defined: 2026-03-18*
-*Last updated: 2026-03-18 after roadmap creation*
+*Last updated: 2026-03-21 after Phase 1 completion*

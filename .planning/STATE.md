@@ -5,32 +5,32 @@
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** Teams should never lose their work — every change by every collaborator must be saved reliably.
-**Current focus:** Phase 1 — Save Reliability
+**Current focus:** Phase 2 — QA Gate
 
 ## Current Position
 
-Phase: 1 of 6 (Save Reliability)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-03-18 — Completed 01-01-PLAN.md
+Phase: 2 of 6 (QA Gate)
+Plan: 0 of 3 in current phase
+Status: Not started
+Last activity: 2026-03-21 — Completed Phase 1 (01-02-PLAN.md approved)
 
-Progress: [█░░░░░░░░░] ~8%
+Progress: [██░░░░░░░░] ~17%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 8 min
-- Total execution time: 8 min
+- Total plans completed: 2
+- Average duration: ~27 min
+- Total execution time: ~53 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-save-reliability | 1/2 | 8 min | 8 min |
+| 01-save-reliability | 2/2 | ~53 min | ~27 min |
 
 **Recent Trend:**
-- Last 5 plans: 8 min
+- Last 5 plans: ~27 min avg
 - Trend: baseline established
 
 *Updated after each plan completion*
@@ -53,17 +53,23 @@ Recent decisions affecting current work:
 - destroy() must be async and await save() before setting destroyed=true to guarantee final flush completes
 - flushPendingSave() uses await persist.destroy() as the single sequenced call rather than save+destroy separately
 
+**From 01-02 execution:**
+- 6MB Yjs initialization broadcast was the root cause of all realtime collaboration failure — fixed via 'initialization' origin tag in initializeYDoc transact()
+- Supabase Realtime silently drops messages over 1MB — MAX_BROADCAST_BYTES = 900KB guard added to all outgoing Yjs messages
+- sync2 size cap: oversized sync2 responses skip broadcast; fresh peer loads full state from yjs_state DB column
+- Promise.all load order (IndexedDB + Supabase) is CRDT-safe — audited and documented in context file
+- Do not retry RLS/permission errors (code 42501) — they won't resolve on their own
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-- [Phase 1]: Root cause of persistence failure confirmed and fixed in 01-01. Plan 02 may add Playwright stress testing.
-- [Phase 1]: Workshop is live today — Phase 1 is urgent. Plan 01 deployed fixes are ready.
+None. Phase 1 complete and human-verified.
 
 ## Session Continuity
 
-Last session: 2026-03-18T19:08:00Z
-Stopped at: Completed 01-01-PLAN.md (2 tasks, all done)
+Last session: 2026-03-21
+Stopped at: Phase 1 complete. Phase 2 (QA Gate) not yet started — plans not yet created.
 Resume file: None
