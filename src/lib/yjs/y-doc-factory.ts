@@ -72,6 +72,9 @@ export function createProjectYDoc(): Y.Doc {
  * 2. Migrating a legacy project (no yjs_state yet) to CRDT
  */
 export function initializeYDoc(doc: Y.Doc, project: CXDProject): void {
+  // Use 'initialization' origin so SupabaseYjsProvider can skip broadcasting this.
+  // The full state is saved to yjs_state by SupabasePersistence — new peers load
+  // from DB rather than needing a P2P broadcast of 6MB+ data.
   doc.transact(() => {
     // ── Meta ──
     const yMeta = doc.getMap(YDOC_KEYS.META);
@@ -192,7 +195,7 @@ export function initializeYDoc(doc: Y.Doc, project: CXDProject): void {
     if (project.experienceFlowDescription) {
       yDesc.insert(0, project.experienceFlowDescription);
     }
-  });
+  }, 'initialization'); // origin: SupabaseYjsProvider skips broadcasting this
 }
 
 // ─── Conversion: Y.Doc → CXDProject ─────────────────────────────────────────

@@ -23,6 +23,11 @@ const YJS_SYNC_EVENT = 'yjs_sync';
 // Debounce interval for batching local updates (ms)
 const UPDATE_DEBOUNCE_MS = 50;
 
+// Supabase Realtime broadcast limit (free tier: 1MB, paid: higher).
+// Keep well under to avoid silent drops. Peers that need more than this
+// must load the full state from the yjs_state DB column via SupabasePersistence.
+const MAX_BROADCAST_BYTES = 900_000; // 900KB
+
 interface YjsSyncMessage {
   msgType: 'sync1' | 'sync2' | 'update';
   data: string; // base64-encoded binary
@@ -46,11 +51,20 @@ export class SupabaseYjsProvider {
     this.channel = channel;
     this.userId = userId;
 
-    // Listen for local Y.Doc updates and broadcast them
+    // Listen for local Y.Doc updates and broadcast them.
+    // Only queue user-generated edits — skip persistence loads and initialization
+    // hydration which can be 6MB+ and exceed Supabase Realtime's 1MB message limit.
+    // New peers load the full state from the yjs_state DB column via SupabasePersistence.
     this.updateHandler = (update: Uint8Array, origin: unknown) => {
       if (this.destroyed) return;
-      // Only broadcast local changes (not remote applies)
+      // Skip remote applies (avoid echo)
       if (origin === 'remote') return;
+      // Skip initial hydration from project_data JSON (can be 6MB+)
+      if (origin === 'initialization') return;
+      // Skip Supabase DB persistence loads
+      if (origin === 'persistence') return;
+      // Skip IndexedDB persistence (y-indexeddb uses its provider instance as origin)
+      if (origin !== null && origin !== undefined && typeof origin === 'object') return;
       this.queueUpdate(update);
     };
     this.doc.on('update', this.updateHandler);
@@ -142,8 +156,9 @@ export class SupabaseYjsProvider {
             syncProtocol.readSyncStep1(decoder, encoder, this.doc);
             const response = encoding.toUint8Array(encoder);
 
-            // Only send if there's actual content
-            if (response.byteLength > 0) {
+            // Only send if there's actual content and within size limit.
+            // If the response is too large the peer must load from yjs_state DB column.
+            if (response.byteLength > 0 && response.byteLength <= MAX_BROADCAST_BYTES) {
               console.log('[YjsProvider] Sending sync2 response, size:', response.byteLength);
               this.channel.send({
                 type: 'broadcast',
@@ -154,6 +169,8 @@ export class SupabaseYjsProvider {
                   sender: this.userId,
                 } satisfies YjsSyncMessage,
               });
+            } else if (response.byteLength > MAX_BROADCAST_BYTES) {
+              console.warn('[YjsProvider] sync2 too large to broadcast (' + response.byteLength + ' bytes). Peer should load from DB (yjs_state column).');
             }
           } catch (err) {
             console.error('[YjsProvider] Failed to process sync1, re-requesting sync:', err);
@@ -246,6 +263,11 @@ export class SupabaseYjsProvider {
     const merged = Y.mergeUpdates(this.pendingUpdates);
     this.pendingUpdates = [];
     console.log('[YjsProvider] Broadcasting update, merged size:', merged.byteLength);
+
+    if (merged.byteLength > MAX_BROADCAST_BYTES) {
+      console.warn('[YjsProvider] Update too large to broadcast (' + merged.byteLength + ' bytes). Skipping realtime broadcast — peers will sync from DB (yjs_state).');
+      return;
+    }
 
     this.channel.send({
       type: 'broadcast',
