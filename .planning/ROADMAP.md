@@ -47,12 +47,12 @@ Plans:
   2. Running `playwright test` covers the collaboration flow: invite, collaborator edits, both reload, changes persist
   3. No test-surfaced bugs remain open; each is either fixed or explicitly deferred with a written reason
   4. The canvas remains responsive (no jank, no lag) with 10+ elements on screen and 2 concurrent collaborators
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: Write Playwright test suite for solo happy path (sign-up through persistence verification)
-- [ ] 02-02: Write Playwright test suite for collaboration flow
-- [ ] 02-03: Triage and fix all bugs surfaced by the test runs
+- [ ] 02-01-PLAN.md — Solo happy path test: create board, add elements, edit, reload, verify persistence
+- [ ] 02-02-PLAN.md — Collaboration persistence test: owner + collaborator sync and persist after reload
+- [ ] 02-03-PLAN.md — Run full suite, triage/fix all bugs, add performance smoke test
 
 ---
 
