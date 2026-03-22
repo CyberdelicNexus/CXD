@@ -124,7 +124,7 @@ interface CXDState {
   setClipboard: (elements: CanvasElement[]) => void;
 
   // Actions - Projects
-  createProject: (name: string, ownerId: string) => string;
+  createProject: (name: string, ownerId: string, initialElements?: CanvasElement[]) => string;
   loadProject: (id: string) => void;
   deleteProject: (id: string) => void;
   getCurrentProject: () => CXDProject | null;
@@ -378,13 +378,13 @@ export const useCXDStore = create<CXDState>()(
       setClipboard: (elements) => set({ clipboard: elements }),
 
       // Project actions
-      createProject: (name, ownerId) => {
+      createProject: (name, ownerId, initialElements) => {
         const id = uuidv4();
-        const project = createDefaultProject(id, name, ownerId);
+        const project = createDefaultProject(id, name, ownerId, initialElements);
         set((state) => ({
           projects: [...state.projects, project],
           currentProjectId: id,
-          viewMode: 'wizard',
+          viewMode: initialElements?.length ? 'canvas' : 'wizard',
         }));
         // Insert new project into database (async)
         insertProject(project).catch(err => console.error('Failed to insert new project:', err));

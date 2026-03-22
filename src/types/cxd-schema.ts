@@ -317,7 +317,7 @@ export interface CXDProject {
 }
 
 // Default project factory
-export function createDefaultProject(id: string, name: string, ownerId: string): CXDProject {
+export function createDefaultProject(id: string, name: string, ownerId: string, initialElements?: import('./canvas-elements').CanvasElement[]): CXDProject {
   return {
     id,
     name,
@@ -413,7 +413,10 @@ export function createDefaultProject(id: string, name: string, ownerId: string):
     experienceFlowDescription: '',
 
     // Canvas layout positions
-    canvasLayout: {},
+    canvasLayout: {
+      elements: initialElements ? [...initialElements] : [],
+      edges: [],
+    },
 
     wizardCompleted: false,
     currentWizardStep: 0,
