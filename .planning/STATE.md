@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 3 of 6 (Templates)
-Plan: 1 of TBD in current phase
+Plan: 2 of TBD in current phase
 Status: In progress
-Last activity: 2026-03-22 — Completed 03-01-PLAN.md (template scaffold definitions + dashboard gallery)
+Last activity: 2026-03-22 — Completed 03-02-PLAN.md (canvas template picker via AccountMenu)
 
-Progress: [█████░░░░░] ~50%
+Progress: [█████░░░░░] ~55%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: ~19 min
-- Total execution time: ~96 min
+- Total plans completed: 6
+- Average duration: ~18 min
+- Total execution time: ~107 min
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [█████░░░░░] ~50%
 |-------|-------|-------|----------|
 | 01-save-reliability | 2/2 | ~53 min | ~27 min |
 | 02-qa-gate | 2/3 | ~35 min | ~18 min |
-| 03-templates | 1/TBD | ~8 min | ~8 min |
+| 03-templates | 2/TBD | ~19 min | ~10 min |
 
 **Recent Trend:**
-- Last 5 plans: ~19 min avg
+- Last 5 plans: ~17 min avg
 - Trend: accelerating (simpler feature work vs infrastructure)
 
 *Updated after each plan completion*
@@ -68,6 +68,10 @@ Recent decisions affecting current work:
 - viewMode='canvas' when initialElements provided: template projects skip wizard, go straight to canvas
 - containerStyle typed as ElementStyle (not inline with 'as const') — avoids cast gymnastics for borderStyle literal
 
+**From 03-02 execution:**
+- onOpenTemplates optional prop pattern: AccountMenu Templates item hidden when prop absent — backward-compatible with dashboard or any other usage without canvas context
+- LayoutTemplate icon confirmed available in installed lucide-react version before use
+
 ### Pending Todos
 
 None.
@@ -79,5 +83,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 03-01-PLAN.md (template scaffold definitions + dashboard gallery)
+Stopped at: Completed 03-02-PLAN.md (canvas template picker via AccountMenu)
 Resume file: None
