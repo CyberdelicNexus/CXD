@@ -65,11 +65,11 @@ Plans:
   2. At least 3 named scaffold options are visible (e.g. User Journey, Service Blueprint, Workshop)
   3. Clicking a template and confirming creates a new board with containers and zones already laid out
   4. The scaffold layout uses containers and labeled zones — no prescriptive content, just structure
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Build Templates tab UI in the new board creation flow
-- [ ] 03-02: Define and implement 3 scaffold layouts (User Journey, Service Blueprint, Workshop)
+- [ ] 03-01-PLAN.md — Tabbed create dialog (Blank/Templates), store extension for initialElements, template card selection UI
+- [ ] 03-02-PLAN.md — Define 3 scaffold layouts (User Journey, Service Blueprint, Workshop) and wire into creation flow
 
 ---
 
