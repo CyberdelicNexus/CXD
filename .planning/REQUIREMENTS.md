@@ -21,10 +21,10 @@
 
 ### Templates
 
-- [ ] **TPL-01**: Templates tab is accessible from the new board creation flow
-- [ ] **TPL-02**: At least 3 blank structure scaffolds are available (e.g. User Journey, Service Blueprint, Workshop)
-- [ ] **TPL-03**: Selecting a template creates a new board pre-populated with the scaffold layout
-- [ ] **TPL-04**: Scaffolds use containers and zones to define structure without prescribing content
+- [x] **TPL-01**: Templates tab is accessible from the new board creation flow
+- [x] **TPL-02**: At least 3 blank structure scaffolds are available (e.g. User Journey, Service Blueprint, Workshop)
+- [x] **TPL-03**: Selecting a template creates a new board pre-populated with the scaffold layout
+- [x] **TPL-04**: Scaffolds use containers and zones to define structure without prescribing content
 
 ### Connectors
 

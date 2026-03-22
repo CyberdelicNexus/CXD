@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Save Reliability** - Fix the collaborator persistence bug so no user ever loses work
 - [x] **Phase 2: QA Gate** - Stress test critical flows end-to-end with Playwright and fix all surfaced bugs
-- [ ] **Phase 3: Templates** - Ship a templates tab with blank scaffolds so new users have structure to start from
+- [x] **Phase 3: Templates** - Ship a templates tab with blank scaffolds so new users have structure to start from
 - [ ] **Phase 4: Connector Refinement + Canvas Interactions** - Polish connectors and add auto-organize, cmd+L shortcut, and right-click connect
 - [ ] **Phase 5: Comments** - Add a canvas-pinned comment system with threads and resolution
 - [ ] **Phase 6: Landing Page Assets** - Create visual assets that communicate the tool to prospective users
@@ -68,8 +68,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Tabbed create dialog (Blank/Templates), store extension for initialElements, template card selection UI
-- [ ] 03-02-PLAN.md — Define 3 scaffold layouts (User Journey, Service Blueprint, Workshop) and wire into creation flow
+- [x] 03-01-PLAN.md — Dashboard template gallery, store extension for initialElements, template card selection UI
+- [x] 03-02-PLAN.md — TemplatePickerModal for canvas (AccountMenu → modal → addCanvasElement)
 
 ---
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Save Reliability | 2/2 | Complete | 2026-03-21 |
 | 2. QA Gate | 3/3 | Complete (test fixes applied; full green run deferred) | 2026-03-21 |
-| 3. Templates | 0/2 | Not started | - |
+| 3. Templates | 2/2 | Complete | 2026-03-22 |
 | 4. Connector Refinement + Canvas Interactions | 0/3 | Not started | - |
 | 5. Comments | 0/2 | Not started | - |
 | 6. Landing Page Assets | 0/2 | Not started | - |

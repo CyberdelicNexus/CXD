@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** Teams should never lose their work — every change by every collaborator must be saved reliably.
-**Current focus:** Phase 3 — Templates
+**Current focus:** Phase 4 — Connector Refinement + Canvas Interactions
 
 ## Current Position
 
-Phase: 3 of 6 (Templates)
-Plan: 2 of TBD in current phase
-Status: In progress
-Last activity: 2026-03-22 — Completed 03-02-PLAN.md (canvas template picker via AccountMenu)
+Phase: 4 of 6 (Connector Refinement + Canvas Interactions)
+Plan: 0 of 3 in current phase
+Status: Not started
+Last activity: 2026-03-22 — Phase 3 complete; dashboard template gallery + canvas AccountMenu template modal shipped
 
 Progress: [█████░░░░░] ~55%
 
