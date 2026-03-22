@@ -42,7 +42,9 @@ import {
   Send,
   Check,
   Loader2,
+  LayoutTemplate,
 } from "lucide-react";
+import { TEMPLATES, type TemplateDefinition } from "@/lib/templates";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { useRouter } from "next/navigation";
 import { fetchUserProjects, ensureUserProfile, saveProject } from "@/lib/supabase-projects";
@@ -90,6 +92,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [coverImageProject, setCoverImageProject] = useState<{ id: string; name: string } | null>(null);
   const [coverImageUrl, setCoverImageUrl] = useState("");
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | null>(null);
+  const [templateProjectName, setTemplateProjectName] = useState('');
 
   // Subscription state
   const {
@@ -283,6 +288,29 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
       router.push("/cxd");
     }
+  };
+
+  const handleCreateFromTemplate = async () => {
+    if (!canCreate) { setShowUpgradeModal(true); setTemplateDialogOpen(false); return; }
+    if (!selectedTemplate || !templateProjectName.trim()) return;
+
+    const freshElements = selectedTemplate.elements.map(el => ({
+      ...el,
+      id: crypto.randomUUID(),
+    }));
+
+    const projectId = createProject(templateProjectName.trim(), userId, freshElements);
+    setTemplateProjectName('');
+    setSelectedTemplate(null);
+    setTemplateDialogOpen(false);
+
+    await createNotification(
+      userId,
+      "PROJECT_CREATED",
+      `Your project "${templateProjectName.trim()}" has been created successfully`,
+      { projectId, projectName: templateProjectName.trim() },
+    );
+    router.push('/cxd');
   };
 
   const handleOpenProject = (projectId: string) => {
@@ -885,6 +913,37 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             </div>
           </div>
         </div>
+
+        {/* Template Gallery */}
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-4">
+            <LayoutTemplate className="w-4 h-4 text-purple-400" />
+            <h3 className="text-sm font-medium text-white/70">Start from a Template</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {TEMPLATES.map((tpl) => (
+              <div
+                key={tpl.id}
+                className="group flex flex-col gap-2 p-4 rounded-xl bg-black/20 border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all cursor-pointer"
+                onClick={() => {
+                  if (!canCreate) { setShowUpgradeModal(true); return; }
+                  setSelectedTemplate(tpl);
+                  setTemplateProjectName(tpl.name);
+                  setTemplateDialogOpen(true);
+                }}
+              >
+                <div className="text-2xl">{tpl.emoji}</div>
+                <div>
+                  <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors">{tpl.name}</p>
+                  <p className="text-xs text-white/50 mt-0.5">{tpl.description}</p>
+                </div>
+                <div className="mt-auto pt-2">
+                  <span className="text-xs text-purple-400 group-hover:text-purple-300 transition-colors">Use template →</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Upgrade Modal */}
@@ -1224,6 +1283,43 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             <div className="flex gap-3 justify-end pt-2">
               <Button variant="ghost" onClick={() => { setCoverImageProject(null); setCoverImageUrl(""); }} className="text-white/60 hover:text-white">
                 Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template Name Dialog */}
+      <Dialog open={templateDialogOpen} onOpenChange={(open) => { setTemplateDialogOpen(open); if (!open) { setTemplateProjectName(''); setSelectedTemplate(null); } }}>
+        <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedTemplate?.emoji} Create from {selectedTemplate?.name}
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              {selectedTemplate?.description}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="template-project-name" className="text-white/70">Project Name</Label>
+              <Input
+                id="template-project-name"
+                placeholder="Enter project name..."
+                value={templateProjectName}
+                onChange={(e) => setTemplateProjectName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateFromTemplate()}
+                className="bg-white/5 border-white/10 text-white placeholder:text-white/30"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button variant="ghost" onClick={() => setTemplateDialogOpen(false)} className="text-white/60 hover:text-white">
+                Cancel
+              </Button>
+              <Button onClick={handleCreateFromTemplate} className="btn-primary-glow" disabled={!templateProjectName.trim()}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Canvas
               </Button>
             </div>
           </div>
