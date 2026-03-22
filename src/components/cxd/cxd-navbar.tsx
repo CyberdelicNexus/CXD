@@ -49,7 +49,8 @@ import { createNotification, NotificationType } from "@/lib/notifications";
 import { createClient } from "@/../../supabase/client";
 import { useNotifications } from "@/hooks/use-notifications";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useCollaboration, useCanvasPermissions } from "@/hooks/use-collaboration";
+import { useCanvasPermissions } from "@/hooks/use-collaboration";
+import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorAvatars, ConnectionStatus } from "@/components/collaboration";
 import { CollaborationPanel } from "@/components/collaboration";
 import { NavCreditMeter } from "./nav-credit-meter";
@@ -58,6 +59,7 @@ import { useSubscription } from "@/hooks/use-subscription";
 import { useAICredits } from "@/hooks/use-ai-credits";
 import { UpgradeModal } from "@/components/modals/upgrade-modal";
 import { SettingsModal } from "@/components/modals/settings-modal";
+import { TemplatePickerModal } from './template-picker-modal';
 import { Lock } from "lucide-react";
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
@@ -178,7 +180,8 @@ export function CXDNavbar() {
 
   // Collaboration state
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
-  const { collaborators, isConnected } = useCollaboration(project?.id || null);
+  const [showTemplatesModal, setShowTemplatesModal] = useState(false);
+  const { collaborators, isConnected } = useCollaborationContext();
   const { role: canvasRole, permissions } = useCanvasPermissions(project?.id || null);
 
   const handleExportJSON = async () => {
@@ -682,6 +685,7 @@ export function CXDNavbar() {
             aiCredits={credits}
             onLogout={handleLogout}
             onOpenSettings={() => setShowSettingsModal(true)}
+            onOpenTemplates={() => setShowTemplatesModal(true)}
             plan={plan.id as any}
             isTrialing={isTrialing}
             trialDaysRemaining={trialDaysRemaining}
@@ -712,6 +716,14 @@ export function CXDNavbar() {
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
       />
+
+      {/* Template Picker Modal */}
+      {showTemplatesModal && (
+        <TemplatePickerModal
+          open={showTemplatesModal}
+          onClose={() => setShowTemplatesModal(false)}
+        />
+      )}
     </nav>
   );
 }
