@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** Teams should never lose their work — every change by every collaborator must be saved reliably.
-**Current focus:** Phase 2 — QA Gate
+**Current focus:** Phase 3 — Templates
 
 ## Current Position
 
 Phase: 3 of 6 (Templates)
-Plan: 0 of TBD in current phase
-Status: Not started
-Last activity: 2026-03-21 — Phase 2 closed; test infrastructure built, fixes applied, full green run deferred
+Plan: 1 of TBD in current phase
+Status: In progress
+Last activity: 2026-03-22 — Completed 03-01-PLAN.md (template scaffold definitions + dashboard gallery)
 
-Progress: [████░░░░░░] ~40%
+Progress: [█████░░░░░] ~50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: ~22 min
-- Total execution time: ~88 min
+- Total plans completed: 5
+- Average duration: ~19 min
+- Total execution time: ~96 min
 
 **By Phase:**
 
@@ -29,10 +29,11 @@ Progress: [████░░░░░░] ~40%
 |-------|-------|-------|----------|
 | 01-save-reliability | 2/2 | ~53 min | ~27 min |
 | 02-qa-gate | 2/3 | ~35 min | ~18 min |
+| 03-templates | 1/TBD | ~8 min | ~8 min |
 
 **Recent Trend:**
-- Last 5 plans: ~27 min avg
-- Trend: baseline established
+- Last 5 plans: ~19 min avg
+- Trend: accelerating (simpler feature work vs infrastructure)
 
 *Updated after each plan completion*
 
@@ -62,16 +63,21 @@ Recent decisions affecting current work:
 - Promise.all load order (IndexedDB + Supabase) is CRDT-safe — audited and documented in context file
 - Do not retry RLS/permission errors (code 42501) — they won't resolve on their own
 
+**From 03-01 execution:**
+- UUID refresh on template instantiation: reassign all element IDs via crypto.randomUUID() to prevent ID collisions between projects from the same template
+- viewMode='canvas' when initialElements provided: template projects skip wizard, go straight to canvas
+- containerStyle typed as ElementStyle (not inline with 'as const') — avoids cast gymnastics for borderStyle literal
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None. Phase 1 complete and human-verified.
+None.
 
 ## Session Continuity
 
-Last session: 2026-03-21
-Stopped at: Completed 02-02-PLAN.md (collab persistence test suite, human-verified green)
+Last session: 2026-03-22
+Stopped at: Completed 03-01-PLAN.md (template scaffold definitions + dashboard gallery)
 Resume file: None
