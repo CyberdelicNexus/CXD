@@ -12,6 +12,7 @@ import {
   Sparkles,
   Clock,
   CreditCard,
+  LayoutTemplate,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -35,6 +36,7 @@ interface AccountMenuProps {
   aiCredits?: AICreditsInfo | null;
   onLogout?: () => void;
   onOpenSettings?: () => void;
+  onOpenTemplates?: () => void;
   // Subscription data passed from parent
   plan?: PlanId;
   isTrialing?: boolean;
@@ -46,6 +48,7 @@ export function AccountMenu({
   aiCredits,
   onLogout,
   onOpenSettings,
+  onOpenTemplates,
   plan = 'free',
   isTrialing = false,
   trialDaysRemaining = null,
@@ -223,6 +226,16 @@ export function AccountMenu({
           <Settings className="w-4 h-4 mr-3" />
           Settings
         </DropdownMenuItem>
+
+        {onOpenTemplates && (
+          <DropdownMenuItem
+            onClick={onOpenTemplates}
+            className="hover:bg-white/5 cursor-pointer text-white/80 hover:text-white px-4 py-2.5"
+          >
+            <LayoutTemplate className="w-4 h-4 mr-3" />
+            Templates
+          </DropdownMenuItem>
+        )}
 
         {isFree && (
           <DropdownMenuItem
