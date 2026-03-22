@@ -21,7 +21,9 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test';
 import path from 'path';
 
-const BASE_URL = 'http://localhost:3000';
+// Use the configured base URL from playwright.config.ts (production build on port 3002).
+// Hardcoding localhost:3000 would hit the dev server which continuously recompiles.
+const BASE_URL = process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3002';
 const AUTH_A = path.join(__dirname, '.auth/user-a.json');
 const AUTH_B = path.join(__dirname, '.auth/user-b.json');
 const BOARD_NAME = 'Collab Test 2';
@@ -32,6 +34,11 @@ const REALTIME_TIMEOUT = 20_000; // ms to wait for a live update
 /** Navigate to dashboard and click the card with a specific project name (exact match) */
 async function openNamedCanvas(page: Page, name: string): Promise<void> {
   await page.goto(`${BASE_URL}/dashboard`);
+
+  // Wait for the dashboard to finish loading projects from Supabase.
+  // Without this, project cards may not be visible yet.
+  await page.waitForSelector('text=Loading your projects...', { state: 'hidden', timeout: 30000 })
+    .catch(() => { /* proceed if never shown */ });
 
   // Wait for dashboard to populate
   const anyCard = page.locator('.aspect-square.cursor-pointer').first();
@@ -82,6 +89,32 @@ async function openNamedCanvas(page: Page, name: string): Promise<void> {
   // Verify canvas loaded (check navbar shows the project name)
   const navTitle = await page.locator('nav').first().textContent().catch(() => '');
   console.log(`  Canvas loaded: "${navTitle?.trim().slice(0, 40) ?? 'unknown'}"`);
+
+  // Canvases open in their last-used mode (often Framing for new/untouched canvases).
+  // Switch to Canvas mode to ensure note cards are accessible for typing.
+  try {
+    const canvasNavBtn = page.locator('nav').locator('div').filter({ hasText: /^Canvas$/ }).first();
+    if (await canvasNavBtn.count() > 0) {
+      await canvasNavBtn.click({ timeout: 5000 });
+      await page.waitForTimeout(1500);
+      console.log('  Switched to Canvas mode');
+    }
+  } catch {
+    console.log('  Note: Could not switch to Canvas mode');
+  }
+
+  // Click "Fit All" to bring all canvas elements into the viewport.
+  // Canvas cards use CSS transforms — scrollIntoViewIfNeeded() won't work without this.
+  try {
+    // Wait up to 5s for the navigation toolkit to render after Canvas mode switch
+    const fitAllBtn = page.locator('button[title="Fit All"]').first();
+    await fitAllBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await fitAllBtn.click({ timeout: 3000 });
+    await page.waitForTimeout(800);
+    console.log('  Fit All — all elements visible');
+  } catch {
+    console.log('  Fit All button not found, continuing (elements may still be in viewport)');
+  }
 }
 
 /** Enter edit mode on a note card and update its title.
@@ -95,8 +128,9 @@ async function openNamedCanvas(page: Page, name: string): Promise<void> {
 async function typeOnNoteCard(page: Page, tag: string): Promise<string> {
   const text = `collab-${tag}-${Date.now()}`;
 
-  // Note cards are preferred; fall back to task/freeform card
-  const noteCard = page.locator('.card--note-resizable').first();
+  // Note cards: use [data-canvas-node] to target only the outer absolute wrapper.
+  // .card--note-resizable appears on both the outer wrapper AND the inner FreeformCard div.
+  const noteCard = page.locator('[data-canvas-node="true"].card--note-resizable').first();
   const count = await noteCard.count();
 
   if (count === 0) {
@@ -106,11 +140,11 @@ async function typeOnNoteCard(page: Page, tag: string): Promise<string> {
 
     if (cardCount > 0) {
       await canvasCards.waitFor({ state: 'visible', timeout: 5000 });
-      await canvasCards.dblclick({ delay: 100 });
+      await canvasCards.dblclick({ delay: 100, force: true });
     } else {
       const taskTitleEl = page.getByText('Task Title').first();
       if (await taskTitleEl.count() > 0) {
-        await taskTitleEl.dblclick({ delay: 100 });
+        await taskTitleEl.dblclick({ delay: 100, force: true });
       } else {
         throw new Error('No interactable canvas elements found');
       }
@@ -128,8 +162,12 @@ async function typeOnNoteCard(page: Page, tag: string): Promise<string> {
 
   await noteCard.waitFor({ state: 'visible', timeout: 10000 });
 
-  // Double-click to enter edit mode (mounts the title Input + TipTap body)
-  await noteCard.dblclick({ delay: 100 });
+  // Double-click to enter edit mode (mounts the title Input + TipTap body).
+  // Use force:true to bypass pointer-event interception from overlapping canvas cards.
+  // Note: scrollIntoViewIfNeeded() is NOT used here — canvas elements use CSS transforms
+  // that the browser's scrollIntoView cannot resolve. fitAll() in openNamedCanvas handles
+  // bringing elements into viewport before this function is called.
+  await noteCard.dblclick({ delay: 100, force: true });
 
   // After edit mode, a regular <input> appears for the note title
   // Target it scoped inside the note card so we don't accidentally pick up navbar inputs
@@ -142,8 +180,9 @@ async function typeOnNoteCard(page: Page, tag: string): Promise<string> {
 
   await inputEl.waitFor({ state: 'visible', timeout: 8000 });
 
-  // Select all existing title text and replace with our unique string
-  await inputEl.click({ clickCount: 3 });
+  // Select all existing title text and replace with our unique string.
+  // Use force:true since the input may be behind another canvas element.
+  await inputEl.click({ clickCount: 3, force: true });
   await inputEl.fill(text);
 
   // Click outside to blur and trigger the Yjs document update
@@ -262,8 +301,16 @@ test.describe('Collaboration with Persistence', () => {
       console.log('  - Persistence: Both users see edit after reload');
 
     } finally {
-      await ctxOwner.close();
-      await ctxCollab.close();
+      // Close browser contexts. Use a short timeout to avoid hanging on
+      // Supabase Realtime WebSocket connections that don't close cleanly.
+      await Promise.race([
+        ctxOwner.close(),
+        new Promise<void>(r => setTimeout(r, 5000)),
+      ]).catch(() => {});
+      await Promise.race([
+        ctxCollab.close(),
+        new Promise<void>(r => setTimeout(r, 5000)),
+      ]).catch(() => {});
     }
   });
 

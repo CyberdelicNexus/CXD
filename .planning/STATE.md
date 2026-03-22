@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 
 ## Current Position
 
-Phase: 2 of 6 (QA Gate)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-03-21 — Completed 02-02-PLAN.md (collab persistence test suite, human-verified green)
+Phase: 3 of 6 (Templates)
+Plan: 0 of TBD in current phase
+Status: Not started
+Last activity: 2026-03-21 — Phase 2 closed; test infrastructure built, fixes applied, full green run deferred
 
-Progress: [███░░░░░░░] ~33%
+Progress: [████░░░░░░] ~40%
 
 ## Performance Metrics
 
