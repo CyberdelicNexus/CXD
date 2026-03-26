@@ -3996,6 +3996,8 @@ export function CXDCanvas() {
                   setSelectedEdgeId(edge.id);
                   setSelectedElementId(null);
                   setSelectedElementIds(new Set());
+                  setRadialMenuEdgeId(edge.id);
+                  setRadialMenuAutoColor(false);
                 }}
                 onMouseEnter={() => setHoveredEdgeId(edge.id)}
                 onMouseLeave={() => setHoveredEdgeId(null)}
@@ -4088,6 +4090,27 @@ export function CXDCanvas() {
                 })()}
               </g>
 
+              {/* Midpoint dot — simple colored dot that opens radial menu on click */}
+              <circle
+                cx={nodeX}
+                cy={nodeY}
+                r={3.5}
+                fill={grad.mid}
+                opacity={0.75}
+                stroke={grad.light}
+                strokeWidth={0.8}
+                strokeOpacity={0.5}
+                style={{ pointerEvents: "auto", cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedEdgeId(edge.id);
+                  setSelectedElementId(null);
+                  setSelectedElementIds(new Set());
+                  setRadialMenuEdgeId(edge.id);
+                  setRadialMenuAutoColor(false);
+                }}
+              />
+
             </svg>
           </div>
         );
@@ -4167,7 +4190,6 @@ export function CXDCanvas() {
 
       {/* Connector drop picker — appears when dragging connector to empty canvas */}
       {connectorDropPicker && (() => {
-        const localMaxZ = canvasElements.reduce((m, el) => Math.max(m, el.zIndex ?? 0), 0);
         return (
           <>
             {/* Backdrop */}
@@ -4189,40 +4211,59 @@ export function CXDCanvas() {
               <div className="bg-[rgba(12,10,22,0.97)] border border-[rgba(255,255,255,0.1)] rounded-2xl shadow-2xl backdrop-blur-xl overflow-hidden py-2 min-w-[160px]">
                 <div className="px-3 py-1.5 text-[10px] font-medium text-white/30 uppercase tracking-widest">Connect to new</div>
                 {([
-                  { type: 'freeform' as const, label: 'Note', icon: '📝' },
-                  { type: 'freeform' as const, label: 'Task', icon: '✓', cardType: 'task' as const },
-                  { type: 'container' as const, label: 'Container', icon: '⬜' },
-                ]).map(({ type, label, icon, cardType }) => (
+                  { elType: 'note',      label: 'Note',      icon: '📝' },
+                  { elType: 'task',      label: 'Task',       icon: '✅' },
+                  { elType: 'container', label: 'Container',  icon: '⬜' },
+                  { elType: 'image',     label: 'Image',      icon: '🖼️' },
+                  { elType: 'link',      label: 'Link',       icon: '🔗' },
+                  { elType: 'embed',     label: 'Embed',      icon: '▶' },
+                  { elType: 'board',     label: 'Board',      icon: '📋' },
+                ] as { elType: string; label: string; icon: string }[]).map(({ elType, label, icon }) => (
                   <button
-                    key={label}
+                    key={elType}
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-colors text-left"
                     onMouseDown={(e) => {
                       e.stopPropagation();
                       const { fromElementId, fromAnchor, fromAnchorOffset, screenX, screenY } = connectorDropPicker;
                       const worldX = (screenX - canvasPosition.x) / canvasZoom;
                       const worldY = (screenY - canvasPosition.y) / canvasZoom;
-                      const W = type === 'container' ? 280 : 220;
-                      const H = type === 'container' ? 200 : 140;
-                      const newEl: CanvasElement = {
-                        id: `el-${Date.now()}`,
-                        type,
-                        x: worldX - W / 2,
-                        y: worldY - H / 2,
-                        width: W,
-                        height: H,
-                        zIndex: localMaxZ + 1,
+                      const newId = uuidv4();
+                      const maxZ = canvasElements.reduce((m, el) => Math.max(m, el.zIndex ?? 0), 0);
+                      const DEFAULT_BG = "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
+                      const base = {
+                        id: newId,
+                        zIndex: maxZ + 1,
                         boardId: activeBoardId || undefined,
                         surface: activeSurface || 'main',
-                        ...(cardType ? { cardType } : { cardType: 'note' as const }),
-                        content: '',
-                      } as CanvasElement;
+                      };
+                      let newEl: CanvasElement;
+                      if (elType === 'note') {
+                        newEl = { ...base, type: 'freeform', x: worldX - 150, y: worldY - 150, width: 300, height: 300, cardType: 'note', content: '', noteTitle: 'Untitled Note', noteBody: '', emoji: '📌', style: { bgColor: DEFAULT_BG, textColor: '#ffffff' } } as CanvasElement;
+                      } else if (elType === 'task') {
+                        newEl = { ...base, type: 'freeform', x: worldX - 125, y: worldY - 70, width: 250, height: 140, cardType: 'task', content: 'Task Title', emoji: '✅', taskMetadata: { isActionable: true, subtasks: [] }, style: { bgColor: DEFAULT_BG, textColor: '#ffffff' } } as CanvasElement;
+                      } else if (elType === 'container') {
+                        const minZ = canvasElements.reduce((m, el) => Math.min(m, el.zIndex ?? 0), 0);
+                        newEl = { ...base, type: 'container', x: worldX - 160, y: worldY - 120, width: 320, height: 240, label: '', zIndex: minZ - 1 } as CanvasElement;
+                      } else if (elType === 'image') {
+                        newEl = { ...base, type: 'image', x: worldX - 150, y: worldY - 100, width: 300, height: 200, src: '', objectFit: 'cover' } as CanvasElement;
+                      } else if (elType === 'link') {
+                        newEl = { ...base, type: 'link', x: worldX - 150, y: worldY - 75, width: 300, height: 150, url: '', linkMode: 'bookmark' } as CanvasElement;
+                      } else if (elType === 'embed') {
+                        newEl = { ...base, type: 'link', x: worldX - 240, y: worldY - 180, width: 480, height: 360, url: '', linkMode: 'embed' } as CanvasElement;
+                      } else if (elType === 'board') {
+                        const newBoardId = createBoard("New Board");
+                        newEl = { ...base, type: 'board', x: worldX - 100, y: worldY - 60, width: 200, height: 120, childBoardId: newBoardId, title: 'New Board' } as CanvasElement;
+                      } else {
+                        setConnectorDropPicker(null);
+                        return;
+                      }
                       syncAddElement(newEl);
                       const gradientName = GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName;
                       gradientCounterRef.current += 1;
                       syncAddEdge({
-                        id: `edge-${Date.now()}`,
+                        id: uuidv4(),
                         fromNodeId: fromElementId,
-                        toNodeId: newEl.id,
+                        toNodeId: newId,
                         fromAnchor,
                         toAnchor: 'left',
                         fromAutoAnchor: true,
