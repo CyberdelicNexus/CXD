@@ -1283,14 +1283,15 @@ export function CXDCanvas() {
             surface: activeSurface,
             bend: bendPoint,
             style: {
-              color: "hsl(180 100% 50% / 0.8)",
               thickness: 2,
               lineStyle: "solid",
-              arrowHead: false,
+              gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+              arrowStyle: 'end' as const,
             },
           };
           console.log("[CONNECTOR] Creating edge:", newEdge);
           syncAddEdge(newEdge);
+          gradientCounterRef.current += 1;
 
           // Propagate parent (fromEl) hypercubeTags to child (toEl) — union, no overwrite
           if (fromEl?.hypercubeTags?.length) {
