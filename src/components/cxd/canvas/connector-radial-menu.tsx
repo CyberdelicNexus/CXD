@@ -59,16 +59,9 @@ export function ConnectorRadialMenu({
   const screenY = canvasY + midY * canvasZoom;
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
     const keyHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('mousedown', handler);
     document.addEventListener('keydown', keyHandler);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', keyHandler);
-    };
+    return () => document.removeEventListener('keydown', keyHandler);
   }, [onClose]);
 
   const currentGrad = (edge.style?.gradientName ?? 'violet') as GradientName;
@@ -91,13 +84,20 @@ export function ConnectorRadialMenu({
   const btnNormal = "bg-[rgba(15,12,25,0.92)] border-[rgba(255,255,255,0.12)] text-white/60 hover:bg-[rgba(35,28,55,0.97)] hover:text-white/90 hover:border-[rgba(255,255,255,0.2)]";
 
   return (
-    <div
-      ref={ref}
-      className="fixed pointer-events-auto"
-      style={{ left: screenX, top: screenY, transform: 'translate(-50%, -50%)', zIndex: 9999 }}
-    >
+    <>
+      {/* Backdrop: captures outside clicks to close menu */}
+      <div
+        className="fixed inset-0 pointer-events-auto"
+        style={{ zIndex: 9998 }}
+        onMouseDown={(e) => { e.stopPropagation(); onClose(); }}
+      />
+      <div
+        ref={ref}
+        className="fixed pointer-events-auto"
+        style={{ left: screenX, top: screenY, transform: 'translate(-50%, -50%)', zIndex: 9999 }}
+      >
       {/* Top arm — color */}
-      <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5">
+      <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5">
         {/* Swatch submenu — only appears when colorExpanded */}
         {colorExpanded && (
           <div className="flex gap-1.5 bg-[rgba(15,12,25,0.95)] rounded-full px-2.5 py-2 border border-[rgba(255,255,255,0.1)] backdrop-blur-sm shadow-lg">
@@ -147,7 +147,7 @@ export function ConnectorRadialMenu({
       </div>
 
       {/* Right arm — line style (cycles on click) */}
-      <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2">
+      <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2">
         <button
           className={`${btnBase} ${btnNormal} text-white/70`}
           title={`Line style: ${currentLine} (click to cycle)`}
@@ -159,7 +159,7 @@ export function ConnectorRadialMenu({
       </div>
 
       {/* Bottom arm — arrow style (cycles on click) */}
-      <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2">
+      <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2">
         <button
           className={`${btnBase} ${btnNormal} text-[10px] font-mono tracking-tight`}
           title={`Arrow: ${currentArrow} (click to cycle)`}
@@ -171,7 +171,7 @@ export function ConnectorRadialMenu({
       </div>
 
       {/* Left arm — delete */}
-      <div className="absolute right-full mr-2 top-1/2 -translate-y-1/2">
+      <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2">
         <button
           className={`${btnBase} bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.22)] text-red-400/70 hover:bg-[rgba(239,68,68,0.18)] hover:text-red-400`}
           title="Delete connector"
@@ -186,6 +186,7 @@ export function ConnectorRadialMenu({
 
       {/* Center dot */}
       <div className="w-2.5 h-2.5 rounded-full bg-[rgba(124,58,237,0.5)] border border-[rgba(167,139,250,0.6)]" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
-    </div>
+      </div>
+    </>
   );
 }

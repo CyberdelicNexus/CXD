@@ -4016,7 +4016,7 @@ export function CXDCanvas() {
                 <circle cx={from.x} cy={from.y} r={1.8} fill={grad.mid} opacity={0.85} />
                 {/* Source arrow indicator */}
                 {(edge.style?.arrowStyle === 'start' || edge.style?.arrowStyle === 'both') && (() => {
-                  const dir = fromAnchor === 'left' ? 'left' : fromAnchor === 'right' ? 'right' : fromAnchor === 'top' ? 'up' : 'down';
+                  const dir = fromAnchor === 'left' ? 'right' : fromAnchor === 'right' ? 'left' : fromAnchor === 'top' ? 'down' : 'up';
                   const pts = dir === 'left'  ? `${from.x-5},${from.y} ${from.x+2},${from.y-3} ${from.x+2},${from.y+3}`
                             : dir === 'right' ? `${from.x+5},${from.y} ${from.x-2},${from.y-3} ${from.x-2},${from.y+3}`
                             : dir === 'up'    ? `${from.x},${from.y-5} ${from.x-3},${from.y+2} ${from.x+3},${from.y+2}`
@@ -4043,17 +4043,25 @@ export function CXDCanvas() {
                 })()}
               </g>
 
-              {/* Midpoint dot — small, semi-transparent, draggable + opens radial menu on click */}
+              {/* Midpoint bend handle — glass orb style matching connector gradient */}
               <g
-                style={{ pointerEvents: "auto", cursor: "grab" }}
+                style={{ pointerEvents: "auto", cursor: isMidHovered ? "grab" : "pointer" }}
                 onMouseDown={(e) => { e.stopPropagation(); startBendDrag(e, edge); }}
                 onMouseEnter={() => setHoveredMidpointEdgeId(edge.id)}
                 onMouseLeave={() => setHoveredMidpointEdgeId(null)}
                 onClick={(e) => { e.stopPropagation(); setRadialMenuEdgeId(edge.id); setRadialMenuAutoColor(false); }}
               >
-                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 4 : 3}
-                  fill={grad.mid} fillOpacity={isMidHovered ? 0.65 : 0.4}
-                  stroke={grad.light} strokeWidth={0.8} strokeOpacity={0.35} />
+                {/* Glow */}
+                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 9 : 7} fill={grad.mid} opacity={isMidHovered ? 0.25 : 0.15} filter={`url(#${glowId})`} />
+                {/* Glass body */}
+                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 5 : 4}
+                  fill={`url(#${orbSrcId})`}
+                  stroke={grad.mid} strokeWidth={1} strokeOpacity={0.7} />
+                {/* Arc highlight */}
+                <path d={`M ${nodeX-2.5} ${nodeY-2.5} Q ${nodeX-0.5} ${nodeY-4} ${nodeX+1.5} ${nodeY-2.5}`}
+                  stroke="white" strokeWidth={0.7} fill="none" strokeOpacity={0.45} strokeLinecap="round" />
+                {/* Inner dot */}
+                <circle cx={nodeX} cy={nodeY} r={1.5} fill={grad.mid} opacity={0.9} />
               </g>
             </svg>
           </div>
@@ -4067,10 +4075,29 @@ export function CXDCanvas() {
         const fromEl = elementsById[edge.fromNodeId];
         const toEl = elementsById[edge.toNodeId];
         if (!fromEl || !toEl) return null;
-        const { from, to } = getResolvedEdgePoints(edge, fromEl, toEl);
+        const { from, to, fromAnchor, toAnchor } = getResolvedEdgePoints(edge, fromEl, toEl);
         if (!from || !to) return null;
-        const midX = (from.x + to.x) / 2;
-        const midY = (from.y + to.y) / 2;
+        // Compute bezier control points (same as edge rendering loop)
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const offset = Math.max(60, Math.min(Math.abs(dx), Math.abs(dy)) * 0.4);
+        const anchorOff = (anchor: 'top' | 'right' | 'bottom' | 'left', o: number) => {
+          switch (anchor) {
+            case 'right':  return { x: o, y: 0 };
+            case 'left':   return { x: -o, y: 0 };
+            case 'bottom': return { x: 0, y: o };
+            case 'top':    return { x: 0, y: -o };
+          }
+        };
+        const cp1 = { x: from.x + anchorOff(fromAnchor, offset).x, y: from.y + anchorOff(fromAnchor, offset).y };
+        const cp2 = { x: to.x + anchorOff(toAnchor, offset).x, y: to.y + anchorOff(toAnchor, offset).y };
+        const useStraight = Math.abs(dy) < 20 || Math.abs(dx) < 20;
+        const midX = useStraight
+          ? (from.x + to.x) / 2
+          : 0.125 * from.x + 0.375 * cp1.x + 0.375 * cp2.x + 0.125 * to.x;
+        const midY = useStraight
+          ? (from.y + to.y) / 2
+          : 0.125 * from.y + 0.375 * cp1.y + 0.375 * cp2.y + 0.125 * to.y;
         return (
           <ConnectorRadialMenu
             key={radialMenuEdgeId}
