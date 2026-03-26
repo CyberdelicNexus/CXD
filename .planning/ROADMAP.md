@@ -69,7 +69,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — Dashboard template gallery, store extension for initialElements, template card selection UI
-- [x] 03-02-PLAN.md — TemplatePickerModal for canvas (AccountMenu → modal → addCanvasElement)
+- [x] 03-02-PLAN.md — TemplatePickerModal for canvas (AccountMenu -> modal -> addCanvasElement)
 
 ---
 
@@ -84,12 +84,12 @@ Plans:
   4. Selecting 3+ elements and pressing cmd+L (or ctrl+L) creates connector lines between them
   5. Selecting 3+ elements and right-clicking shows a "Connect selected" option in the context menu
   6. Clicking "Auto-organize" spreads selected elements into an evenly-spaced grid on the canvas
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: Fix connector edge-snapping and z-order rendering
-- [ ] 04-02: Implement tag propagation on connect (CON-03)
-- [ ] 04-03: Implement auto-organize (CAN-01), cmd+L shortcut (CAN-02), and right-click "Connect selected" (CAN-03)
+- [ ] 04-01-PLAN.md — Fix connector edge-snapping, z-order rendering, and visual polish (CON-01, CON-02, CON-04)
+- [ ] 04-02-PLAN.md — Implement tag propagation on connect (CON-03)
+- [ ] 04-03-PLAN.md — Implement cmd+L shortcut (CAN-02), right-click "Connect selected" (CAN-03), and auto-organize (CAN-01)
 
 ---
 
@@ -129,7 +129,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
