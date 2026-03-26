@@ -33,6 +33,7 @@ import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorCursors } from "@/components/collaboration";
 import { useCanvasSettings } from "@/hooks/use-canvas-settings";
 import { getGradient, GRADIENT_ORDER, type GradientName } from './canvas/connector-gradients';
+import { ConnectorRadialMenu } from './canvas/connector-radial-menu';
 
 // Constants for zoom limits
 const MIN_ZOOM = 0.1;
@@ -349,6 +350,15 @@ export function CXDCanvas() {
     broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
   }, [updateCanvasEdge, broadcastUpdate]);
 
+  const syncUpdateEdgeStyle = useCallback((edgeId: string, style: Partial<NonNullable<CanvasEdge['style']>>) => {
+    const project = useCXDStore.getState().getCurrentProject();
+    if (!project) return;
+    const edge = (project.canvasLayout?.edges ?? []).find((e) => e.id === edgeId);
+    if (!edge) return;
+    const updatedStyle = { ...edge.style, ...style };
+    syncUpdateEdge(edgeId, { style: updatedStyle });
+  }, [syncUpdateEdge]);
+
   // Sync container movement with all children (always broadcast LWW as fallback for Yjs)
   const syncMoveContainerWithChildren = useCallback((containerId: string, deltaX: number, deltaY: number) => {
     moveContainerWithChildren(containerId, deltaX, deltaY);
@@ -492,6 +502,7 @@ export function CXDCanvas() {
   // Connector creation state
   // Auto-cycle gradient counter for new connectors
   const gradientCounterRef = useRef(0);
+  const connectingAnchorOffsetRef = useRef(0.5);
 
   // Radial menu state (menu opens when midpoint dot is clicked or on connector create)
   const [radialMenuEdgeId, setRadialMenuEdgeId] = useState<string | null>(null);
@@ -1953,10 +1964,11 @@ export function CXDCanvas() {
 
   // Handle connector creation start
   const handleStartConnector = useCallback(
-    (elementId: string, anchor: "top" | "right" | "bottom" | "left") => {
+    (elementId: string, anchor: "top" | "right" | "bottom" | "left", anchorOffset?: number) => {
       console.log("[CONNECTOR] Starting connector from:", elementId, anchor);
       setIsConnecting(true);
       setConnectingFrom({ elementId, anchor });
+      connectingAnchorOffsetRef.current = anchorOffset ?? 0.5;
       setSelectedElementId(null);
       setHoverTargetNodeId(null);
       setHoverTargetPort(null);
@@ -2000,7 +2012,7 @@ export function CXDCanvas() {
           toAnchor: toAnchor,
           fromAutoAnchor: true,
           toAutoAnchor: true,
-          fromAnchorOffset: 0.5,
+          fromAnchorOffset: connectingAnchorOffsetRef.current,
           toAnchorOffset: 0.5,
           boardId: activeBoardId,
           surface: activeSurface,
@@ -4029,6 +4041,34 @@ export function CXDCanvas() {
           </div>
         );
       })}
+
+      {/* Radial menu for selected/just-created connector */}
+      {radialMenuEdgeId && (() => {
+        const edge = canvasEdges.find(e => e.id === radialMenuEdgeId);
+        if (!edge) return null;
+        const fromEl = elementsById[edge.fromNodeId];
+        const toEl = elementsById[edge.toNodeId];
+        if (!fromEl || !toEl) return null;
+        const { from, to } = getResolvedEdgePoints(edge, fromEl, toEl);
+        if (!from || !to) return null;
+        const midX = (from.x + to.x) / 2;
+        const midY = (from.y + to.y) / 2;
+        return (
+          <ConnectorRadialMenu
+            key={radialMenuEdgeId}
+            edge={edge}
+            midX={midX}
+            midY={midY}
+            canvasX={canvasPosition.x}
+            canvasY={canvasPosition.y}
+            canvasZoom={canvasZoom}
+            autoExpandColor={radialMenuAutoColor}
+            onUpdateEdge={syncUpdateEdgeStyle}
+            onDeleteEdge={(id) => { removeCanvasEdge(id); }}
+            onClose={() => { setRadialMenuEdgeId(null); setRadialMenuAutoColor(false); }}
+          />
+        );
+      })()}
 
       {/* Connector preview while drawing */}
       {isConnecting && connectingFrom && connectorPreview && (
