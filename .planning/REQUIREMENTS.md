@@ -98,13 +98,13 @@ See: .planning/ROADMAP.md for full phase goals and success criteria.
 | TPL-02 | Phase 3 | Templates | Pending |
 | TPL-03 | Phase 3 | Templates | Pending |
 | TPL-04 | Phase 3 | Templates | Pending |
-| CON-01 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
-| CON-02 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
-| CON-03 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
-| CON-04 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
-| CAN-01 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
-| CAN-02 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
-| CAN-03 | Phase 4 | Connector Refinement + Canvas Interactions | Pending |
+| CON-01 | Phase 4 | Connector Refinement + Canvas Interactions | Complete |
+| CON-02 | Phase 4 | Connector Refinement + Canvas Interactions | Complete |
+| CON-03 | Phase 4 | Connector Refinement + Canvas Interactions | Complete |
+| CON-04 | Phase 4 | Connector Refinement + Canvas Interactions | Complete |
+| CAN-01 | Phase 4 | Connector Refinement + Canvas Interactions | Complete |
+| CAN-02 | Phase 4 | Connector Refinement + Canvas Interactions | Complete |
+| CAN-03 | Phase 4 | Connector Refinement + Canvas Interactions | Complete |
 | CMT-01 | Phase 5 | Comments | Pending |
 | CMT-02 | Phase 5 | Comments | Pending |
 | CMT-03 | Phase 5 | Comments | Pending |
