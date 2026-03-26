@@ -3969,6 +3969,11 @@ export function CXDCanvas() {
                   : undefined
                 }
                 className="pointer-events-none"
+                style={{
+                  filter: isHovered
+                    ? `drop-shadow(0 0 3px ${grad.mid})`
+                    : undefined,
+                }}
               />
 
               {/* Text label */}
