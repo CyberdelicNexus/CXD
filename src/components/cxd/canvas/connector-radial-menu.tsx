@@ -87,13 +87,13 @@ export function ConnectorRadialMenu({
     <>
       {/* Backdrop: captures outside clicks to close menu */}
       <div
-        className="fixed inset-0 pointer-events-auto"
+        className="absolute inset-0 pointer-events-auto"
         style={{ zIndex: 9998 }}
         onMouseDown={(e) => { e.stopPropagation(); onClose(); }}
       />
       <div
         ref={ref}
-        className="fixed pointer-events-auto"
+        className="absolute pointer-events-auto"
         style={{ left: screenX, top: screenY, transform: 'translate(-50%, -50%)', zIndex: 9999 }}
       >
       {/* Top arm — color */}

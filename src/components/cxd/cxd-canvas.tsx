@@ -518,6 +518,15 @@ export function CXDCanvas() {
     y: number;
   } | null>(null);
 
+  // Connector drop picker — appears when dragging connector to empty canvas
+  const [connectorDropPicker, setConnectorDropPicker] = useState<{
+    screenX: number;
+    screenY: number;
+    fromElementId: string;
+    fromAnchor: 'top' | 'right' | 'bottom' | 'left';
+    fromAnchorOffset: number;
+  } | null>(null);
+
   // Active tool state (lifted from toolkit for line layer integration)
   const [activeTool, setActiveTool] = useState<CanvasElementType | null>(null);
 
@@ -1317,6 +1326,27 @@ export function CXDCanvas() {
         }
       }
 
+      // If no target found and we have a preview position, show element picker
+      if (!hoverTargetNodeId && connectingFrom && connectorPreview) {
+        const worldX = connectorPreview.x;
+        const worldY = connectorPreview.y;
+        const hitEl = canvasElements.find(el =>
+          worldX >= el.x && worldX <= el.x + el.width &&
+          worldY >= el.y && worldY <= el.y + el.height
+        );
+        if (!hitEl) {
+          const screenX = worldX * canvasZoom + canvasPosition.x;
+          const screenY = worldY * canvasZoom + canvasPosition.y;
+          setConnectorDropPicker({
+            screenX,
+            screenY,
+            fromElementId: connectingFrom.elementId,
+            fromAnchor: connectingFrom.anchor,
+            fromAnchorOffset: connectingAnchorOffsetRef.current,
+          });
+        }
+      }
+
       // Always clean up connector state
       setIsConnecting(false);
       setConnectingFrom(null);
@@ -1374,6 +1404,9 @@ export function CXDCanvas() {
     hoverTargetNodeId,
     hoveredAnchor,
     connectingFrom,
+    connectorPreview,
+    canvasZoom,
+    canvasPosition,
     activeBoardId,
     activeSurface,
     addCanvasEdge,
@@ -2872,6 +2905,16 @@ export function CXDCanvas() {
     };
   }, [isPanning]);
 
+  // Close connector drop picker on Escape
+  useEffect(() => {
+    if (!connectorDropPicker) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConnectorDropPicker(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [connectorDropPicker]);
+
   const handleZoomIn = () => {
     const newZoom = Math.min(MAX_ZOOM, canvasZoom * 1.2);
     setCanvasZoom(newZoom);
@@ -3843,7 +3886,10 @@ export function CXDCanvas() {
         onOperationStart={pushCanvasHistory}
       />
       {/* Per-edge SVGs — each at computed z-index above its connected elements */}
-      {canvasEdges.map((edge) => {
+      {(() => {
+        // Compute max z-index across all elements so edges always render above them
+        const maxElementZ = canvasElements.reduce((m, el) => Math.max(m, el.zIndex ?? 0), 0);
+        return canvasEdges.map((edge) => {
         const fromElement = elementsById[edge.fromNodeId];
         const toElement = elementsById[edge.toNodeId];
         if (!fromElement || !toElement) return null;
@@ -3894,9 +3940,8 @@ export function CXDCanvas() {
         const orbSrcId = `orb-src-${edge.id}`;
         const orbTgtId = `orb-tgt-${edge.id}`;
 
-        // Z-index: above connected elements, below unrelated higher-z elements
-        const connectedMaxZ = Math.max(fromElement.zIndex ?? 0, toElement.zIndex ?? 0);
-        const edgeZIndex = Math.ceil(connectedMaxZ) + 1;
+        // Z-index: above all elements
+        const edgeZIndex = maxElementZ + 1;
 
         return (
           <div
@@ -4043,30 +4088,11 @@ export function CXDCanvas() {
                 })()}
               </g>
 
-              {/* Midpoint bend handle — glass orb style matching connector gradient */}
-              <g
-                style={{ pointerEvents: "auto", cursor: isMidHovered ? "grab" : "pointer" }}
-                onMouseDown={(e) => { e.stopPropagation(); startBendDrag(e, edge); }}
-                onMouseEnter={() => setHoveredMidpointEdgeId(edge.id)}
-                onMouseLeave={() => setHoveredMidpointEdgeId(null)}
-                onClick={(e) => { e.stopPropagation(); setRadialMenuEdgeId(edge.id); setRadialMenuAutoColor(false); }}
-              >
-                {/* Glow */}
-                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 9 : 7} fill={grad.mid} opacity={isMidHovered ? 0.25 : 0.15} filter={`url(#${glowId})`} />
-                {/* Glass body */}
-                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 5 : 4}
-                  fill={`url(#${orbSrcId})`}
-                  stroke={grad.mid} strokeWidth={1} strokeOpacity={0.7} />
-                {/* Arc highlight */}
-                <path d={`M ${nodeX-2.5} ${nodeY-2.5} Q ${nodeX-0.5} ${nodeY-4} ${nodeX+1.5} ${nodeY-2.5}`}
-                  stroke="white" strokeWidth={0.7} fill="none" strokeOpacity={0.45} strokeLinecap="round" />
-                {/* Inner dot */}
-                <circle cx={nodeX} cy={nodeY} r={1.5} fill={grad.mid} opacity={0.9} />
-              </g>
             </svg>
           </div>
         );
-      })}
+      });
+      })()}
 
       {/* Radial menu for selected/just-created connector */}
       {radialMenuEdgeId && (() => {
@@ -4139,6 +4165,87 @@ export function CXDCanvas() {
         </div>
       )}
 
+      {/* Connector drop picker — appears when dragging connector to empty canvas */}
+      {connectorDropPicker && (() => {
+        const localMaxZ = canvasElements.reduce((m, el) => Math.max(m, el.zIndex ?? 0), 0);
+        return (
+          <>
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 pointer-events-auto"
+              style={{ zIndex: 9997 }}
+              onMouseDown={() => setConnectorDropPicker(null)}
+            />
+            {/* Picker menu */}
+            <div
+              className="absolute pointer-events-auto"
+              style={{
+                left: connectorDropPicker.screenX,
+                top: connectorDropPicker.screenY,
+                transform: 'translate(-50%, -20px)',
+                zIndex: 9998,
+              }}
+            >
+              <div className="bg-[rgba(12,10,22,0.97)] border border-[rgba(255,255,255,0.1)] rounded-2xl shadow-2xl backdrop-blur-xl overflow-hidden py-2 min-w-[160px]">
+                <div className="px-3 py-1.5 text-[10px] font-medium text-white/30 uppercase tracking-widest">Connect to new</div>
+                {([
+                  { type: 'freeform' as const, label: 'Note', icon: '📝' },
+                  { type: 'freeform' as const, label: 'Task', icon: '✓', cardType: 'task' as const },
+                  { type: 'container' as const, label: 'Container', icon: '⬜' },
+                ]).map(({ type, label, icon, cardType }) => (
+                  <button
+                    key={label}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-colors text-left"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      const { fromElementId, fromAnchor, fromAnchorOffset, screenX, screenY } = connectorDropPicker;
+                      const worldX = (screenX - canvasPosition.x) / canvasZoom;
+                      const worldY = (screenY - canvasPosition.y) / canvasZoom;
+                      const W = type === 'container' ? 280 : 220;
+                      const H = type === 'container' ? 200 : 140;
+                      const newEl: CanvasElement = {
+                        id: `el-${Date.now()}`,
+                        type,
+                        x: worldX - W / 2,
+                        y: worldY - H / 2,
+                        width: W,
+                        height: H,
+                        zIndex: localMaxZ + 1,
+                        boardId: activeBoardId || undefined,
+                        surface: activeSurface || 'main',
+                        ...(cardType ? { cardType } : { cardType: 'note' as const }),
+                        content: '',
+                      } as CanvasElement;
+                      syncAddElement(newEl);
+                      const gradientName = GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName;
+                      gradientCounterRef.current += 1;
+                      syncAddEdge({
+                        id: `edge-${Date.now()}`,
+                        fromNodeId: fromElementId,
+                        toNodeId: newEl.id,
+                        fromAnchor,
+                        toAnchor: 'left',
+                        fromAutoAnchor: true,
+                        toAutoAnchor: true,
+                        fromAnchorOffset,
+                        toAnchorOffset: 0.5,
+                        boardId: activeBoardId || undefined,
+                        surface: activeSurface || 'main',
+                        style: { gradientName, arrowStyle: 'end' as const },
+                      });
+                      setConnectorDropPicker(null);
+                    }}
+                  >
+                    <span className="text-base leading-none">{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
       {/* Bend handles and anchor handles for selected connector */}
       {selectedEdgeId &&
         (() => {
@@ -4152,6 +4259,8 @@ export function CXDCanvas() {
             (el) => el.id === edge.toNodeId,
           );
           if (!fromElement || !toElement) return null;
+
+          const grad = getGradient(edge.style?.gradientName as GradientName | undefined);
 
           const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
           if (!from || !to) return null;
@@ -4226,21 +4335,6 @@ export function CXDCanvas() {
 
           return (
             <>
-              {/* Bend handle (purple) */}
-              <div
-                className="absolute w-4 h-4 bg-purple-500 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
-                style={{
-                  left: bendScreenX - 8,
-                  top: bendScreenY - 8,
-                  zIndex: 1000,
-                }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  setDraggingBendHandle(selectedEdgeId);
-                }}
-                title="Drag to adjust curve"
-              />
               {/* Center pivot guide lines */}
               <svg
                 className="absolute inset-0 pointer-events-none"
@@ -4267,10 +4361,15 @@ export function CXDCanvas() {
               </svg>
               {/* From pivot handle */}
               <div
-                className="absolute w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
+                className="absolute cursor-move rounded-full flex items-center justify-center hover:scale-110 transition-transform"
                 style={{
-                  left: fromCenterScreenX - 7,
-                  top: fromCenterScreenY - 7,
+                  left: fromCenterScreenX - 9,
+                  top: fromCenterScreenY - 9,
+                  width: 18,
+                  height: 18,
+                  background: `radial-gradient(circle at 35% 30%, ${grad.mid}99, ${grad.dark}55)`,
+                  border: `1.5px solid ${grad.mid}cc`,
+                  boxShadow: `0 0 8px ${grad.mid}66, inset 0 0 4px ${grad.light}22`,
                   zIndex: 1000,
                 }}
                 onMouseDown={(e) => {
@@ -4290,14 +4389,21 @@ export function CXDCanvas() {
                   document.addEventListener("mousemove", handleMouseMove);
                   document.addEventListener("mouseup", handleMouseUp);
                 }}
-                title="Drag pivot to pick connector side"
-              />
+                title="Drag to change connector anchor"
+              >
+                <div style={{ width: 5, height: 5, borderRadius: '50%', background: grad.mid, opacity: 0.9 }} />
+              </div>
               {/* To pivot handle */}
               <div
-                className="absolute w-3.5 h-3.5 bg-cyan-400 border-2 border-white rounded-full cursor-move hover:scale-125 transition-transform"
+                className="absolute cursor-move rounded-full flex items-center justify-center hover:scale-110 transition-transform"
                 style={{
-                  left: toCenterScreenX - 7,
-                  top: toCenterScreenY - 7,
+                  left: toCenterScreenX - 9,
+                  top: toCenterScreenY - 9,
+                  width: 18,
+                  height: 18,
+                  background: `radial-gradient(circle at 35% 30%, ${grad.mid}99, ${grad.dark}55)`,
+                  border: `1.5px solid ${grad.mid}cc`,
+                  boxShadow: `0 0 8px ${grad.mid}66, inset 0 0 4px ${grad.light}22`,
                   zIndex: 1000,
                 }}
                 onMouseDown={(e) => {
@@ -4317,8 +4423,10 @@ export function CXDCanvas() {
                   document.addEventListener("mousemove", handleMouseMove);
                   document.addEventListener("mouseup", handleMouseUp);
                 }}
-                title="Drag pivot to pick connector side"
-              />
+                title="Drag to change connector anchor"
+              >
+                <div style={{ width: 5, height: 5, borderRadius: '50%', background: grad.mid, opacity: 0.9 }} />
+              </div>
             </>
           );
         })()}
