@@ -360,12 +360,14 @@ export interface CanvasEdge {
     position?: number; // 0-1 along the path, 0.5 = center
   };
   style?: {
-    color?: string;
+    color?: string;             // legacy — superseded by gradientName
     thickness?: number;
-    arrowHead?: boolean; // Legacy, use endCap instead
+    arrowHead?: boolean;        // legacy — use endCap/arrowStyle instead
     startCap?: ConnectorEndStyle;
     endCap?: ConnectorEndStyle;
     lineStyle?: 'solid' | 'dashed' | 'dotted';
+    gradientName?: 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
+    arrowStyle?: 'none' | 'end' | 'both';
   };
 }
 
