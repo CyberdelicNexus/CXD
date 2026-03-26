@@ -32,6 +32,7 @@ import {
 import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorCursors } from "@/components/collaboration";
 import { useCanvasSettings } from "@/hooks/use-canvas-settings";
+import { getGradient, GRADIENT_ORDER, type GradientName } from './canvas/connector-gradients';
 
 // Constants for zoom limits
 const MIN_ZOOM = 0.1;
@@ -489,6 +490,13 @@ export function CXDCanvas() {
   } | null>(null);
 
   // Connector creation state
+  // Auto-cycle gradient counter for new connectors
+  const gradientCounterRef = useRef(0);
+
+  // Radial menu state (menu opens when midpoint dot is clicked or on connector create)
+  const [radialMenuEdgeId, setRadialMenuEdgeId] = useState<string | null>(null);
+  const [radialMenuAutoColor, setRadialMenuAutoColor] = useState(false);
+
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingFrom, setConnectingFrom] = useState<{
     elementId: string;
@@ -1997,14 +2005,18 @@ export function CXDCanvas() {
           surface: activeSurface,
           bend: bendPoint,
           style: {
-            color: "hsl(180 100% 50% / 0.8)", // Cyan neon
             thickness: 2,
             lineStyle: "solid",
-            arrowHead: false,
+            gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+            arrowStyle: 'end' as const,
           },
         };
         console.log("[CONNECTOR] Creating edge:", newEdge);
         syncAddEdge(newEdge);
+        gradientCounterRef.current += 1;
+        // Auto-open radial menu with color arm expanded
+        setRadialMenuEdgeId(newEdge.id);
+        setRadialMenuAutoColor(true);
 
         // Propagate parent (fromEl) hypercubeTags to child (toEl) — union, no overwrite
         if (fromEl?.hypercubeTags?.length) {
@@ -2199,9 +2211,14 @@ export function CXDCanvas() {
         toAnchor: 'left',
         fromAutoAnchor: true,
         toAutoAnchor: true,
-        style: {},
+        style: {
+          thickness: 2,
+          gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+          arrowStyle: 'end' as const,
+        },
       };
       syncAddEdge(newEdge);
+      gradientCounterRef.current += 1;
       // Propagate hypercubeTags from source to target
       if (sorted[i].hypercubeTags?.length) {
         const existingTags = sorted[i + 1].hypercubeTags ?? [];
@@ -3231,12 +3248,14 @@ export function CXDCanvas() {
         boardId: activeBoardId,
         surface: activeSurface,
         style: {
-          color: "hsl(var(--primary))",
           thickness: 2,
+          gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+          arrowStyle: 'end' as const,
         },
       };
 
       syncAddEdge(newEdge);
+      gradientCounterRef.current += 1;
 
       // Propagate parent (sourceElement) hypercubeTags to child (newShape) — union, no overwrite
       if (sourceElement.hypercubeTags?.length) {
@@ -3816,59 +3835,51 @@ export function CXDCanvas() {
         const toElement = elementsById[edge.toNodeId];
         if (!fromElement || !toElement) return null;
 
-        const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
+        const { from, to, fromAnchor, toAnchor } = getResolvedEdgePoints(edge, fromElement, toElement);
         if (!from || !to) return null;
 
         const isSelected = selectedEdgeId === edge.id;
         const isHovered = hoveredEdgeId === edge.id;
-        const strokeColor = edge.style?.color || "hsl(180 100% 50% / 0.8)";
 
-        const bend = edge.bend || { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
-        const pathD = `M ${from.x} ${from.y} Q ${bend.x} ${bend.y} ${to.x} ${to.y}`;
+        // Cubic bezier control points adaptive to anchor directions
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const offset = Math.max(60, Math.min(Math.abs(dx), Math.abs(dy)) * 0.4);
 
-        // Midpoint on bezier curve at t=0.5
-        const nodeX = 0.25 * from.x + 0.5 * bend.x + 0.25 * to.x;
-        const nodeY = 0.25 * from.y + 0.5 * bend.y + 0.25 * to.y;
+        const anchorDir = (anchor: 'top' | 'right' | 'bottom' | 'left', o: number) => {
+          switch (anchor) {
+            case 'right':  return { x: o, y: 0 };
+            case 'left':   return { x: -o, y: 0 };
+            case 'bottom': return { x: 0, y: o };
+            case 'top':    return { x: 0, y: -o };
+          }
+        };
+        const fc = anchorDir(fromAnchor, offset);
+        const tc = anchorDir(toAnchor, offset);
+        const cp1 = { x: from.x + fc.x, y: from.y + fc.y };
+        const cp2 = { x: to.x + tc.x, y: to.y + tc.y };
+
+        // Straight line threshold: within 20px on either axis
+        const useStraight = Math.abs(dy) < 20 || Math.abs(dx) < 20;
+        const pathD = useStraight
+          ? `M ${from.x} ${from.y} L ${to.x} ${to.y}`
+          : `M ${from.x} ${from.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${to.x} ${to.y}`;
+
+        // Midpoint at cubic bezier t=0.5
+        const nodeX = useStraight
+          ? (from.x + to.x) / 2
+          : 0.125 * from.x + 0.375 * cp1.x + 0.375 * cp2.x + 0.125 * to.x;
+        const nodeY = useStraight
+          ? (from.y + to.y) / 2
+          : 0.125 * from.y + 0.375 * cp1.y + 0.375 * cp2.y + 0.125 * to.y;
         const isMidHovered = hoveredMidpointEdgeId === edge.id;
 
-        const markerIds = {
-          arrowEnd: `${edge.id}-arrow-end`,
-          arrowStart: `${edge.id}-arrow-start`,
-          dotEnd: `${edge.id}-dot-end`,
-          dotStart: `${edge.id}-dot-start`,
-          diamondEnd: `${edge.id}-diamond-end`,
-          diamondStart: `${edge.id}-diamond-start`,
-          squareEnd: `${edge.id}-square-end`,
-          squareStart: `${edge.id}-square-start`,
-        };
-
-        const getMarkerEnd = (): string | undefined => {
-          const endCap = edge.style?.endCap || (edge.style?.arrowHead ? 'arrow' : 'none');
-          switch (endCap) {
-            case 'arrow': return `url(#${markerIds.arrowEnd})`;
-            case 'dot': return `url(#${markerIds.dotEnd})`;
-            case 'diamond': return `url(#${markerIds.diamondEnd})`;
-            case 'square': return `url(#${markerIds.squareEnd})`;
-            default: return undefined;
-          }
-        };
-
-        const getMarkerStart = (): string | undefined => {
-          switch (edge.style?.startCap || 'none') {
-            case 'arrow': return `url(#${markerIds.arrowStart})`;
-            case 'dot': return `url(#${markerIds.dotStart})`;
-            case 'diamond': return `url(#${markerIds.diamondStart})`;
-            case 'square': return `url(#${markerIds.squareStart})`;
-            default: return undefined;
-          }
-        };
-
-        const labelPosition = edge.label?.position ?? 0.5;
-        const t = labelPosition;
-        const labelPoint = {
-          x: (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * bend.x + t * t * to.x,
-          y: (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * bend.y + t * t * to.y,
-        };
+        // Gradient config for this edge
+        const grad = getGradient(edge.style?.gradientName as GradientName | undefined);
+        const gradId = `grad-${edge.id}`;
+        const glowId = `glow-${edge.id}`;
+        const orbSrcId = `orb-src-${edge.id}`;
+        const orbTgtId = `orb-tgt-${edge.id}`;
 
         // Z-index: above connected elements, below unrelated higher-z elements
         const connectedMaxZ = Math.max(fromElement.zIndex ?? 0, toElement.zIndex ?? 0);
@@ -3889,31 +3900,32 @@ export function CXDCanvas() {
               style={{ width: 1, height: 1, left: 0, top: 0, pointerEvents: "none" }}
             >
               <defs>
-                <marker id={markerIds.arrowEnd} markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto">
-                  <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
-                </marker>
-                <marker id={markerIds.arrowStart} markerWidth="10" markerHeight="7" refX="2" refY="3.5" orient="auto-start-reverse">
-                  <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
-                </marker>
-                <marker id={markerIds.dotEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                  <circle cx="4" cy="4" r="3" fill={strokeColor} />
-                </marker>
-                <marker id={markerIds.dotStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                  <circle cx="4" cy="4" r="3" fill={strokeColor} />
-                </marker>
-                <marker id={markerIds.diamondEnd} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-                  <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
-                </marker>
-                <marker id={markerIds.diamondStart} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-                  <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
-                </marker>
-                <marker id={markerIds.squareEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                  <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
-                </marker>
-                <marker id={markerIds.squareStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                  <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
-                </marker>
+                {/* Glow filter */}
+                <filter id={glowId} x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="3" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                {/* Gradient along connector direction */}
+                <linearGradient id={gradId} gradientUnits="userSpaceOnUse"
+                  x1={from.x} y1={from.y} x2={to.x} y2={to.y}>
+                  <stop offset="0%"   stopColor={grad.dark} />
+                  <stop offset="50%"  stopColor={grad.mid} />
+                  <stop offset="100%" stopColor={grad.light} />
+                </linearGradient>
+                {/* Source orb radial gradient (dark→mid) */}
+                <radialGradient id={orbSrcId} cx="35%" cy="30%" r="65%">
+                  <stop offset="0%"   stopColor={grad.mid}  stopOpacity="0.55" />
+                  <stop offset="55%"  stopColor={grad.dark} stopOpacity="0.28" />
+                  <stop offset="100%" stopColor={grad.dark} stopOpacity="0.12" />
+                </radialGradient>
+                {/* Target orb radial gradient (mid→light) */}
+                <radialGradient id={orbTgtId} cx="35%" cy="30%" r="65%">
+                  <stop offset="0%"   stopColor={grad.light} stopOpacity="0.55" />
+                  <stop offset="55%"  stopColor={grad.mid}   stopOpacity="0.28" />
+                  <stop offset="100%" stopColor={grad.mid}   stopOpacity="0.12" />
+                </radialGradient>
               </defs>
+
               {/* Invisible wide click target */}
               <path
                 d={pathD}
@@ -3930,10 +3942,22 @@ export function CXDCanvas() {
                 onMouseEnter={() => setHoveredEdgeId(edge.id)}
                 onMouseLeave={() => setHoveredEdgeId(null)}
               />
-              {/* Visible connector path */}
+
+              {/* Glow layer (behind stroke) */}
               <path
                 d={pathD}
-                stroke={strokeColor}
+                stroke={`url(#${gradId})`}
+                strokeWidth={(edge.style?.thickness || 2) * 3}
+                fill="none"
+                strokeLinecap="round"
+                opacity={0.18}
+                className="pointer-events-none"
+              />
+
+              {/* Main connector stroke */}
+              <path
+                d={pathD}
+                stroke={`url(#${gradId})`}
                 strokeWidth={isSelected ? (edge.style?.thickness || 2) + 1 : edge.style?.thickness || 2}
                 fill="none"
                 strokeLinecap="round"
@@ -3943,37 +3967,57 @@ export function CXDCanvas() {
                   : edge.style?.lineStyle === "dotted" ? "2,4"
                   : undefined
                 }
-                markerStart={getMarkerStart()}
-                markerEnd={getMarkerEnd()}
-                style={{
-                  filter: isSelected
-                    ? "drop-shadow(0 0 4px rgba(167,139,250,0.45))"
-                    : isHovered
-                    ? `drop-shadow(0 0 3px ${strokeColor})`
-                    : undefined,
-                }}
                 className="pointer-events-none"
               />
+
               {/* Text label */}
-              {edge.label?.text && (
-                <g className="pointer-events-none">
-                  <rect x={labelPoint.x - 30} y={labelPoint.y - 10} width={60} height={20} rx={4} fill="hsl(var(--card))" fillOpacity={0.9} />
-                  <text x={labelPoint.x} y={labelPoint.y + 4} textAnchor="middle" fill={edge.label.color || "hsl(var(--foreground))"} fontSize={edge.label.fontSize || 12} fontFamily={edge.label.fontFamily || "inherit"} className="select-none">
-                    {edge.label.text}
-                  </text>
-                </g>
-              )}
-              {/* Always-visible midpoint circle node */}
+              {edge.label?.text && (() => {
+                const t = edge.label?.position ?? 0.5;
+                const lx = useStraight
+                  ? from.x + (to.x - from.x) * t
+                  : Math.pow(1-t,3)*from.x + 3*Math.pow(1-t,2)*t*cp1.x + 3*(1-t)*t*t*cp2.x + Math.pow(t,3)*to.x;
+                const ly = useStraight
+                  ? from.y + (to.y - from.y) * t
+                  : Math.pow(1-t,3)*from.y + 3*Math.pow(1-t,2)*t*cp1.y + 3*(1-t)*t*t*cp2.y + Math.pow(t,3)*to.y;
+                return (
+                  <g className="pointer-events-none">
+                    <rect x={lx-30} y={ly-10} width={60} height={20} rx={4} fill="hsl(var(--card))" fillOpacity={0.9} />
+                    <text x={lx} y={ly+4} textAnchor="middle" fill={edge.label.color || "hsl(var(--foreground))"} fontSize={edge.label.fontSize || 12} fontFamily={edge.label.fontFamily || "inherit"} className="select-none">
+                      {edge.label.text}
+                    </text>
+                  </g>
+                );
+              })()}
+
+              {/* Source glass orb */}
+              <g className="pointer-events-none">
+                <circle cx={from.x} cy={from.y} r={9} fill={grad.mid} opacity={0.15} filter={`url(#${glowId})`} />
+                <circle cx={from.x} cy={from.y} r={5.5} fill={`url(#${orbSrcId})`} stroke={grad.mid} strokeWidth={1} strokeOpacity={0.65} />
+                <path d={`M ${from.x-3} ${from.y-3} Q ${from.x-1} ${from.y-5} ${from.x+2} ${from.y-3}`}
+                  stroke="white" strokeWidth={0.8} fill="none" strokeOpacity={0.4} strokeLinecap="round" />
+                <circle cx={from.x} cy={from.y} r={1.8} fill={grad.mid} opacity={0.85} />
+              </g>
+
+              {/* Target glass orb */}
+              <g className="pointer-events-none">
+                <circle cx={to.x} cy={to.y} r={9} fill={grad.light} opacity={0.15} filter={`url(#${glowId})`} />
+                <circle cx={to.x} cy={to.y} r={5.5} fill={`url(#${orbTgtId})`} stroke={grad.light} strokeWidth={1} strokeOpacity={0.6} />
+                <path d={`M ${to.x-3} ${to.y-3} Q ${to.x-1} ${to.y-5} ${to.x+2} ${to.y-3}`}
+                  stroke="white" strokeWidth={0.8} fill="none" strokeOpacity={0.4} strokeLinecap="round" />
+                <circle cx={to.x} cy={to.y} r={1.8} fill={grad.light} opacity={0.85} />
+              </g>
+
+              {/* Midpoint dot — small, semi-transparent, draggable + opens radial menu on click */}
               <g
                 style={{ pointerEvents: "auto", cursor: "grab" }}
                 onMouseDown={(e) => { e.stopPropagation(); startBendDrag(e, edge); }}
                 onMouseEnter={() => setHoveredMidpointEdgeId(edge.id)}
                 onMouseLeave={() => setHoveredMidpointEdgeId(null)}
+                onClick={(e) => { e.stopPropagation(); setRadialMenuEdgeId(edge.id); setRadialMenuAutoColor(false); }}
               >
-                {isSelected && <circle cx={nodeX} cy={nodeY} r={9} fill="none" stroke="white" strokeWidth={1.5} />}
-                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 8.5 : 7} fill={strokeColor} opacity={0.9}
-                  style={{ filter: isMidHovered ? `drop-shadow(0 0 4px ${strokeColor})` : undefined }} />
-                <circle cx={nodeX} cy={nodeY} r={4.5} fill="#0f0f0f" />
+                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 4 : 3}
+                  fill={grad.mid} fillOpacity={isMidHovered ? 0.65 : 0.4}
+                  stroke={grad.light} strokeWidth={0.8} strokeOpacity={0.35} />
               </g>
             </svg>
           </div>
