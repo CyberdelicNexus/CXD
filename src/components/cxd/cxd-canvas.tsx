@@ -14,7 +14,7 @@ import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
 import { MultiSelectionBox } from "./canvas/multi-selection-box";
 import { Button } from "@/components/ui/button";
-import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download } from "lucide-react";
+import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   CanvasElement,
@@ -65,9 +65,12 @@ function CanvasContextMenu({
   onDuplicate,
   onDelete,
   onDownloadImage,
+  onConnectSelected,
+  onAutoOrganize,
   hasSelection,
   hasClipboard,
   isImageSelected,
+  multipleSelected,
 }: {
   position: { x: number; y: number };
   target: { type: 'canvas' | 'element'; elementId?: string };
@@ -79,9 +82,12 @@ function CanvasContextMenu({
   onDuplicate: () => void;
   onDelete: () => void;
   onDownloadImage?: () => void;
+  onConnectSelected?: () => void;
+  onAutoOrganize?: () => void;
   hasSelection: boolean;
   hasClipboard: boolean;
   isImageSelected?: boolean;
+  multipleSelected?: boolean;
 }) {
   const [isReady, setIsReady] = useState(false);
 
@@ -223,6 +229,20 @@ function CanvasContextMenu({
             Duplicate
             <span className="ml-auto text-xs text-muted-foreground">Ctrl+D</span>
           </button>
+          {multipleSelected && (
+            <>
+              <div className="-mx-1 my-1 h-px bg-muted" />
+              <button onClick={onConnectSelected} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors">
+                <Link2 className="w-4 h-4" />
+                Connect selected
+                <span className="ml-auto text-xs text-muted-foreground">{typeof navigator !== 'undefined' && navigator.platform.includes('Mac') ? '⌘L' : 'Ctrl+L'}</span>
+              </button>
+              <button onClick={onAutoOrganize} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors">
+                <LayoutGrid className="w-4 h-4" />
+                Auto-organize
+              </button>
+            </>
+          )}
           <div className="-mx-1 my-1 h-px bg-muted" />
           <button
             onClick={onDelete}
@@ -2164,6 +2184,68 @@ export function CXDCanvas() {
     return () => document.removeEventListener('mousedown', handleGlobalClick, { capture: true });
   }, []);
 
+  // Connect selected elements in spatial order with edges (cmd+L)
+  const connectSelectedElements = useCallback(() => {
+    const selected = canvasElements.filter(el => selectedElementIds.has(el.id));
+    if (selected.length < 2) return;
+    pushCanvasHistory();
+    const sorted = [...selected].sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const newEdge: CanvasEdge = {
+        id: crypto.randomUUID(),
+        fromNodeId: sorted[i].id,
+        toNodeId: sorted[i + 1].id,
+        fromAnchor: 'right',
+        toAnchor: 'left',
+        fromAutoAnchor: true,
+        toAutoAnchor: true,
+        style: {},
+      };
+      syncAddEdge(newEdge);
+      // Propagate hypercubeTags from source to target
+      if (sorted[i].hypercubeTags?.length) {
+        const existingTags = sorted[i + 1].hypercubeTags ?? [];
+        const unionTags = Array.from(new Set([...existingTags, ...sorted[i].hypercubeTags!]));
+        if (unionTags.length !== existingTags.length) {
+          syncUpdateElement(sorted[i + 1].id, { hypercubeTags: unionTags });
+        }
+      }
+    }
+  }, [canvasElements, selectedElementIds, pushCanvasHistory, syncAddEdge, syncUpdateElement]);
+
+  // Auto-organize selected elements into an evenly-spaced grid (cmd+shift+O)
+  const autoOrganizeSelected = useCallback(() => {
+    const selected = canvasElements.filter(el => selectedElementIds.has(el.id));
+    if (selected.length < 2) return;
+    pushCanvasHistory();
+    const sorted = [...selected].sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+    const count = sorted.length;
+    const cols = Math.ceil(Math.sqrt(count));
+    const maxW = Math.max(...sorted.map(e => e.width));
+    const maxH = Math.max(...sorted.map(e => e.height));
+    const gap = 40;
+    const cellW = maxW + gap;
+    const cellH = maxH + gap;
+    const centroidX = sorted.reduce((s, e) => s + e.x + e.width / 2, 0) / count;
+    const centroidY = sorted.reduce((s, e) => s + e.y + e.height / 2, 0) / count;
+    const startX = centroidX - (cols * cellW) / 2;
+    const startY = centroidY - (Math.ceil(count / cols) * cellH) / 2;
+    sorted.forEach((el, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      syncUpdateElement(el.id, {
+        x: startX + col * cellW + (cellW - el.width) / 2,
+        y: startY + row * cellH + (cellH - el.height) / 2,
+      });
+    });
+    // Clear bends on edges between selected elements
+    canvasEdges.forEach(edge => {
+      if (selectedElementIds.has(edge.fromNodeId) && selectedElementIds.has(edge.toNodeId)) {
+        syncUpdateEdge(edge.id, { bend: undefined });
+      }
+    });
+  }, [canvasElements, canvasEdges, selectedElementIds, pushCanvasHistory, syncUpdateElement, syncUpdateEdge]);
+
   // Check if user is in an editing context (actual text editing, not just interactive elements)
   const isEditingContext = useCallback(() => {
     const target = document.activeElement as HTMLElement;
@@ -2293,6 +2375,20 @@ export function CXDCanvas() {
       if (!isMod && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
         setActiveTool("board");
+        return;
+      }
+
+      // Cmd/Ctrl+L → Connect selected elements
+      if (isMod && !e.shiftKey && (e.key === 'l' || e.key === 'L')) {
+        e.preventDefault();
+        if (selectedElementIds.size >= 2) connectSelectedElements();
+        return;
+      }
+
+      // Cmd/Ctrl+Shift+O → Auto-organize selected elements
+      if (isMod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault();
+        if (selectedElementIds.size >= 2) autoOrganizeSelected();
         return;
       }
 
@@ -2562,6 +2658,8 @@ export function CXDCanvas() {
     canvasEdges,
     updateCanvasEdge,
     setActiveTool,
+    connectSelectedElements,
+    autoOrganizeSelected,
   ]);
 
   // Smooth zoom with scroll wheel (Ctrl+scroll) or pan (regular scroll)
@@ -4398,6 +4496,7 @@ export function CXDCanvas() {
           }}
           hasSelection={!!(selectedElementId || selectedElementIds.size > 0)}
           hasClipboard={clipboard.length > 0}
+          multipleSelected={selectedElementIds.size >= 2}
           isImageSelected={(() => {
             if (selectedElementId) {
               const element = canvasElements.find(el => el.id === selectedElementId);
@@ -4405,6 +4504,8 @@ export function CXDCanvas() {
             }
             return false;
           })()}
+          onConnectSelected={() => { connectSelectedElements(); setContextMenuPos(null); setContextMenuTarget(null); }}
+          onAutoOrganize={() => { autoOrganizeSelected(); setContextMenuPos(null); setContextMenuTarget(null); }}
           onDownloadImage={async () => {
             if (selectedElementId) {
               const element = canvasElements.find(el => el.id === selectedElementId);
