@@ -124,6 +124,7 @@ import {
   getFreeformCardType,
   isNoteCard,
 } from "@/components/cxd/canvas/card-type-utils";
+import { FloatingPort } from "./floating-port";
 
 // Hypercube tag icons mapping (defined at top for use in JSX)
 const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
@@ -171,6 +172,7 @@ interface CanvasElementRendererProps {
   onStartConnector?: (
     elementId: string,
     anchor: "top" | "right" | "bottom" | "left",
+    anchorOffset?: number,
   ) => void;
   onEndConnector?: (
     toElementId: string,
@@ -437,7 +439,7 @@ export function CanvasElementRenderer({
     if (element.type !== "experienceBlock") return;
 
     const expElement = element as ExperienceBlockElement;
-    const viewMode = expElement.viewMode || "compact";
+    const viewMode = expElement.viewMode || "inline";
 
     // Skip auto-resize if user has manually resized
     if (expElement.manuallyResized) {
@@ -452,23 +454,25 @@ export function CanvasElementRenderer({
     // Skip if this is just the initial render (not a viewMode change)
     if (!viewModeChanged && element.width > 0 && element.height > 0) return;
 
+    // Inline height is measured from DOM content by ExperienceBlockCard — only enforce width here
     const nextSize =
       viewMode === "inline"
-        ? { width: 420, height: 360 }
+        ? { width: 420 }
         : { width: 220, height: 100 };
 
     // Only update if size differs
-    const needsUpdate =
-      element.width !== nextSize.width || element.height !== nextSize.height;
+    const needsUpdate = viewMode === "inline"
+      ? element.width !== nextSize.width
+      : element.width !== nextSize.width || element.height !== (nextSize as any).height;
 
     if (!needsUpdate) return;
 
     // Defer to next tick and re-check against the latest element size to avoid render-phase updates
     const t = window.setTimeout(() => {
-      if (
-        element.width !== nextSize.width ||
-        element.height !== nextSize.height
-      ) {
+      const stillNeedsUpdate = viewMode === "inline"
+        ? element.width !== nextSize.width
+        : element.width !== nextSize.width || element.height !== (nextSize as any).height;
+      if (stillNeedsUpdate) {
         onUpdate(nextSize);
       }
     }, 0);
@@ -755,53 +759,19 @@ export function CanvasElementRenderer({
       onMouseUp={onDragEnd}
       onDoubleClick={handleDoubleClick}
     >
-      {/* Connection anchors - shown when connecting or hovering (not for line elements or documents) */}
-      {(showConnectorAnchors || isConnecting || isSelected) &&
-        onStartConnector &&
+      {/* Connection port - floating dot that slides along the nearest edge following the cursor */}
+      {onStartConnector &&
         element.type !== "line" &&
         !(element.type === "freeform" && (element as FreeformElement).isDocument) && (
-          <>
-            <ConnectionAnchor
-              position="top"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-            <ConnectionAnchor
-              position="right"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-            <ConnectionAnchor
-              position="bottom"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-            <ConnectionAnchor
-              position="left"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-          </>
+          <FloatingPort
+            elementId={element.id}
+            elementRef={elementRef as React.RefObject<HTMLDivElement | null>}
+            isDragging={isDragging ?? false}
+            isConnecting={isConnecting ?? false}
+            canvasZoom={canvasZoom ?? 1}
+            onStartConnector={onStartConnector}
+            onEndConnector={onEndConnector ?? (() => {})}
+          />
         )}
       {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
       {isSelected && !isDragging && element.type !== "line" && !isReadOnly && !isMultiSelected && (
@@ -1275,7 +1245,7 @@ export function CanvasElementRenderer({
                 {showExperienceViewMenu && (
                   <ExperienceViewSubmenu
                     currentMode={
-                      (element as ExperienceBlockElement).viewMode || "compact"
+                      (element as ExperienceBlockElement).viewMode || "inline"
                     }
                     onModeSelect={(mode) => {
                       onUpdate({ viewMode: mode } as Partial<CanvasElement>);
@@ -7234,7 +7204,7 @@ function ExperienceBlockCard({
   };
 
   const icon = iconMap[element.componentKey];
-  const viewMode = element.viewMode || "compact";
+  const viewMode = element.viewMode || "inline";
 
   // Get project from store
   const project = useCXDStore((state) => state.getCurrentProject());
@@ -7259,6 +7229,42 @@ function ExperienceBlockCard({
     updateStateMapping,
     updateTraitMapping,
   } = useCXDStore();
+
+  // Auto-size the element height to fit inline content (must be before conditional returns)
+  const contentRef = useRef<HTMLDivElement>(null);
+  const lastAutoHeightRef = useRef<number>(0);
+  const manuallyResized = (element as any).manuallyResized ?? false;
+
+  useEffect(() => {
+    if (viewMode !== 'inline' || manuallyResized) return;
+    const el = contentRef.current;
+    if (!el) return;
+
+    // Header: py-2 (16px) + h-8 icon (32px) + border-b ≈ 52px
+    const HEADER_HEIGHT = 52;
+
+    const measure = () => {
+      const totalHeight = Math.max(el.scrollHeight + HEADER_HEIGHT, 200);
+      if (Math.abs(totalHeight - lastAutoHeightRef.current) > 2) {
+        lastAutoHeightRef.current = totalHeight;
+        onUpdate({ height: totalHeight } as any);
+      }
+    };
+
+    // RAF debounce: coalesce rapid observer callbacks into a single frame.
+    // Without this, ScrollArea's internal DOM rearrangements after each height
+    // update can trigger the observer again → oscillation loop.
+    let rafId: number | null = null;
+    const debouncedMeasure = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => { rafId = null; measure(); });
+    };
+
+    measure();
+    const ro = new ResizeObserver(debouncedMeasure);
+    ro.observe(el);
+    return () => { ro.disconnect(); if (rafId !== null) cancelAnimationFrame(rafId); };
+  }, [viewMode, manuallyResized, onUpdate]);
 
   if (!project) return null;
 
@@ -7313,27 +7319,20 @@ function ExperienceBlockCard({
         <div className="flex-1 min-w-0 text-sm font-semibold text-white truncate">
           {element.title}
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            // Auto-expand to fit content - measure the ScrollArea content
-            const scrollContent = e.currentTarget
-              .closest(".group")
-              ?.querySelector("[data-no-drag]");
-            if (scrollContent) {
-              const contentHeight = scrollContent.scrollHeight;
-              const newHeight = Math.min(contentHeight + 80, 800); // 80px for header, max 800px
-              const newWidth = Math.max(element.width, 500); // Min 500px width
-              // Mark as manually resized since user intentionally adjusted size
-              onUpdate({ width: newWidth, height: newHeight, manuallyResized: true } as any);
-            }
-          }}
-          className="flex-shrink-0 p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-          title="Expand to fit content"
-          data-no-drag
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
+        {manuallyResized && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              // Reset to auto-size by clearing the manuallyResized flag
+              onUpdate({ manuallyResized: false } as any);
+            }}
+            className="flex-shrink-0 p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            title="Reset to auto-size"
+            data-no-drag
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -7351,7 +7350,7 @@ function ExperienceBlockCard({
         className="flex-1 overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 space-y-4" data-no-drag>
+        <div className="p-4 space-y-4" data-no-drag ref={contentRef}>
           {element.componentKey === "intentionCore" && (
             <>
               <div className="space-y-2">
