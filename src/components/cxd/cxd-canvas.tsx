@@ -3896,7 +3896,7 @@ export function CXDCanvas() {
 
         // Z-index: above connected elements, below unrelated higher-z elements
         const connectedMaxZ = Math.max(fromElement.zIndex ?? 0, toElement.zIndex ?? 0);
-        const edgeZIndex = connectedMaxZ + 0.5;
+        const edgeZIndex = Math.ceil(connectedMaxZ) + 1;
 
         return (
           <div
@@ -4014,6 +4014,15 @@ export function CXDCanvas() {
                 <path d={`M ${from.x-3} ${from.y-3} Q ${from.x-1} ${from.y-5} ${from.x+2} ${from.y-3}`}
                   stroke="white" strokeWidth={0.8} fill="none" strokeOpacity={0.4} strokeLinecap="round" />
                 <circle cx={from.x} cy={from.y} r={1.8} fill={grad.mid} opacity={0.85} />
+                {/* Source arrow indicator */}
+                {(edge.style?.arrowStyle === 'start' || edge.style?.arrowStyle === 'both') && (() => {
+                  const dir = fromAnchor === 'left' ? 'left' : fromAnchor === 'right' ? 'right' : fromAnchor === 'top' ? 'up' : 'down';
+                  const pts = dir === 'left'  ? `${from.x-5},${from.y} ${from.x+2},${from.y-3} ${from.x+2},${from.y+3}`
+                            : dir === 'right' ? `${from.x+5},${from.y} ${from.x-2},${from.y-3} ${from.x-2},${from.y+3}`
+                            : dir === 'up'    ? `${from.x},${from.y-5} ${from.x-3},${from.y+2} ${from.x+3},${from.y+2}`
+                            :                   `${from.x},${from.y+5} ${from.x-3},${from.y-2} ${from.x+3},${from.y-2}`;
+                  return <polygon points={pts} fill={grad.mid} opacity={0.9} />;
+                })()}
               </g>
 
               {/* Target glass orb */}
@@ -4023,6 +4032,15 @@ export function CXDCanvas() {
                 <path d={`M ${to.x-3} ${to.y-3} Q ${to.x-1} ${to.y-5} ${to.x+2} ${to.y-3}`}
                   stroke="white" strokeWidth={0.8} fill="none" strokeOpacity={0.4} strokeLinecap="round" />
                 <circle cx={to.x} cy={to.y} r={1.8} fill={grad.light} opacity={0.85} />
+                {/* Target arrow indicator */}
+                {(edge.style?.arrowStyle === 'end' || edge.style?.arrowStyle === 'both') && (() => {
+                  const dir = toAnchor === 'left' ? 'right' : toAnchor === 'right' ? 'left' : toAnchor === 'top' ? 'down' : 'up';
+                  const pts = dir === 'right' ? `${to.x+5},${to.y} ${to.x-2},${to.y-3} ${to.x-2},${to.y+3}`
+                            : dir === 'left'  ? `${to.x-5},${to.y} ${to.x+2},${to.y-3} ${to.x+2},${to.y+3}`
+                            : dir === 'down'  ? `${to.x},${to.y+5} ${to.x-3},${to.y-2} ${to.x+3},${to.y-2}`
+                            :                   `${to.x},${to.y-5} ${to.x-3},${to.y+2} ${to.x+3},${to.y+2}`;
+                  return <polygon points={pts} fill={grad.light} opacity={0.9} />;
+                })()}
               </g>
 
               {/* Midpoint dot — small, semi-transparent, draggable + opens radial menu on click */}
@@ -4082,11 +4100,11 @@ export function CXDCanvas() {
         >
           <svg className="absolute overflow-visible" style={{ width: 1, height: 1, left: 0, top: 0, pointerEvents: "none" }}>
             <line
-              x1={(() => { const el = elementsById[connectingFrom.elementId]; return el ? getAnchorPosition(el, connectingFrom.anchor).x : 0; })()}
-              y1={(() => { const el = elementsById[connectingFrom.elementId]; return el ? getAnchorPosition(el, connectingFrom.anchor).y : 0; })()}
+              x1={(() => { const el = elementsById[connectingFrom.elementId]; return el ? getAnchorPosition(el, connectingFrom.anchor, connectingAnchorOffsetRef.current).x : 0; })()}
+              y1={(() => { const el = elementsById[connectingFrom.elementId]; return el ? getAnchorPosition(el, connectingFrom.anchor, connectingAnchorOffsetRef.current).y : 0; })()}
               x2={connectorPreview.x}
               y2={connectorPreview.y}
-              stroke="hsl(180 100% 50% / 0.6)"
+              stroke={`${getGradient(GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName).mid}99`}
               strokeWidth={2}
               strokeDasharray="8,4"
             />
@@ -4278,59 +4296,6 @@ export function CXDCanvas() {
           );
         })()}
 
-      {/* Connector context menu - outside pointer-events-none wrapper */}
-      {selectedEdgeId &&
-        (() => {
-          const edge = canvasEdges.find((e) => e.id === selectedEdgeId);
-          if (!edge) return null;
-
-          const fromElement = canvasElements.find(
-            (el) => el.id === edge.fromNodeId,
-          );
-          const toElement = canvasElements.find(
-            (el) => el.id === edge.toNodeId,
-          );
-          if (!fromElement || !toElement) return null;
-
-          const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
-          if (!from || !to) return null;
-
-          const bend = edge.bend || {
-            x: (from.x + to.x) / 2,
-            y: (from.y + to.y) / 2,
-          };
-
-          // Calculate midpoint on the quadratic curve
-          const t = 0.5;
-          const midWorld = {
-            x: (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * bend.x + t * t * to.x,
-            y: (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * bend.y + t * t * to.y,
-          };
-
-          // Convert to screen coords
-          const midScreenX = midWorld.x * canvasZoom + canvasPosition.x;
-          const midScreenY = midWorld.y * canvasZoom + canvasPosition.y;
-
-          // Determine menu placement based on line orientation
-          const dx = to.x - from.x;
-          const dy = to.y - from.y;
-          const isHorizontal = Math.abs(dx) > Math.abs(dy);
-          return (
-            <ConnectorContextMenu
-              edge={edge}
-              menuPosition={
-                isHorizontal
-                  ? { top: midScreenY + 16, left: midScreenX - 100 }
-                  : { top: midScreenY - 20, left: midScreenX + 16 }
-              }
-              onUpdateEdge={(updates) => syncUpdateEdge(selectedEdgeId, updates)}
-              onDelete={() => {
-                syncRemoveEdge(selectedEdgeId);
-                setSelectedEdgeId(null);
-              }}
-            />
-          );
-        })()}
 
       {/* Canvas Toolkit */}
       <CanvasToolkit

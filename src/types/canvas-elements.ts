@@ -367,7 +367,7 @@ export interface CanvasEdge {
     endCap?: ConnectorEndStyle;
     lineStyle?: 'solid' | 'dashed' | 'dotted';
     gradientName?: 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
-    arrowStyle?: 'none' | 'end' | 'both';
+    arrowStyle?: 'none' | 'end' | 'start' | 'both';
   };
 }
 
