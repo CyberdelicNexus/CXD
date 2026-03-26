@@ -279,6 +279,8 @@ export function CXDCanvas() {
     clipboard,
     setClipboard,
     getAllInboxItems,
+    updateElementsPositionLocal,
+    commitDragPositionsToYjs,
   } = useCXDStore();
 
   const project = getCurrentProject();
@@ -291,72 +293,68 @@ export function CXDCanvas() {
   // Uses the shared CollaborationProvider channel (from page.tsx) — avoids
   // creating a duplicate canvas:{projectId} subscription which would cause
   // presence key conflicts and broken cursor visibility.
-  const { collaborators, updateCursor, clearCursor, broadcastUpdate } = useCollaborationContext();
+  const { collaborators, updateCursor, clearCursor, broadcastUpdate, updateSelection, followingCollaboratorId, setFollowingCollaboratorId } = useCollaborationContext();
 
   // Wrapper functions that sync changes to collaborators
   // In CRDT mode, the store action mutates Y.Doc which auto-broadcasts via SupabaseYjsProvider
   // In LWW mode, we explicitly broadcast the update
   const syncAddElement = useCallback((element: CanvasElement) => {
     addCanvasElement(element);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'element_add', element });
-    }
+    broadcastUpdate({ type: 'element_add', element });
   }, [addCanvasElement, broadcastUpdate]);
 
   const syncUpdateElement = useCallback((elementId: string, updates: Partial<CanvasElement>) => {
     updateCanvasElement(elementId, updates);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'element_update', elementId, changes: updates });
-    }
+    broadcastUpdate({ type: 'element_update', elementId, changes: updates });
   }, [updateCanvasElement, broadcastUpdate]);
 
   const syncRemoveElement = useCallback((elementId: string) => {
     removeCanvasElement(elementId);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'element_delete', elementId });
-    }
+    broadcastUpdate({ type: 'element_delete', elementId });
   }, [removeCanvasElement, broadcastUpdate]);
 
   const syncAddEdge = useCallback((edge: CanvasEdge) => {
     addCanvasEdge(edge);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'edge_add', edge });
-    }
+    broadcastUpdate({ type: 'edge_add', edge });
   }, [addCanvasEdge, broadcastUpdate]);
 
   const syncRemoveEdge = useCallback((edgeId: string) => {
     removeCanvasEdge(edgeId);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'edge_delete', edgeId });
-    }
+    broadcastUpdate({ type: 'edge_delete', edgeId });
   }, [removeCanvasEdge, broadcastUpdate]);
 
   const syncUpdateEdge = useCallback((edgeId: string, changes: Partial<CanvasEdge>) => {
     updateCanvasEdge(edgeId, changes);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
-    }
+    broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
   }, [updateCanvasEdge, broadcastUpdate]);
 
-  // Sync container movement with all children
+  // Sync container movement with all children (always broadcast LWW as fallback for Yjs)
   const syncMoveContainerWithChildren = useCallback((containerId: string, deltaX: number, deltaY: number) => {
     moveContainerWithChildren(containerId, deltaX, deltaY);
 
-    // In CRDT mode, Y.Doc handles sync; in LWW mode, broadcast explicitly
-    if (!useCXDStore.getState().yDoc) {
-      const allElements = getCanvasElements();
-      const container = allElements.find(el => el.id === containerId);
-      const children = allElements.filter(el => el.containerId === containerId);
-      const childUpdates = [
-        { elementId: containerId, changes: { x: (container?.x || 0) + deltaX, y: (container?.y || 0) + deltaY } },
-        ...children.map(child => ({
-          elementId: child.id,
-          changes: { x: child.x + deltaX, y: child.y + deltaY }
-        }))
-      ];
-      broadcastUpdate({ type: 'container_move', containerId, childUpdates });
-    }
+    const allElements = getCanvasElements();
+    const container = allElements.find(el => el.id === containerId);
+    const children = allElements.filter(el => el.containerId === containerId);
+    const childUpdates = [
+      { elementId: containerId, changes: { x: (container?.x || 0) + deltaX, y: (container?.y || 0) + deltaY } },
+      ...children.map(child => ({
+        elementId: child.id,
+        changes: { x: child.x + deltaX, y: child.y + deltaY }
+      }))
+    ];
+    broadcastUpdate({ type: 'container_move', containerId, childUpdates });
   }, [moveContainerWithChildren, getCanvasElements, broadcastUpdate]);
+
+  // Sync node-container attachment/detachment
+  const syncAddNodeToContainer = useCallback((nodeId: string, containerId: string) => {
+    addNodeToContainer(nodeId, containerId);
+    broadcastUpdate({ type: 'element_update', elementId: nodeId, changes: { containerId } });
+  }, [addNodeToContainer, broadcastUpdate]);
+
+  const syncRemoveNodeFromContainer = useCallback((nodeId: string) => {
+    removeNodeFromContainer(nodeId);
+    broadcastUpdate({ type: 'element_update', elementId: nodeId, changes: { containerId: null } });
+  }, [removeNodeFromContainer, broadcastUpdate]);
 
   // Broadcast full state sync after undo/redo (LWW only — CRDT uses Y.UndoManager)
   const syncAfterUndoRedo = useCallback(() => {
@@ -368,6 +366,8 @@ export function CXDCanvas() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomAccumulator = useRef(0); // Accumulate trackpad zoom delta for incremental steps
+  // Track last known cursor canvas position so zoom changes can re-broadcast with updated zoom level
+  const lastCursorCanvasPosRef = useRef<{ x: number; y: number } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false); // Track spacebar for pan mode
@@ -416,6 +416,10 @@ export function CXDCanvas() {
   const [draggingBendHandle, setDraggingBendHandle] = useState<string | null>(
     null,
   );
+
+  // Connector hover states for glow and midpoint node
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const [hoveredMidpointEdgeId, setHoveredMidpointEdgeId] = useState<string | null>(null);
 
   // Connector hover target for glow feedback
   const [hoverTargetNodeId, setHoverTargetNodeId] = useState<string | null>(
@@ -514,6 +518,13 @@ export function CXDCanvas() {
     () => allCanvasElements.filter((el) => !el.inInbox),
     [allCanvasElements]
   );
+
+  // Fast element lookup by id for per-edge z-index computation
+  const elementsById = useMemo(
+    () => Object.fromEntries(canvasElements.map(el => [el.id, el])),
+    [canvasElements]
+  );
+
   const canShowConnectorAnchors = activeTool === "line" || activeTool === "connector";
 
   const getResolvedEdgePoints = useCallback((edge: CanvasEdge, fromElement: CanvasElement, toElement: CanvasElement) => {
@@ -525,18 +536,43 @@ export function CXDCanvas() {
       if (edge.toAutoAnchor) toAnchor = closest.to;
     }
 
-    const from = getAnchorPosition(
+    const fromRaw = getAnchorPosition(
       fromElement,
       fromAnchor,
       edge.fromAutoAnchor ? 0.5 : edge.fromAnchorOffset,
     );
-    const to = getAnchorPosition(
+    const toRaw = getAnchorPosition(
       toElement,
       toAnchor,
       edge.toAutoAnchor ? 0.5 : edge.toAnchorOffset,
     );
 
+    // Apply 2px outset so lines attach cleanly at element edges without overlapping card body
+    const OUTSET = 2;
+    const applyOutset = (pt: { x: number; y: number }, anchor: 'top' | 'right' | 'bottom' | 'left') => {
+      switch (anchor) {
+        case 'top':    return { x: pt.x, y: pt.y - OUTSET };
+        case 'bottom': return { x: pt.x, y: pt.y + OUTSET };
+        case 'left':   return { x: pt.x - OUTSET, y: pt.y };
+        case 'right':  return { x: pt.x + OUTSET, y: pt.y };
+      }
+    };
+
+    const from = applyOutset(fromRaw, fromAnchor);
+    const to = applyOutset(toRaw, toAnchor);
+
     return { from, to, fromAnchor, toAnchor };
+  }, []);
+
+  // Reusable bend drag starter — used by both the selected-edge handle and the always-visible midpoint node
+  const startBendDrag = useCallback((e: React.MouseEvent, edge: CanvasEdge) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDraggingBendHandle(edge.id);
+    // Also ensure the edge is selected so the full handle UI appears
+    setSelectedEdgeId(edge.id);
+    setSelectedElementId(null);
+    setSelectedElementIds(new Set());
   }, []);
 
   // State for dragging inbox items onto canvas
@@ -654,6 +690,27 @@ export function CXDCanvas() {
     [canvasElements, activeBoardId, activeSurface, addCanvasElement],
   );
 
+  // Duplicate a line element (offset by 20px so it's visible)
+  const handleDuplicateLine = useCallback(
+    (line: LineElement) => {
+      pushCanvasHistory();
+      const offset = 20;
+      const newLine: LineElement = {
+        ...line,
+        id: uuidv4(),
+        x: line.x + offset,
+        y: line.y + offset,
+        start: line.start ? { x: line.start.x + offset, y: line.start.y + offset } : line.start,
+        end: line.end ? { x: line.end.x + offset, y: line.end.y + offset } : line.end,
+        bend: line.bend ? { x: line.bend.x + offset, y: line.bend.y + offset } : line.bend,
+      };
+      syncAddElement(newLine);
+      setSelectedElementId(newLine.id);
+      setSelectedElementIds(new Set([newLine.id]));
+    },
+    [pushCanvasHistory, syncAddElement],
+  );
+
   // Merge project's saved canvas layout with defaults
   const sectionPositions = useMemo(() => {
     if (!project) return DEFAULT_SECTION_POSITIONS;
@@ -742,7 +799,8 @@ export function CXDCanvas() {
         const rect = containerRef.current.getBoundingClientRect();
         const cursorX = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
         const cursorY = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
-        updateCursor(cursorX, cursorY);
+        lastCursorCanvasPosRef.current = { x: cursorX, y: cursorY };
+        updateCursor(cursorX, cursorY, canvasZoom, activeBoardId ?? null);
       }
 
       if (isMarqueeSelecting && containerRef.current) {
@@ -784,12 +842,17 @@ export function CXDCanvas() {
           const primaryElement = canvasElements.find((e) => e.id === draggingElement);
 
           // Calculate new position for primary element
+          // Use dragOriginalPositionsRef (captured at drag start) so that Yjs bridge
+          // updates to Zustand between frames don't cause the delta to compound.
           let snappedDeltaX = deltaX;
           let snappedDeltaY = deltaY;
 
           if (primaryElement) {
-            let newPrimaryX = primaryElement.x + deltaX;
-            let newPrimaryY = primaryElement.y + deltaY;
+            const primaryOrigin = dragOriginalPositionsRef.current.get(draggingElement);
+            const baseX = primaryOrigin?.x ?? primaryElement.x;
+            const baseY = primaryOrigin?.y ?? primaryElement.y;
+            let newPrimaryX = baseX + deltaX;
+            let newPrimaryY = baseY + deltaY;
 
             // Apply grid snap to the new position
             if (snapToGrid) {
@@ -805,20 +868,37 @@ export function CXDCanvas() {
             if (guides.snapX !== undefined) newPrimaryX = guides.snapX;
             if (guides.snapY !== undefined) newPrimaryY = guides.snapY;
 
-            // Calculate the effective delta
-            snappedDeltaX = newPrimaryX - primaryElement.x;
-            snappedDeltaY = newPrimaryY - primaryElement.y;
+            // Total snapped delta from origin (not incremental from live Zustand position)
+            snappedDeltaX = newPrimaryX - baseX;
+            snappedDeltaY = newPrimaryY - baseY;
           }
+
+          // Collect all position updates for a single local Zustand write
+          const localUpdates: Array<{ id: string; x: number; y: number }> = [];
 
           selectedElementIds.forEach((id) => {
             const el = canvasElements.find((e) => e.id === id);
             if (el) {
+              const elOrigin = dragOriginalPositionsRef.current.get(id);
               if (el.type === "container") {
-                syncMoveContainerWithChildren(id, snappedDeltaX, snappedDeltaY);
+                const targetX = (elOrigin?.x ?? el.x) + snappedDeltaX;
+                const targetY = (elOrigin?.y ?? el.y) + snappedDeltaY;
+                localUpdates.push({ id, x: targetX, y: targetY });
+                // Move children locally too
+                canvasElements.forEach((child) => {
+                  if (child.containerId === id) {
+                    const childOrigin = dragOriginalPositionsRef.current.get(child.id);
+                    localUpdates.push({
+                      id: child.id,
+                      x: (childOrigin?.x ?? child.x) + snappedDeltaX,
+                      y: (childOrigin?.y ?? child.y) + snappedDeltaY,
+                    });
+                  }
+                });
               } else {
-                const newX = el.x + snappedDeltaX;
-                const newY = el.y + snappedDeltaY;
-                syncUpdateElement(id, { x: newX, y: newY });
+                const newX = (elOrigin?.x ?? el.x) + snappedDeltaX;
+                const newY = (elOrigin?.y ?? el.y) + snappedDeltaY;
+                localUpdates.push({ id, x: newX, y: newY });
 
                 // Check if child element moved outside its container
                 if (el.containerId) {
@@ -832,13 +912,18 @@ export function CXDCanvas() {
                       newY < container.y - 50;
 
                     if (isCompletelyOutside) {
-                      removeNodeFromContainer(id);
+                      syncRemoveNodeFromContainer(id);
                     }
                   }
                 }
               }
             }
           });
+
+          // Write all multi-select position changes to Zustand in one shot (no Yjs during drag)
+          if (localUpdates.length > 0) {
+            updateElementsPositionLocal(localUpdates);
+          }
 
           // Move bend points of edges connecting two selected elements
           canvasEdges.forEach((edge) => {
@@ -891,9 +976,11 @@ export function CXDCanvas() {
             (el) => el.id === draggingElement,
           );
           if (element) {
-            // Calculate new position using incremental delta
-            let newX = element.x + deltaX;
-            let newY = element.y + deltaY;
+            // Use origin position (captured at drag start) so Yjs bridge updates
+            // to Zustand between frames don't compound the delta.
+            const elementOrigin = dragOriginalPositionsRef.current.get(draggingElement);
+            let newX = (elementOrigin?.x ?? element.x) + deltaX;
+            let newY = (elementOrigin?.y ?? element.y) + deltaY;
 
             // Apply grid snap if enabled
             if (snapToGrid) {
@@ -909,16 +996,27 @@ export function CXDCanvas() {
             if (guides.snapX !== undefined) newX = guides.snapX;
             if (guides.snapY !== undefined) newY = guides.snapY;
 
-            // If it's a container, move children too
+            // Write position(s) directly to Zustand — no Yjs during drag.
+            // commitDragPositionsToYjs on mouseup will do one batch Yjs transaction.
             if (element.type === "container") {
-              const containerDeltaX = newX - element.x;
-              const containerDeltaY = newY - element.y;
-              syncMoveContainerWithChildren(draggingElement, containerDeltaX, containerDeltaY);
-            } else {
-              syncUpdateElement(draggingElement, {
-                x: newX,
-                y: newY,
+              // Move container + all its children locally
+              const singleDragUpdates: Array<{ id: string; x: number; y: number }> = [
+                { id: draggingElement, x: newX, y: newY },
+              ];
+              canvasElements.forEach((child) => {
+                if (child.containerId === draggingElement) {
+                  const childOrigin = dragOriginalPositionsRef.current.get(child.id);
+                  const cDelta = { x: newX - (elementOrigin?.x ?? element.x), y: newY - (elementOrigin?.y ?? element.y) };
+                  singleDragUpdates.push({
+                    id: child.id,
+                    x: (childOrigin?.x ?? child.x) + cDelta.x,
+                    y: (childOrigin?.y ?? child.y) + cDelta.y,
+                  });
+                }
               });
+              updateElementsPositionLocal(singleDragUpdates);
+            } else {
+              updateElementsPositionLocal([{ id: draggingElement, x: newX, y: newY }]);
 
               // Check if child element moved outside its container
               if (element.containerId) {
@@ -932,7 +1030,7 @@ export function CXDCanvas() {
                     newY < container.y - 50;
 
                   if (isCompletelyOutside) {
-                    removeNodeFromContainer(draggingElement);
+                    syncRemoveNodeFromContainer(draggingElement);
                   }
                 }
               }
@@ -973,7 +1071,11 @@ export function CXDCanvas() {
             }
           }
         }
-        setDragElementStart({ x: e.clientX, y: e.clientY });
+        // NOTE: Do NOT update dragElementStart here. We use dragOriginalPositionsRef
+        // (fixed at drag start) + absolute delta (currentMouse - dragElementStart) so
+        // that the element tracks the total displacement, not just the per-frame increment.
+        // Updating dragElementStart each frame caused elements to appear frozen because
+        // newX = origin + (lastFrame - thisFrame) ≈ origin on every frame.
       } else if (isConnecting && containerRef.current) {
         // Update connector preview position
         const rect = containerRef.current.getBoundingClientRect();
@@ -1041,12 +1143,11 @@ export function CXDCanvas() {
       updateCanvasElement,
       isConnecting,
       canvasPosition,
-      moveContainerWithChildren,
       isMarqueeSelecting,
       selectedElementIds,
       dragOffsets,
       draggingBendHandle,
-      removeNodeFromContainer,
+      syncRemoveNodeFromContainer,
       canvasEdges,
       updateCanvasEdge,
       syncUpdateEdge,
@@ -1090,6 +1191,30 @@ export function CXDCanvas() {
     }
     setIsPanning(false);
     setDraggingSection(null);
+
+    // Auto-center bend: if released within 12px of geometric midpoint, clear explicit bend
+    if (draggingBendHandle) {
+      const edge = canvasEdges.find((e) => e.id === draggingBendHandle);
+      if (edge && edge.bend) {
+        const fromEl = canvasElements.find((el) => el.id === edge.fromNodeId);
+        const toEl = canvasElements.find((el) => el.id === edge.toNodeId);
+        if (fromEl && toEl) {
+          const { from, to } = getResolvedEdgePoints(edge, fromEl, toEl);
+          if (from && to) {
+            const autoMidX = (from.x + to.x) / 2;
+            const autoMidY = (from.y + to.y) / 2;
+            // Geometric midpoint on curve at t=0.5 using auto midpoint as control point
+            const geomMidX = 0.25 * from.x + 0.5 * autoMidX + 0.25 * to.x;
+            const geomMidY = 0.25 * from.y + 0.5 * autoMidY + 0.25 * to.y;
+            const dist = Math.hypot(edge.bend.x - geomMidX, edge.bend.y - geomMidY);
+            if (dist < 12) {
+              syncUpdateEdge(draggingBendHandle, { bend: undefined });
+            }
+          }
+        }
+      }
+    }
+
     setDraggingBendHandle(null);
 
     // Cancel connecting if clicking on background
@@ -1138,6 +1263,17 @@ export function CXDCanvas() {
           };
           console.log("[CONNECTOR] Creating edge:", newEdge);
           syncAddEdge(newEdge);
+
+          // Propagate parent (fromEl) hypercubeTags to child (toEl) — union, no overwrite
+          if (fromEl?.hypercubeTags?.length) {
+            const existingTags = toEl?.hypercubeTags || [];
+            const unionTags = Array.from(new Set([...existingTags, ...fromEl.hypercubeTags]));
+            if (unionTags.length !== existingTags.length) {
+              syncUpdateElement(newEdge.toNodeId, { hypercubeTags: unionTags });
+            }
+          }
+
+          // customTags propagation intentionally omitted — taskMetadata is not on all element types
         }
       }
 
@@ -1429,6 +1565,14 @@ export function CXDCanvas() {
       } else if (element) {
         // Single element drag - store its original position
         originalPositions.set(elementId, { x: element.x, y: element.y });
+        // If it's a container, also capture all children so we can move them locally
+        if (element.type === 'container') {
+          canvasElements.forEach((child) => {
+            if (child.containerId === elementId) {
+              originalPositions.set(child.id, { x: child.x, y: child.y });
+            }
+          });
+        }
       }
 
       dragOriginalPositionsRef.current = originalPositions;
@@ -1505,22 +1649,37 @@ export function CXDCanvas() {
 
         // Attach all dropped elements to the container (no auto-expansion)
         elementsToDrop.forEach((id) => {
-          addNodeToContainer(id, targetContainer.id);
+          syncAddNodeToContainer(id, targetContainer.id);
         });
       }
     }
 
+    // Commit all final drag positions to Yjs in one batch transaction.
+    // During the drag we wrote directly to Zustand (no Yjs) for instant visual
+    // feedback. Now we produce a single Yjs update → one broadcast to peers.
+    const finalPositions: Array<{ id: string; x: number; y: number }> = [];
+    dragOriginalPositionsRef.current.forEach((_, id) => {
+      const el = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements?.find(e => e.id === id);
+      if (el) finalPositions.push({ id, x: el.x, y: el.y });
+    });
+    if (finalPositions.length > 0) {
+      commitDragPositionsToYjs(finalPositions);
+    }
+    dragOriginalPositionsRef.current = new Map();
+
     setDraggingElement(null);
     setDropTargetBoardId(null);
     setDropTargetContainerId(null);
+    setAlignmentGuides({ horizontal: [], vertical: [] });
   }, [
     draggingElement,
     canvasElements,
-    addNodeToContainer,
+    syncAddNodeToContainer,
     dropTargetBoardId,
     dropTargetContainerId,
     selectedElementIds,
     updateCanvasElement,
+    commitDragPositionsToYjs,
   ]);
 
   // Handle experience block drag start
@@ -1727,10 +1886,11 @@ export function CXDCanvas() {
             type: "experienceBlock" as const,
             componentKey: draggingExperienceBlock.sectionId as any,
             title: draggingExperienceBlock.label,
-            x: canvasX - 110, // Center the 220px wide element
-            y: canvasY - 50, // Center the 100px tall element
-            width: 220,
-            height: 100,
+            x: canvasX - 210, // Center the 420px wide element horizontally
+            y: canvasY - 26,  // Cursor lands in the header (header ~52px, offset to middle)
+            width: 420,
+            height: 360,      // Placeholder — ResizeObserver in ExperienceBlockCard will correct
+            viewMode: 'inline',
             zIndex: maxZIndex + 1,
             boardId: boardId,
             surface: surface,
@@ -1825,6 +1985,16 @@ export function CXDCanvas() {
         };
         console.log("[CONNECTOR] Creating edge:", newEdge);
         syncAddEdge(newEdge);
+
+        // Propagate parent (fromEl) hypercubeTags to child (toEl) — union, no overwrite
+        if (fromEl?.hypercubeTags?.length) {
+          const existingTags = toEl?.hypercubeTags ?? [];
+          const unionTags = Array.from(new Set([...existingTags, ...fromEl.hypercubeTags]));
+          if (unionTags.length !== existingTags.length) {
+            syncUpdateElement(newEdge.toNodeId, { hypercubeTags: unionTags });
+          }
+        }
+
       }
       setIsConnecting(false);
       setConnectingFrom(null);
@@ -1839,6 +2009,7 @@ export function CXDCanvas() {
       canvasElements,
       activeBoardId,
       activeSurface,
+      syncUpdateElement,
     ],
   );
 
@@ -1861,6 +2032,112 @@ export function CXDCanvas() {
     window.addEventListener("mousemove", handleMouseMove);
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
+
+  // Dialog state for clipboard paste — shown when the pasted content is ambiguous
+  type ClipboardPasteState =
+    | { kind: 'text'; text: string; canvasX: number; canvasY: number }
+    | { kind: 'link'; url: string; canvasX: number; canvasY: number };
+  const [clipboardPasteDialog, setClipboardPasteDialog] = useState<ClipboardPasteState | null>(null);
+
+  // Helper: convert last mouse position to canvas coordinates
+  const mouseToCanvasCoords = useCallback((clientX: number, clientY: number) => {
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) return null;
+    return {
+      x: (clientX - containerRect.left - canvasPosition.x) / canvasZoom,
+      y: (clientY - containerRect.top - canvasPosition.y) / canvasZoom,
+    };
+  }, [canvasPosition, canvasZoom]);
+
+  // Helper: build a new canvas element base at canvas coords
+  const makeElementBase = useCallback((type: CanvasElementType, canvasX: number, canvasY: number) => {
+    const size = DEFAULT_ELEMENT_SIZES[type] ?? { width: 300, height: 200 };
+    const maxZIndex = canvasElements.reduce(
+      (max, el) => Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0), 0,
+    );
+    return {
+      id: uuidv4(),
+      type,
+      x: canvasX - size.width / 2,
+      y: canvasY - size.height / 2,
+      width: size.width,
+      height: size.height,
+      zIndex: maxZIndex + 1,
+      boardId: activeBoardId,
+      surface: activeSurface,
+    };
+  }, [canvasElements, activeBoardId, activeSurface]);
+
+  // System clipboard paste handler (Ctrl/Cmd+V with actual clipboard data)
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Skip if user is editing text in an input/textarea/contenteditable
+      const target = e.target as HTMLElement;
+      const isEditing =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.contentEditable === 'true' ||
+        target.closest('[contenteditable="true"]');
+      if (isEditing) return;
+
+      // Skip if there are canvas elements in our internal clipboard (handled by keydown)
+      if (clipboard.length > 0) return;
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const coords = mouseToCanvasCoords(lastMousePos.x, lastMousePos.y);
+      if (!coords) return;
+      const { x: canvasX, y: canvasY } = coords;
+
+      // ── Image ──
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const src = evt.target?.result as string;
+            if (!src) return;
+            pushCanvasHistory();
+            const base = makeElementBase('image', canvasX, canvasY);
+            const newEl = { ...base, type: 'image' as const, src, objectFit: 'cover' as const };
+            syncAddElement(newEl);
+            setSelectedElementId(newEl.id);
+            setSelectedElementIds(new Set([newEl.id]));
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
+      }
+
+      // ── Text / URL ──
+      const textItem = Array.from(items).find((i) => i.type === 'text/plain');
+      if (!textItem) return;
+
+      textItem.getAsString((text) => {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+
+        // Detect URL
+        const isUrl = /^https?:\/\/\S+$/.test(trimmed);
+        if (isUrl) {
+          e.preventDefault();
+          setClipboardPasteDialog({ kind: 'link', url: trimmed, canvasX, canvasY });
+          return;
+        }
+
+        // Plain text
+        e.preventDefault();
+        setClipboardPasteDialog({ kind: 'text', text: trimmed, canvasX, canvasY });
+      });
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipboard.length, lastMousePos, mouseToCanvasCoords, makeElementBase, pushCanvasHistory, syncAddElement]);
 
   // Global click handler to deselect text elements when clicking outside and close all menus
   useEffect(() => {
@@ -2568,6 +2845,76 @@ export function CXDCanvas() {
     [setFocusedSection],
   );
 
+  // Broadcast local selection to collaborators so they see our highlights
+  useEffect(() => {
+    updateSelection(Array.from(selectedElementIds));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedElementIds]);
+
+  // Derived: the collaborator currently being followed (used for live-follow logic + overlay)
+  const followedCollaborator = useMemo(
+    () => (followingCollaboratorId ? collaborators.find((c) => c.id === followingCollaboratorId) ?? null : null),
+    [followingCollaboratorId, collaborators],
+  );
+
+  // Live-follow: pan canvas (and match zoom) to keep the followed collaborator's cursor centered
+  useEffect(() => {
+    if (!followingCollaboratorId) return;
+    const followed = collaborators.find((c) => c.id === followingCollaboratorId);
+    if (!followed?.cursor) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    // Mirror the followed user's zoom if available
+    const targetZoom = followed.cursor.zoom ?? canvasZoom;
+    if (followed.cursor.zoom !== undefined && followed.cursor.zoom !== canvasZoom) {
+      setCanvasZoom(followed.cursor.zoom);
+    }
+    setCanvasPosition({
+      x: rect.width / 2 - followed.cursor.x * targetZoom,
+      y: rect.height / 2 - followed.cursor.y * targetZoom,
+    });
+  }, [followingCollaboratorId, collaborators, canvasZoom, setCanvasPosition, setCanvasZoom]);
+
+  // Stop following when the viewer clicks anywhere
+  useEffect(() => {
+    if (!followingCollaboratorId) return;
+    const stop = () => setFollowingCollaboratorId(null);
+    document.addEventListener('mousedown', stop, { capture: true });
+    return () => document.removeEventListener('mousedown', stop, { capture: true });
+  }, [followingCollaboratorId, setFollowingCollaboratorId]);
+
+  // Re-broadcast cursor with new zoom level whenever canvasZoom changes
+  // This ensures collaborators immediately see the updated zoom even when the mouse isn't moving
+  useEffect(() => {
+    if (!updateCursor || !lastCursorCanvasPosRef.current) return;
+    const { x, y } = lastCursorCanvasPosRef.current;
+    updateCursor(x, y, canvasZoom, activeBoardId ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasZoom]);
+
+  // Board breadcrumb following: mirror the followed user's board navigation
+  const prevFollowedBoardIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!followedCollaborator) {
+      prevFollowedBoardIdRef.current = undefined;
+      return;
+    }
+    const targetBoardId = followedCollaborator.cursor?.boardId ?? null;
+    // Only act when boardId actually changed
+    if (prevFollowedBoardIdRef.current === targetBoardId) return;
+    prevFollowedBoardIdRef.current = targetBoardId;
+
+    if (targetBoardId !== null && targetBoardId !== activeBoardId) {
+      // Find the board element to get its title
+      const boardEl = canvasElements.find((el) => el.id === targetBoardId);
+      const boardTitle = (boardEl as any)?.title ?? 'Board';
+      enterBoard(targetBoardId, boardTitle);
+    } else if (targetBoardId === null && activeBoardId !== null) {
+      exitBoard();
+    }
+  }, [followedCollaborator, activeBoardId, canvasElements, enterBoard, exitBoard]);
+
   // Multi-selection box handlers
   const selectedElementsArray = useMemo(() => {
     return canvasElements.filter((el) => selectedElementIds.has(el.id));
@@ -2793,11 +3140,20 @@ export function CXDCanvas() {
 
       syncAddEdge(newEdge);
 
+      // Propagate parent (sourceElement) hypercubeTags to child (newShape) — union, no overwrite
+      if (sourceElement.hypercubeTags?.length) {
+        const existingTags = newShape.hypercubeTags ?? [];
+        const unionTags = Array.from(new Set([...existingTags, ...sourceElement.hypercubeTags]));
+        if (unionTags.length !== existingTags.length) {
+          syncUpdateElement(newShape.id, { hypercubeTags: unionTags });
+        }
+      }
+
       // Select the new shape
       setSelectedElementId(newShape.id);
       setSelectedElementIds(new Set([newShape.id]));
     },
-    [canvasElements, activeBoardId, activeSurface, pushCanvasHistory, syncAddElement, syncAddEdge]
+    [canvasElements, activeBoardId, activeSurface, pushCanvasHistory, syncAddElement, syncAddEdge, syncUpdateElement]
   );
 
   // Drag and drop file handling
@@ -3058,14 +3414,20 @@ export function CXDCanvas() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* Canvas Background with dot grid */}
+      {/* Canvas Background - covers container, used for click detection */}
       <div
-        className="canvas-background absolute inset-0 top-full left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-1 py-[8px] mt-[14.75px] bg-[#0f0939] opacity-[1] w-[937px] h-[363px]"
-        style={{
-          background:
-            "radial-gradient(circle at center, hsl(270 45% 8%) 0%, hsl(270 50% 3%) 100%)",
-        }}
+        className="canvas-background absolute inset-0 pointer-events-none"
       />
+      {/* Live-follow gradient border overlay — shows a colored glow/ring while following a collaborator */}
+      {followedCollaborator && (
+        <div
+          className="pointer-events-none absolute inset-0 transition-opacity duration-300"
+          style={{
+            zIndex: 9997,
+            boxShadow: `inset 0 0 0 3px ${followedCollaborator.color}, inset 0 0 60px ${followedCollaborator.color}33`,
+          }}
+        />
+      )}
       {/* Dot grid - rendered inside canvas transform for perfect alignment */}
       {settings.gridVisible && (
         <div
@@ -3097,6 +3459,7 @@ export function CXDCanvas() {
           collaborators={collaborators}
           canvasOffset={{ x: canvasPosition.x, y: canvasPosition.y }}
           zoom={canvasZoom}
+          currentBoardId={activeBoardId ?? null}
         />
       )}
 
@@ -3207,6 +3570,38 @@ export function CXDCanvas() {
             />
           ))}
 
+        {/* Remote selection rings — show which elements other collaborators have selected */}
+        {collaborators.map((collaborator) =>
+          (collaborator.selection?.elementIds ?? []).map((elementId) => {
+            const el = canvasElements.find((e) => e.id === elementId);
+            if (!el) return null;
+            return (
+              <div
+                key={`${collaborator.id}-${elementId}`}
+                className="pointer-events-none absolute"
+                style={{
+                  left: el.x - 3,
+                  top: el.y - 3,
+                  width: el.width + 6,
+                  height: el.height + 6,
+                  border: `2px solid ${collaborator.color}`,
+                  borderRadius: 6,
+                  boxShadow: `0 0 0 1px ${collaborator.color}40`,
+                  zIndex: 9990,
+                }}
+              >
+                {/* Collaborator name tag */}
+                <span
+                  className="absolute -top-5 left-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium text-white leading-none"
+                  style={{ backgroundColor: collaborator.color }}
+                >
+                  {collaborator.name}
+                </span>
+              </div>
+            );
+          })
+        )}
+
         {/* Multi-Selection Box with bounding box and toolbar */}
         {selectedElementIds.size > 1 && (
           <MultiSelectionBox
@@ -3309,6 +3704,7 @@ export function CXDCanvas() {
         onUpdateLine={(id, updates) => syncUpdateElement(id, updates)}
         onCreateLine={handleCreateLine}
         onDeleteLine={(id) => syncRemoveElement(id)}
+        onDuplicateLine={handleDuplicateLine}
         canvasPosition={canvasPosition}
         canvasZoom={canvasZoom}
         isLineToolActive={activeTool === "line"}
@@ -3316,218 +3712,199 @@ export function CXDCanvas() {
         containerRef={containerRef}
         onOperationStart={pushCanvasHistory}
       />
-      {/* Connectors SVG Layer - rendered BELOW elements */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
-          transformOrigin: "0 0",
-          zIndex: 5,
-        }}
-      >
-        <svg
-          className="absolute inset-0 overflow-visible"
+      {/* Per-edge SVGs — each at computed z-index above its connected elements */}
+      {canvasEdges.map((edge) => {
+        const fromElement = elementsById[edge.fromNodeId];
+        const toElement = elementsById[edge.toNodeId];
+        if (!fromElement || !toElement) return null;
+
+        const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
+        if (!from || !to) return null;
+
+        const isSelected = selectedEdgeId === edge.id;
+        const isHovered = hoveredEdgeId === edge.id;
+        const strokeColor = edge.style?.color || "hsl(180 100% 50% / 0.8)";
+
+        const bend = edge.bend || { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+        const pathD = `M ${from.x} ${from.y} Q ${bend.x} ${bend.y} ${to.x} ${to.y}`;
+
+        // Midpoint on bezier curve at t=0.5
+        const nodeX = 0.25 * from.x + 0.5 * bend.x + 0.25 * to.x;
+        const nodeY = 0.25 * from.y + 0.5 * bend.y + 0.25 * to.y;
+        const isMidHovered = hoveredMidpointEdgeId === edge.id;
+
+        const markerIds = {
+          arrowEnd: `${edge.id}-arrow-end`,
+          arrowStart: `${edge.id}-arrow-start`,
+          dotEnd: `${edge.id}-dot-end`,
+          dotStart: `${edge.id}-dot-start`,
+          diamondEnd: `${edge.id}-diamond-end`,
+          diamondStart: `${edge.id}-diamond-start`,
+          squareEnd: `${edge.id}-square-end`,
+          squareStart: `${edge.id}-square-start`,
+        };
+
+        const getMarkerEnd = (): string | undefined => {
+          const endCap = edge.style?.endCap || (edge.style?.arrowHead ? 'arrow' : 'none');
+          switch (endCap) {
+            case 'arrow': return `url(#${markerIds.arrowEnd})`;
+            case 'dot': return `url(#${markerIds.dotEnd})`;
+            case 'diamond': return `url(#${markerIds.diamondEnd})`;
+            case 'square': return `url(#${markerIds.squareEnd})`;
+            default: return undefined;
+          }
+        };
+
+        const getMarkerStart = (): string | undefined => {
+          switch (edge.style?.startCap || 'none') {
+            case 'arrow': return `url(#${markerIds.arrowStart})`;
+            case 'dot': return `url(#${markerIds.dotStart})`;
+            case 'diamond': return `url(#${markerIds.diamondStart})`;
+            case 'square': return `url(#${markerIds.squareStart})`;
+            default: return undefined;
+          }
+        };
+
+        const labelPosition = edge.label?.position ?? 0.5;
+        const t = labelPosition;
+        const labelPoint = {
+          x: (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * bend.x + t * t * to.x,
+          y: (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * bend.y + t * t * to.y,
+        };
+
+        // Z-index: above connected elements, below unrelated higher-z elements
+        const connectedMaxZ = Math.max(fromElement.zIndex ?? 0, toElement.zIndex ?? 0);
+        const edgeZIndex = connectedMaxZ + 0.5;
+
+        return (
+          <div
+            key={edge.id}
+            className="absolute pointer-events-none"
+            style={{
+              transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
+              transformOrigin: "0 0",
+              zIndex: edgeZIndex,
+            }}
+          >
+            <svg
+              className="absolute overflow-visible"
+              style={{ width: 1, height: 1, left: 0, top: 0, pointerEvents: "none" }}
+            >
+              <defs>
+                <marker id={markerIds.arrowEnd} markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
+                </marker>
+                <marker id={markerIds.arrowStart} markerWidth="10" markerHeight="7" refX="2" refY="3.5" orient="auto-start-reverse">
+                  <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
+                </marker>
+                <marker id={markerIds.dotEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                  <circle cx="4" cy="4" r="3" fill={strokeColor} />
+                </marker>
+                <marker id={markerIds.dotStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                  <circle cx="4" cy="4" r="3" fill={strokeColor} />
+                </marker>
+                <marker id={markerIds.diamondEnd} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                  <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
+                </marker>
+                <marker id={markerIds.diamondStart} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                  <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
+                </marker>
+                <marker id={markerIds.squareEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                  <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
+                </marker>
+                <marker id={markerIds.squareStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                  <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
+                </marker>
+              </defs>
+              {/* Invisible wide click target */}
+              <path
+                d={pathD}
+                stroke="transparent"
+                strokeWidth={12}
+                fill="none"
+                style={{ pointerEvents: "auto", cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedEdgeId(edge.id);
+                  setSelectedElementId(null);
+                  setSelectedElementIds(new Set());
+                }}
+                onMouseEnter={() => setHoveredEdgeId(edge.id)}
+                onMouseLeave={() => setHoveredEdgeId(null)}
+              />
+              {/* Visible connector path */}
+              <path
+                d={pathD}
+                stroke={strokeColor}
+                strokeWidth={isSelected ? (edge.style?.thickness || 2) + 1 : edge.style?.thickness || 2}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeDasharray={
+                  edge.style?.lineStyle === "dashed" ? "8,4"
+                  : edge.style?.lineStyle === "dotted" ? "2,4"
+                  : undefined
+                }
+                markerStart={getMarkerStart()}
+                markerEnd={getMarkerEnd()}
+                style={{
+                  filter: isSelected
+                    ? "drop-shadow(0 0 4px rgba(167,139,250,0.45))"
+                    : isHovered
+                    ? `drop-shadow(0 0 3px ${strokeColor})`
+                    : undefined,
+                }}
+                className="pointer-events-none"
+              />
+              {/* Text label */}
+              {edge.label?.text && (
+                <g className="pointer-events-none">
+                  <rect x={labelPoint.x - 30} y={labelPoint.y - 10} width={60} height={20} rx={4} fill="hsl(var(--card))" fillOpacity={0.9} />
+                  <text x={labelPoint.x} y={labelPoint.y + 4} textAnchor="middle" fill={edge.label.color || "hsl(var(--foreground))"} fontSize={edge.label.fontSize || 12} fontFamily={edge.label.fontFamily || "inherit"} className="select-none">
+                    {edge.label.text}
+                  </text>
+                </g>
+              )}
+              {/* Always-visible midpoint circle node */}
+              <g
+                style={{ pointerEvents: "auto", cursor: "grab" }}
+                onMouseDown={(e) => { e.stopPropagation(); startBendDrag(e, edge); }}
+                onMouseEnter={() => setHoveredMidpointEdgeId(edge.id)}
+                onMouseLeave={() => setHoveredMidpointEdgeId(null)}
+              >
+                {isSelected && <circle cx={nodeX} cy={nodeY} r={9} fill="none" stroke="white" strokeWidth={1.5} />}
+                <circle cx={nodeX} cy={nodeY} r={isMidHovered ? 8.5 : 7} fill={strokeColor} opacity={0.9}
+                  style={{ filter: isMidHovered ? `drop-shadow(0 0 4px ${strokeColor})` : undefined }} />
+                <circle cx={nodeX} cy={nodeY} r={4.5} fill="#0f0f0f" />
+              </g>
+            </svg>
+          </div>
+        );
+      })}
+
+      {/* Connector preview while drawing */}
+      {isConnecting && connectingFrom && connectorPreview && (
+        <div
+          className="absolute pointer-events-none"
           style={{
-            width: "10000px",
-            height: "10000px",
-            left: 0,
-            top: 0,
-            pointerEvents: "none",
+            transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
+            transformOrigin: "0 0",
+            zIndex: 9998,
           }}
         >
-
-          {/* Existing edges */}
-          {canvasEdges.map((edge) => {
-            const fromElement = canvasElements.find(
-              (el) => el.id === edge.fromNodeId,
-            );
-            const toElement = canvasElements.find(
-              (el) => el.id === edge.toNodeId,
-            );
-            if (!fromElement || !toElement) return null;
-
-            const { from, to } = getResolvedEdgePoints(edge, fromElement, toElement);
-
-            if (!from || !to) return null;
-
-            const isSelected = selectedEdgeId === edge.id;
-            const strokeColor = edge.style?.color || "hsl(180 100% 50% / 0.8)";
-
-            // Use bend point or default to midpoint
-            const bend = edge.bend || {
-              x: (from.x + to.x) / 2,
-              y: (from.y + to.y) / 2,
-            };
-
-            // Create path for curve using quadratic Bezier
-            const pathD = `M ${from.x} ${from.y} Q ${bend.x} ${bend.y} ${to.x} ${to.y}`;
-
-            // Per-edge marker ids so endpoint color always follows the line color in realtime.
-            const markerIds = {
-              arrowEnd: `${edge.id}-arrow-end`,
-              arrowStart: `${edge.id}-arrow-start`,
-              dotEnd: `${edge.id}-dot-end`,
-              dotStart: `${edge.id}-dot-start`,
-              diamondEnd: `${edge.id}-diamond-end`,
-              diamondStart: `${edge.id}-diamond-start`,
-              squareEnd: `${edge.id}-square-end`,
-              squareStart: `${edge.id}-square-start`,
-            };
-
-            // Determine endpoint markers
-            const getMarkerEnd = (): string | undefined => {
-              const endCap = edge.style?.endCap || (edge.style?.arrowHead ? 'arrow' : 'none');
-              switch (endCap) {
-                case 'arrow': return `url(#${markerIds.arrowEnd})`;
-                case 'dot': return `url(#${markerIds.dotEnd})`;
-                case 'diamond': return `url(#${markerIds.diamondEnd})`;
-                case 'square': return `url(#${markerIds.squareEnd})`;
-                default: return undefined;
-              }
-            };
-
-            const getMarkerStart = (): string | undefined => {
-              const startCap = edge.style?.startCap || 'none';
-              switch (startCap) {
-                case 'arrow': return `url(#${markerIds.arrowStart})`;
-                case 'dot': return `url(#${markerIds.dotStart})`;
-                case 'diamond': return `url(#${markerIds.diamondStart})`;
-                case 'square': return `url(#${markerIds.squareStart})`;
-                default: return undefined;
-              }
-            };
-
-            // Calculate label position along the path (default to 0.5 = center)
-            const labelPosition = edge.label?.position ?? 0.5;
-            // Quadratic bezier point at t
-            const getLabelPoint = (t: number) => {
-              const x = (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * bend.x + t * t * to.x;
-              const y = (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * bend.y + t * t * to.y;
-              return { x, y };
-            };
-            const labelPoint = getLabelPoint(labelPosition);
-
-            return (
-              <g key={edge.id}>
-                <defs>
-                  <marker id={markerIds.arrowEnd} markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
-                  </marker>
-                  <marker id={markerIds.arrowStart} markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto-start-reverse">
-                    <polygon points="0 0, 10 3.5, 0 7" fill={strokeColor} />
-                  </marker>
-                  <marker id={markerIds.dotEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                    <circle cx="4" cy="4" r="3" fill={strokeColor} />
-                  </marker>
-                  <marker id={markerIds.dotStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                    <circle cx="4" cy="4" r="3" fill={strokeColor} />
-                  </marker>
-                  <marker id={markerIds.diamondEnd} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-                    <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
-                  </marker>
-                  <marker id={markerIds.diamondStart} markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
-                    <polygon points="5 0, 10 5, 5 10, 0 5" fill={strokeColor} />
-                  </marker>
-                  <marker id={markerIds.squareEnd} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                    <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
-                  </marker>
-                  <marker id={markerIds.squareStart} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-                    <rect x="1" y="1" width="6" height="6" fill={strokeColor} />
-                  </marker>
-                </defs>
-                {/* Clickable invisible path for selection */}
-                <path
-                  d={pathD}
-                  stroke="transparent"
-                  strokeWidth={12}
-                  fill="none"
-                  className="pointer-events-auto cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedEdgeId(edge.id);
-                    setSelectedElementId(null);
-                    setSelectedElementIds(new Set());
-                  }}
-                />
-                {/* Visible path */}
-                <path
-                  d={pathD}
-                  stroke={strokeColor}
-                  strokeWidth={isSelected ? (edge.style?.thickness || 2) + 1 : edge.style?.thickness || 2}
-                  fill="none"
-                  strokeDasharray={
-                    edge.style?.lineStyle === "dashed"
-                      ? "8,4"
-                      : edge.style?.lineStyle === "dotted"
-                        ? "2,4"
-                        : undefined
-                  }
-                  markerStart={getMarkerStart()}
-                  markerEnd={getMarkerEnd()}
-                  style={isSelected ? { filter: "drop-shadow(0 0 4px rgba(167,139,250,0.45))" } : undefined}
-                />
-                {/* Text label */}
-                {edge.label?.text && (
-                  <g>
-                    {/* Label background */}
-                    <rect
-                      x={labelPoint.x - 30}
-                      y={labelPoint.y - 10}
-                      width={60}
-                      height={20}
-                      rx={4}
-                      fill="hsl(var(--card))"
-                      fillOpacity={0.9}
-                      className="pointer-events-none"
-                    />
-                    {/* Label text */}
-                    <text
-                      x={labelPoint.x}
-                      y={labelPoint.y + 4}
-                      textAnchor="middle"
-                      fill={edge.label.color || "hsl(var(--foreground))"}
-                      fontSize={edge.label.fontSize || 12}
-                      fontFamily={edge.label.fontFamily || "inherit"}
-                      className="pointer-events-none select-none"
-                    >
-                      {edge.label.text}
-                    </text>
-                  </g>
-                )}
-              </g>
-            );
-          })}
-
-          {/* Connector preview while creating */}
-          {isConnecting && connectingFrom && connectorPreview && (
+          <svg className="absolute overflow-visible" style={{ width: 1, height: 1, left: 0, top: 0, pointerEvents: "none" }}>
             <line
-              x1={(() => {
-                const fromEl = canvasElements.find(
-                  (el) => el.id === connectingFrom.elementId,
-                );
-                return fromEl
-                  ? getAnchorPosition(fromEl, connectingFrom.anchor).x
-                  : 0;
-              })()}
-              y1={(() => {
-                const fromEl = canvasElements.find(
-                  (el) => el.id === connectingFrom.elementId,
-                );
-                return fromEl
-                  ? getAnchorPosition(fromEl, connectingFrom.anchor).y
-                  : 0;
-              })()}
+              x1={(() => { const el = elementsById[connectingFrom.elementId]; return el ? getAnchorPosition(el, connectingFrom.anchor).x : 0; })()}
+              y1={(() => { const el = elementsById[connectingFrom.elementId]; return el ? getAnchorPosition(el, connectingFrom.anchor).y : 0; })()}
               x2={connectorPreview.x}
               y2={connectorPreview.y}
               stroke="hsl(180 100% 50% / 0.6)"
               strokeWidth={2}
               strokeDasharray="8,4"
-              className="pointer-events-none"
             />
-          )}
-
-        </svg>
-      </div>
+          </svg>
+        </div>
+      )}
 
       {/* Bend handles and anchor handles for selected connector */}
       {selectedEdgeId &&
@@ -4053,6 +4430,158 @@ export function CXDCanvas() {
           }}
         />
       )}
+
+      {/* Clipboard Paste Dialog - shown when pasting text or links */}
+      {clipboardPasteDialog && (
+        <ClipboardPasteDialog
+          dialog={clipboardPasteDialog}
+          onClose={() => setClipboardPasteDialog(null)}
+          onConfirm={(choice) => {
+            setClipboardPasteDialog(null);
+            const d = clipboardPasteDialog;
+            pushCanvasHistory();
+
+            if (d.kind === 'text') {
+              if (choice === 'note') {
+                const base = makeElementBase('freeform', d.canvasX, d.canvasY);
+                syncAddElement({
+                  ...base,
+                  type: 'freeform',
+                  cardType: 'note',
+                  noteTitle: 'Pasted Note',
+                  noteBody: d.text,
+                  emoji: '📌',
+                  style: {
+                    bgColor: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)',
+                    textColor: '#ffffff',
+                  },
+                } as any);
+                setSelectedElementId(base.id);
+                setSelectedElementIds(new Set([base.id]));
+              } else {
+                // floating text
+                const base = makeElementBase('text', d.canvasX, d.canvasY);
+                syncAddElement({
+                  ...base,
+                  type: 'text',
+                  content: d.text,
+                  style: { fontSize: 20 },
+                } as any);
+                setSelectedElementId(base.id);
+                setSelectedElementIds(new Set([base.id]));
+              }
+            } else if (d.kind === 'link') {
+              const linkMode = choice as 'bookmark' | 'embed';
+              const base = makeElementBase('link', d.canvasX, d.canvasY);
+              syncAddElement({
+                ...base,
+                type: 'link',
+                url: d.url,
+                linkMode,
+                ...(linkMode === 'embed' && { width: 480, height: 360 }),
+              } as any);
+              setSelectedElementId(base.id);
+              setSelectedElementIds(new Set([base.id]));
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Clipboard Paste Dialog ────────────────────────────────────────────────────
+
+function ClipboardPasteDialog({
+  dialog,
+  onClose,
+  onConfirm,
+}: {
+  dialog: { kind: 'text'; text: string } | { kind: 'link'; url: string };
+  onClose: () => void;
+  onConfirm: (choice: string) => void;
+}) {
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-card border border-border rounded-xl shadow-2xl p-6 w-80 flex flex-col gap-4">
+        {dialog.kind === 'text' ? (
+          <>
+            <div>
+              <h3 className="font-semibold text-foreground mb-1">Paste text as…</h3>
+              <p className="text-xs text-muted-foreground line-clamp-3 break-all">{dialog.text}</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                autoFocus
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:bg-primary/10 hover:border-primary/50 transition-colors text-left"
+                onClick={() => onConfirm('note')}
+              >
+                <span className="text-xl">📌</span>
+                <div>
+                  <div className="text-sm font-medium">Note</div>
+                  <div className="text-xs text-muted-foreground">Paste into a note card body</div>
+                </div>
+              </button>
+              <button
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:bg-primary/10 hover:border-primary/50 transition-colors text-left"
+                onClick={() => onConfirm('floating')}
+              >
+                <span className="text-xl">T</span>
+                <div>
+                  <div className="text-sm font-medium">Floating text</div>
+                  <div className="text-xs text-muted-foreground">Add as a text element on canvas</div>
+                </div>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <h3 className="font-semibold text-foreground mb-1">Paste link as…</h3>
+              <p className="text-xs text-muted-foreground truncate">{dialog.url}</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                autoFocus
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:bg-primary/10 hover:border-primary/50 transition-colors text-left"
+                onClick={() => onConfirm('bookmark')}
+              >
+                <span className="text-xl">🔖</span>
+                <div>
+                  <div className="text-sm font-medium">Bookmark</div>
+                  <div className="text-xs text-muted-foreground">Show as a link card with preview</div>
+                </div>
+              </button>
+              <button
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:bg-primary/10 hover:border-primary/50 transition-colors text-left"
+                onClick={() => onConfirm('embed')}
+              >
+                <span className="text-xl">🖼️</span>
+                <div>
+                  <div className="text-sm font-medium">Embed</div>
+                  <div className="text-xs text-muted-foreground">Display inline in an iframe</div>
+                </div>
+              </button>
+            </div>
+          </>
+        )}
+        <button
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors self-center"
+          onClick={onClose}
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
