@@ -25,6 +25,18 @@ const containerStyle: ElementStyle = {
   bgColor: 'rgba(255,255,255,0.03)',
 };
 
+const promptStyle: ElementStyle = {
+  fontSize: 14,
+  fontWeight: 'normal',
+  textColor: 'rgba(255,255,255,0.5)',
+};
+
+const labelStyle: ElementStyle = {
+  fontSize: 16,
+  fontWeight: 'bold',
+  textColor: 'rgba(255,255,255,0.8)',
+};
+
 /**
  * Re-map element IDs to fresh UUIDs while preserving containerId references.
  * Call this before adding template elements to a project.
@@ -47,6 +59,7 @@ export function remapTemplateIds(elements: CanvasElement[]): CanvasElement[] {
 
 // ─── Experience Design ──────────────────────────────────────────────
 
+// 1. Experience Journey — 5 containers + 5 text prompts = 10 elements
 const experienceJourney: TemplateDefinition = {
   id: 'experience-journey',
   name: 'Experience Journey',
@@ -54,23 +67,20 @@ const experienceJourney: TemplateDefinition = {
   emoji: '🗺️',
   category: 'experience',
   elements: [
-    // Containers
-    { id: 'ej-awareness',     type: 'container', x: 50,   y: 200, width: 350, height: 500, zIndex: 0, label: 'Awareness',     tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'ej-consideration', type: 'container', x: 430,  y: 200, width: 350, height: 500, zIndex: 0, label: 'Consideration', tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    { id: 'ej-engagement',    type: 'container', x: 810,  y: 200, width: 350, height: 500, zIndex: 0, label: 'Engagement',    tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
-    { id: 'ej-experience',    type: 'container', x: 1190, y: 200, width: 350, height: 500, zIndex: 0, label: 'Experience',    tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'ej-reflection',    type: 'container', x: 1570, y: 200, width: 350, height: 500, zIndex: 0, label: 'Reflection',    tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
-    // Prompt cards
-    { id: 'ej-p1', type: 'freeform', x: 70,   y: 260, width: 200, height: 120, zIndex: 1, locked: false, containerId: 'ej-awareness',     cardType: 'note', content: 'How does the audience first discover this experience? What channels or triggers create awareness?' },
-    { id: 'ej-p2', type: 'freeform', x: 450,  y: 260, width: 200, height: 120, zIndex: 1, locked: false, containerId: 'ej-consideration', cardType: 'note', content: 'What motivates someone to commit? What barriers or hesitations exist at this stage?' },
-    { id: 'ej-p3', type: 'freeform', x: 830,  y: 260, width: 200, height: 120, zIndex: 1, locked: false, containerId: 'ej-engagement',    cardType: 'note', content: 'What is the core interaction? Describe the peak moment of participation.' },
-    { id: 'ej-p4', type: 'freeform', x: 1210, y: 260, width: 200, height: 120, zIndex: 1, locked: false, containerId: 'ej-experience',    cardType: 'note', content: 'What sensory and emotional elements define the lived experience? How is the environment designed?' },
-    { id: 'ej-p5', type: 'freeform', x: 1590, y: 260, width: 200, height: 120, zIndex: 1, locked: false, containerId: 'ej-reflection',    cardType: 'note', content: 'How do participants reflect on and share the experience? What lasting impression remains?' },
-    // Example content card in Engagement
-    { id: 'ej-ex1', type: 'freeform', x: 830, y: 420, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'ej-engagement', cardType: 'note', content: 'Example: Guests enter a projection-mapped tunnel that responds to their movement, building anticipation before the main reveal.' },
+    { id: 'ej-c1', type: 'container', x: 50,   y: 100, width: 340, height: 420, zIndex: 0, label: 'Awareness',     tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'ej-c2', type: 'container', x: 420,  y: 100, width: 340, height: 420, zIndex: 0, label: 'Consideration', tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
+    { id: 'ej-c3', type: 'container', x: 790,  y: 100, width: 340, height: 420, zIndex: 0, label: 'Engagement',    tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'ej-c4', type: 'container', x: 1160, y: 100, width: 340, height: 420, zIndex: 0, label: 'Experience',    tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'ej-c5', type: 'container', x: 1530, y: 100, width: 340, height: 420, zIndex: 0, label: 'Reflection',    tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
+    { id: 'ej-t1', type: 'text', x: 70,   y: 160, width: 300, height: 60, zIndex: 1, locked: false, containerId: 'ej-c1', content: 'How does the audience first discover this experience? What channels or triggers create awareness?', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-t2', type: 'text', x: 440,  y: 160, width: 300, height: 60, zIndex: 1, locked: false, containerId: 'ej-c2', content: 'What motivates someone to commit? What barriers or hesitations exist at this stage?', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-t3', type: 'text', x: 810,  y: 160, width: 300, height: 60, zIndex: 1, locked: false, containerId: 'ej-c3', content: 'What is the core interaction? Describe the peak moment of participation.', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-t4', type: 'text', x: 1180, y: 160, width: 300, height: 60, zIndex: 1, locked: false, containerId: 'ej-c4', content: 'What sensory and emotional elements define the lived experience?', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-t5', type: 'text', x: 1550, y: 160, width: 300, height: 60, zIndex: 1, locked: false, containerId: 'ej-c5', content: 'How do participants reflect on and share the experience afterward?', style: promptStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
+// 2. Immersive Experience Canvas — 5 containers + 5 text prompts = 10 elements
 const immersiveCanvas: TemplateDefinition = {
   id: 'immersive-canvas',
   name: 'Immersive Experience Canvas',
@@ -78,21 +88,20 @@ const immersiveCanvas: TemplateDefinition = {
   emoji: '🌀',
   category: 'experience',
   elements: [
-    // Containers
-    { id: 'ic-concept',  type: 'container', x: 350,  y: 50,  width: 600, height: 280, zIndex: 0, label: 'Concept',         tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'ic-audience', type: 'container', x: 50,   y: 50,  width: 270, height: 280, zIndex: 0, label: 'Audience',        tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    { id: 'ic-sensory',  type: 'container', x: 980,  y: 50,  width: 300, height: 280, zIndex: 0, label: 'Sensory Domains', tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
-    { id: 'ic-spatial',  type: 'container', x: 50,   y: 370, width: 600, height: 320, zIndex: 0, label: 'Spatial Layout',  tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'ic-narrative',type: 'container', x: 680,  y: 370, width: 600, height: 320, zIndex: 0, label: 'Narrative Arc',   tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
-    // Prompt cards
-    { id: 'ic-p1', type: 'freeform', x: 370,  y: 110, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ic-concept',   cardType: 'note', content: 'What is the central concept or theme? What world are you creating and why does it matter?' },
-    { id: 'ic-p2', type: 'freeform', x: 70,   y: 110, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ic-audience',  cardType: 'note', content: 'Who is the intended audience? What prior knowledge or expectations do they bring?' },
-    { id: 'ic-p3', type: 'freeform', x: 1000, y: 110, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ic-sensory',   cardType: 'note', content: 'Which senses are engaged? Map visual, audio, haptic, olfactory, and taste elements.' },
-    { id: 'ic-p4', type: 'freeform', x: 70,   y: 430, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ic-spatial',   cardType: 'note', content: 'How is the physical or virtual space organized? Describe zones, flow paths, and transition points.' },
-    { id: 'ic-p5', type: 'freeform', x: 700,  y: 430, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ic-narrative', cardType: 'note', content: 'What is the narrative structure? Map the beginning, rising tension, climax, and resolution.' },
+    { id: 'ic-c1', type: 'container', x: 50,   y: 50,  width: 550, height: 300, zIndex: 0, label: 'Concept & Theme',  tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'ic-c2', type: 'container', x: 630,  y: 50,  width: 550, height: 300, zIndex: 0, label: 'Audience',         tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
+    { id: 'ic-c3', type: 'container', x: 50,   y: 380, width: 370, height: 300, zIndex: 0, label: 'Sensory Domains',  tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'ic-c4', type: 'container', x: 450,  y: 380, width: 370, height: 300, zIndex: 0, label: 'Spatial Layout',   tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'ic-c5', type: 'container', x: 850,  y: 380, width: 330, height: 300, zIndex: 0, label: 'Narrative Arc',    tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
+    { id: 'ic-t1', type: 'text', x: 70,  y: 110, width: 510, height: 50, zIndex: 1, locked: false, containerId: 'ic-c1', content: 'What is the central concept or theme? What world are you creating and why does it matter?', style: promptStyle, textAlign: 'left' },
+    { id: 'ic-t2', type: 'text', x: 650, y: 110, width: 510, height: 50, zIndex: 1, locked: false, containerId: 'ic-c2', content: 'Who is the intended audience? What prior knowledge or expectations do they bring?', style: promptStyle, textAlign: 'left' },
+    { id: 'ic-t3', type: 'text', x: 70,  y: 440, width: 330, height: 50, zIndex: 1, locked: false, containerId: 'ic-c3', content: 'Which senses are engaged? Map visual, audio, haptic, olfactory, and taste elements.', style: promptStyle, textAlign: 'left' },
+    { id: 'ic-t4', type: 'text', x: 470, y: 440, width: 330, height: 50, zIndex: 1, locked: false, containerId: 'ic-c4', content: 'How is the space organized? Describe zones, flow paths, and transition points.', style: promptStyle, textAlign: 'left' },
+    { id: 'ic-t5', type: 'text', x: 870, y: 440, width: 290, height: 50, zIndex: 1, locked: false, containerId: 'ic-c5', content: 'Map the narrative arc: beginning, rising tension, climax, and resolution.', style: promptStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
+// 3. Event Blueprint — 3 containers + 3 text prompts = 6 elements
 const eventBlueprint: TemplateDefinition = {
   id: 'event-blueprint',
   name: 'Event Blueprint',
@@ -100,46 +109,18 @@ const eventBlueprint: TemplateDefinition = {
   emoji: '🎪',
   category: 'experience',
   elements: [
-    // Main phase containers
-    { id: 'eb-pre',  type: 'container', x: 50,   y: 100, width: 550, height: 600, zIndex: 0, label: 'Pre-Production',  tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    { id: 'eb-live', type: 'container', x: 630,  y: 100, width: 550, height: 600, zIndex: 0, label: 'Live Experience', tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
-    { id: 'eb-post', type: 'container', x: 1210, y: 100, width: 550, height: 600, zIndex: 0, label: 'Post-Experience', tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    // Sub-containers
-    { id: 'eb-tasks',   type: 'container', x: 70,   y: 180, width: 500, height: 220, zIndex: 1, label: 'Planning Tasks',    collapsed: false, locked: false, containerId: 'eb-pre',  style: containerStyle },
-    { id: 'eb-moments', type: 'container', x: 650,  y: 180, width: 500, height: 220, zIndex: 1, label: 'Key Moments',       collapsed: false, locked: false, containerId: 'eb-live', style: containerStyle },
-    { id: 'eb-follow',  type: 'container', x: 1230, y: 180, width: 500, height: 220, zIndex: 1, label: 'Follow-Up Actions', collapsed: false, locked: false, containerId: 'eb-post', style: containerStyle },
-    // Prompt cards
-    { id: 'eb-p1', type: 'freeform', x: 90,   y: 230, width: 200, height: 110, zIndex: 2, locked: false, containerId: 'eb-tasks',   cardType: 'note', content: 'What are the critical milestones? List venue, vendors, permits, and rehearsal dates.' },
-    { id: 'eb-p2', type: 'freeform', x: 670,  y: 230, width: 200, height: 110, zIndex: 2, locked: false, containerId: 'eb-moments', cardType: 'note', content: 'What are the signature moments? Map the guest journey from arrival to finale.' },
-    { id: 'eb-p3', type: 'freeform', x: 1250, y: 230, width: 200, height: 110, zIndex: 2, locked: false, containerId: 'eb-follow',  cardType: 'note', content: 'How will you gather feedback? Plan surveys, thank-yous, and content sharing.' },
-    { id: 'eb-p4', type: 'freeform', x: 70,   y: 460, width: 240, height: 100, zIndex: 1, locked: false, containerId: 'eb-pre',  cardType: 'note', content: 'Budget and resource allocation: What is the cost breakdown across categories?' },
-    { id: 'eb-p5', type: 'freeform', x: 650,  y: 460, width: 240, height: 100, zIndex: 1, locked: false, containerId: 'eb-live', cardType: 'note', content: 'Contingency plan: What happens if weather, tech, or attendance changes?' },
-    { id: 'eb-p6', type: 'freeform', x: 1230, y: 460, width: 240, height: 100, zIndex: 1, locked: false, containerId: 'eb-post', cardType: 'note', content: 'Metrics: How will you measure success? Attendance, NPS, social reach, revenue?' },
-  ] as CanvasElement[],
-};
-
-const serviceBlueprint: TemplateDefinition = {
-  id: 'service-blueprint',
-  name: 'Service Blueprint',
-  description: 'Visualize frontstage and backstage service layers',
-  emoji: '🏗️',
-  category: 'experience',
-  elements: [
-    // Containers
-    { id: 'sb-customer', type: 'container', x: 100, y: 150,  width: 1800, height: 200, zIndex: 0, label: 'Customer Actions',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'sb-front',    type: 'container', x: 100, y: 400,  width: 1800, height: 200, zIndex: 0, label: 'Frontstage',        collapsed: false, locked: false, style: containerStyle },
-    { id: 'sb-back',     type: 'container', x: 100, y: 650,  width: 1800, height: 200, zIndex: 0, label: 'Backstage',         collapsed: false, locked: false, style: containerStyle },
-    { id: 'sb-support',  type: 'container', x: 100, y: 900,  width: 1800, height: 200, zIndex: 0, label: 'Support Processes', collapsed: false, locked: false, style: containerStyle },
-    // Prompt cards
-    { id: 'sb-p1', type: 'freeform', x: 130, y: 210, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'sb-customer', cardType: 'note', content: 'What actions does the customer take at each touchpoint? List them left-to-right chronologically.' },
-    { id: 'sb-p2', type: 'freeform', x: 130, y: 460, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'sb-front',   cardType: 'note', content: 'What does the customer see, hear, and interact with? These are the visible service elements.' },
-    { id: 'sb-p3', type: 'freeform', x: 130, y: 710, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'sb-back',    cardType: 'note', content: 'What internal processes support the frontstage? Map the invisible operations behind the scenes.' },
-    { id: 'sb-p4', type: 'freeform', x: 130, y: 960, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'sb-support', cardType: 'note', content: 'What systems, tools, and infrastructure keep everything running? Database, CRM, logistics, etc.' },
+    { id: 'eb-c1', type: 'container', x: 50,  y: 100, width: 500, height: 450, zIndex: 0, label: 'Pre-Production',  tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
+    { id: 'eb-c2', type: 'container', x: 580, y: 100, width: 500, height: 450, zIndex: 0, label: 'Live Experience', tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'eb-c3', type: 'container', x: 1110, y: 100, width: 500, height: 450, zIndex: 0, label: 'Post-Experience', tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'eb-t1', type: 'text', x: 70,   y: 160, width: 460, height: 50, zIndex: 1, locked: false, containerId: 'eb-c1', content: 'What are the critical milestones? List venue, vendors, permits, rehearsal dates, and budget.', style: promptStyle, textAlign: 'left' },
+    { id: 'eb-t2', type: 'text', x: 600,  y: 160, width: 460, height: 50, zIndex: 1, locked: false, containerId: 'eb-c2', content: 'What are the signature moments? Map the guest journey from arrival to finale.', style: promptStyle, textAlign: 'left' },
+    { id: 'eb-t3', type: 'text', x: 1130, y: 160, width: 460, height: 50, zIndex: 1, locked: false, containerId: 'eb-c3', content: 'How will you gather feedback and measure success? Plan surveys, thank-yous, and metrics.', style: promptStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
 // ─── Product & Brand ────────────────────────────────────────────────
 
+// 4. Product Canvas — 6 containers + 6 text prompts = 12 elements
 const productCanvas: TemplateDefinition = {
   id: 'product-canvas',
   name: 'Product Canvas',
@@ -147,49 +128,43 @@ const productCanvas: TemplateDefinition = {
   emoji: '📦',
   category: 'product-brand',
   elements: [
-    // Containers  (grid layout)
-    { id: 'pc-problem',  type: 'container', x: 50,   y: 50,  width: 400, height: 280, zIndex: 0, label: 'Problem',           tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
-    { id: 'pc-solution', type: 'container', x: 480,  y: 50,  width: 400, height: 280, zIndex: 0, label: 'Solution',          tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
-    { id: 'pc-audience', type: 'container', x: 50,   y: 360, width: 300, height: 280, zIndex: 0, label: 'Audience',          tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    { id: 'pc-value',    type: 'container', x: 380,  y: 360, width: 380, height: 280, zIndex: 0, label: 'Value Proposition', tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'pc-channels', type: 'container', x: 790,  y: 360, width: 300, height: 280, zIndex: 0, label: 'Channels',          tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'pc-metrics',  type: 'container', x: 50,   y: 670, width: 1040, height: 220, zIndex: 0, label: 'Metrics',          tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
-    // Prompt cards
-    { id: 'pc-p1', type: 'freeform', x: 70,  y: 110, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'pc-problem',  cardType: 'note', content: 'What problem are you solving? Who feels this pain most acutely and how do they cope today?' },
-    { id: 'pc-p2', type: 'freeform', x: 500, y: 110, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'pc-solution', cardType: 'note', content: 'How does your product solve it? What is the core mechanism or innovation?' },
-    { id: 'pc-p3', type: 'freeform', x: 70,  y: 420, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'pc-audience', cardType: 'note', content: 'Describe your ideal customer. What are their demographics, behaviors, and goals?' },
-    { id: 'pc-p4', type: 'freeform', x: 400, y: 420, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'pc-value',    cardType: 'note', content: 'What unique value do you deliver? Complete: "We help [audience] to [outcome] by [method]."' },
-    { id: 'pc-p5', type: 'freeform', x: 810, y: 420, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'pc-channels', cardType: 'note', content: 'How do customers find and access the product? List acquisition, activation, and retention channels.' },
-    { id: 'pc-p6', type: 'freeform', x: 70,  y: 720, width: 240, height: 100, zIndex: 1, locked: false, containerId: 'pc-metrics',  cardType: 'note', content: 'What numbers prove success? Define your North Star metric and 3-5 supporting KPIs.' },
+    { id: 'pc-c1', type: 'container', x: 50,  y: 50,  width: 400, height: 280, zIndex: 0, label: 'Problem',           tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
+    { id: 'pc-c2', type: 'container', x: 480, y: 50,  width: 400, height: 280, zIndex: 0, label: 'Solution',          tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'pc-c3', type: 'container', x: 50,  y: 360, width: 280, height: 280, zIndex: 0, label: 'Audience',          tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
+    { id: 'pc-c4', type: 'container', x: 360, y: 360, width: 340, height: 280, zIndex: 0, label: 'Value Proposition', tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'pc-c5', type: 'container', x: 730, y: 360, width: 280, height: 280, zIndex: 0, label: 'Channels',          tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'pc-c6', type: 'container', x: 50,  y: 670, width: 960, height: 200, zIndex: 0, label: 'Key Metrics',       tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
+    { id: 'pc-t1', type: 'text', x: 70,  y: 110, width: 360, height: 50, zIndex: 1, locked: false, containerId: 'pc-c1', content: 'What problem are you solving? Who feels this pain most acutely?', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-t2', type: 'text', x: 500, y: 110, width: 360, height: 50, zIndex: 1, locked: false, containerId: 'pc-c2', content: 'How does your product solve it? What is the core mechanism?', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-t3', type: 'text', x: 70,  y: 420, width: 240, height: 50, zIndex: 1, locked: false, containerId: 'pc-c3', content: 'Describe your ideal customer persona.', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-t4', type: 'text', x: 380, y: 420, width: 300, height: 50, zIndex: 1, locked: false, containerId: 'pc-c4', content: '"We help [audience] to [outcome] by [method]."', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-t5', type: 'text', x: 750, y: 420, width: 240, height: 50, zIndex: 1, locked: false, containerId: 'pc-c5', content: 'How do customers find and access the product?', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-t6', type: 'text', x: 70,  y: 720, width: 920, height: 50, zIndex: 1, locked: false, containerId: 'pc-c6', content: 'Define your North Star metric and 3-5 supporting KPIs.', style: promptStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
-const brandMap: TemplateDefinition = {
-  id: 'brand-map',
-  name: 'Brand Experience Map',
-  description: 'Align brand values with touchpoints and emotional journeys',
-  emoji: '✨',
+// 5. Brand Assets — 4 containers + 4 text prompts = 8 elements
+const brandAssets: TemplateDefinition = {
+  id: 'brand-assets',
+  name: 'Brand Assets',
+  description: 'Organize primary colors, logo, typography, and photographic style',
+  emoji: '🎨',
   category: 'product-brand',
   elements: [
-    // Containers
-    { id: 'bm-values',    type: 'container', x: 50,   y: 50,  width: 1200, height: 200, zIndex: 0, label: 'Brand Values',      tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'bm-touch1',    type: 'container', x: 50,   y: 290, width: 380,  height: 280, zIndex: 0, label: 'Digital Touchpoints',tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    { id: 'bm-touch2',    type: 'container', x: 460,  y: 290, width: 380,  height: 280, zIndex: 0, label: 'Physical Touchpoints',tintColor: 'emerald',collapsed: false, locked: false, style: containerStyle },
-    { id: 'bm-touch3',    type: 'container', x: 870,  y: 290, width: 380,  height: 280, zIndex: 0, label: 'Human Touchpoints', tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'bm-emotional', type: 'container', x: 50,   y: 610, width: 600,  height: 280, zIndex: 0, label: 'Emotional Journey', tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
-    { id: 'bm-visual',    type: 'container', x: 680,  y: 610, width: 570,  height: 280, zIndex: 0, label: 'Visual Identity',   tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
-    // Prompt cards
-    { id: 'bm-p1', type: 'freeform', x: 70,   y: 110, width: 240, height: 100, zIndex: 1, locked: false, containerId: 'bm-values',    cardType: 'note', content: 'What are your 3-5 core brand values? How do they translate into customer-facing behaviors?' },
-    { id: 'bm-p2', type: 'freeform', x: 70,   y: 350, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'bm-touch1',    cardType: 'note', content: 'Website, app, social media, email: How does the brand show up digitally?' },
-    { id: 'bm-p3', type: 'freeform', x: 480,  y: 350, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'bm-touch2',    cardType: 'note', content: 'Packaging, retail space, signage, events: What physical artifacts carry the brand?' },
-    { id: 'bm-p4', type: 'freeform', x: 890,  y: 350, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'bm-touch3',    cardType: 'note', content: 'Sales calls, support, onboarding: How do people represent the brand in conversation?' },
-    { id: 'bm-p5', type: 'freeform', x: 70,   y: 670, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'bm-emotional', cardType: 'note', content: 'Map the emotional arc: What should customers feel at first contact, during use, and long-term?' },
-    { id: 'bm-p6', type: 'freeform', x: 700,  y: 670, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'bm-visual',    cardType: 'note', content: 'Colors, typography, imagery, logo usage: What are the visual rules and how are they applied?' },
+    { id: 'ba-c1', type: 'container', x: 50,  y: 50,  width: 480, height: 340, zIndex: 0, label: 'Primary Colors',      tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'ba-c2', type: 'container', x: 560, y: 50,  width: 480, height: 340, zIndex: 0, label: 'Logo',                tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
+    { id: 'ba-c3', type: 'container', x: 50,  y: 420, width: 480, height: 340, zIndex: 0, label: 'Typography',           tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'ba-c4', type: 'container', x: 560, y: 420, width: 480, height: 340, zIndex: 0, label: 'Photographic Style',   tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'ba-t1', type: 'text', x: 70,  y: 110, width: 440, height: 50, zIndex: 1, locked: false, containerId: 'ba-c1', content: 'Add color swatches here. Define primary, secondary, and accent colors with hex values.', style: promptStyle, textAlign: 'left' },
+    { id: 'ba-t2', type: 'text', x: 580, y: 110, width: 440, height: 50, zIndex: 1, locked: false, containerId: 'ba-c2', content: 'Place logo variations here: full color, monochrome, icon-only. Note minimum sizes and clear space.', style: promptStyle, textAlign: 'left' },
+    { id: 'ba-t3', type: 'text', x: 70,  y: 480, width: 440, height: 50, zIndex: 1, locked: false, containerId: 'ba-c3', content: 'Define heading and body typefaces. Note weights, sizes, and line-height guidelines.', style: promptStyle, textAlign: 'left' },
+    { id: 'ba-t4', type: 'text', x: 580, y: 480, width: 440, height: 50, zIndex: 1, locked: false, containerId: 'ba-c4', content: 'Describe the photographic direction: lighting, color treatment, subject matter, and composition rules.', style: promptStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
 // ─── Creative & General ─────────────────────────────────────────────
 
+// 6. Mood Board — 5 containers + 3 text prompts = 8 elements
 const moodBoard: TemplateDefinition = {
   id: 'mood-board',
   name: 'Mood Board',
@@ -197,47 +172,51 @@ const moodBoard: TemplateDefinition = {
   emoji: '🎨',
   category: 'creative',
   elements: [
-    // Containers
-    { id: 'mb-visual', type: 'container', x: 50,   y: 50,  width: 1100, height: 350, zIndex: 0, label: 'Visual Inspiration', tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'mb-color',  type: 'container', x: 50,   y: 430, width: 350,  height: 280, zIndex: 0, label: 'Color Palette',      tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'mb-type',   type: 'container', x: 430,  y: 430, width: 350,  height: 280, zIndex: 0, label: 'Typography',         tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    { id: 'mb-refs',   type: 'container', x: 810,  y: 430, width: 340,  height: 280, zIndex: 0, label: 'References',         tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
-    { id: 'mb-notes',  type: 'container', x: 50,   y: 740, width: 1100, height: 200, zIndex: 0, label: 'Notes',              tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
-    // Prompt cards
-    { id: 'mb-p1', type: 'freeform', x: 70,  y: 110, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'mb-visual', cardType: 'note', content: 'Drag images here that capture the mood, texture, and aesthetic you are aiming for.' },
-    { id: 'mb-p2', type: 'freeform', x: 70,  y: 490, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'mb-color',  cardType: 'note', content: 'Add swatches or describe your color palette. Consider primary, secondary, and accent colors.' },
-    { id: 'mb-p3', type: 'freeform', x: 450, y: 490, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'mb-type',   cardType: 'note', content: 'What typefaces define the voice? Pair a heading and body font. Note weights and sizes.' },
-    { id: 'mb-p4', type: 'freeform', x: 830, y: 490, width: 200, height: 100, zIndex: 1, locked: false, containerId: 'mb-refs',   cardType: 'note', content: 'Links, articles, competitor examples, and other reference material.' },
-    { id: 'mb-p5', type: 'freeform', x: 70,  y: 790, width: 240, height: 100, zIndex: 1, locked: false, containerId: 'mb-notes',  cardType: 'note', content: 'Capture decisions, open questions, and direction notes here.' },
+    { id: 'mb-c1', type: 'container', x: 50,  y: 50,  width: 1000, height: 320, zIndex: 0, label: 'Visual Inspiration', tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'mb-c2', type: 'container', x: 50,  y: 400, width: 320,  height: 280, zIndex: 0, label: 'Color Palette',      tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'mb-c3', type: 'container', x: 400, y: 400, width: 320,  height: 280, zIndex: 0, label: 'Typography',         tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
+    { id: 'mb-c4', type: 'container', x: 750, y: 400, width: 300,  height: 280, zIndex: 0, label: 'References',         tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'mb-c5', type: 'container', x: 50,  y: 710, width: 1000, height: 180, zIndex: 0, label: 'Notes & Decisions',  tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
+    { id: 'mb-t1', type: 'text', x: 70,  y: 110, width: 960, height: 40, zIndex: 1, locked: false, containerId: 'mb-c1', content: 'Drag images here that capture the mood, texture, and aesthetic you are aiming for.', style: promptStyle, textAlign: 'left' },
+    { id: 'mb-t2', type: 'text', x: 70,  y: 460, width: 280, height: 40, zIndex: 1, locked: false, containerId: 'mb-c2', content: 'Primary, secondary, and accent color swatches.', style: promptStyle, textAlign: 'left' },
+    { id: 'mb-t3', type: 'text', x: 420, y: 460, width: 280, height: 40, zIndex: 1, locked: false, containerId: 'mb-c3', content: 'Heading and body typefaces with weight and size notes.', style: promptStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
-const workshopCanvas: TemplateDefinition = {
-  id: 'workshop',
-  name: 'Workshop Canvas',
-  description: 'Structure a collaborative workshop with activities and outputs',
-  emoji: '🛠️',
+// 7. Lean Canvas — 9 containers + 9 text labels = 18 elements
+const leanCanvas: TemplateDefinition = {
+  id: 'lean-canvas',
+  name: 'Lean Canvas',
+  description: 'One-page business model adapted from Ash Maurya\'s Lean Canvas',
+  emoji: '📋',
   category: 'creative',
   elements: [
-    // Containers
-    { id: 'ws-objective',    type: 'container', x: 100,  y: 150, width: 550, height: 300, zIndex: 0, label: 'Objective',            tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'ws-participants', type: 'container', x: 700,  y: 150, width: 550, height: 300, zIndex: 0, label: 'Participants',         tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    { id: 'ws-activity1',    type: 'container', x: 100,  y: 500, width: 550, height: 350, zIndex: 0, label: 'Activity 1',           tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
-    { id: 'ws-activity2',    type: 'container', x: 700,  y: 500, width: 550, height: 350, zIndex: 0, label: 'Activity 2',           tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'ws-activity3',    type: 'container', x: 1300, y: 500, width: 550, height: 350, zIndex: 0, label: 'Activity 3',           tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
-    { id: 'ws-outcomes',     type: 'container', x: 1300, y: 150, width: 550, height: 300, zIndex: 0, label: 'Outcomes & Next Steps',tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
-    // Facilitator prompt cards
-    { id: 'ws-p1', type: 'freeform', x: 120,  y: 210, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ws-objective',    cardType: 'note', content: 'What is the single most important outcome of this workshop? Frame it as a clear goal statement.' },
-    { id: 'ws-p2', type: 'freeform', x: 720,  y: 210, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ws-participants', cardType: 'note', content: 'Who needs to be in the room? List roles, expertise, and what each person brings.' },
-    { id: 'ws-p3', type: 'freeform', x: 120,  y: 560, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ws-activity1',    cardType: 'note', content: 'Warm-up or icebreaker: What exercise builds trust and gets people engaged? (10-15 min)' },
-    { id: 'ws-p4', type: 'freeform', x: 720,  y: 560, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ws-activity2',    cardType: 'note', content: 'Core exercise: What is the main collaborative activity? Define the process and time box.' },
-    { id: 'ws-p5', type: 'freeform', x: 1320, y: 560, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ws-activity3',    cardType: 'note', content: 'Synthesis: How do you converge ideas? Dot voting, affinity mapping, or prioritization matrix?' },
-    { id: 'ws-p6', type: 'freeform', x: 1320, y: 210, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ws-outcomes',     cardType: 'note', content: 'What are the tangible deliverables? Who owns each action item and by when?' },
-    // Example content in Activity 1
-    { id: 'ws-ex1', type: 'freeform', x: 120, y: 700, width: 220, height: 100, zIndex: 1, locked: false, containerId: 'ws-activity1', cardType: 'note', content: 'Example: "Two Truths and a Lie" — each participant shares 3 statements. The group guesses the lie. Builds rapport in 10 minutes.' },
+    // Row 1: Problem | Solution | UVP | Unfair Advantage | Customer Segments
+    { id: 'lc-c1', type: 'container', x: 50,  y: 50,  width: 300, height: 360, zIndex: 0, label: 'Problem',                tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
+    { id: 'lc-c2', type: 'container', x: 370, y: 50,  width: 300, height: 360, zIndex: 0, label: 'Solution',               tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'lc-c3', type: 'container', x: 690, y: 50,  width: 300, height: 360, zIndex: 0, label: 'Unique Value Proposition', tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'lc-c4', type: 'container', x: 1010, y: 50,  width: 300, height: 360, zIndex: 0, label: 'Unfair Advantage',       tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
+    { id: 'lc-c5', type: 'container', x: 1330, y: 50,  width: 300, height: 360, zIndex: 0, label: 'Customer Segments',      tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    // Row 2: Key Metrics | Channels
+    { id: 'lc-c6', type: 'container', x: 50,  y: 440, width: 460, height: 260, zIndex: 0, label: 'Key Metrics',             tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
+    { id: 'lc-c7', type: 'container', x: 530, y: 440, width: 460, height: 260, zIndex: 0, label: 'Channels',                tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    // Row 3: Cost Structure | Revenue Streams
+    { id: 'lc-c8', type: 'container', x: 50,  y: 730, width: 780, height: 220, zIndex: 0, label: 'Cost Structure',           tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
+    { id: 'lc-c9', type: 'container', x: 850, y: 730, width: 780, height: 220, zIndex: 0, label: 'Revenue Streams',          tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    // Text labels inside each container
+    { id: 'lc-t1', type: 'text', x: 70,   y: 110, width: 260, height: 40, zIndex: 1, locked: false, containerId: 'lc-c1', content: 'Top 3 problems your customers face', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t2', type: 'text', x: 390,  y: 110, width: 260, height: 40, zIndex: 1, locked: false, containerId: 'lc-c2', content: 'Top 3 features or capabilities', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t3', type: 'text', x: 710,  y: 110, width: 260, height: 40, zIndex: 1, locked: false, containerId: 'lc-c3', content: 'Single clear compelling message', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t4', type: 'text', x: 1030, y: 110, width: 260, height: 40, zIndex: 1, locked: false, containerId: 'lc-c4', content: 'What can\'t be easily copied or bought', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t5', type: 'text', x: 1350, y: 110, width: 260, height: 40, zIndex: 1, locked: false, containerId: 'lc-c5', content: 'Target customers and early adopters', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t6', type: 'text', x: 70,   y: 500, width: 420, height: 40, zIndex: 1, locked: false, containerId: 'lc-c6', content: 'Key numbers that tell you how your business is doing', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t7', type: 'text', x: 550,  y: 500, width: 420, height: 40, zIndex: 1, locked: false, containerId: 'lc-c7', content: 'Path to customers (online, direct, partners)', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t8', type: 'text', x: 70,   y: 790, width: 740, height: 40, zIndex: 1, locked: false, containerId: 'lc-c8', content: 'Customer acquisition costs, hosting, salaries, fixed and variable costs', style: labelStyle, textAlign: 'left' },
+    { id: 'lc-t9', type: 'text', x: 870,  y: 790, width: 740, height: 40, zIndex: 1, locked: false, containerId: 'lc-c9', content: 'Revenue model, pricing, lifetime value, gross margin', style: labelStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
+// 8. Brainstorm Board — 3 containers + 3 text prompts = 6 elements
 const brainstormBoard: TemplateDefinition = {
   id: 'brainstorm',
   name: 'Brainstorm Board',
@@ -245,16 +224,12 @@ const brainstormBoard: TemplateDefinition = {
   emoji: '💡',
   category: 'creative',
   elements: [
-    // Containers
-    { id: 'bs-diverge',  type: 'container', x: 50,   y: 50,  width: 800,  height: 500, zIndex: 0, label: 'Diverge — Generate Ideas',      tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    { id: 'bs-converge', type: 'container', x: 880,  y: 50,  width: 400,  height: 500, zIndex: 0, label: 'Converge — Prioritize',          tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
-    { id: 'bs-actions',  type: 'container', x: 50,   y: 580, width: 1230, height: 250, zIndex: 0, label: 'Action Items',                   tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
-    // Prompt cards
-    { id: 'bs-p1', type: 'freeform', x: 70,  y: 110, width: 220, height: 120, zIndex: 1, locked: false, containerId: 'bs-diverge',  cardType: 'note', content: 'No bad ideas! Generate as many ideas as possible. Use one card per idea. Aim for quantity over quality.' },
-    { id: 'bs-p2', type: 'freeform', x: 320, y: 110, width: 220, height: 120, zIndex: 1, locked: false, containerId: 'bs-diverge',  cardType: 'note', content: 'Prompt: "How might we..." — reframe the challenge as an open question to spark creative solutions.' },
-    { id: 'bs-p3', type: 'freeform', x: 900, y: 110, width: 220, height: 120, zIndex: 1, locked: false, containerId: 'bs-converge', cardType: 'note', content: 'Group similar ideas. Vote on the top 3. Use an Impact vs. Effort matrix to prioritize.' },
-    { id: 'bs-p4', type: 'freeform', x: 900, y: 280, width: 220, height: 120, zIndex: 1, locked: false, containerId: 'bs-converge', cardType: 'note', content: 'High Impact / Low Effort = Quick Wins. High Impact / High Effort = Big Bets. Decide which to pursue.' },
-    { id: 'bs-p5', type: 'freeform', x: 70,  y: 640, width: 240, height: 120, zIndex: 1, locked: false, containerId: 'bs-actions',  cardType: 'note', content: 'For each chosen idea: Who owns it? What is the first step? When is the deadline?' },
+    { id: 'bs-c1', type: 'container', x: 50,  y: 50,  width: 700, height: 420, zIndex: 0, label: 'Diverge — Generate Ideas', tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'bs-c2', type: 'container', x: 780, y: 50,  width: 400, height: 420, zIndex: 0, label: 'Converge — Prioritize',    tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
+    { id: 'bs-c3', type: 'container', x: 50,  y: 500, width: 1130, height: 220, zIndex: 0, label: 'Action Items',            tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
+    { id: 'bs-t1', type: 'text', x: 70,  y: 110, width: 660, height: 40, zIndex: 1, locked: false, containerId: 'bs-c1', content: 'No bad ideas! One card per idea. "How might we..." reframe the challenge as an open question.', style: promptStyle, textAlign: 'left' },
+    { id: 'bs-t2', type: 'text', x: 800, y: 110, width: 360, height: 40, zIndex: 1, locked: false, containerId: 'bs-c2', content: 'Group similar ideas. Vote on top 3. Use Impact vs. Effort to prioritize.', style: promptStyle, textAlign: 'left' },
+    { id: 'bs-t3', type: 'text', x: 70,  y: 560, width: 1090, height: 40, zIndex: 1, locked: false, containerId: 'bs-c3', content: 'For each chosen idea: Who owns it? What is the first step? When is the deadline?', style: promptStyle, textAlign: 'left' },
   ] as CanvasElement[],
 };
 
@@ -265,12 +240,11 @@ export const TEMPLATES: TemplateDefinition[] = [
   experienceJourney,
   immersiveCanvas,
   eventBlueprint,
-  serviceBlueprint,
   // Product & Brand
   productCanvas,
-  brandMap,
+  brandAssets,
   // Creative & General
   moodBoard,
-  workshopCanvas,
+  leanCanvas,
   brainstormBoard,
 ];
