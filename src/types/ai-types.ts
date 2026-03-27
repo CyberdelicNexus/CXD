@@ -125,7 +125,7 @@ export interface ChatThread {
 // Model & Provider Types
 // ============================================================
 
-export type AIProviderKey = 'gpt' | 'claude' | 'gemini' | 'kimi';
+export type AIProviderKey = 'claude' | 'gemini' | 'kimi';
 export type AIModelTier = 'chat' | 'analysis';
 
 export interface AIModelConfig {
@@ -166,8 +166,8 @@ export interface CreditTransaction {
 export type CreditAction = 'chat' | 'suggestion' | 'analyze' | 'erd';
 
 export const CREDIT_COSTS: Record<CreditAction, Record<AIProviderKey, number>> = {
-  chat: { gpt: 1, claude: 2, gemini: 1, kimi: 1 },
-  suggestion: { gpt: 1, claude: 2, gemini: 1, kimi: 1 },
-  analyze: { gpt: 5, claude: 8, gemini: 4, kimi: 5 },
-  erd: { gpt: 15, claude: 20, gemini: 12, kimi: 15 },
+  chat: { claude: 2, gemini: 1, kimi: 1 },
+  suggestion: { claude: 2, gemini: 1, kimi: 1 },
+  analyze: { claude: 8, gemini: 4, kimi: 5 },
+  erd: { claude: 20, gemini: 12, kimi: 15 },
 };
