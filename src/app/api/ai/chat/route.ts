@@ -55,10 +55,8 @@ export async function POST(request: Request) {
     // Map model ID to provider
     const modelToProvider: Record<string, AIProviderKey> = {
       'gemini-2.0-flash': 'gemini',
-      'gpt-4o-mini': 'gpt',
       'kimi': 'kimi',
       'claude-haiku-4.5': 'claude',
-      'gpt-4o': 'gpt',
       'gemini-2.5-pro': 'gemini',
       'claude-sonnet-4.5': 'claude',
       'claude-opus-4.6': 'claude',
@@ -83,7 +81,6 @@ export async function POST(request: Request) {
     if (hasBYOK) {
       // Map provider to BYOK provider names
       const providerMap: Record<AIProviderKey, string> = {
-        gpt: 'openai',
         claude: 'anthropic',
         gemini: 'google',
         kimi: 'moonshot',

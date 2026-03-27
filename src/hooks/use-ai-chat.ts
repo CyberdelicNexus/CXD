@@ -80,7 +80,7 @@ interface UseAIChatReturn {
 export function useAIChat({
   faceKey,
   projectId,
-  provider = "gpt",
+  provider = "gemini",
   enabled = true,
   faceLabel,
   faceHue,

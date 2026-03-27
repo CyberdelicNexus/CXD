@@ -13,7 +13,6 @@ interface AICreditMeterProps {
 }
 
 const MODEL_LABELS: Record<AIProviderKey, string> = {
-  gpt: "GPT",
   claude: "Claude",
   gemini: "Gemini",
   kimi: "Kimi",

@@ -15,10 +15,8 @@ import { CREDIT_COSTS } from "@/types/ai-types";
 // Map model IDs to provider keys (model IDs may arrive from client as provider)
 const modelToProvider: Record<string, AIProviderKey> = {
   'gemini-2.0-flash': 'gemini',
-  'gpt-4o-mini': 'gpt',
   'kimi': 'kimi',
   'claude-haiku-4.5': 'claude',
-  'gpt-4o': 'gpt',
   'gemini-2.5-pro': 'gemini',
   'claude-sonnet-4.5': 'claude',
   'claude-opus-4.6': 'claude',
@@ -53,7 +51,7 @@ export async function POST(request: Request) {
       faceKey,
       projectContext,
       faceContext,
-      provider = "gpt",
+      provider = "gemini",
       analysisType = "face",
     }: {
       faceKey: string;

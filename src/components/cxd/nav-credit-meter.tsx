@@ -13,10 +13,8 @@ import { AI_MODELS, type ModelId, getAllowedModels, getModelCreditWeight } from 
 function getShortModelLabel(modelId: ModelId): string {
   const labels: Record<ModelId, string> = {
     'gemini-2.0-flash': 'Gemini Flash',
-    'gpt-4o-mini': 'GPT-4o Mini',
     'kimi': 'Kimi',
     'claude-haiku-4.5': 'Haiku',
-    'gpt-4o': 'GPT-4o',
     'gemini-2.5-pro': 'Gemini Pro',
     'claude-sonnet-4.5': 'Sonnet',
     'claude-opus-4.6': 'Opus',

@@ -21,7 +21,6 @@ const MODEL_OPTIONS: {
   requiredTier: "free" | "pro" | "lifetime";
 }[] = [
   { key: "kimi", label: "Kimi K2.5", costLabel: "Free", requiredTier: "free" },
-  { key: "gpt", label: "GPT-4.1", costLabel: "1x cost", requiredTier: "pro" },
   { key: "claude", label: "Claude Sonnet 4.5", costLabel: "2x cost", requiredTier: "pro" },
   { key: "gemini", label: "Gemini 2.5 Pro", costLabel: "1x cost", requiredTier: "pro" },
 ];
