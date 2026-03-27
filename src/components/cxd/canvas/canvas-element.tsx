@@ -189,6 +189,8 @@ interface CanvasElementRendererProps {
   onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void; // Create connected shape
   isReadOnly?: boolean;
   snapToGrid?: boolean;
+  /** Optional data-tour-id attribute for onboarding tour targeting */
+  tourId?: string;
 }
 
 export function CanvasElementRenderer({
@@ -218,6 +220,7 @@ export function CanvasElementRenderer({
   onCreateConnectedShape,
   isReadOnly = false,
   snapToGrid = false,
+  tourId,
 }: CanvasElementRendererProps) {
   // Stabilize onUpdate via ref so that effects and sub-component callbacks
   // that depend on onUpdate don't re-fire just because the parent re-rendered
@@ -654,6 +657,7 @@ export function CanvasElementRenderer({
     <div
       ref={elementRef}
       data-element-id={element.id}
+      {...(tourId ? { "data-tour-id": tourId } : {})}
       draggable={false}
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",

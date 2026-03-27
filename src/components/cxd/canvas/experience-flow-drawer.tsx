@@ -238,11 +238,14 @@ export function ExperienceFlowDrawer() {
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+    <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none" data-tour-id="canvas-experience-flow">
       <div className="pointer-events-auto">
         {/* Collapsed bar */}
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setIsExpanded(!isExpanded)}
+          onKeyDown={(e) => e.key === 'Enter' && setIsExpanded(!isExpanded)}
           className="w-full flex items-center justify-center gap-2 py-2.5 px-4 backdrop-blur-xl border-t border-border hover:brightness-110 transition-colors cursor-pointer"
           style={{ backgroundColor: drawerBgColor }}
         >
@@ -351,7 +354,7 @@ export function ExperienceFlowDrawer() {
           ) : (
             <ChevronUp className="w-4 h-4 text-muted-foreground" />
           )}
-        </button>
+        </div>
 
         {/* Expanded drawer */}
         <div

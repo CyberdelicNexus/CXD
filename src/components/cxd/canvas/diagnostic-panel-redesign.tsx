@@ -402,6 +402,7 @@ export function DiagnosticPanelRedesign({
           !isOpen && "-translate-x-full"
         )}
         style={{ backgroundColor: panelBgColor }}
+        data-tour-id="map-insights-panel"
       >
         {/* Header */}
         <div className="px-4 py-3 border-b border-border space-y-2">

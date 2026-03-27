@@ -239,7 +239,7 @@ export function PlanView() {
         <div className="flex items-center gap-4">
           <Tabs value={activeView} onValueChange={(v) => setActiveView(v as PlanViewType)}>
             <TabsList className="bg-black/40">
-              <TabsTrigger value="versions" className="gap-2">
+              <TabsTrigger value="versions" className="gap-2" data-tour-id="plan-roadmap-tab">
                 <Milestone className="w-4 h-4" />
                 Roadmap
               </TabsTrigger>
@@ -247,19 +247,19 @@ export function PlanView() {
                 <LayoutGrid className="w-4 h-4" />
                 Kanban
               </TabsTrigger>
-              <TabsTrigger value="table" className="gap-2">
+              <TabsTrigger value="table" className="gap-2" data-tour-id="plan-table-tab">
                 <TableIcon className="w-4 h-4" />
                 Table
               </TabsTrigger>
-              <TabsTrigger value="timeline" className="gap-2">
+              <TabsTrigger value="timeline" className="gap-2" data-tour-id="plan-timeline-tab">
                 <GanttChart className="w-4 h-4" />
                 Timeline
               </TabsTrigger>
-              <TabsTrigger value="calendar" className="gap-2">
+              <TabsTrigger value="calendar" className="gap-2" data-tour-id="plan-calendar-tab">
                 <Calendar className="w-4 h-4" />
                 Calendar
               </TabsTrigger>
-              <TabsTrigger value="archive" className="gap-2">
+              <TabsTrigger value="archive" className="gap-2" data-tour-id="plan-archive-tab">
                 <Archive className="w-4 h-4" />
                 Archive
               </TabsTrigger>
@@ -272,7 +272,7 @@ export function PlanView() {
 
         <Dialog open={isAddTaskOpen} onOpenChange={handleOpenAddTask} modal={false}>
           <DialogTrigger asChild>
-            <Button variant="default" size="sm">
+            <Button variant="default" size="sm" data-tour-id="plan-kanban-add-task">
               <Plus className="w-4 h-4 mr-2" />
               Add Task
             </Button>
@@ -468,6 +468,7 @@ export function PlanView() {
           <div
             className="absolute right-0 top-0 bottom-0 w-96 border-l border-white/10 overflow-y-auto gantt-scrollbar z-20 shadow-2xl shadow-black/50"
             style={{ backgroundColor: panelBgColor, backdropFilter: 'blur(12px)' }}
+            data-tour-id="plan-task-detail"
           >
             <TaskDetailPanel
               task={selectedTask}

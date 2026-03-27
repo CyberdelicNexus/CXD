@@ -403,6 +403,7 @@ export function CanvasToolkit({
       {/* Floating Toolbar */}
       <div
         ref={toolbarRef}
+        data-tour-id="canvas-toolkit"
         className={cn(
           "fixed top-28 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center p-1.5 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
           isCollapsed ? "w-[52px] overflow-hidden" : "w-[500px] overflow-visible"
@@ -422,7 +423,7 @@ export function CanvasToolkit({
             const isBeingDragged = isDragging && dragType === tool.type;
 
             return (
-              <div key={tool.type} className="relative flex-shrink-0">
+              <div key={tool.type} className="relative flex-shrink-0" {...(tool.type === "board" ? { "data-tour-id": "canvas-board-tool" } : {})}>
                 <button
                   draggable={tool.type !== "shape"}
                   onClick={() => handleToolClick(tool.type)}

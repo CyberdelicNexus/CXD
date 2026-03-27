@@ -1808,9 +1808,10 @@ export function Hypercube3D({
         </svg>
 
         {/* Top Navigation Bar - Upgraded Hypercube Faces Menu */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 items-center p-2 rounded-xl">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 items-center p-2 rounded-xl" data-tour-id="map-face-selector">
           {/* General AI Chat button */}
           <button
+            data-tour-id="map-cyberdelic-tab"
             onClick={(e) => {
               e.stopPropagation();
               if (hasDragged) return;
@@ -2245,7 +2246,7 @@ export function Hypercube3D({
                       : "max-w-[820px]",
                   )}
                 >
-                  <div className="pointer-events-auto">
+                  <div className="pointer-events-auto" data-tour-id="map-chat-panel">
                     <AIChatPanel
                       faceKey={currentChatKey}
                       projectId={project?.id || ""}

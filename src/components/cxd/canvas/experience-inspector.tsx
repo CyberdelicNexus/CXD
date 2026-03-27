@@ -236,6 +236,7 @@ export function ExperienceInspectorRail({
       onMouseMove={handleMouseMove}
       onWheel={(e) => e.stopPropagation()}
       data-prevent-canvas-wheel="true"
+      data-tour-id="canvas-experience-sidebar"
     >
       <div className="flex flex-col gap-1.5 px-3 gap-y-[26px] h-fit">
         {INSPECTOR_SECTIONS.map((section) => (

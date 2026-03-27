@@ -145,6 +145,7 @@ export function TaskInbox({
       {/* Circular Inbox Button */}
       <button
         id="task-inbox-button"
+        data-tour-id="canvas-inbox"
         onClick={() => {
           setIsOpen(!isOpen);
           setIsGlowing(false);

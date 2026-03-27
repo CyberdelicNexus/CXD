@@ -312,6 +312,19 @@ interface CXDState {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+
+  // Tour state
+  tourActive: boolean;
+  tourId: 'canvas' | 'map' | 'plan' | null;
+  tourStep: number;
+
+  // Tour actions
+  startTour: (tourId: 'canvas' | 'map' | 'plan') => void;
+  nextTourStep: () => void;
+  prevTourStep: () => void;
+  skipTour: () => void;
+  completeTour: () => void;
+  isTourCompleted: (tourId: 'canvas' | 'map' | 'plan') => boolean;
 }
 
 export const useCXDStore = create<CXDState>()(
@@ -2813,6 +2826,72 @@ export const useCXDStore = create<CXDState>()(
           return canvasUndoManager.redoStack.length > 0;
         }
         return canvasHistoryIndex < canvasHistory.length - 1;
+      },
+
+      // Tour state
+      tourActive: false,
+      tourId: null,
+      tourStep: 0,
+
+      // Tour actions
+      startTour: (tourId) => {
+        set({ tourActive: true, tourId, tourStep: 0 });
+      },
+
+      nextTourStep: () => {
+        const { tourStep, tourId } = get();
+        // Step counts per tour — import-free to avoid circular deps
+        const stepCounts: Record<string, number> = { canvas: 9, map: 5, plan: 7 };
+        const maxSteps = tourId ? stepCounts[tourId] ?? 0 : 0;
+        if (tourStep + 1 >= maxSteps) {
+          get().completeTour();
+        } else {
+          set({ tourStep: tourStep + 1 });
+        }
+      },
+
+      prevTourStep: () => {
+        const { tourStep } = get();
+        if (tourStep > 0) {
+          set({ tourStep: tourStep - 1 });
+        }
+      },
+
+      skipTour: () => {
+        get().completeTour();
+      },
+
+      completeTour: () => {
+        const { tourId, currentProjectId } = get();
+        if (tourId && currentProjectId) {
+          set((state) => ({
+            tourActive: false,
+            tourStep: 0,
+            projects: state.projects.map((p) =>
+              p.id === currentProjectId
+                ? {
+                    ...p,
+                    tourCompleted: {
+                      canvas: p.tourCompleted?.canvas ?? false,
+                      map: p.tourCompleted?.map ?? false,
+                      plan: p.tourCompleted?.plan ?? false,
+                      [tourId]: true,
+                    },
+                    updatedAt: new Date().toISOString(),
+                  }
+                : p,
+            ),
+          }));
+          // Clear tourId after state update
+          set({ tourId: null });
+        } else {
+          set({ tourActive: false, tourId: null, tourStep: 0 });
+        }
+      },
+
+      isTourCompleted: (tourId) => {
+        const project = get().getCurrentProject();
+        return project?.tourCompleted?.[tourId] ?? false;
       },
     }),
     {

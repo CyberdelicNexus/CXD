@@ -3785,10 +3785,11 @@ export function CXDCanvas() {
           return canvasElements
             .filter((el) => el.type !== 'line')
             .filter((el) => !el.containerId || !collapsedIds.has(el.containerId))
-            .map((element) => (
+            .map((element, _elIdx) => (
             <CanvasElementRenderer
                 key={element.id}
                 element={element}
+                tourId={_elIdx === 0 ? "canvas-element-sample" : undefined}
                 onUpdate={(updates) => syncUpdateElement(element.id, updates)}
                 onDelete={() => syncRemoveElement(element.id)}
                 onDuplicate={() => duplicateCanvasElement(element.id)}

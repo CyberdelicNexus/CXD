@@ -392,6 +392,7 @@ export function AIChatPanel({
           {onGenerateERD && (
             <button
               onClick={onGenerateERD}
+              data-tour-id="map-erd-button"
               className="px-2.5 py-1 text-[11px] font-medium rounded-md transition-all flex items-center gap-1.5 text-white/90 hover:text-white active:scale-95"
               style={{
                 background: "linear-gradient(135deg, hsl(270 60% 40%), hsl(200 70% 40%))",

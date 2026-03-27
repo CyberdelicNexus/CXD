@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { CollaborationProvider } from "@/contexts/collaboration-context";
 import { YjsProjectProvider } from "@/contexts/yjs-project-context";
 import { CreditTopUpSuccess } from "@/components/cxd/credit-topup-success";
+import { TourOverlay } from "@/components/cxd/tour/tour-overlay";
 import type { CanvasUpdate } from "@/hooks/use-collaboration";
 
 // Dynamically import heavy components to improve initial load time
@@ -117,16 +118,22 @@ export default function CXDPage() {
     return () => clearTimeout(timer);
   }, [viewMode, canvasViewMode]);
 
-  // Handle remote updates from collaborators (shared across all views)
-  // In CRDT mode, the Yjs provider handles all sync — skip LWW dispatch
+  // Handle remote updates from collaborators (shared across all views).
+  // LWW broadcasts are sent even in CRDT mode as a fallback for dropped Yjs updates.
+  // Receivers apply them with deduplication: element_add only if not already present.
   const handleRemoteUpdate = useCallback((update: CanvasUpdate) => {
-    if (useCXDStore.getState().yDoc) return;
-    console.log('[Collab] Received remote update:', update.type);
+    const state = useCXDStore.getState();
+    const inCrdtMode = !!state.yDoc;
+    console.log('[Collab] Received remote update:', update.type, inCrdtMode ? '(CRDT mode)' : '(LWW mode)');
 
     switch (update.type) {
       case 'element_add':
         if (update.element) {
-          addCanvasElement(update.element as any);
+          // Dedup: skip if Yjs already synced this element to avoid double-writing Y.Doc
+          const alreadyExists = getCanvasElements().some((e) => e.id === (update.element as any).id);
+          if (!alreadyExists) {
+            addCanvasElement(update.element as any);
+          }
         }
         break;
       case 'element_update':
@@ -162,7 +169,8 @@ export default function CXDPage() {
         }
         break;
       case 'state_sync':
-        // Full state sync from undo/redo
+        // Full state sync from undo/redo — skip in CRDT mode, Yjs owns full state
+        if (inCrdtMode) break;
         if (update.elements && update.edges) {
           const currentElements = getCanvasElements();
           const currentEdges = getCanvasEdges();
@@ -201,7 +209,8 @@ export default function CXDPage() {
         }
         break;
       case 'field_update':
-        // Handle CXD design field updates
+        // Skip in CRDT mode — Yjs handles field sync via YjsZustandBridge
+        if (inCrdtMode) break;
         if (update.path && update.value !== undefined) {
           const [section, field, subfield] = update.path;
           console.log('[Collab] Field update:', section, field, subfield, update.value);
@@ -278,65 +287,83 @@ export default function CXDPage() {
   useEffect(() => {
     const restoreProjectState = async () => {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
 
-      if (!user) {
-        // Middleware should handle redirect, use window.location for full page navigation
-        window.location.href = "/sign-in";
+      // Fast path: if projects are already in state, show the canvas immediately.
+      // Auth is still verified in the background; expired sessions redirect on next interaction.
+      if (currentProjectId && projects.length > 0) {
+        // Ensure correct view mode (e.g. if navigated directly to /cxd with viewMode="home")
+        if (viewMode === "home" && currentProjectId) {
+          setViewMode("canvas");
+        }
+        setIsRestoring(false);
+        supabase.auth.getUser().then(({ data: { user } }) => {
+          if (!user) window.location.href = "/sign-in";
+        });
         return;
       }
 
-      // If we have a currentProjectId but no projects loaded, restore from database
-      if (currentProjectId && projects.length === 0) {
-        const userProjects = await fetchUserProjects(user.id);
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-        // Check for localStorage backup before setting projects
-        const backup = getLocalBackup();
-        if (backup && backup.project && backup.project.id) {
-          const dbProject = userProjects.find(p => p.id === backup.project.id);
-          const oneHourAgo = Date.now() - (60 * 60 * 1000);
+        if (!user) {
+          // Middleware should handle redirect, use window.location for full page navigation
+          window.location.href = "/sign-in";
+          return;
+        }
 
-          if (backup.timestamp > oneHourAgo) {
-            if (dbProject) {
-              const dbUpdated = new Date(dbProject.updatedAt).getTime();
-              // If backup is newer than database, use backup
-              if (backup.timestamp > dbUpdated) {
-                console.log('[CXD] Restoring from localStorage backup (newer than database)');
-                const mergedProjects = userProjects.map(p =>
-                  p.id === backup.project.id ? { ...backup.project, updatedAt: new Date().toISOString() } : p
-                );
-                setProjects(mergedProjects);
-                // Save backup to database
-                saveProject(backup.project).then(success => {
-                  if (success) {
-                    console.log('[CXD] Backup saved to database');
-                    clearLocalBackup();
-                  }
-                });
-                setIsRestoring(false);
-                return;
+        // If we have a currentProjectId but no projects loaded, restore from database
+        if (currentProjectId && projects.length === 0) {
+          const userProjects = await fetchUserProjects(user.id);
+
+          // Check for localStorage backup before setting projects
+          const backup = getLocalBackup();
+          if (backup && backup.project && backup.project.id) {
+            const dbProject = userProjects.find(p => p.id === backup.project.id);
+            const oneHourAgo = Date.now() - (60 * 60 * 1000);
+
+            if (backup.timestamp > oneHourAgo) {
+              if (dbProject) {
+                const dbUpdated = new Date(dbProject.updatedAt).getTime();
+                // If backup is newer than database, use backup
+                if (backup.timestamp > dbUpdated) {
+                  console.log('[CXD] Restoring from localStorage backup (newer than database)');
+                  const mergedProjects = userProjects.map(p =>
+                    p.id === backup.project.id ? { ...backup.project, updatedAt: new Date().toISOString() } : p
+                  );
+                  setProjects(mergedProjects);
+                  // Save backup to database
+                  saveProject(backup.project).then(success => {
+                    if (success) {
+                      console.log('[CXD] Backup saved to database');
+                      clearLocalBackup();
+                    }
+                  });
+                  return;
+                }
               }
+              // Clear stale backup
+              clearLocalBackup();
+            } else {
+              clearLocalBackup();
             }
-            // Clear stale backup
-            clearLocalBackup();
-          } else {
-            clearLocalBackup();
+          }
+
+          if (userProjects.length > 0) {
+            setProjects(userProjects);
           }
         }
 
-        if (userProjects.length > 0) {
-          setProjects(userProjects);
+        // Ensure we're not in home mode since CXD page is for editing
+        if (viewMode === "home" && currentProjectId) {
+          setViewMode("canvas");
         }
+      } catch (err) {
+        console.error('[CXD] Error restoring project state:', err);
+      } finally {
+        setIsRestoring(false);
       }
-
-      // Ensure we're not in home mode since CXD page is for editing
-      if (viewMode === "home" && currentProjectId) {
-        setViewMode("canvas");
-      }
-
-      setIsRestoring(false);
     };
 
     restoreProjectState();
@@ -366,10 +393,31 @@ export default function CXDPage() {
         console.warn('[CXD] Loading timeout, forcing content display');
         setIsRestoring(false);
       }
-    }, 10000); // 10 second timeout
+    }, 5000); // 5 second timeout
 
     return () => clearTimeout(timeout);
   }, [isRestoring]);
+
+  // Auto-trigger onboarding tour when switching to a tab whose tour hasn't been completed
+  useEffect(() => {
+    if (isRestoring || viewMode !== "canvas") return;
+    const state = useCXDStore.getState();
+    let tourIdForView: 'canvas' | 'map' | 'plan' | null = null;
+    if (canvasViewMode === "canvas") tourIdForView = "canvas";
+    else if (canvasViewMode === "hexagon" || canvasViewMode === "hypercube") tourIdForView = "map";
+    else if (canvasViewMode === "plan") tourIdForView = "plan";
+
+    if (tourIdForView && !state.isTourCompleted(tourIdForView) && !state.tourActive) {
+      const timer = setTimeout(() => {
+        // Re-check in case tour was started or completed during the delay
+        const freshState = useCXDStore.getState();
+        if (!freshState.isTourCompleted(tourIdForView!) && !freshState.tourActive) {
+          freshState.startTour(tourIdForView!);
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [canvasViewMode, viewMode, isRestoring]);
 
   // Create a unique key for the current view to trigger transitions (only for wizard and plan)
   const viewKey = `${viewMode}-${canvasViewMode}`;
@@ -427,6 +475,7 @@ export default function CXDPage() {
           onDismiss={() => setShowTopUpSuccess(false)}
         />
       )}
+      <TourOverlay />
     </CollaborationProvider>
     </YjsProjectProvider>
   );

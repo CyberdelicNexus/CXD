@@ -314,6 +314,9 @@ export interface CXDProject {
   versions?: import('./version-types').Version[];
   okrs?: import('./version-types').OKR[];
 
+  // Tour completion tracking
+  tourCompleted?: { canvas: boolean; map: boolean; plan: boolean };
+
   // Wizard progress
   wizardCompleted: boolean;
   currentWizardStep: number;

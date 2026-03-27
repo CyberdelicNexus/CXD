@@ -557,13 +557,28 @@ export function CXDNavbar() {
             <NavCreditMeter />
           )}
 
+          {/* Tour replay button */}
+          <div
+            className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
+            onClick={() => {
+              const state = useCXDStore.getState();
+              let tourIdForView: 'canvas' | 'map' | 'plan' = 'canvas';
+              if (canvasViewMode === 'hexagon' || canvasViewMode === 'hypercube') tourIdForView = 'map';
+              else if (canvasViewMode === 'plan') tourIdForView = 'plan';
+              state.startTour(tourIdForView);
+            }}
+            title="Replay tour"
+          >
+            <HelpCircle className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
+          </div>
+
           {/* Shortcuts Guide - Always visible */}
           <ShortcutsGuide />
 
           {project && viewMode !== "home" && (
             <>
               {/* Collaboration section — single button with hover-reveal bubbles */}
-              <div className="relative group mr-2" style={{ zIndex: 100 }}>
+              <div className="relative group mr-2" style={{ zIndex: 100 }} data-tour-id="canvas-collaborate-btn">
                 {/* Main circle button */}
                 <div
                   className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 relative cursor-pointer hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all"
