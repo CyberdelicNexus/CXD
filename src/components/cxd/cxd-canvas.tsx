@@ -954,10 +954,14 @@ export function CXDCanvas() {
                     (c) => c.id === el.containerId,
                   );
                   if (container && container.type === 'container') {
-                    // Check if moved outside container's origin (detach)
+                    // Center-point check, 30px threshold, all 4 edges
+                    const centerX = newX + el.width / 2;
+                    const centerY = newY + el.height / 2;
                     const isCompletelyOutside =
-                      newX < container.x - 50 ||
-                      newY < container.y - 50;
+                      centerX < container.x - 30 ||
+                      centerX > container.x + container.width + 30 ||
+                      centerY < container.y - 30 ||
+                      centerY > container.y + container.height + 30;
 
                     if (isCompletelyOutside) {
                       syncRemoveNodeFromContainer(id);
@@ -1072,10 +1076,14 @@ export function CXDCanvas() {
                   (c) => c.id === element.containerId,
                 );
                 if (container && container.type === 'container') {
-                  // Check if moved outside container's origin (detach)
+                  // Center-point check, 30px threshold, all 4 edges
+                  const centerX = newX + element.width / 2;
+                  const centerY = newY + element.height / 2;
                   const isCompletelyOutside =
-                    newX < container.x - 50 ||
-                    newY < container.y - 50;
+                    centerX < container.x - 30 ||
+                    centerX > container.x + container.width + 30 ||
+                    centerY < container.y - 30 ||
+                    centerY > container.y + container.height + 30;
 
                   if (isCompletelyOutside) {
                     syncRemoveNodeFromContainer(draggingElement);
@@ -3940,6 +3948,12 @@ export function CXDCanvas() {
         const orbSrcId = `orb-src-${edge.id}`;
         const orbTgtId = `orb-tgt-${edge.id}`;
 
+        // Arrow size scales with line thickness
+        const edgeT = edge.style?.thickness ?? 2;
+        const aTip  = 4 + edgeT * 0.85;   // tip reach  (t=2→5.7  t=8→10.8)
+        const aBack = 1.5 + edgeT * 0.4;  // base setback (t=2→2.3  t=8→4.7)
+        const aHalf = 2 + edgeT * 0.6;    // half-width  (t=2→3.2  t=8→6.8)
+
         // Z-index: above all elements
         const edgeZIndex = maxElementZ + 1;
 
@@ -3965,7 +3979,10 @@ export function CXDCanvas() {
                 </filter>
                 {/* Gradient along connector direction */}
                 <linearGradient id={gradId} gradientUnits="userSpaceOnUse"
-                  x1={from.x} y1={from.y} x2={to.x} y2={to.y}>
+                  x1={edge.style?.gradientReversed ? to.x : from.x}
+                  y1={edge.style?.gradientReversed ? to.y : from.y}
+                  x2={edge.style?.gradientReversed ? from.x : to.x}
+                  y2={edge.style?.gradientReversed ? from.y : to.y}>
                   <stop offset="0%"   stopColor={grad.dark} />
                   <stop offset="50%"  stopColor={grad.mid} />
                   <stop offset="100%" stopColor={grad.light} />
@@ -4064,10 +4081,10 @@ export function CXDCanvas() {
                 {/* Source arrow indicator */}
                 {(edge.style?.arrowStyle === 'start' || edge.style?.arrowStyle === 'both') && (() => {
                   const dir = fromAnchor === 'left' ? 'right' : fromAnchor === 'right' ? 'left' : fromAnchor === 'top' ? 'down' : 'up';
-                  const pts = dir === 'left'  ? `${from.x-5},${from.y} ${from.x+2},${from.y-3} ${from.x+2},${from.y+3}`
-                            : dir === 'right' ? `${from.x+5},${from.y} ${from.x-2},${from.y-3} ${from.x-2},${from.y+3}`
-                            : dir === 'up'    ? `${from.x},${from.y-5} ${from.x-3},${from.y+2} ${from.x+3},${from.y+2}`
-                            :                   `${from.x},${from.y+5} ${from.x-3},${from.y-2} ${from.x+3},${from.y-2}`;
+                  const pts = dir === 'left'  ? `${from.x-aTip},${from.y} ${from.x+aBack},${from.y-aHalf} ${from.x+aBack},${from.y+aHalf}`
+                            : dir === 'right' ? `${from.x+aTip},${from.y} ${from.x-aBack},${from.y-aHalf} ${from.x-aBack},${from.y+aHalf}`
+                            : dir === 'up'    ? `${from.x},${from.y-aTip} ${from.x-aHalf},${from.y+aBack} ${from.x+aHalf},${from.y+aBack}`
+                            :                   `${from.x},${from.y+aTip} ${from.x-aHalf},${from.y-aBack} ${from.x+aHalf},${from.y-aBack}`;
                   return <polygon points={pts} fill={grad.mid} opacity={0.9} />;
                 })()}
               </g>
@@ -4082,10 +4099,10 @@ export function CXDCanvas() {
                 {/* Target arrow indicator */}
                 {(edge.style?.arrowStyle === 'end' || edge.style?.arrowStyle === 'both') && (() => {
                   const dir = toAnchor === 'left' ? 'right' : toAnchor === 'right' ? 'left' : toAnchor === 'top' ? 'down' : 'up';
-                  const pts = dir === 'right' ? `${to.x+5},${to.y} ${to.x-2},${to.y-3} ${to.x-2},${to.y+3}`
-                            : dir === 'left'  ? `${to.x-5},${to.y} ${to.x+2},${to.y-3} ${to.x+2},${to.y+3}`
-                            : dir === 'down'  ? `${to.x},${to.y+5} ${to.x-3},${to.y-2} ${to.x+3},${to.y-2}`
-                            :                   `${to.x},${to.y-5} ${to.x-3},${to.y+2} ${to.x+3},${to.y+2}`;
+                  const pts = dir === 'right' ? `${to.x+aTip},${to.y} ${to.x-aBack},${to.y-aHalf} ${to.x-aBack},${to.y+aHalf}`
+                            : dir === 'left'  ? `${to.x-aTip},${to.y} ${to.x+aBack},${to.y-aHalf} ${to.x+aBack},${to.y+aHalf}`
+                            : dir === 'down'  ? `${to.x},${to.y+aTip} ${to.x-aHalf},${to.y-aBack} ${to.x+aHalf},${to.y-aBack}`
+                            :                   `${to.x},${to.y-aTip} ${to.x-aHalf},${to.y+aBack} ${to.x+aHalf},${to.y+aBack}`;
                   return <polygon points={pts} fill={grad.light} opacity={0.9} />;
                 })()}
               </g>
@@ -4213,6 +4230,7 @@ export function CXDCanvas() {
                 {([
                   { elType: 'note',      label: 'Note',      icon: '📝' },
                   { elType: 'task',      label: 'Task',       icon: '✅' },
+                  { elType: 'shape',     label: 'Shape',      icon: '⬡' },
                   { elType: 'container', label: 'Container',  icon: '⬜' },
                   { elType: 'image',     label: 'Image',      icon: '🖼️' },
                   { elType: 'link',      label: 'Link',       icon: '🔗' },
@@ -4241,6 +4259,8 @@ export function CXDCanvas() {
                         newEl = { ...base, type: 'freeform', x: worldX - 150, y: worldY - 150, width: 300, height: 300, cardType: 'note', content: '', noteTitle: 'Untitled Note', noteBody: '', emoji: '📌', style: { bgColor: DEFAULT_BG, textColor: '#ffffff' } } as CanvasElement;
                       } else if (elType === 'task') {
                         newEl = { ...base, type: 'freeform', x: worldX - 125, y: worldY - 70, width: 250, height: 140, cardType: 'task', content: 'Task Title', emoji: '✅', taskMetadata: { isActionable: true, subtasks: [] }, style: { bgColor: DEFAULT_BG, textColor: '#ffffff' } } as CanvasElement;
+                      } else if (elType === 'shape') {
+                        newEl = { ...base, type: 'shape', x: worldX - 75, y: worldY - 75, width: 150, height: 150, shapeType: 'rectangle', content: '', style: { bgColor: 'hsl(var(--primary) / 0.3)', borderColor: 'hsl(var(--primary))' } } as CanvasElement;
                       } else if (elType === 'container') {
                         const minZ = canvasElements.reduce((m, el) => Math.min(m, el.zIndex ?? 0), 0);
                         newEl = { ...base, type: 'container', x: worldX - 160, y: worldY - 120, width: 320, height: 240, label: '', zIndex: minZ - 1 } as CanvasElement;
