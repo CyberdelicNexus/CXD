@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -51,7 +51,7 @@ import { useNotifications } from "@/hooks/use-notifications";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCanvasPermissions } from "@/hooks/use-collaboration";
 import { useCollaborationContext } from "@/contexts/collaboration-context";
-import { CollaboratorAvatars, ConnectionStatus } from "@/components/collaboration";
+import { ConnectionStatus } from "@/components/collaboration";
 import { CollaborationPanel } from "@/components/collaboration";
 import { NavCreditMeter } from "./nav-credit-meter";
 import { AccountMenu } from "./account-menu";
@@ -134,6 +134,38 @@ export function CXDNavbar() {
   } = useCXDStore();
   const { toast } = useToast();
   const project = getCurrentProject();
+
+  // Deduplicate boardPath to prevent duplicate breadcrumb entries
+  const dedupedBoardPath = useMemo(() => {
+    if (!boardPath) return [];
+    const seen = new Set<string>();
+    return boardPath.filter(entry => {
+      if (seen.has(entry.id)) return false;
+      seen.add(entry.id);
+      return true;
+    });
+  }, [boardPath]);
+
+  // Browser back button / mouse back button: go up one level in board breadcrumbs
+  const prevBoardDepthRef = useRef(0);
+  useEffect(() => {
+    if (boardPath.length > prevBoardDepthRef.current) {
+      // Entered a deeper board — push a history entry so the back button can pop it
+      window.history.pushState({ boardDepth: boardPath.length }, '');
+    }
+    prevBoardDepthRef.current = boardPath.length;
+  }, [boardPath.length]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (boardPath.length > 0) {
+        // Go up one level (back to parent board, or root if at depth 1)
+        navigateToBoardPath(boardPath.length - 2);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [boardPath, navigateToBoardPath]);
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll } = useNotifications();
 
   // Subscription and credits
@@ -181,8 +213,8 @@ export function CXDNavbar() {
   // Collaboration state
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
-  const { collaborators, isConnected } = useCollaborationContext();
-  const { role: canvasRole, permissions } = useCanvasPermissions(project?.id || null);
+  const { collaborators, isConnected, currentUser, followingCollaboratorId, setFollowingCollaboratorId } = useCollaborationContext();
+  const { role: canvasRole } = useCanvasPermissions(project?.id || null);
 
   const handleExportJSON = async () => {
     if (!project) return;
@@ -370,23 +402,33 @@ export function CXDNavbar() {
               </div>
 
               {/* Breadcrumbs - shown when inside a board */}
-              {boardPath && boardPath.length > 0 && (
+              {dedupedBoardPath && dedupedBoardPath.length > 0 && (
                 <div className="flex items-center gap-1 ml-3 pl-3 border-l border-white/10 max-w-[300px] lg:max-w-[400px] xl:max-w-[500px] 2xl:max-w-[600px]">
+                  {/* Hidden gradient definition for home icon */}
+                  <svg width="0" height="0" className="absolute overflow-hidden">
+                    <defs>
+                      <linearGradient id="home-icon-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#c084fc" />
+                        <stop offset="100%" stopColor="#f472b6" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
                   <button
                     onClick={() => navigateToBoardPath(-1)}
-                    className="flex items-center gap-1 text-white/60 hover:text-white transition-colors text-sm flex-shrink-0"
+                    className="flex items-center gap-1 transition-opacity hover:opacity-80 text-sm flex-shrink-0"
+                    title="Go to root canvas"
                   >
-                    <Home className="w-3.5 h-3.5" />
+                    <Home className="w-5 h-5" style={{ stroke: 'url(#home-icon-grad)' }} />
                   </button>
-                  {boardPath.length <= 3 ? (
+                  {dedupedBoardPath.length <= 3 ? (
                     // Show all breadcrumbs if 3 or fewer
-                    boardPath.map((board, index) => (
+                    dedupedBoardPath.map((board, index) => (
                       <div key={board.id} className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
                         <button
                           onClick={() => navigateToBoardPath(index)}
                           className={`text-sm transition-colors truncate max-w-[100px] lg:max-w-[120px] xl:max-w-[150px] ${
-                            index === boardPath.length - 1
+                            index === dedupedBoardPath.length - 1
                               ? "text-primary font-medium"
                               : "text-white/60 hover:text-white"
                           }`}
@@ -404,24 +446,24 @@ export function CXDNavbar() {
                         <button
                           onClick={() => navigateToBoardPath(0)}
                           className="text-sm text-white/60 hover:text-white transition-colors truncate max-w-[80px]"
-                          title={boardPath[0].title}
+                          title={dedupedBoardPath[0].title}
                         >
-                          {boardPath[0].title}
+                          {dedupedBoardPath[0].title}
                         </button>
                       </div>
                       <div className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
                         <span className="text-sm text-white/40">...</span>
                       </div>
-                      {boardPath.slice(-2).map((board, idx) => {
-                        const index = boardPath.length - 2 + idx;
+                      {dedupedBoardPath.slice(-2).map((board, idx) => {
+                        const index = dedupedBoardPath.length - 2 + idx;
                         return (
                           <div key={board.id} className="flex items-center flex-shrink-0">
                             <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
                             <button
                               onClick={() => navigateToBoardPath(index)}
                               className={`text-sm transition-colors truncate max-w-[100px] ${
-                                index === boardPath.length - 1
+                                index === dedupedBoardPath.length - 1
                                   ? "text-primary font-medium"
                                   : "text-white/60 hover:text-white"
                               }`}
@@ -520,30 +562,74 @@ export function CXDNavbar() {
 
           {project && viewMode !== "home" && (
             <>
-              {/* Collaboration section */}
-              <div className="flex items-center gap-3 mr-2">
-                {/* Online collaborators */}
-                {collaborators.length > 0 && (
-                  <CollaboratorAvatars
-                    collaborators={collaborators}
-                    maxVisible={3}
-                    onClick={() => setShowCollaborationPanel(true)}
-                  />
-                )}
-
+              {/* Collaboration section — single button with hover-reveal bubbles */}
+              <div className="relative group mr-2" style={{ zIndex: 100 }}>
+                {/* Main circle button */}
                 <div
-                  className="cursor-pointer transition-all"
+                  className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 relative cursor-pointer hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all"
                   onClick={() => setShowCollaborationPanel(true)}
+                  title="Collaboration"
                 >
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 relative hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group transition-all">
-                    <Users className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
-                    {collaborators.length > 0 && (
-                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 text-[10px] flex items-center justify-center text-white font-bold">
-                        {collaborators.length}
-                      </span>
-                    )}
-                  </div>
+                  <Users className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                  {/* Live participant count badge */}
+                  {collaborators.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(52,211,153,0.8)] text-[10px] flex items-center justify-center text-white font-bold px-0.5">
+                      {collaborators.length}
+                    </span>
+                  )}
                 </div>
+
+                {/* Hover-reveal: profile bubbles for each online collaborator */}
+                {collaborators.length > 0 && (
+                  <div
+                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 flex flex-row items-start gap-2
+                               opacity-0 pointer-events-none -translate-y-1
+                               group-hover:opacity-100 group-hover:pointer-events-auto group-hover:translate-y-0
+                               transition-all duration-200 delay-300 group-hover:delay-0"
+                  >
+                    {collaborators.map((c) => {
+                      const initials = c.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+                      const isFollowing = followingCollaboratorId === c.id;
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFollowingCollaboratorId(isFollowing ? null : c.id);
+                          }}
+                          title={isFollowing ? `Stop following ${c.name}` : `Follow ${c.name}`}
+                          className="relative flex-shrink-0 transition-transform hover:scale-110"
+                        >
+                          <div
+                            className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold border-2 transition-all"
+                            style={{
+                              backgroundColor: c.avatarUrl ? undefined : c.color,
+                              borderColor: isFollowing ? c.color : 'transparent',
+                              boxShadow: isFollowing ? `0 0 8px ${c.color}` : undefined,
+                            }}
+                          >
+                            {c.avatarUrl ? (
+                              <img src={c.avatarUrl} alt={c.name} className="w-full h-full rounded-full object-cover" />
+                            ) : (
+                              initials
+                            )}
+                          </div>
+                          {/* Live green dot */}
+                          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-black" />
+                          {/* "Following" label */}
+                          {isFollowing && (
+                            <span
+                              className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] font-semibold rounded px-1 py-0.5 text-white"
+                              style={{ backgroundColor: c.color }}
+                            >
+                              Following
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div

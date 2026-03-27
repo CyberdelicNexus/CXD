@@ -37,7 +37,7 @@ import {
 import { saveProject, insertProject, deleteProjectFromDb, updateProjectShareToken } from '@/lib/supabase-projects';
 import type * as Y from 'yjs';
 import {
-  yjsAddElement, yjsUpdateElement, yjsRemoveElement, yjsDuplicateElement,
+  yjsAddElement, yjsUpdateElement, yjsRemoveElement, yjsDuplicateElement, yjsBatchUpdatePositions,
   yjsAddEdge, yjsUpdateEdge, yjsRemoveEdge,
   yjsMoveContainerWithChildren, yjsCreateGroup, yjsUngroup,
   yjsSetDesignTextField, yjsSetDesignNumberField, yjsSetMetaField,
@@ -221,6 +221,10 @@ interface CXDState {
   addCanvasElement: (element: CanvasElement) => void;
   updateCanvasElement: (elementId: string, updates: Partial<CanvasElement>) => void;
   removeCanvasElement: (elementId: string) => void;
+  /** Write positions directly to Zustand without touching Yjs (used during drag for instant visual feedback). */
+  updateElementsPositionLocal: (updates: Array<{ id: string; x: number; y: number }>) => void;
+  /** Commit final drag positions to Yjs in a single transaction (one broadcast to peers). */
+  commitDragPositionsToYjs: (updates: Array<{ id: string; x: number; y: number }>) => void;
   getCanvasElements: () => CanvasElement[];
   getAllInboxItems: () => CanvasElement[]; // Get all inbox items across all boards
   duplicateCanvasElement: (elementId: string) => void;
@@ -1510,6 +1514,39 @@ export const useCXDStore = create<CXDState>()(
         }
       },
 
+      updateElementsPositionLocal: (updates) => {
+        // Write x/y directly to Zustand with no Yjs involvement.
+        // Used during drag so every mousemove gets instant visual feedback
+        // without spawning a Yjs transaction + bridge RAF + React re-render cascade.
+        const { currentProjectId } = get();
+        set((state) => ({
+          projects: state.projects.map((p) => {
+            if (p.id !== currentProjectId) return p;
+            const idSet = new Map(updates.map((u) => [u.id, u]));
+            return {
+              ...p,
+              canvasLayout: {
+                ...p.canvasLayout,
+                elements: (p.canvasLayout?.elements || []).map((el) => {
+                  const upd = idSet.get(el.id);
+                  return upd ? { ...el, x: upd.x, y: upd.y } : el;
+                }),
+              },
+            };
+          }),
+        }));
+      },
+
+      commitDragPositionsToYjs: (updates) => {
+        // Write all final drag positions to Yjs in ONE transaction.
+        // This produces a single update message broadcast to all peers
+        // instead of the 60+/second storm that would occur if Yjs were
+        // written on every mousemove.
+        const { yDoc } = get();
+        if (!yDoc || updates.length === 0) return;
+        yjsBatchUpdatePositions(yDoc, updates);
+      },
+
       getCanvasElements: () => {
         const currentProject = get().getCurrentProject();
         const { activeBoardId, activeSurface } = get();
@@ -1672,6 +1709,12 @@ export const useCXDStore = create<CXDState>()(
       // Board Navigation
       enterBoard: (boardId, title) => {
         const { boardPath, saveCurrentViewport, restoreViewport } = get();
+
+        // Guard: skip if already at this board (prevents duplicate entries)
+        const lastEntry = boardPath[boardPath.length - 1];
+        if (lastEntry && lastEntry.id === boardId) {
+          return;
+        }
 
         // Save current canvas viewport before entering new board
         saveCurrentViewport();
@@ -2187,18 +2230,22 @@ export const useCXDStore = create<CXDState>()(
           updatedAt: new Date().toISOString(),
         };
 
+        // Always update Zustand directly so the UI reflects the change immediately.
+        // In CRDT mode, yjsAddOKR writes to the Y.Doc but the bridge doesn't observe
+        // the OKRs array, so without this direct set() the selector would see an empty
+        // list and the "Create First OKR" button would never disappear.
+        const okrsWithNew = [...(currentProject.okrs || []), newOKR];
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, okrs: okrsWithNew, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
         if (yDoc) {
           yjsAddOKR(yDoc, newOKR);
         } else {
-          const okrs = [...(currentProject.okrs || []), newOKR];
-
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { ...p, okrs, updatedAt: new Date().toISOString() }
-                : p
-            ),
-          }));
           const updatedProject = get().getCurrentProject();
           if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
         }
@@ -2212,20 +2259,21 @@ export const useCXDStore = create<CXDState>()(
 
         const { yDoc } = get();
 
+        // Always update Zustand directly (same reason as addOKR — bridge doesn't observe OKRs)
+        const okrsUpdated = (currentProject.okrs || []).map((okr) =>
+          okr.id === okrId ? { ...okr, ...updates, updatedAt: new Date().toISOString() } : okr
+        );
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, okrs: okrsUpdated, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
         if (yDoc) {
           yjsUpdateOKR(yDoc, okrId, updates);
         } else {
-          const okrs = (currentProject.okrs || []).map((okr) =>
-            okr.id === okrId ? { ...okr, ...updates, updatedAt: new Date().toISOString() } : okr
-          );
-
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { ...p, okrs, updatedAt: new Date().toISOString() }
-                : p
-            ),
-          }));
           const updatedProject = get().getCurrentProject();
           if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
         }
@@ -2237,18 +2285,19 @@ export const useCXDStore = create<CXDState>()(
 
         const { yDoc } = get();
 
+        // Always update Zustand directly (bridge doesn't observe OKRs)
+        const okrsFiltered = (currentProject.okrs || []).filter((okr) => okr.id !== okrId);
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, okrs: okrsFiltered, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
         if (yDoc) {
           yjsDeleteOKR(yDoc, okrId);
         } else {
-          const okrs = (currentProject.okrs || []).filter((okr) => okr.id !== okrId);
-
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { ...p, okrs, updatedAt: new Date().toISOString() }
-                : p
-            ),
-          }));
           const updatedProject = get().getCurrentProject();
           if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
         }
@@ -2574,6 +2623,16 @@ export const useCXDStore = create<CXDState>()(
         boardPath: state.boardPath,
         viewportByCanvasId: state.viewportByCanvasId,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state && state.boardPath) {
+          const seen = new Set<string>();
+          state.boardPath = state.boardPath.filter(entry => {
+            if (seen.has(entry.id)) return false;
+            seen.add(entry.id);
+            return true;
+          });
+        }
+      },
     }
   )
 );
