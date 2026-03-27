@@ -104,6 +104,10 @@ interface CXDState {
   activeCommentId: string | null;
   showResolvedComments: boolean;
 
+  // Cached user profile for comments
+  cachedUserProfile: { name: string; avatar: string | null } | null;
+  setCachedUserProfile: (profile: { name: string; avatar: string | null }) => void;
+
   // Highlighted element (for navigation from hypercube)
   highlightedElementId: string | null;
 
@@ -350,6 +354,7 @@ export const useCXDStore = create<CXDState>()(
       commentMode: false,
       activeCommentId: null,
       showResolvedComments: false,
+      cachedUserProfile: null,
       highlightedElementId: null,
       clipboard: [],
       canvasHistory: [],
@@ -2046,6 +2051,10 @@ export const useCXDStore = create<CXDState>()(
       // COMMENTS
       // ═══════════════════════════════════════════════════════════════════════
 
+      setCachedUserProfile: (profile) => {
+        set({ cachedUserProfile: profile });
+      },
+
       toggleCommentMode: () => {
         set((state) => ({
           commentMode: !state.commentMode,
@@ -2067,12 +2076,13 @@ export const useCXDStore = create<CXDState>()(
       addComment: (content, position) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
-        const { activeBoardId } = get();
+        const { activeBoardId, cachedUserProfile } = get();
 
         const newComment: Comment = {
           id: uuidv4(),
           authorId: currentProject.ownerId || 'anonymous',
-          authorName: 'You',
+          authorName: cachedUserProfile?.name || 'You',
+          authorAvatar: cachedUserProfile?.avatar || undefined,
           content,
           position,
           boardId: activeBoardId,
@@ -2126,10 +2136,12 @@ export const useCXDStore = create<CXDState>()(
         const rootComment = comments.find(c => c.id === parentId);
         if (!rootComment) return;
 
+        const { cachedUserProfile } = get();
         const newReply: Comment = {
           id: uuidv4(),
           authorId: currentProject.ownerId || 'anonymous',
-          authorName: 'You',
+          authorName: cachedUserProfile?.name || 'You',
+          authorAvatar: cachedUserProfile?.avatar || undefined,
           content,
           position: rootComment.position,
           boardId: rootComment.boardId,

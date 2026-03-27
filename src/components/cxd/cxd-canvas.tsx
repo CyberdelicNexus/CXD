@@ -14,7 +14,7 @@ import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
 import { MultiSelectionBox } from "./canvas/multi-selection-box";
 import { Button } from "@/components/ui/button";
-import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid } from "lucide-react";
+import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid, SmilePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   CanvasElement,
@@ -307,6 +307,7 @@ export function CXDCanvas() {
     updateElementsPositionLocal,
     commitDragPositionsToYjs,
     commentMode,
+    setCommentMode,
     activeCommentId,
     showResolvedComments,
     setActiveComment,
@@ -333,6 +334,8 @@ export function CXDCanvas() {
   // New comment input state
   const [newCommentInput, setNewCommentInput] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const newCommentInputRef = useRef<HTMLTextAreaElement>(null);
+  const [showNewCommentEmoji, setShowNewCommentEmoji] = useState(false);
+  const NEW_COMMENT_EMOJIS = ['😊', '👍', '❤️', '🎉', '🤔', '👀', '🔥', '💯', '😂', '🙌', '✅', '💡'];
 
   // Canvas settings from user preferences
   const { settings, zoomSensitivity } = useCanvasSettings();
@@ -4758,26 +4761,59 @@ export function CXDCanvas() {
               <span className="text-xs font-medium text-purple-300">New Comment</span>
             </div>
             <div className="p-2">
-              <textarea
-                ref={newCommentInputRef}
-                autoFocus
-                placeholder="Add a comment..."
-                rows={2}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 resize-none focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    const text = (e.target as HTMLTextAreaElement).value.trim();
-                    if (text) {
-                      addComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
+              <div className="relative">
+                <textarea
+                  ref={newCommentInputRef}
+                  autoFocus
+                  placeholder="Add a comment..."
+                  rows={2}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 pr-8 text-sm text-white placeholder-white/30 resize-none focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      const text = (e.target as HTMLTextAreaElement).value.trim();
+                      if (text) {
+                        addComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
+                        setNewCommentInput(null);
+                        setCommentMode(false);
+                      }
+                    }
+                    if (e.key === 'Escape') {
                       setNewCommentInput(null);
                     }
-                  }
-                  if (e.key === 'Escape') {
-                    setNewCommentInput(null);
-                  }
-                }}
-              />
+                  }}
+                />
+                <button
+                  onClick={() => setShowNewCommentEmoji(!showNewCommentEmoji)}
+                  className="absolute right-2 bottom-2 p-0.5 rounded hover:bg-white/10 text-white/30 hover:text-white/60 transition-colors"
+                  title="Add emoji"
+                >
+                  <SmilePlus className="w-4 h-4" />
+                </button>
+                {showNewCommentEmoji && (
+                  <div className="absolute bottom-full right-0 mb-1 flex flex-wrap gap-0.5 p-1.5 rounded-lg bg-[rgba(12,10,22,0.97)] border border-white/10 shadow-xl z-10 max-w-[200px]">
+                    {NEW_COMMENT_EMOJIS.map(emoji => (
+                      <button
+                        key={emoji}
+                        onClick={() => {
+                          if (newCommentInputRef.current) {
+                            const start = newCommentInputRef.current.selectionStart;
+                            const end = newCommentInputRef.current.selectionEnd;
+                            const val = newCommentInputRef.current.value;
+                            newCommentInputRef.current.value = val.slice(0, start) + emoji + val.slice(end);
+                            newCommentInputRef.current.selectionStart = newCommentInputRef.current.selectionEnd = start + emoji.length;
+                          }
+                          setShowNewCommentEmoji(false);
+                          newCommentInputRef.current?.focus();
+                        }}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors text-base"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex justify-end mt-1.5 gap-1.5">
                 <button
                   onClick={() => setNewCommentInput(null)}
@@ -4791,6 +4827,7 @@ export function CXDCanvas() {
                     if (text) {
                       addComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
                       setNewCommentInput(null);
+                      setCommentMode(false);
                     }
                   }}
                   className="px-2.5 py-1 text-xs text-white bg-purple-600 hover:bg-purple-500 rounded transition-colors"

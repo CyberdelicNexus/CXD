@@ -97,6 +97,7 @@ export default function CXDPage() {
     updateContextMagic,
     updateExperienceFlowNarrative,
     updateExperienceFlowIntent,
+    setCachedUserProfile,
   } = useCXDStore();
   const [isRestoring, setIsRestoring] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -117,6 +118,28 @@ export default function CXDPage() {
     const timer = setTimeout(() => setIsTransitioning(false), 300);
     return () => clearTimeout(timer);
   }, [viewMode, canvasViewMode]);
+
+  // Load and cache user profile for comments
+  useEffect(() => {
+    async function loadUserProfile() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data } = await supabase.from('users').select('full_name, name, profile_picture').eq('id', user.id).single();
+          if (data) {
+            setCachedUserProfile({
+              name: data.full_name || data.name || user.email?.split('@')[0] || 'You',
+              avatar: data.profile_picture || user.user_metadata?.avatar_url || null,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[CXD] Error loading user profile for comments:', err);
+      }
+    }
+    loadUserProfile();
+  }, [setCachedUserProfile]);
 
   // Handle remote updates from collaborators (shared across all views).
   // LWW broadcasts are sent even in CRDT mode as a fallback for dropped Yjs updates.

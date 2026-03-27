@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Check, RotateCcw, Trash2 } from "lucide-react";
+import { X, Check, RotateCcw, Trash2, SmilePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
 import type { CommentThread as CommentThreadType } from "@/types/comment-types";
@@ -26,6 +26,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 const REACTION_EMOJIS = ['👍', '❤️', '😊', '🎉', '🤔', '👀', '🔥', '💯'];
+const INPUT_EMOJIS = ['😊', '👍', '❤️', '🎉', '🤔', '👀', '🔥', '💯', '😂', '🙌', '✅', '💡'];
 
 function ReactionBar({ commentId, reactions }: { commentId: string; reactions?: Record<string, string[]> }) {
   const [showPicker, setShowPicker] = useState(false);
@@ -89,6 +90,7 @@ export function CommentThreadPanel({
 }: CommentThreadProps) {
   const { addReply, resolveComment, unresolveComment, deleteComment, setActiveComment } = useCXDStore();
   const [replyText, setReplyText] = useState("");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isResolved = thread.root.resolvedAt !== null;
   const pinScale = 1 / canvasZoom;
@@ -228,15 +230,41 @@ export function CommentThreadPanel({
         {/* Reply input - hidden when resolved */}
         {!isResolved && (
           <div className="border-t border-white/10 px-3 py-2">
-            <textarea
-              ref={inputRef}
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Reply... (Enter to send)"
-              rows={1}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 resize-none focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30"
-            />
+            <div className="relative">
+              <textarea
+                ref={inputRef}
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Reply... (Enter to send)"
+                rows={1}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 pr-8 text-sm text-white placeholder-white/30 resize-none focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30"
+              />
+              <button
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                className="absolute right-2 bottom-2 p-0.5 rounded hover:bg-white/10 text-white/30 hover:text-white/60 transition-colors"
+                title="Add emoji"
+              >
+                <SmilePlus className="w-4 h-4" />
+              </button>
+              {showEmojiPicker && (
+                <div className="absolute bottom-full right-0 mb-1 flex flex-wrap gap-0.5 p-1.5 rounded-lg bg-[rgba(12,10,22,0.97)] border border-white/10 shadow-xl z-10 max-w-[200px]">
+                  {INPUT_EMOJIS.map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => {
+                        setReplyText(prev => prev + emoji);
+                        setShowEmojiPicker(false);
+                        inputRef.current?.focus();
+                      }}
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors text-base"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
