@@ -44,7 +44,7 @@ import {
   Loader2,
   LayoutTemplate,
 } from "lucide-react";
-import { TEMPLATES, type TemplateDefinition } from "@/lib/templates";
+import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, remapTemplateIds, type TemplateDefinition, type TemplateCategory } from "@/lib/templates";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { useRouter } from "next/navigation";
 import { fetchUserProjects, ensureUserProfile, saveProject } from "@/lib/supabase-projects";
@@ -102,6 +102,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     isPro,
     isLifetime,
     isBetaTester,
+    hasTemplates,
     canCreateCanvas,
     isTrialing,
     trialDaysRemaining
@@ -203,24 +204,34 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     }
   };
 
+  // If Zustand already has cached projects, show them immediately without waiting
+  // for the network fetch. The effect below will refresh them in the background.
+  useEffect(() => {
+    if (projects.length > 0) {
+      setIsLoading(false);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const loadUserAndProjects = async () => {
+      // Flush any pending project_data save BEFORE fetching projects so the fetch
+      // sees the latest state (prevents stale data overwriting Zustand on dashboard load).
       await flushPendingSave();
-      await ensureUserProfile(userId, userEmail);
 
-      // Fetch projects via API route (uses admin client to bypass RLS)
-      let userProjects: any[] = [];
-      try {
-        const response = await fetch('/api/projects');
-        const data = await response.json();
-        if (data.projects) {
-          userProjects = data.projects;
-        }
-      } catch (error) {
-        console.error('Error fetching projects from API:', error);
-        // Fallback to client-side fetch
-        userProjects = await fetchUserProjects(userId);
-      }
+      // Now fetch projects and profile in parallel
+      const [userProjects, profile] = await Promise.all([
+        // Fetch projects via API route (uses admin client to bypass RLS)
+        fetch('/api/projects')
+          .then(r => r.json())
+          .then(d => d.projects as any[] ?? [])
+          .catch(async () => {
+            console.error('API route failed, falling back to client fetch');
+            return fetchUserProjects(userId);
+          }),
+        // Profile fetch runs in parallel — it doesn't depend on projects
+        getUserProfile(userId),
+        ensureUserProfile(userId, userEmail),
+      ]);
 
       const backup = getLocalBackup();
       if (backup && backup.project && backup.project.id) {
@@ -254,7 +265,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
         setProjects(userProjects);
       }
 
-      const profile = await getUserProfile(userId);
       if (profile) {
         setUserProfile(profile);
         setCoverImagePosition(profile.cover_image_position);
@@ -294,10 +304,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     if (!canCreate) { setShowUpgradeModal(true); setTemplateDialogOpen(false); return; }
     if (!selectedTemplate || !templateProjectName.trim()) return;
 
-    const freshElements = selectedTemplate.elements.map(el => ({
-      ...el,
-      id: crypto.randomUUID(),
-    }));
+    const freshElements = remapTemplateIds(selectedTemplate.elements);
 
     const projectId = createProject(templateProjectName.trim(), userId, freshElements);
     setTemplateProjectName('');
@@ -920,29 +927,39 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             <LayoutTemplate className="w-4 h-4 text-purple-400" />
             <h3 className="text-sm font-medium text-white/70">Start from a Template</h3>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {TEMPLATES.map((tpl) => (
-              <div
-                key={tpl.id}
-                className="group flex flex-col gap-2 p-4 rounded-xl bg-black/20 border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all cursor-pointer"
-                onClick={() => {
-                  if (!canCreate) { setShowUpgradeModal(true); return; }
-                  setSelectedTemplate(tpl);
-                  setTemplateProjectName(tpl.name);
-                  setTemplateDialogOpen(true);
-                }}
-              >
-                <div className="text-2xl">{tpl.emoji}</div>
-                <div>
-                  <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors">{tpl.name}</p>
-                  <p className="text-xs text-white/50 mt-0.5">{tpl.description}</p>
-                </div>
-                <div className="mt-auto pt-2">
-                  <span className="text-xs text-purple-400 group-hover:text-purple-300 transition-colors">Use template →</span>
+          {(['experience', 'product-brand', 'creative'] as TemplateCategory[]).map((cat) => {
+            const catTemplates = TEMPLATES.filter((t) => t.category === cat);
+            if (catTemplates.length === 0) return null;
+            return (
+              <div key={cat} className="mb-6">
+                <h4 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">
+                  {TEMPLATE_CATEGORY_LABELS[cat]}
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {catTemplates.map((tpl) => (
+                    <div
+                      key={tpl.id}
+                      className="group flex flex-col gap-2 p-4 rounded-xl bg-black/20 border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all cursor-pointer"
+                      onClick={() => {
+                        setSelectedTemplate(tpl);
+                        setTemplateProjectName(tpl.name);
+                        setTemplateDialogOpen(true);
+                      }}
+                    >
+                      <div className="text-2xl">{tpl.emoji}</div>
+                      <div>
+                        <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors">{tpl.name}</p>
+                        <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{tpl.description}</p>
+                      </div>
+                      <div className="mt-auto pt-2">
+                        <span className="text-xs text-purple-400 group-hover:text-purple-300 transition-colors">Use template →</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
       </div>
 
