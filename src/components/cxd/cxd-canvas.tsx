@@ -1736,14 +1736,23 @@ export function CXDCanvas() {
 
         // Auto-expand container to wrap all children with 20px padding (never shrinks)
         if (elementsToDrop.length > 0) {
-          const allEls = getCanvasElements();
-          const children = allEls.filter((el) => el.containerId === targetContainer.id);
-          if (children.length > 0) {
+          // Build child list from canvasElements closure (works in both Yjs and LWW mode).
+          // Don't use getCanvasElements() here — in Yjs mode the containerId update is
+          // deferred to the next requestAnimationFrame and would read stale values.
+          const preExistingChildren = canvasElements.filter(
+            (el) => el.containerId === targetContainer.id,
+          );
+          const droppedEls = elementsToDrop
+            .map((id) => canvasElements.find((e) => e.id === id))
+            .filter((e): e is CanvasElement => e !== undefined);
+          const allChildren = [...preExistingChildren, ...droppedEls];
+
+          if (allChildren.length > 0) {
             const PAD = 20;
-            const minX = Math.min(...children.map((c) => c.x));
-            const minY = Math.min(...children.map((c) => c.y));
-            const maxX = Math.max(...children.map((c) => c.x + c.width));
-            const maxY = Math.max(...children.map((c) => c.y + c.height));
+            const minX = Math.min(...allChildren.map((c) => c.x));
+            const minY = Math.min(...allChildren.map((c) => c.y));
+            const maxX = Math.max(...allChildren.map((c) => c.x + c.width));
+            const maxY = Math.max(...allChildren.map((c) => c.y + c.height));
 
             const proposedX = minX - PAD;
             const proposedY = minY - PAD;
@@ -1795,6 +1804,7 @@ export function CXDCanvas() {
     draggingElement,
     canvasElements,
     syncAddNodeToContainer,
+    syncUpdateElement,
     dropTargetBoardId,
     dropTargetContainerId,
     selectedElementIds,
