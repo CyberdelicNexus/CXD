@@ -10,7 +10,6 @@ export const TOUR_STEPS: Record<'canvas' | 'map' | 'plan', TourStep[]> = {
     { targetId: 'canvas-toolkit', title: 'Your Toolkit', content: 'This is your toolkit. Click any tool to add elements to your canvas — cards, text, images, shapes, containers, and more.', position: 'right' },
     { targetId: 'canvas-element-sample', title: 'Canvas Elements', content: 'Drag to move, grab corners to resize, right-click for more options. Double-click cards to edit their content.', position: 'top' },
     { targetId: 'canvas-inbox', title: 'Inbox', content: 'Your inbox holds elements waiting to be placed. Drag them onto the canvas when you\'re ready to use them.', position: 'left' },
-    { targetId: 'canvas-connector-port', title: 'Connections', content: 'Drag from a connector port to another element to create connections. A menu appears to choose the connection type.', position: 'top' },
     { targetId: 'canvas-board-tool', title: 'Nested Boards', content: 'Create nested boards to organize complex projects. Double-click a board to dive inside it.', position: 'top' },
     { targetId: 'canvas-experience-sidebar', title: 'Experience Elements', content: 'Drag experience elements from here onto the canvas, or click them to view details about each experience stage.', position: 'left' },
     { targetId: 'canvas-experience-flow', title: 'Experience Flow', content: 'Map the stages of your experience here. This timeline shows how your experience flows from start to finish.', position: 'top' },

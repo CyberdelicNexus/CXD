@@ -2869,7 +2869,7 @@ export const useCXDStore = create<CXDState>()(
       nextTourStep: () => {
         const { tourStep, tourId } = get();
         // Step counts per tour — import-free to avoid circular deps
-        const stepCounts: Record<string, number> = { canvas: 9, map: 5, plan: 7 };
+        const stepCounts: Record<string, number> = { canvas: 8, map: 5, plan: 7 };
         const maxSteps = tourId ? stepCounts[tourId] ?? 0 : 0;
         if (tourStep + 1 >= maxSteps) {
           get().completeTour();

@@ -40,6 +40,9 @@ export function TourOverlay() {
   const steps = tourId ? TOUR_STEPS[tourId] : [];
   const currentStep = steps[tourStep] ?? null;
 
+  // Track how long we've been polling for a missing/zero-size target
+  const missingTargetCountRef = useRef(0);
+
   // Measure target element position
   const measureTarget = useCallback(() => {
     if (!currentStep) {
@@ -48,22 +51,52 @@ export function TourOverlay() {
     }
     const el = document.querySelector(`[data-tour-id="${currentStep.targetId}"]`);
     if (el) {
+      // Scroll element into view if it's outside the viewport (skip for
+      // canvas elements that are positioned via CSS transforms)
+      const r = el.getBoundingClientRect();
+      const isOffscreen =
+        r.bottom < 0 ||
+        r.top > window.innerHeight ||
+        r.right < 0 ||
+        r.left > window.innerWidth;
+      if (isOffscreen) {
+        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      }
+
       const rect = el.getBoundingClientRect();
-      setTargetRect({
-        top: rect.top,
-        left: rect.left,
-        width: rect.width,
-        height: rect.height,
-      });
+      if (rect.width > 0 && rect.height > 0) {
+        missingTargetCountRef.current = 0;
+        setTargetRect({
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+        });
+      } else {
+        // Element found but zero-size — skip after a few polls
+        missingTargetCountRef.current++;
+        if (missingTargetCountRef.current > 4) {
+          missingTargetCountRef.current = 0;
+          nextTourStep();
+        }
+      }
     } else {
-      // Element not found - show tooltip centered without cutout
+      // Element not found — auto-skip after ~2 seconds of polling (4 x 500ms)
+      missingTargetCountRef.current++;
+      if (missingTargetCountRef.current > 4) {
+        missingTargetCountRef.current = 0;
+        nextTourStep();
+      }
       setTargetRect(null);
     }
-  }, [currentStep]);
+  }, [currentStep, nextTourStep]);
 
   // Re-measure on step change, resize, scroll
   useEffect(() => {
     if (!tourActive || !currentStep) return;
+
+    // Reset missing-target counter on step change
+    missingTargetCountRef.current = 0;
 
     // Transition animation between steps
     if (prevStepRef.current !== tourStep) {
@@ -131,7 +164,7 @@ export function TourOverlay() {
     )`;
   };
 
-  // Calculate tooltip position
+  // Resolve final tooltip position — with auto-flip and viewport clamping
   const getTooltipStyle = (): React.CSSProperties => {
     if (!targetRect) {
       // Center of screen if no target found
@@ -144,7 +177,25 @@ export function TourOverlay() {
       };
     }
 
-    const pos = currentStep.position;
+    const margin = 16; // minimum distance from viewport edges
+    const estimatedTooltipHeight = 200; // conservative estimate for clamping
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Determine effective position — flip if preferred side has no room
+    let pos = currentStep.position;
+    const spaceTop = targetRect.top;
+    const spaceBottom = vh - targetRect.top - targetRect.height;
+    const spaceLeft = targetRect.left;
+    const spaceRight = vw - targetRect.left - targetRect.width;
+    const neededHoriz = TOOLTIP_MAX_WIDTH + TOOLTIP_OFFSET + margin;
+    const neededVert = estimatedTooltipHeight + TOOLTIP_OFFSET + margin;
+
+    if (pos === "right" && spaceRight < neededHoriz) pos = spaceLeft >= neededHoriz ? "left" : "bottom";
+    else if (pos === "left" && spaceLeft < neededHoriz) pos = spaceRight >= neededHoriz ? "right" : "bottom";
+    else if (pos === "bottom" && spaceBottom < neededVert) pos = spaceTop >= neededVert ? "top" : "right";
+    else if (pos === "top" && spaceTop < neededVert) pos = spaceBottom >= neededVert ? "bottom" : "right";
+
     const style: React.CSSProperties = {
       position: "fixed",
       maxWidth: TOOLTIP_MAX_WIDTH,
@@ -152,7 +203,7 @@ export function TourOverlay() {
 
     switch (pos) {
       case "top":
-        style.bottom = window.innerHeight - targetRect.top + TOOLTIP_OFFSET;
+        style.bottom = vh - targetRect.top + TOOLTIP_OFFSET;
         style.left = targetRect.left + targetRect.width / 2;
         style.transform = "translateX(-50%)";
         break;
@@ -163,7 +214,7 @@ export function TourOverlay() {
         break;
       case "left":
         style.top = targetRect.top + targetRect.height / 2;
-        style.right = window.innerWidth - targetRect.left + TOOLTIP_OFFSET;
+        style.right = vw - targetRect.left + TOOLTIP_OFFSET;
         style.transform = "translateY(-50%)";
         break;
       case "right":
@@ -171,6 +222,20 @@ export function TourOverlay() {
         style.left = targetRect.left + targetRect.width + TOOLTIP_OFFSET;
         style.transform = "translateY(-50%)";
         break;
+    }
+
+    // Clamp to viewport bounds
+    if (style.left !== undefined && typeof style.left === "number") {
+      style.left = Math.max(margin, Math.min(style.left, vw - TOOLTIP_MAX_WIDTH - margin));
+    }
+    if (style.top !== undefined && typeof style.top === "number") {
+      style.top = Math.max(margin, Math.min(style.top, vh - estimatedTooltipHeight - margin));
+    }
+    if (style.right !== undefined && typeof style.right === "number") {
+      style.right = Math.max(margin, style.right);
+    }
+    if (style.bottom !== undefined && typeof style.bottom === "number") {
+      style.bottom = Math.max(margin, style.bottom);
     }
 
     return style;
