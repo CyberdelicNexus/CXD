@@ -1016,6 +1016,7 @@ export function CXDCanvas() {
             const containerTarget = canvasElements.find(
               (el) =>
                 el.type === "container" &&
+                !(el as ContainerElement).collapsed &&
                 !selectedElementIds.has(el.id) &&
                 mouseCanvasX >= el.x &&
                 mouseCanvasX <= el.x + el.width &&
@@ -1118,6 +1119,7 @@ export function CXDCanvas() {
               const containerTarget = canvasElements.find(
                 (el) =>
                   el.type === "container" &&
+                  !(el as ContainerElement).collapsed &&
                   el.id !== draggingElement &&
                   mouseCanvasX >= el.x &&
                   mouseCanvasX <= el.x + el.width &&
