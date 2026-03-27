@@ -65,6 +65,14 @@ export const FONT_FAMILIES = [
   { value: 'Inter, sans-serif', label: 'Inter' },
   { value: 'Georgia, serif', label: 'Georgia' },
   { value: 'ui-monospace, monospace', label: 'Mono' },
+  // Creative/Display
+  { value: "'Space Grotesk', sans-serif", label: 'Space Grotesk' },
+  { value: "'Syne', sans-serif", label: 'Syne' },
+  { value: "'Unbounded', sans-serif", label: 'Unbounded' },
+  // Professional/Versatile
+  { value: "'Playfair Display', serif", label: 'Playfair' },
+  { value: "'Raleway', sans-serif", label: 'Raleway' },
+  { value: "'Outfit', sans-serif", label: 'Outfit' },
 ] as const;
 
 // Style properties shared across elements
@@ -256,7 +264,10 @@ export interface LineElement extends CanvasElementBase {
   style?: {
     kind?: 'solid' | 'dashed' | 'dotted';
     widthPx?: number;
+    /** Solid color (hex/hsl). Overridden by gradientName when set. */
     color?: string;
+    /** Named gradient — same palette as connectors. Takes precedence over color. */
+    gradientName?: 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
     startCap?: LineEndStyle;
     endCap?: LineEndStyle;
   };
@@ -401,7 +412,7 @@ export const DEFAULT_ELEMENT_SIZES: Record<CanvasElementType, { width: number; h
   container: { width: 300, height: 200 },
   connector: { width: 0, height: 0 },
   line: { width: 200, height: 0 },
-  text: { width: 200, height: 40 },
+  text: { width: 400, height: 40 },
   link: { width: 320, height: 240 }, // Updated for better bookmark view and 16:9 embed
   board: { width: 200, height: 150 },
   experienceBlock: { width: 220, height: 100 },

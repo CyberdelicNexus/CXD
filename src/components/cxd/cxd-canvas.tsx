@@ -1526,7 +1526,8 @@ export function CXDCanvas() {
             ...baseElement,
             type: "text",
             content: "",
-            style: { fontSize: 20 },
+            width: 400,
+            style: { fontSize: 32, fontWeight: 'bold' },
           };
           break;
         case "link":
@@ -2237,12 +2238,37 @@ export function CXDCanvas() {
           reader.onload = (evt) => {
             const src = evt.target?.result as string;
             if (!src) return;
-            pushCanvasHistory();
-            const base = makeElementBase('image', canvasX, canvasY);
-            const newEl = { ...base, type: 'image' as const, src, objectFit: 'cover' as const };
-            syncAddElement(newEl);
-            setSelectedElementId(newEl.id);
-            setSelectedElementIds(new Set([newEl.id]));
+            // Read natural dimensions before creating the element so we preserve aspect ratio
+            const img = new window.Image();
+            img.onload = () => {
+              const MAX = 400;
+              const w = img.naturalWidth || MAX;
+              const h = img.naturalHeight || MAX;
+              const ratio = Math.min(MAX / w, MAX / h, 1);
+              const width = Math.round(w * ratio);
+              const height = Math.round(h * ratio);
+              pushCanvasHistory();
+              const maxZIndex = canvasElements.reduce(
+                (mx, el) => Math.max(mx, Number.isFinite(el.zIndex) ? el.zIndex : 0), 0,
+              );
+              const newEl = {
+                id: crypto.randomUUID(),
+                type: 'image' as const,
+                x: canvasX - width / 2,
+                y: canvasY - height / 2,
+                width,
+                height,
+                zIndex: maxZIndex + 1,
+                boardId: activeBoardId,
+                surface: activeSurface,
+                src,
+                objectFit: 'cover' as const,
+              };
+              syncAddElement(newEl);
+              setSelectedElementId(newEl.id);
+              setSelectedElementIds(new Set([newEl.id]));
+            };
+            img.src = src;
           };
           reader.readAsDataURL(file);
           return;
@@ -4676,7 +4702,7 @@ export function CXDCanvas() {
               let newElement: CanvasElement;
               switch (type) {
                 case 'text':
-                  newElement = { ...baseElement, type: 'text', content: '' };
+                  newElement = { ...baseElement, type: 'text', content: '', width: 400, style: { fontSize: 32, fontWeight: 'bold' } };
                   break;
                 case 'image':
                   newElement = { ...baseElement, type: 'image', src: '', alt: '' };
@@ -4877,7 +4903,8 @@ export function CXDCanvas() {
                   ...base,
                   type: 'text',
                   content: d.text,
-                  style: { fontSize: 20 },
+                  width: 400,
+                  style: { fontSize: 32, fontWeight: 'bold' },
                 } as any);
                 setSelectedElementId(base.id);
                 setSelectedElementIds(new Set([base.id]));

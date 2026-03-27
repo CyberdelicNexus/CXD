@@ -114,6 +114,7 @@ import {
   Tag,
   AlertCircle,
   Download,
+  ALargeSmall,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
@@ -764,6 +765,7 @@ export function CanvasElementRenderer({
       {/* Connection port - floating dot that slides along the nearest edge following the cursor */}
       {onStartConnector &&
         element.type !== "line" &&
+        element.type !== "text" &&
         !(element.type === "freeform" && (element as FreeformElement).isDocument) && (
           <FloatingPort
             elementId={element.id}
@@ -1198,6 +1200,37 @@ export function CanvasElementRenderer({
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
+          {element.type === "container" && (
+            <>
+              {TINT_ORDER.map((name) => {
+                const c = CONTAINER_TINTS[name];
+                const isActive = (element as ContainerElement).tintColor === name ||
+                  (!(element as ContainerElement).tintColor && name === 'violet');
+                return (
+                  <button
+                    key={name}
+                    title={name.charAt(0).toUpperCase() + name.slice(1)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdate({ tintColor: name } as Partial<CanvasElement>);
+                    }}
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.mid})`,
+                      border: isActive ? '2px solid rgba(255,255,255,0.9)' : '2px solid rgba(255,255,255,0.15)',
+                      boxShadow: isActive ? `0 0 6px ${c.mid}88` : 'none',
+                      flexShrink: 0,
+                      cursor: 'pointer',
+                      transition: 'border-color 0.15s, box-shadow 0.15s',
+                    }}
+                  />
+                );
+              })}
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+            </>
+          )}
           {element.type === "experienceBlock" && (
             <>
               <div className="relative">
@@ -1269,63 +1302,6 @@ export function CanvasElementRenderer({
           )}
           {element.type === "container" && (
             <>
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    showColorPicker ? closeAllSubmenus() : openColorPicker();
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showColorPicker && "bg-primary/20 text-primary",
-                  )}
-                  title="Styling"
-                >
-                  <Palette className="w-4 h-4" />
-                </button>
-                {showColorPicker && element.type === "container" && (
-                  <ContainerStylePicker
-                    fillColor={(element as ContainerElement).style?.bgColor}
-                    strokeColor={
-                      (element as ContainerElement).style?.borderColor
-                    }
-                    strokeWidth={
-                      (element as ContainerElement).style?.borderWidth
-                    }
-                    strokeStyle={
-                      (element as ContainerElement).style?.borderStyle
-                    }
-                    fillOpacity={
-                      (element as ContainerElement).style?.fillOpacity
-                    }
-                    onFillColorChange={(color) =>
-                      onUpdate({ style: { ...element.style, bgColor: color } })
-                    }
-                    onStrokeColorChange={(color) =>
-                      onUpdate({
-                        style: { ...element.style, borderColor: color },
-                      })
-                    }
-                    onStrokeWidthChange={(width) =>
-                      onUpdate({
-                        style: { ...element.style, borderWidth: width },
-                      })
-                    }
-                    onStrokeStyleChange={(style) =>
-                      onUpdate({
-                        style: { ...element.style, borderStyle: style },
-                      })
-                    }
-                    onFillOpacityChange={(opacity) =>
-                      onUpdate({
-                        style: { ...element.style, fillOpacity: opacity },
-                      })
-                    }
-                    onClose={() => setShowColorPicker(false)}
-                  />
-                )}
-              </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1622,11 +1598,10 @@ export function CanvasElementRenderer({
       )}
       {/* Element content */}
       {renderContent()}
-      {/* Resize handles - shown when selected (not for boards, text, or line elements) */}
+      {/* Resize handles - shown when selected (not for boards or line elements) */}
       {isSelected &&
         !isDragging &&
         element.type !== "board" &&
-        element.type !== "text" &&
         element.type !== "line" && (
           <>
             {/* Note cards are the only resizable freeform cards (width-only). */}
@@ -1723,20 +1698,12 @@ export function CanvasElementRenderer({
         )}
       {/* Text font-size resize handle - shown when text selected and not editing */}
       {isSelected && !isEditing && element.type === "text" && !isReadOnly && (
-        <>
-          <TextFontSizeHandle
-            element={element as TextElement}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-            onResizeStart={pushCanvasHistory}
-          />
-          <TextWrapWidthHandle
-            element={element as TextElement}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-            onResizeStart={pushCanvasHistory}
-          />
-        </>
+        <TextFontSizeHandle
+          element={element as TextElement}
+          onUpdate={onUpdate}
+          canvasZoom={canvasZoom}
+          onResizeStart={pushCanvasHistory}
+        />
       )}
     </div>
   );
@@ -2015,15 +1982,13 @@ function TextFontSizeHandle({
 
       setIsDragging(true);
 
-      const startX = e.clientX;
       const startY = e.clientY;
       const startFontSize = element.style?.fontSize || 16;
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
-        // Calculate delta - diagonal movement (right/down increases, left/up decreases)
-        const deltaX = (moveEvent.clientX - startX) / canvasZoom;
+        // Calculate delta - vertical only (down increases, up decreases)
         const deltaY = (moveEvent.clientY - startY) / canvasZoom;
-        const delta = (deltaX + deltaY) / 2; // Average of both axes for smooth diagonal
+        const delta = deltaY;
 
         // Scale factor: each 10px of drag = 1px font size change
         const fontSizeChange = Math.round(delta / 10);
@@ -2056,102 +2021,29 @@ function TextFontSizeHandle({
   const handleScale = 1 / canvasZoom;
   const baseScale = isDragging ? 1.25 : 1;
 
+  // Offset the handle below the element
+  const handleOffset = 8;
+
   return (
     <div
       className={cn(
-        "absolute bottom-0 right-0 w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-nwse-resize transition-all hover:scale-110",
+        "absolute w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-ns-resize transition-all hover:scale-110",
         isDragging && "shadow-lg",
       )}
       style={{
-        transform: `translate(50%, 50%) scale(${handleScale * baseScale})`,
-        transformOrigin: "bottom right",
+        position: 'absolute',
+        left: '50%',
+        bottom: `-${handleOffset}px`,
+        transform: `translateX(-50%) scale(${handleScale * baseScale})`,
       }}
       onMouseDown={handleMouseDown}
       title="Drag to resize text"
     >
-      <Type className="w-3 h-3 text-background" />
+      <ALargeSmall className="w-3.5 h-3.5 text-background" />
     </div>
   );
 }
 
-// Text wrap-width handle - drag horizontally to control text wrapping
-function TextWrapWidthHandle({
-  element,
-  onUpdate,
-  canvasZoom,
-  onResizeStart,
-}: {
-  element: TextElement;
-  onUpdate: (updates: Partial<TextElement>) => void;
-  canvasZoom: number;
-  onResizeStart?: () => void;
-}) {
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-
-      // Capture history before starting resize for undo support
-      onResizeStart?.();
-
-      setIsDragging(true);
-
-      const startX = e.clientX;
-      const startWidth = element.wrapWidth || element.width;
-
-      const handleMouseMove = (moveEvent: MouseEvent) => {
-        // Calculate horizontal delta only
-        const deltaX = (moveEvent.clientX - startX) / canvasZoom;
-        let newWrapWidth = startWidth + deltaX;
-
-        // Clamp to reasonable bounds (min 60px, no max)
-        newWrapWidth = Math.max(60, newWrapWidth);
-
-        onUpdate({
-          wrapWidth: newWrapWidth,
-        });
-      };
-
-      const handleMouseUp = () => {
-        setIsDragging(false);
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    },
-    [element, onUpdate, canvasZoom, onResizeStart],
-  );
-
-  return (
-    <div
-      className={cn(
-        "absolute top-0 right-0 w-5 h-5 bg-accent/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-ew-resize transition-all hover:scale-110",
-        isDragging && "scale-125 shadow-lg",
-      )}
-      style={{
-        transform: "translate(50%, -50%)",
-      }}
-      onMouseDown={handleMouseDown}
-      title="Drag to control text wrapping"
-    >
-      <svg
-        className="w-3 h-3 text-background"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M4 12h16M4 6h16M4 18h10" />
-      </svg>
-    </div>
-  );
-}
 
 // Color picker popover - positioned above the toolbar
 function ColorPicker({
@@ -6210,22 +6102,26 @@ function ContainerCard({
             value={element.label ?? ''}
             onChange={(e) => onUpdate({ label: e.target.value })}
             onBlur={onBlur}
-            placeholder="Group"
-            className="flex-1 min-w-0 bg-transparent border-0 p-0 text-xs font-medium focus:outline-none"
+            placeholder="Name"
+            className="flex-1 min-w-0 bg-transparent border-0 p-0 focus:outline-none"
             style={{
               color: `rgba(${hexToRgb(tint.light)}, 0.85)`,
-              fontFamily: 'monospace',
+              fontFamily: "'Poppins', sans-serif",
+              fontSize: 17,
+              fontWeight: 600,
             }}
           />
         ) : (
           <span
-            className="flex-1 min-w-0 truncate text-xs font-medium"
+            className="flex-1 min-w-0 truncate"
             style={{
               color: `rgba(${hexToRgb(tint.light)}, 0.85)`,
-              fontFamily: 'monospace',
+              fontFamily: "'Poppins', sans-serif",
+              fontSize: 17,
+              fontWeight: 600,
             }}
           >
-            {element.label || 'Group'}
+            {element.label || 'Name'}
           </span>
         )}
 
@@ -6583,6 +6479,20 @@ function LinkCard({
   const [embedError, setEmbedError] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-fetch bookmark metadata when element is created with a URL but no metadata yet.
+  // This handles the paste-as-bookmark flow where the URL is set but the card is empty.
+  useEffect(() => {
+    if (
+      element.url &&
+      element.linkMode === 'bookmark' &&
+      !element.title &&
+      !element.domain
+    ) {
+      fetchLinkMetadata(element.url);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync draft with element when element URL changes externally
   useEffect(() => {
