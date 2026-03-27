@@ -2,7 +2,7 @@
 // Central model configuration and provider factory.
 // Adding a new provider requires only a new entry here + the @ai-sdk package.
 
-import { openai, createOpenAI } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
 import { google, createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { AIProviderKey, AIModelTier } from "@/types/ai-types";
@@ -15,9 +15,6 @@ export const MODEL_ID_MAP: Record<ModelId, string> = {
   // Gemini - requires 'models/' prefix
   'gemini-2.0-flash': 'models/gemini-2.0-flash',
   'gemini-2.5-pro': 'models/gemini-2.5-pro',
-  // GPT - working
-  'gpt-4o-mini': 'gpt-4o-mini',
-  'gpt-4o': 'gpt-4o',
   // Kimi - working
   'kimi': 'moonshotai/kimi-k2.5',
   // Claude - only claude-3-haiku-20240307 works with current API key
@@ -45,24 +42,6 @@ interface ModelEntry {
 
 // Model configurations per provider per tier
 const MODEL_CONFIGS: Record<AIProviderKey, Record<AIModelTier, ModelEntry>> = {
-  gpt: {
-    chat: {
-      provider: "gpt",
-      tier: "chat",
-      modelId: process.env.GPT_TIER1_MODEL || "gpt-4.1",
-      displayName: "GPT-4.1",
-      costMultiplier: 1.0,
-      maxTokens: 4096,
-    },
-    analysis: {
-      provider: "gpt",
-      tier: "analysis",
-      modelId: process.env.GPT_TIER2_MODEL || "gpt-4.1",
-      displayName: "GPT-4.1",
-      costMultiplier: 2.0,
-      maxTokens: 8192,
-    },
-  },
   claude: {
     chat: {
       provider: "claude",
@@ -140,12 +119,6 @@ export function getModelInstance(
   const config = getModelConfig(provider, tier);
 
   switch (provider) {
-    case "gpt":
-      if (customApiKey) {
-        const customOpenAI = createOpenAI({ apiKey: customApiKey });
-        return customOpenAI(config.modelId);
-      }
-      return openai(config.modelId);
     case "claude":
       if (customApiKey) {
         const customAnthropic = createAnthropic({ apiKey: customApiKey });
@@ -184,13 +157,7 @@ export function getModelInstanceByModelId(
   const apiModelId = MODEL_ID_MAP[modelId];
 
   // Determine provider from model ID
-  if (modelId.startsWith('gpt-')) {
-    if (customApiKey) {
-      const customOpenAI = createOpenAI({ apiKey: customApiKey });
-      return customOpenAI(apiModelId);
-    }
-    return openai(apiModelId);
-  } else if (modelId.startsWith('claude-')) {
+  if (modelId.startsWith('claude-')) {
     if (customApiKey) {
       const customAnthropic = createAnthropic({ apiKey: customApiKey });
       return customAnthropic(apiModelId);
@@ -220,7 +187,6 @@ export function getModelInstanceByModelId(
  * User-facing provider display info.
  */
 export const PROVIDER_INFO: Record<AIProviderKey, { name: string; icon: string }> = {
-  gpt: { name: "GPT", icon: "openai" },
   claude: { name: "Claude", icon: "anthropic" },
   gemini: { name: "Gemini", icon: "google" },
   kimi: { name: "Kimi K2.5", icon: "nvidia" },
