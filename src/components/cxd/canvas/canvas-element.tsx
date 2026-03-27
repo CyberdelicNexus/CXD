@@ -772,6 +772,12 @@ export function CanvasElementRenderer({
             isConnecting={isConnecting ?? false}
             canvasZoom={canvasZoom ?? 1}
             isShape={element.type === 'shape'}
+            isContainer={element.type === 'container'}
+            isCollapsed={
+              element.type === 'container'
+                ? (element as ContainerElement).collapsed ?? false
+                : false
+            }
             onStartConnector={onStartConnector}
             onEndConnector={onEndConnector ?? (() => {})}
           />
