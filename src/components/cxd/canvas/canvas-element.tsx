@@ -6100,13 +6100,16 @@ function ContainerCard({
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const dotButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!pickerOpen) return;
     const handleOutside = (e: PointerEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setPickerOpen(false);
-      }
+      if (
+        (pickerRef.current && pickerRef.current.contains(e.target as Node)) ||
+        (dotButtonRef.current && dotButtonRef.current.contains(e.target as Node))
+      ) return;
+      setPickerOpen(false);
     };
     document.addEventListener('pointerdown', handleOutside);
     return () => document.removeEventListener('pointerdown', handleOutside);
@@ -6151,6 +6154,7 @@ function ContainerCard({
       >
         {/* Color dot */}
         <button
+          ref={dotButtonRef}
           className="w-3 h-3 rounded-full flex-shrink-0 focus:outline-none"
           style={{
             background: `radial-gradient(circle at 35% 30%, ${tint.light}, ${tint.mid})`,
