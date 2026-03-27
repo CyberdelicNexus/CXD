@@ -74,6 +74,8 @@ Corner handles only (4 corners) — already implemented. No change needed.
 
 `FloatingPort` receives `isContainer={element.type === 'container'}`. Container dead zones: corners only (offset < 14% or offset > 86% on any side). No midpoint dead zone — containers have no + buttons at edge centers.
 
+When the container is **collapsed**, the FloatingPort is hidden entirely — the element is only a header bar and connecting to it while collapsed would be confusing. Port reappears on uncollapse. When **locked**, the port still shows — you can connect to a locked container, just not move it.
+
 ---
 
 ## 3. Behaviours
@@ -155,7 +157,7 @@ No other type changes required. `locked` is on `CanvasElementBase`. `collapsed` 
 | `src/types/canvas-elements.ts` | Add `tintColor` to `ContainerElement` |
 | `src/components/cxd/canvas/canvas-element.tsx` | Rework `ContainerCard`: glassmorphism shell, header bar with 5 controls, collapse + lock toggle handlers |
 | `src/components/cxd/cxd-canvas.tsx` | Fix detachment (4-edge center-point check, 30px threshold); auto-expand on drop (bounding box + 20px pad); lock propagation (set locked on container + all children) |
-| `src/components/cxd/canvas/floating-port.tsx` | Pass `isContainer` prop → corner dead zones only |
+| `src/components/cxd/canvas/floating-port.tsx` | Pass `isContainer` + `isCollapsed` props → corner dead zones; hide entirely when collapsed |
 
 ### Files not changed
 
