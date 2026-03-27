@@ -6317,12 +6317,12 @@ function TextCard({
     }
   }, [
     element.content,
-    fontSize,
-    fontWeight,
-    fontFamily,
     wrapWidth,
     isEditing,
     onUpdate,
+    // NOTE: fontSize, fontWeight, fontFamily intentionally excluded —
+    // style changes should NOT reset the bounding box; text reflows
+    // within existing bounds via CSS.
   ]);
 
   // Removed automatic click-outside blur - user must click outside or press Escape to exit editing
