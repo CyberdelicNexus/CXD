@@ -5,7 +5,7 @@ import { Eye, EyeOff, Key, Check, AlertCircle, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ApiKeyConfig {
-  provider: 'openai' | 'anthropic';
+  provider: 'anthropic' | 'google' | 'moonshot';
   label: string;
   placeholder: string;
   helpText: string;

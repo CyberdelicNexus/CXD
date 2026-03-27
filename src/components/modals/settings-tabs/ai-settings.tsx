@@ -22,7 +22,6 @@ export function AISettings() {
   const getProviderColor = (provider: string) => {
     switch (provider) {
       case 'anthropic': return 'text-orange-400 border-orange-500/30 bg-orange-500/10';
-      case 'openai': return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
       case 'google': return 'text-blue-400 border-blue-500/30 bg-blue-500/10';
       case 'moonshot': return 'text-purple-400 border-purple-500/30 bg-purple-500/10';
       default: return 'text-gray-400 border-gray-500/30 bg-gray-500/10';
@@ -209,7 +208,6 @@ export function AISettings() {
           <div className="space-y-3">
             {[
               { provider: 'Anthropic', placeholder: 'sk-ant-...', link: 'https://console.anthropic.com' },
-              { provider: 'OpenAI', placeholder: 'sk-...', link: 'https://platform.openai.com' },
               { provider: 'Google', placeholder: 'AIza...', link: 'https://aistudio.google.com' },
               { provider: 'Moonshot', placeholder: 'sk-...', link: 'https://platform.moonshot.ai' },
             ].map(({ provider, placeholder, link }) => (

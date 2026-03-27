@@ -4,7 +4,7 @@ import { encryptAPIKey, decryptAPIKey, validateAPIKeyFormat, maskAPIKey } from '
 import { canBringOwnKeys } from '@/lib/ai-credit-config';
 import { getPlan } from '@/lib/plans';
 
-type Provider = 'anthropic' | 'openai' | 'google' | 'moonshot';
+type Provider = 'anthropic' | 'google' | 'moonshot';
 
 /**
  * GET /api/ai/byok
@@ -103,7 +103,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!['anthropic', 'openai', 'google', 'moonshot'].includes(provider)) {
+    if (!['anthropic', 'google', 'moonshot'].includes(provider)) {
       return NextResponse.json(
         { error: 'Invalid provider' },
         { status: 400 }

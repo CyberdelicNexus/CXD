@@ -91,7 +91,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       },
       {
         category: 'feature',
-        description: 'Support for 8 AI models across 4 providers (Anthropic, OpenAI, Google, Moonshot)',
+        description: 'Support for AI models across 3 providers (Anthropic, Google, Moonshot)',
       },
       {
         category: 'feature',

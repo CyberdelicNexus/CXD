@@ -60,28 +60,18 @@ function getAdminClient() {
 // ============================================================
 
 /**
- * Generate query embedding via OpenAI API.
- * Throws on API errors (caller handles gracefully).
+ * Generate query embedding for semantic search.
+ *
+ * TODO: Integrate a non-OpenAI embeddings provider (e.g. Google Generative AI
+ * text-embedding-004 via @ai-sdk/google, or a local model). Until then this
+ * function is disabled and always throws so the caller falls back to the empty
+ * KnowledgeContext path.
  */
-async function generateQueryEmbedding(query: string): Promise<number[]> {
-  const response = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'text-embedding-3-small',
-      input: query,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Embedding API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.data[0].embedding;
+async function generateQueryEmbedding(_query: string): Promise<number[]> {
+  throw new Error(
+    'Embeddings are currently disabled — no embeddings provider configured. ' +
+    'See TODO in knowledge-retrieval.ts to wire up a replacement.'
+  );
 }
 
 // ============================================================

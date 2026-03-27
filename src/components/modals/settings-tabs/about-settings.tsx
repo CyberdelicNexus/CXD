@@ -144,7 +144,7 @@ export function AboutSettings() {
             </div>
             <div className="flex items-center justify-between text-xs">
               <span>AI Providers:</span>
-              <span className="text-foreground">Anthropic, OpenAI, Google, Moonshot</span>
+              <span className="text-foreground">Anthropic, Google, Moonshot</span>
             </div>
           </div>
         </div>

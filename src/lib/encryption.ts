@@ -119,7 +119,6 @@ export function decryptAPIKey(encryptedData: string): string {
 export function validateAPIKeyFormat(provider: string, apiKey: string): boolean {
   const patterns: Record<string, RegExp> = {
     anthropic: /^sk-ant-api03-[A-Za-z0-9_-]{95}$/,
-    openai: /^sk-[A-Za-z0-9]{48}$/,
     google: /^AIza[A-Za-z0-9_-]{35}$/,
     moonshot: /^sk-[A-Za-z0-9]{32,}$/,
   };

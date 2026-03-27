@@ -286,7 +286,7 @@ export function UpgradeModal({ isOpen, onClose, feature, onUpgrade }: UpgradeMod
                 What happens to my Lifetime API usage?
               </summary>
               <p className="mt-2 text-sm text-muted-foreground pl-4">
-                Lifetime members can bring their own API keys (OpenAI, Anthropic) and use any model without consuming platform credits.
+                Lifetime members can bring their own API keys (Anthropic, Google, Moonshot) and use any model without consuming platform credits.
                 This gives you full control and unlimited usage with your preferred models.
               </p>
             </details>
