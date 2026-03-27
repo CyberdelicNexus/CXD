@@ -9,6 +9,9 @@ interface FloatingPortProps {
   isDragging: boolean;           // element is being dragged — hide port
   isConnecting: boolean;         // a connector draw is in progress globally
   canvasZoom: number;
+  isShape?: boolean;             // shapes have + icons at midpoints and resize handles at corners
+  isContainer?: boolean;         // containers: corner dead zones only (no midpoints)
+  isCollapsed?: boolean;         // collapsed containers: hide port entirely
   onStartConnector: (
     elementId: string,
     anchor: 'top' | 'right' | 'bottom' | 'left',
@@ -36,6 +39,9 @@ export function FloatingPort({
   isDragging,
   isConnecting,
   canvasZoom,
+  isShape = false,
+  isContainer = false,
+  isCollapsed = false,
   onStartConnector,
   onEndConnector,
 }: FloatingPortProps) {
@@ -110,8 +116,23 @@ export function FloatingPort({
       }
     }
 
+    // For shapes: exclude corner zones (resize handles) and midpoint zones (+ buttons)
+    if (isShape) {
+      const inCorner = offset < 14 || offset > 86;
+      const inMidpoint = offset > 38 && offset < 62;
+      if (inCorner || inMidpoint) return null;
+    }
+
+    // For containers: corner dead zones only (no midpoint dead zones — no + buttons)
+    // Hide entirely when collapsed
+    if (isContainer) {
+      if (isCollapsed) return null;
+      const inCorner = offset < 14 || offset > 86;
+      if (inCorner) return null;
+    }
+
     return { visible: true, side, offset };
-  }, [elementRef]);
+  }, [elementRef, isShape, isContainer, isCollapsed]);
 
   useEffect(() => {
     const el = elementRef.current;
