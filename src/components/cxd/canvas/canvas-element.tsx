@@ -6099,6 +6099,18 @@ function ContainerCard({
   );
 
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handleOutside = (e: PointerEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutside);
+    return () => document.removeEventListener('pointerdown', handleOutside);
+  }, [pickerOpen]);
 
   const handleLock = () => {
     const newLocked = !element.locked;
@@ -6150,6 +6162,7 @@ function ContainerCard({
         {/* Color picker popup */}
         {pickerOpen && (
           <div
+            ref={pickerRef}
             className="absolute top-8 left-0 flex gap-1.5 rounded-full px-2.5 py-2 border backdrop-blur-sm shadow-lg z-50"
             style={{
               background: 'rgba(15,12,25,0.95)',
@@ -6165,9 +6178,9 @@ function ContainerCard({
                   className="w-4 h-4 rounded-full transition-transform hover:scale-110 focus:outline-none flex-shrink-0"
                   style={{
                     background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.mid})`,
-                    outline: element.tintColor === name ? '2px solid rgba(255,255,255,0.9)' : 'none',
+                    outline: tintName === name ? '2px solid rgba(255,255,255,0.9)' : 'none',
                     outlineOffset: 2,
-                    boxShadow: element.tintColor === name ? `0 0 6px ${c.mid}88` : 'none',
+                    boxShadow: tintName === name ? `0 0 6px ${c.mid}88` : 'none',
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
