@@ -49,7 +49,6 @@ function getProviderFromModelId(modelId: string): string {
 
   // Fallback to legacy provider keys
   if (modelId.includes('claude')) return 'anthropic';
-  if (modelId.includes('gpt')) return 'openai';
   if (modelId.includes('gemini')) return 'google';
   if (modelId.includes('kimi')) return 'moonshot';
 
@@ -61,7 +60,6 @@ export function AIProviderIcon({ provider, className = "w-4 h-4" }: AIProviderIc
 
   switch (providerName) {
     case "openai":
-    case "gpt":
       return <OpenAIIcon className={className} />;
     case "anthropic":
     case "claude":

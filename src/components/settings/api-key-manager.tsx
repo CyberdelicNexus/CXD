@@ -20,13 +20,6 @@ const API_KEY_CONFIGS: ApiKeyConfig[] = [
     helpText: 'For Claude models (Sonnet, Opus, Haiku)',
     helpLink: 'https://console.anthropic.com/settings/keys',
   },
-  {
-    provider: 'openai',
-    label: 'OpenAI API Key',
-    placeholder: 'sk-...',
-    helpText: 'For GPT-4, GPT-4 Turbo, and O1 models',
-    helpLink: 'https://platform.openai.com/api-keys',
-  },
 ];
 
 interface ApiKeyManagerProps {

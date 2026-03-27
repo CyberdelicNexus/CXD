@@ -55,7 +55,7 @@ export function ERDGenerator({
 
   // Use the globally selected model from the credit meter, falling back to prop/default
   const { selectedModel } = useAICredits();
-  const provider = providerProp || selectedModel || "gpt";
+  const provider = providerProp || selectedModel || "gemini";
 
   const projects = useCXDStore((s) => s.projects);
   const addCanvasElement = useCXDStore((s) => s.addCanvasElement);

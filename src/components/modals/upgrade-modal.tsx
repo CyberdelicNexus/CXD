@@ -21,7 +21,7 @@ interface UpgradeModalProps {
 
 const PRO_FEATURES = [
   'Unlimited Canvases',
-  'Premium AI Models (GPT-4o, Claude Sonnet, Kimi)',
+  'Premium AI Models (Claude Sonnet, Gemini Pro, Kimi)',
   '500 AI Credits/month',
   'Plan View with Kanban Boards',
   'Smart Templates Library',
@@ -74,7 +74,7 @@ export function UpgradeModal({ isOpen, onClose, feature, onUpgrade }: UpgradeMod
       },
       'premium-ai': {
         title: 'Premium AI Models',
-        description: 'Get faster, more accurate responses with Claude Sonnet 4 and GPT-4.',
+        description: 'Get faster, more accurate responses with Claude Sonnet 4.5 and Gemini 2.5 Pro.',
         benefits: [
           'Faster response times',
           'Higher quality insights',

@@ -185,7 +185,7 @@ export function AISettings() {
             <div className="text-xs text-blue-300 flex items-start gap-2">
               <Crown className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <div>
-                <strong>Upgrade to Pro or Lifetime</strong> to unlock all premium AI models including Claude Sonnet 4.5, GPT-4o, and more.
+                <strong>Upgrade to Pro or Lifetime</strong> to unlock all premium AI models including Claude Sonnet 4.5, Gemini 2.5 Pro, and more.
               </div>
             </div>
           </div>

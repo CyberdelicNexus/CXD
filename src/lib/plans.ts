@@ -34,7 +34,7 @@ export const PLANS = {
     features: [
       'Unlimited Canvases',
       'Everything in Free',
-      'Premium AI Models (GPT-4o, Claude Sonnet, Kimi)',
+      'Premium AI Models (Claude Sonnet, Gemini Pro, Kimi)',
       '500 AI Credits/month',
       'Plan View with Kanban',
       'Smart Templates',
