@@ -13,6 +13,7 @@ export interface Comment {
   parentId: string | null;
   resolvedAt: number | null;
   resolvedBy?: string;
+  reactions?: Record<string, string[]>; // emoji -> array of authorIds who reacted
 }
 
 export interface CommentThread {

@@ -25,6 +25,64 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
+const REACTION_EMOJIS = ['👍', '❤️', '😊', '🎉', '🤔', '👀', '🔥', '💯'];
+
+function ReactionBar({ commentId, reactions }: { commentId: string; reactions?: Record<string, string[]> }) {
+  const [showPicker, setShowPicker] = useState(false);
+  const { toggleReaction } = useCXDStore();
+  const currentProject = useCXDStore((s) => s.getCurrentProject());
+  const authorId = currentProject?.ownerId || 'anonymous';
+
+  return (
+    <div className="flex items-center gap-1 flex-wrap mt-1.5 pl-7">
+      {/* Existing reactions */}
+      {reactions && Object.entries(reactions).map(([emoji, users]) => (
+        <button
+          key={emoji}
+          onClick={() => toggleReaction(commentId, emoji)}
+          className={cn(
+            "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs transition-all",
+            users.includes(authorId)
+              ? "bg-purple-500/20 border border-purple-500/30 text-white"
+              : "bg-white/5 border border-white/10 text-white/60 hover:bg-white/10"
+          )}
+        >
+          <span>{emoji}</span>
+          <span className="text-[10px]">{users.length}</span>
+        </button>
+      ))}
+
+      {/* Add reaction button */}
+      <div className="relative">
+        <button
+          onClick={() => setShowPicker(!showPicker)}
+          className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/30 hover:text-white/60 hover:bg-white/10 text-xs transition-all"
+        >
+          +
+        </button>
+
+        {/* Emoji picker popup */}
+        {showPicker && (
+          <div className="absolute bottom-full left-0 mb-1 flex gap-0.5 p-1.5 rounded-lg bg-[rgba(12,10,22,0.97)] border border-white/10 shadow-xl z-10">
+            {REACTION_EMOJIS.map(emoji => (
+              <button
+                key={emoji}
+                onClick={() => {
+                  toggleReaction(commentId, emoji);
+                  setShowPicker(false);
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors text-base"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function CommentThreadPanel({
   thread,
   canvasZoom,
@@ -136,6 +194,7 @@ export function CommentThreadPanel({
             <p className="text-sm text-white/70 whitespace-pre-wrap pl-7">
               {thread.root.content}
             </p>
+            <ReactionBar commentId={thread.root.id} reactions={thread.root.reactions} />
           </div>
 
           {/* Replies */}
@@ -161,6 +220,7 @@ export function CommentThreadPanel({
               <p className="text-sm text-white/70 whitespace-pre-wrap pl-7">
                 {reply.content}
               </p>
+              <ReactionBar commentId={reply.id} reactions={reply.reactions} />
             </div>
           ))}
         </div>

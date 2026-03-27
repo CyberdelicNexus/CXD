@@ -299,6 +299,7 @@ interface CXDState {
   resolveComment: (commentId: string) => void;
   unresolveComment: (commentId: string) => void;
   deleteComment: (commentId: string) => void;
+  toggleReaction: (commentId: string, emoji: string) => void;
   toggleShowResolved: () => void;
   getComments: () => Comment[];
   getThreads: () => CommentThread[];
@@ -2216,6 +2217,41 @@ export const useCXDStore = create<CXDState>()(
               : p
           ),
           activeCommentId: get().activeCommentId === commentId ? null : get().activeCommentId,
+        }));
+
+        const updatedProject = get().projects.find(p => p.id === currentProject.id);
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+      },
+
+      toggleReaction: (commentId, emoji) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject || !currentProject.comments) return;
+
+        const authorId = currentProject.ownerId || 'anonymous';
+
+        const comments = currentProject.comments.map(c => {
+          if (c.id !== commentId) return c;
+          const reactions = { ...(c.reactions || {}) };
+          const users = reactions[emoji] || [];
+
+          if (users.includes(authorId)) {
+            // Remove reaction
+            reactions[emoji] = users.filter(id => id !== authorId);
+            if (reactions[emoji].length === 0) delete reactions[emoji];
+          } else {
+            // Add reaction
+            reactions[emoji] = [...users, authorId];
+          }
+
+          return { ...c, reactions };
+        });
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments, updatedAt: new Date().toISOString() }
+              : p
+          ),
         }));
 
         const updatedProject = get().projects.find(p => p.id === currentProject.id);
