@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import {
   CanvasElement,
   CanvasElementType,
+  ContainerElement,
   DEFAULT_ELEMENT_SIZES,
   ShapeType,
   ShapeElement,
@@ -1728,10 +1729,48 @@ export function CXDCanvas() {
               ? [draggingElement]
               : [];
 
-        // Attach all dropped elements to the container (no auto-expansion)
+        // Attach all dropped elements to the container
         elementsToDrop.forEach((id) => {
           syncAddNodeToContainer(id, targetContainer.id);
         });
+
+        // Auto-expand container to wrap all children with 20px padding (never shrinks)
+        if (elementsToDrop.length > 0) {
+          const allEls = getCanvasElements();
+          const children = allEls.filter((el) => el.containerId === targetContainer.id);
+          if (children.length > 0) {
+            const PAD = 20;
+            const minX = Math.min(...children.map((c) => c.x));
+            const minY = Math.min(...children.map((c) => c.y));
+            const maxX = Math.max(...children.map((c) => c.x + c.width));
+            const maxY = Math.max(...children.map((c) => c.y + c.height));
+
+            const proposedX = minX - PAD;
+            const proposedY = minY - PAD;
+            const proposedX2 = maxX + PAD;
+            const proposedY2 = maxY + PAD;
+
+            // Union with current bounds (never shrink)
+            const finalX = Math.min(proposedX, targetContainer.x);
+            const finalY = Math.min(proposedY, targetContainer.y);
+            const finalX2 = Math.max(proposedX2, targetContainer.x + targetContainer.width);
+            const finalY2 = Math.max(proposedY2, targetContainer.y + targetContainer.height);
+
+            if (
+              finalX !== targetContainer.x ||
+              finalY !== targetContainer.y ||
+              finalX2 - finalX !== targetContainer.width ||
+              finalY2 - finalY !== targetContainer.height
+            ) {
+              syncUpdateElement(targetContainer.id, {
+                x: finalX,
+                y: finalY,
+                width: finalX2 - finalX,
+                height: finalY2 - finalY,
+              });
+            }
+          }
+        }
       }
     }
 
@@ -3654,9 +3693,17 @@ export function CXDCanvas() {
         }}
       >
         {/* Canvas Elements (freeform, images, shapes, etc.) - excluding lines which are rendered in overlay */}
-        {canvasElements
-          .filter((el) => el.type !== "line")
-          .map((element) => (
+        {(() => {
+          // Collect IDs of collapsed containers to hide their children
+          const collapsedIds = new Set(
+            canvasElements
+              .filter((el) => el.type === 'container' && (el as ContainerElement).collapsed)
+              .map((el) => el.id),
+          );
+          return canvasElements
+            .filter((el) => el.type !== 'line')
+            .filter((el) => !el.containerId || !collapsedIds.has(el.containerId))
+            .map((element) => (
             <CanvasElementRenderer
                 key={element.id}
                 element={element}
@@ -3749,7 +3796,8 @@ export function CXDCanvas() {
                 handleCreateConnectedShape(element, direction);
               }}
             />
-          ))}
+          ));
+        })()}
 
         {/* Remote selection rings — show which elements other collaborators have selected */}
         {collaborators.map((collaborator) =>
