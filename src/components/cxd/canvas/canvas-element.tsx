@@ -126,6 +126,7 @@ import {
   isNoteCard,
 } from "@/components/cxd/canvas/card-type-utils";
 import { FloatingPort } from "./floating-port";
+import DOMPurify from "dompurify";
 
 // Hypercube tag icons mapping (defined at top for use in JSX)
 const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
@@ -3238,9 +3239,12 @@ function FreeformCard({
   const noteTitle = element.noteTitle ?? (legacyLines[0] || "Untitled Note");
   const noteBody = element.noteBody ?? legacyLines.slice(1).join("\n");
   const renderedNoteBody = useMemo(
-    () => noteBody
-      .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
-      .replace(/>\s*\n+\s*</g, '><'),
+    () => DOMPurify.sanitize(
+      noteBody
+        .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
+        .replace(/>\s*\n+\s*</g, '><'),
+      { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }
+    ),
     [noteBody],
   );
 

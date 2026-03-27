@@ -177,9 +177,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Include partial error message for debugging
+    // Generic error - do not leak internal error details to client
     return NextResponse.json(
-      { error: `Generation failed: ${message.substring(0, 150)}` },
+      { error: "AI generation failed. Please try again or switch to a different model." },
       { status: 500 },
     );
   }

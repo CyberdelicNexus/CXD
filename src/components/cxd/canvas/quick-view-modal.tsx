@@ -4,6 +4,7 @@ import React from "react";
 import { CanvasElement, FreeformElement } from "@/types/canvas-elements";
 import { X, ExternalLink, MapPin, FileText, Image as ImageIcon, Video, Link2, Box, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import DOMPurify from "dompurify";
 
 interface QuickViewModalProps {
   element: CanvasElement;
@@ -43,7 +44,7 @@ export function QuickViewModal({
               {noteBody && (
                 <div
                   className="prose prose-invert prose-sm max-w-none text-foreground/90"
-                  dangerouslySetInnerHTML={{ __html: noteBody }}
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(noteBody, { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }) }}
                 />
               )}
               {!noteTitle && !noteBody && (

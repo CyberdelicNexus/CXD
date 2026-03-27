@@ -49,6 +49,10 @@ export async function GET(request: Request) {
   }
 
   // URL to redirect to after sign in process completes
-  const redirectTo = redirect_to || "/dashboard";
+  // Security: Only allow relative paths to prevent open redirect attacks
+  let redirectTo = redirect_to || "/dashboard";
+  if (redirectTo.startsWith("//") || redirectTo.startsWith("http:") || redirectTo.startsWith("https:") || !redirectTo.startsWith("/")) {
+    redirectTo = "/dashboard";
+  }
   return NextResponse.redirect(new URL(redirectTo, requestUrl.origin));
 }

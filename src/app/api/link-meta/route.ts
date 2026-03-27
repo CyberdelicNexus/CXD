@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,13 @@ function extractMetadata(html: string, url: string): {
 
 export async function GET(request: NextRequest) {
   try {
+    // Authenticate - only logged-in users can fetch link metadata
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const url = searchParams.get("url");
 

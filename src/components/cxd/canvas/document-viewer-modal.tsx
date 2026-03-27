@@ -5,6 +5,7 @@ import { FreeformElement } from "@/types/canvas-elements";
 import { X, Download, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { exportToMarkdown, exportToPDF, exportToDOCX } from "@/lib/document-export";
+import DOMPurify from "dompurify";
 
 interface DocumentViewerModalProps {
   element: FreeformElement;
@@ -153,7 +154,7 @@ export function DocumentViewerModal({ element, onClose }: DocumentViewerModalPro
         <div className="flex-1 overflow-y-auto px-8 py-6" style={{ scrollbarWidth: "thin" }}>
           <div
             className="prose prose-invert prose-sm max-w-none text-foreground/90"
-            dangerouslySetInnerHTML={{ __html: noteBody }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(noteBody, { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }) }}
           />
         </div>
       </div>

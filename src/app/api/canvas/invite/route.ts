@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     if (canvasError) {
       console.error('Error fetching canvas:', canvasError);
       return NextResponse.json(
-        { error: `Database error: ${canvasError.message}` },
+        { error: 'Failed to fetch canvas. Please try again.' },
         { status: 500 }
       );
     }
