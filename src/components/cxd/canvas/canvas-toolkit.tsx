@@ -158,6 +158,7 @@ export function CanvasToolkit({
   onActiveToolChange,
   canvasOriginOffset = { x: 0, y: 0 },
 }: CanvasToolkitProps) {
+  const setCommentMode = useCXDStore((s) => s.setCommentMode);
   // Use controlled state if provided, otherwise use internal state
   const [internalActiveTool, setInternalActiveTool] = useState<CanvasElementType | null>(null);
   const activeTool = controlledActiveTool !== undefined ? controlledActiveTool : internalActiveTool;
@@ -262,6 +263,9 @@ export function CanvasToolkit({
 
   const handleToolClick = useCallback(
     (type: CanvasElementType) => {
+      // Selecting any placement tool turns off comment mode
+      setCommentMode(false);
+
       if (type === "freeform") {
         setShowCardTypeMenu(!showCardTypeMenu);
         setShowShapePalette(false);
@@ -294,7 +298,7 @@ export function CanvasToolkit({
         }
       }
     },
-    [activeTool, showShapePalette, showLinkPalette, showCardTypeMenu, setActiveTool],
+    [activeTool, showShapePalette, showLinkPalette, showCardTypeMenu, setActiveTool, setCommentMode],
   );
 
   const handleCardTypeSelect = useCallback((cardType: "note" | "task" | "document") => {
@@ -535,7 +539,7 @@ export function CanvasToolkit({
         <div className="w-px h-6 bg-white/10 flex-shrink-0 mx-0.5" />
 
         {/* Comment Mode Toggle */}
-        <CommentModeToggle />
+        <CommentModeToggle onActivate={() => setActiveTool(null)} />
 
         {/* Collapse/Expand Toggle Wrapper */}
         <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center">
@@ -577,13 +581,17 @@ export function CanvasToolkit({
 }
 
 /** Comment mode toggle + show-resolved toggle */
-function CommentModeToggle() {
+function CommentModeToggle({ onActivate }: { onActivate?: () => void }) {
   const { commentMode, toggleCommentMode, showResolvedComments, toggleShowResolved } = useCXDStore();
 
   return (
     <div className="flex items-center gap-1 flex-shrink-0">
       <button
-        onClick={toggleCommentMode}
+        onClick={() => {
+          toggleCommentMode();
+          // When entering comment mode, clear any active placement tool
+          if (!commentMode && onActivate) onActivate();
+        }}
         title={commentMode ? "Exit comment mode" : "Comment mode"}
         className={cn(
           "flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300 group border border-transparent",

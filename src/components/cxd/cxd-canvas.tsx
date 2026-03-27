@@ -846,7 +846,9 @@ export function CXDCanvas() {
             const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
 
             // Comment mode: place a new comment or close active thread
-            if (commentMode) {
+            // Only intercept when comment tool is specifically selected (commentMode)
+            // and no other placement tool is active
+            if (commentMode && !activeTool) {
               if (activeCommentId) {
                 // Close any open thread when clicking empty canvas
                 setActiveComment(null);
@@ -880,7 +882,7 @@ export function CXDCanvas() {
         }
       }
     },
-    [canvasPosition, canvasZoom, setSelectedElementId, isSpacePressed, commentMode, activeCommentId, setActiveComment],
+    [canvasPosition, canvasZoom, setSelectedElementId, isSpacePressed, commentMode, activeCommentId, setActiveComment, activeTool],
   );
 
   const handleCanvasMouseMove = useCallback(
@@ -3678,7 +3680,7 @@ export function CXDCanvas() {
           ? "cursor-grab"
           : draggingElement
             ? "cursor-move"
-            : commentMode
+            : commentMode && !activeTool
               ? "cursor-crosshair"
               : "cursor-default w-full h-full"
         }`}
@@ -3997,7 +3999,7 @@ export function CXDCanvas() {
           </svg>
         )}
         {/* Comment Pins - rendered inside zoom/pan container so they move with canvas */}
-        {commentMode && commentThreads.map((thread, index) => (
+        {commentThreads.map((thread, index) => (
           <CommentPin
             key={thread.root.id}
             thread={thread}
@@ -4013,7 +4015,7 @@ export function CXDCanvas() {
         ))}
 
         {/* Active Comment Thread Panel */}
-        {commentMode && activeThread && (
+        {activeThread && (
           <CommentThreadPanel
             thread={activeThread}
             canvasZoom={canvasZoom}

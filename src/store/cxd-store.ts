@@ -291,8 +291,10 @@ interface CXDState {
 
   // Actions - Comments
   toggleCommentMode: () => void;
+  setCommentMode: (enabled: boolean) => void;
   setActiveComment: (commentId: string | null) => void;
   addComment: (content: string, position: { x: number; y: number }) => void;
+  updateCommentPosition: (commentId: string, position: { x: number; y: number }) => void;
   addReply: (parentId: string, content: string) => void;
   resolveComment: (commentId: string) => void;
   unresolveComment: (commentId: string) => void;
@@ -2050,6 +2052,13 @@ export const useCXDStore = create<CXDState>()(
         }));
       },
 
+      setCommentMode: (enabled) => {
+        set({
+          commentMode: enabled,
+          activeCommentId: null,
+        });
+      },
+
       setActiveComment: (commentId) => {
         set({ activeCommentId: commentId });
       },
@@ -2084,6 +2093,25 @@ export const useCXDStore = create<CXDState>()(
         }));
 
         // Persist to DB
+        const updatedProject = get().projects.find(p => p.id === currentProject.id);
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+      },
+
+      updateCommentPosition: (commentId, position) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject || !currentProject.comments) return;
+        const updatedComments = currentProject.comments.map(c =>
+          c.id === commentId ? { ...c, position } : c
+        );
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments: updatedComments, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
         const updatedProject = get().projects.find(p => p.id === currentProject.id);
         if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
       },

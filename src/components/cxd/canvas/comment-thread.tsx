@@ -119,8 +119,12 @@ export function CommentThreadPanel({
           {/* Root comment */}
           <div className={cn("px-3 py-2.5", isResolved && "opacity-60")}>
             <div className="flex items-center gap-2 mb-1">
-              <div className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
-                {thread.root.authorName.charAt(0).toUpperCase()}
+              <div className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 overflow-hidden">
+                {thread.root.authorAvatar ? (
+                  <img src={thread.root.authorAvatar} alt={thread.root.authorName} className="w-full h-full rounded-full object-cover" />
+                ) : (
+                  thread.root.authorName.charAt(0).toUpperCase()
+                )}
               </div>
               <span className="text-xs font-medium text-white/80">
                 {thread.root.authorName}
