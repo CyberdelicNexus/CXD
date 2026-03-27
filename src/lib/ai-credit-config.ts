@@ -9,7 +9,6 @@
  *
  * Sources:
  * - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
- * - OpenAI: https://openai.com/api/pricing/
  * - Google: https://ai.google.dev/gemini-api/docs/pricing
  * - Moonshot: https://platform.moonshot.ai/docs/pricing/chat
  */
@@ -27,19 +26,6 @@ export const AI_MODELS = {
     },
     contextWindow: 1_000_000,
     features: ['fast', 'cost-effective', 'multimodal'],
-    tier: 'budget',
-  },
-  'gpt-4o-mini': {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini',
-    provider: 'openai',
-    creditWeight: 1.5,
-    pricing: {
-      input: 0.15,
-      output: 0.60,
-    },
-    contextWindow: 128_000,
-    features: ['fast', 'smart', 'multimodal'],
     tier: 'budget',
   },
   'kimi': {
@@ -67,19 +53,6 @@ export const AI_MODELS = {
     contextWindow: 200_000,
     features: ['fast', 'efficient', 'smart'],
     tier: 'standard',
-  },
-  'gpt-4o': {
-    id: 'gpt-4o',
-    name: 'GPT-4o',
-    provider: 'openai',
-    creditWeight: 25,
-    pricing: {
-      input: 2.50,
-      output: 10.00,
-    },
-    contextWindow: 128_000,
-    features: ['smart', 'multimodal', 'vision'],
-    tier: 'premium',
   },
   'gemini-2.5-pro': {
     id: 'gemini-2.5-pro',
@@ -144,10 +117,8 @@ export const TIER_CREDIT_ALLOWANCES = {
     monthlyCredits: 500,  // ~500 Gemini Flash or ~83 Kimi or ~14 Sonnet conversations or ~8 Opus conversations
     allowedModels: [
       'gemini-2.0-flash',
-      'gpt-4o-mini',
       'kimi',
       'claude-haiku-4.5',
-      'gpt-4o',
       'gemini-2.5-pro',
       'claude-sonnet-4.5',
       'claude-opus-4.6',
@@ -159,10 +130,8 @@ export const TIER_CREDIT_ALLOWANCES = {
     lifetimeCredits: 1000,  // One-time 1000 credits on signup/upgrade
     allowedModels: [
       'gemini-2.0-flash',
-      'gpt-4o-mini',
       'kimi',
       'claude-haiku-4.5',
-      'gpt-4o',
       'gemini-2.5-pro',
       'claude-sonnet-4.5',
       'claude-opus-4.6',
@@ -173,10 +142,8 @@ export const TIER_CREDIT_ALLOWANCES = {
     monthlyCredits: 500,  // Same as Pro
     allowedModels: [
       'gemini-2.0-flash',
-      'gpt-4o-mini',
       'kimi',
       'claude-haiku-4.5',
-      'gpt-4o',
       'gemini-2.5-pro',
       'claude-sonnet-4.5',
     ] as ModelId[],
