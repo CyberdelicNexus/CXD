@@ -227,6 +227,7 @@ export interface ContainerElement extends CanvasElementBase {
   type: 'container';
   label?: string;
   collapsed?: boolean;
+  tintColor?: 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
   style?: ElementStyle;
 }
 
@@ -368,6 +369,7 @@ export interface CanvasEdge {
     lineStyle?: 'solid' | 'dashed' | 'dotted';
     gradientName?: 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
     arrowStyle?: 'none' | 'end' | 'start' | 'both';
+    gradientReversed?: boolean;   // flip gradient direction (dark→light becomes light→dark)
   };
 }
 
