@@ -8,6 +8,7 @@ import {
   ShapeType,
 } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
+import { useCXDStore } from "@/store/cxd-store";
 
 type LinkMode = 'bookmark' | 'embed' | 'file';
 
@@ -357,15 +358,19 @@ export function CanvasToolkit({
 
       const rect = canvasRef.current.getBoundingClientRect();
 
+      // Some browsers (e.g. Firefox) report clientX/Y as 0,0 on dragend — fall back to last known drag position
+      const clientX = e.clientX === 0 && e.clientY === 0 && dragPreview ? dragPreview.x : e.clientX;
+      const clientY = e.clientX === 0 && e.clientY === 0 && dragPreview ? dragPreview.y : e.clientY;
+
       if (
-        e.clientX >= rect.left &&
-        e.clientX <= rect.right &&
-        e.clientY >= rect.top &&
-        e.clientY <= rect.bottom
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
       ) {
         // Account for canvas origin offset (used in hypercube view where content is centered)
-        const x = (e.clientX - rect.left - canvasPosition.x - canvasOriginOffset.x) / canvasZoom;
-        const y = (e.clientY - rect.top - canvasPosition.y - canvasOriginOffset.y) / canvasZoom;
+        const x = (clientX - rect.left - canvasPosition.x - canvasOriginOffset.x) / canvasZoom;
+        const y = (clientY - rect.top - canvasPosition.y - canvasOriginOffset.y) / canvasZoom;
 
         const options = dragType === "shape"
           ? { shapeType: selectedShapeType }
@@ -389,6 +394,7 @@ export function CanvasToolkit({
       selectedShapeType,
       selectedLinkMode,
       canvasOriginOffset,
+      dragPreview,
     ],
   );
 
@@ -399,7 +405,7 @@ export function CanvasToolkit({
         ref={toolbarRef}
         className={cn(
           "fixed top-28 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center p-1.5 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
-          isCollapsed ? "w-[52px] overflow-hidden" : "w-[438px] overflow-visible"
+          isCollapsed ? "w-[52px] overflow-hidden" : "w-[500px] overflow-visible"
         )}
       >
         <div
@@ -524,6 +530,12 @@ export function CanvasToolkit({
           })}
         </div>
 
+        {/* Divider */}
+        <div className="w-px h-6 bg-white/10 flex-shrink-0 mx-0.5" />
+
+        {/* Comment Mode Toggle */}
+        <CommentModeToggle />
+
         {/* Collapse/Expand Toggle Wrapper */}
         <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center">
           <button
@@ -560,5 +572,55 @@ export function CanvasToolkit({
       )}
       {/* Line drawing preview is now handled by LineLayer component */}
     </>
+  );
+}
+
+/** Comment mode toggle + show-resolved toggle */
+function CommentModeToggle() {
+  const { commentMode, toggleCommentMode, showResolvedComments, toggleShowResolved } = useCXDStore();
+
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <button
+        onClick={toggleCommentMode}
+        title={commentMode ? "Exit comment mode" : "Comment mode"}
+        className={cn(
+          "flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300 group border border-transparent",
+          "hover:bg-purple-600/20 hover:border-purple-500/50 hover:shadow-[0_0_15px_rgba(168,85,247,0.3)]",
+          "active:scale-95",
+          commentMode &&
+            "bg-gradient-to-b from-purple-500/30 to-purple-950/60 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.4),inset_0_1px_0_rgba(255,255,255,0.1)]"
+        )}
+      >
+        <LucideIcons.MessageCircle
+          className={cn(
+            "w-5 h-5 transition-colors",
+            commentMode ? "text-white" : "text-white/60 group-hover:text-white"
+          )}
+        />
+      </button>
+
+      {/* Show resolved toggle - only visible when comment mode is active */}
+      {commentMode && (
+        <button
+          onClick={toggleShowResolved}
+          title={showResolvedComments ? "Hide resolved comments" : "Show resolved comments"}
+          className={cn(
+            "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-300 group border border-transparent",
+            "hover:bg-green-600/20 hover:border-green-500/50",
+            "active:scale-95",
+            showResolvedComments &&
+              "bg-green-500/20 border-green-500/40"
+          )}
+        >
+          <LucideIcons.CheckCircle
+            className={cn(
+              "w-4 h-4 transition-colors",
+              showResolvedComments ? "text-green-400" : "text-white/40 group-hover:text-white/70"
+            )}
+          />
+        </button>
+      )}
+    </div>
   );
 }

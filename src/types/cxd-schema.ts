@@ -307,6 +307,9 @@ export interface CXDProject {
     boards?: import('./canvas-elements').CanvasBoard[];
   };
 
+  // Comments (Figma-style canvas commenting)
+  comments?: import('./comment-types').Comment[];
+
   // Version Management (Strategic release planning)
   versions?: import('./version-types').Version[];
   okrs?: import('./version-types').OKR[];

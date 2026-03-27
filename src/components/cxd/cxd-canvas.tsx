@@ -35,6 +35,8 @@ import { CollaboratorCursors } from "@/components/collaboration";
 import { useCanvasSettings } from "@/hooks/use-canvas-settings";
 import { getGradient, GRADIENT_ORDER, type GradientName } from './canvas/connector-gradients';
 import { ConnectorRadialMenu } from './canvas/connector-radial-menu';
+import { CommentPin } from './canvas/comment-pin';
+import { CommentThreadPanel } from './canvas/comment-thread';
 
 // Constants for zoom limits
 const MIN_ZOOM = 0.1;
@@ -304,10 +306,33 @@ export function CXDCanvas() {
     getAllInboxItems,
     updateElementsPositionLocal,
     commitDragPositionsToYjs,
+    commentMode,
+    activeCommentId,
+    showResolvedComments,
+    setActiveComment,
+    addComment,
+    getThreads,
   } = useCXDStore();
 
   const project = getCurrentProject();
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+
+  // Comment threads for current board
+  const commentThreads = useMemo(() => {
+    const threads = getThreads();
+    if (showResolvedComments) return threads;
+    return threads.filter(t => t.root.resolvedAt === null);
+  }, [getThreads, showResolvedComments, project]);
+
+  // Active thread for the open panel
+  const activeThread = useMemo(
+    () => commentThreads.find(t => t.root.id === activeCommentId) ?? null,
+    [commentThreads, activeCommentId]
+  );
+
+  // New comment input state
+  const [newCommentInput, setNewCommentInput] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const newCommentInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Canvas settings from user preferences
   const { settings, zoomSensitivity } = useCanvasSettings();
@@ -813,12 +838,29 @@ export function CXDCanvas() {
           return;
         }
 
-        // Left click without spacebar: Start marquee selection
+        // Left click without spacebar
         if (e.button === 0 && !isSpacePressed) {
           if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             const x = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
             const y = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+
+            // Comment mode: place a new comment or close active thread
+            if (commentMode) {
+              if (activeCommentId) {
+                // Close any open thread when clicking empty canvas
+                setActiveComment(null);
+              }
+              // Close any existing new-comment input
+              setNewCommentInput(null);
+              // Open inline input at click position
+              setNewCommentInput({ x: e.clientX, y: e.clientY, worldX: x, worldY: y });
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+
+            // Normal mode: Start marquee selection
             setIsMarqueeSelecting(true);
             setMarqueeStart({ x, y });
             setMarqueeEnd({ x, y });
@@ -838,7 +880,7 @@ export function CXDCanvas() {
         }
       }
     },
-    [canvasPosition, canvasZoom, setSelectedElementId, isSpacePressed],
+    [canvasPosition, canvasZoom, setSelectedElementId, isSpacePressed, commentMode, activeCommentId, setActiveComment],
   );
 
   const handleCanvasMouseMove = useCallback(
@@ -3636,7 +3678,9 @@ export function CXDCanvas() {
           ? "cursor-grab"
           : draggingElement
             ? "cursor-move"
-            : "cursor-default w-full h-full"
+            : commentMode
+              ? "cursor-crosshair"
+              : "cursor-default w-full h-full"
         }`}
       style={{ right: canvasRightMargin, background: canvasBackground }}
       onMouseDown={handleCanvasMouseDown}
@@ -3950,6 +3994,29 @@ export function CXDCanvas() {
               />
             ))}
           </svg>
+        )}
+        {/* Comment Pins - rendered inside zoom/pan container so they move with canvas */}
+        {commentMode && commentThreads.map((thread, index) => (
+          <CommentPin
+            key={thread.root.id}
+            thread={thread}
+            index={index}
+            isActive={activeCommentId === thread.root.id}
+            isResolved={thread.root.resolvedAt !== null}
+            onClick={() => {
+              setActiveComment(activeCommentId === thread.root.id ? null : thread.root.id);
+              setNewCommentInput(null);
+            }}
+            canvasZoom={canvasZoom}
+          />
+        ))}
+
+        {/* Active Comment Thread Panel */}
+        {commentMode && activeThread && (
+          <CommentThreadPanel
+            thread={activeThread}
+            canvasZoom={canvasZoom}
+          />
         )}
       </div>
       {/* Line Layer - SVG overlay for all lines with proper state machine */}
@@ -4667,6 +4734,68 @@ export function CXDCanvas() {
             <span className="text-sm font-medium text-foreground">
               {draggingExperienceBlock.label}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* New Comment Input (inline at click position) */}
+      {commentMode && newCommentInput && (
+        <div
+          className="fixed z-[9999] pointer-events-auto"
+          style={{
+            left: newCommentInput.x,
+            top: newCommentInput.y,
+            transform: 'translate(8px, 8px)',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-64 rounded-xl border border-purple-500/30 bg-[rgba(12,10,22,0.97)] backdrop-blur-xl shadow-2xl overflow-hidden">
+            <div className="px-3 py-2 border-b border-white/10">
+              <span className="text-xs font-medium text-purple-300">New Comment</span>
+            </div>
+            <div className="p-2">
+              <textarea
+                ref={newCommentInputRef}
+                autoFocus
+                placeholder="Add a comment..."
+                rows={2}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 resize-none focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const text = (e.target as HTMLTextAreaElement).value.trim();
+                    if (text) {
+                      addComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
+                      setNewCommentInput(null);
+                    }
+                  }
+                  if (e.key === 'Escape') {
+                    setNewCommentInput(null);
+                  }
+                }}
+              />
+              <div className="flex justify-end mt-1.5 gap-1.5">
+                <button
+                  onClick={() => setNewCommentInput(null)}
+                  className="px-2.5 py-1 text-xs text-white/50 hover:text-white rounded hover:bg-white/10 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const text = newCommentInputRef.current?.value.trim();
+                    if (text) {
+                      addComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
+                      setNewCommentInput(null);
+                    }
+                  }}
+                  className="px-2.5 py-1 text-xs text-white bg-purple-600 hover:bg-purple-500 rounded transition-colors"
+                >
+                  Post
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

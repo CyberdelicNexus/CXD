@@ -23,6 +23,7 @@ import {
   DEFAULT_STAGE_PRESENCE_TYPES,
 } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
+import type { Comment, CommentThread } from '@/types/comment-types';
 import {
   Version, OKR, KeyResult, Objective, VersionStatus,
   createDefaultVersion, createDefaultOKR, createDefaultObjective, createDefaultKeyResult,
@@ -97,6 +98,11 @@ interface CXDState {
   activeBoardId: string | null; // null = root canvas - this is the SINGLE source of truth
   currentBoardId: string | null; // alias for activeBoardId (backward compatibility)
   boardPath: { id: string; title: string }[]; // breadcrumb path
+
+  // Comment mode state
+  commentMode: boolean;
+  activeCommentId: string | null;
+  showResolvedComments: boolean;
 
   // Highlighted element (for navigation from hypercube)
   highlightedElementId: string | null;
@@ -283,6 +289,18 @@ interface CXDState {
   // OKR Carry-Forward
   carryForwardOKRs: (sourceVersionId: string, targetVersionId: string, okrIds: string[]) => void;
 
+  // Actions - Comments
+  toggleCommentMode: () => void;
+  setActiveComment: (commentId: string | null) => void;
+  addComment: (content: string, position: { x: number; y: number }) => void;
+  addReply: (parentId: string, content: string) => void;
+  resolveComment: (commentId: string) => void;
+  unresolveComment: (commentId: string) => void;
+  deleteComment: (commentId: string) => void;
+  toggleShowResolved: () => void;
+  getComments: () => Comment[];
+  getThreads: () => CommentThread[];
+
   // Actions - Share
   generateShareToken: () => string;
 
@@ -313,6 +331,9 @@ export const useCXDStore = create<CXDState>()(
       activeBoardId: null,
       currentBoardId: null, // backward compatibility alias
       boardPath: [],
+      commentMode: false,
+      activeCommentId: null,
+      showResolvedComments: false,
       highlightedElementId: null,
       clipboard: [],
       canvasHistory: [],
@@ -498,6 +519,10 @@ export const useCXDStore = create<CXDState>()(
           // Migration: ensure okrs array exists
           if (!project.okrs) {
             project.okrs = [];
+          }
+          // Migration: ensure comments array exists
+          if (!project.comments) {
+            project.comments = [];
           }
         }
         return project;
@@ -1999,6 +2024,186 @@ export const useCXDStore = create<CXDState>()(
             ),
           }));
         }
+      },
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // COMMENTS
+      // ═══════════════════════════════════════════════════════════════════════
+
+      toggleCommentMode: () => {
+        set((state) => ({
+          commentMode: !state.commentMode,
+          activeCommentId: null,
+        }));
+      },
+
+      setActiveComment: (commentId) => {
+        set({ activeCommentId: commentId });
+      },
+
+      addComment: (content, position) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+        const { activeBoardId } = get();
+
+        const newComment: Comment = {
+          id: uuidv4(),
+          authorId: currentProject.ownerId || 'anonymous',
+          authorName: 'You',
+          content,
+          position,
+          boardId: activeBoardId,
+          createdAt: Date.now(),
+          parentId: null,
+          resolvedAt: null,
+        };
+
+        const existingComments = currentProject.comments || [];
+        const updatedComments = [...existingComments, newComment];
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments: updatedComments, updatedAt: new Date().toISOString() }
+              : p
+          ),
+          activeCommentId: newComment.id,
+        }));
+
+        // Persist to DB
+        const updatedProject = get().projects.find(p => p.id === currentProject.id);
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+      },
+
+      addReply: (parentId, content) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        // Find the root comment to get position/boardId
+        const comments = currentProject.comments || [];
+        const rootComment = comments.find(c => c.id === parentId);
+        if (!rootComment) return;
+
+        const newReply: Comment = {
+          id: uuidv4(),
+          authorId: currentProject.ownerId || 'anonymous',
+          authorName: 'You',
+          content,
+          position: rootComment.position,
+          boardId: rootComment.boardId,
+          createdAt: Date.now(),
+          parentId,
+          resolvedAt: null,
+        };
+
+        const updatedComments = [...comments, newReply];
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments: updatedComments, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
+        const updatedProject = get().projects.find(p => p.id === currentProject.id);
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+      },
+
+      resolveComment: (commentId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const now = Date.now();
+        const comments = currentProject.comments || [];
+        // Resolve root and all its replies
+        const updatedComments = comments.map(c => {
+          if (c.id === commentId || c.parentId === commentId) {
+            return { ...c, resolvedAt: now, resolvedBy: currentProject.ownerId || 'anonymous' };
+          }
+          return c;
+        });
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments: updatedComments, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
+        const updatedProject = get().projects.find(p => p.id === currentProject.id);
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+      },
+
+      unresolveComment: (commentId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const comments = currentProject.comments || [];
+        const updatedComments = comments.map(c => {
+          if (c.id === commentId || c.parentId === commentId) {
+            return { ...c, resolvedAt: null, resolvedBy: undefined };
+          }
+          return c;
+        });
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments: updatedComments, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
+        const updatedProject = get().projects.find(p => p.id === currentProject.id);
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+      },
+
+      deleteComment: (commentId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const comments = currentProject.comments || [];
+        // Delete root comment and all its replies
+        const updatedComments = comments.filter(c => c.id !== commentId && c.parentId !== commentId);
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments: updatedComments, updatedAt: new Date().toISOString() }
+              : p
+          ),
+          activeCommentId: get().activeCommentId === commentId ? null : get().activeCommentId,
+        }));
+
+        const updatedProject = get().projects.find(p => p.id === currentProject.id);
+        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+      },
+
+      toggleShowResolved: () => {
+        set((state) => ({ showResolvedComments: !state.showResolvedComments }));
+      },
+
+      getComments: () => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return [];
+        const { activeBoardId } = get();
+        return (currentProject.comments || []).filter(c => c.boardId === activeBoardId);
+      },
+
+      getThreads: () => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return [];
+        const { activeBoardId } = get();
+        const allComments = (currentProject.comments || []).filter(c => c.boardId === activeBoardId);
+        const roots = allComments.filter(c => c.parentId === null);
+        return roots.map(root => ({
+          root,
+          replies: allComments
+            .filter(c => c.parentId === root.id)
+            .sort((a, b) => a.createdAt - b.createdAt),
+        }));
       },
 
       // Share
