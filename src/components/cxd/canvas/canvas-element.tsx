@@ -731,7 +731,9 @@ export function CanvasElementRenderer({
                 : undefined
             : undefined,
         height:
-          element.type === "freeform"
+          element.type === "container" && (element as ContainerElement).collapsed
+            ? 28
+            : element.type === "freeform"
             ? isResizableNoteCard
               ? "auto"
               : "auto"
@@ -769,6 +771,7 @@ export function CanvasElementRenderer({
             isDragging={isDragging ?? false}
             isConnecting={isConnecting ?? false}
             canvasZoom={canvasZoom ?? 1}
+            isShape={element.type === 'shape'}
             onStartConnector={onStartConnector}
             onEndConnector={onEndConnector ?? (() => {})}
           />
@@ -6047,6 +6050,28 @@ function ShapeCard({
 }
 
 // Container card component (true grouping)
+
+// Tint palette — matches SWATCH_COLORS in connector-radial-menu.tsx
+const CONTAINER_TINTS = {
+  violet:  { mid: '#7C3AED', light: '#C4B5FD' },
+  ocean:   { mid: '#2563EB', light: '#67E8F9' },
+  emerald: { mid: '#059669', light: '#6EE7B7' },
+  sunset:  { mid: '#EA580C', light: '#FDE68A' },
+  rose:    { mid: '#DB2777', light: '#FBCFE8' },
+  glacier: { mid: '#475569', light: '#E2E8F0' },
+} as const;
+
+const TINT_ORDER = ['violet', 'ocean', 'emerald', 'sunset', 'rose', 'glacier'] as const;
+type TintName = keyof typeof CONTAINER_TINTS;
+
+/** Convert a 6-digit hex color to "r,g,b" string for use in rgba(). */
+function hexToRgb(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `${r},${g},${b}`;
+}
+
 function ContainerCard({
   element,
   isEditing,
@@ -6062,66 +6087,188 @@ function ContainerCard({
   isSelected: boolean;
   isDropTarget?: boolean;
 }) {
-  const bgColor = element.style?.bgColor || "transparent";
-  const borderColor = element.style?.borderColor || "hsl(var(--primary) / 0.4)";
-  const strokeWidth = element.style?.borderWidth || 2;
-  const borderStyle = element.style?.borderStyle || "dashed";
-  const fillOpacity =
-    element.style?.fillOpacity !== undefined ? element.style.fillOpacity : 20;
+  const tintName = (element.tintColor ?? 'violet') as TintName;
+  const tint = CONTAINER_TINTS[tintName];
 
-  // Convert fillOpacity to CSS opacity
-  const backgroundWithOpacity =
-    bgColor === "transparent"
-      ? `rgba(var(--card-rgb) / ${fillOpacity / 100})`
-      : bgColor;
+  // Live child count from store (returns a number so Zustand === comparison works)
+  const childCount = useCXDStore(
+    (state) =>
+      (state.getCurrentProject()?.canvasLayout?.elements ?? []).filter(
+        (el) => el.containerId === element.id,
+      ).length,
+  );
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const handleLock = () => {
+    const newLocked = !element.locked;
+    // Lock/unlock the container itself
+    onUpdate({ locked: newLocked });
+    // Lock/unlock all current children (snapshot operation)
+    const allEls =
+      useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements ?? [];
+    allEls
+      .filter((el) => el.containerId === element.id)
+      .forEach((child) =>
+        useCXDStore.getState().updateCanvasElement(child.id, { locked: newLocked }),
+      );
+  };
 
   return (
     <div
-      className={cn(
-        "w-full h-full rounded-lg backdrop-blur transition-all",
-        isDropTarget &&
-        "border-primary shadow-lg shadow-primary/20 brightness-110",
-      )}
+      className="w-full h-full flex flex-col overflow-hidden"
       style={{
-        backgroundColor: backgroundWithOpacity,
-        borderColor: borderColor,
-        borderWidth: `${strokeWidth}px`,
-        borderStyle: borderStyle,
+        borderRadius: 14,
+        background: `rgba(${hexToRgb(tint.mid)}, 0.08)`,
+        border: `1px solid rgba(${hexToRgb(tint.mid)}, 0.35)`,
         boxShadow: isDropTarget
-          ? "0 0 20px rgba(168, 85, 247, 0.5), inset 0 0 10px rgba(168, 85, 247, 0.2)"
-          : undefined,
+          ? `0 0 20px rgba(${hexToRgb(tint.mid)}, 0.45), inset 0 0 30px rgba(${hexToRgb(tint.mid)}, 0.12)`
+          : `inset 0 0 30px rgba(${hexToRgb(tint.mid)}, 0.06)`,
       }}
     >
-      {/* Container label */}
+      {/* ── Header bar (always visible) ── */}
       <div
-        className="px-3 py-2"
+        className="flex items-center gap-1.5 px-2 flex-shrink-0 relative"
         style={{
-          borderBottom: `${strokeWidth}px ${borderStyle} ${borderColor}`,
+          height: 28,
+          background: `rgba(${hexToRgb(tint.mid)}, 0.12)`,
+          borderBottom: element.collapsed
+            ? 'none'
+            : `1px solid rgba(${hexToRgb(tint.mid)}, 0.20)`,
         }}
       >
-        {isEditing ? (
-          <Input
-            autoFocus
-            value={element.label || ""}
-            onChange={(e) => onUpdate({ label: e.target.value })}
-            onBlur={onBlur}
-            className="text-sm font-medium bg-transparent border-0 p-0 h-auto focus-visible:ring-0"
-            placeholder="Container label..."
-          />
-        ) : (
-          <div className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <LayoutGrid className="w-4 h-4" />
-            {element.label || "Container"}
+        {/* Color dot */}
+        <button
+          className="w-3 h-3 rounded-full flex-shrink-0 focus:outline-none"
+          style={{
+            background: `radial-gradient(circle at 35% 30%, ${tint.light}, ${tint.mid})`,
+          }}
+          onClick={(e) => { e.stopPropagation(); setPickerOpen((p) => !p); }}
+          title="Change color"
+        />
+
+        {/* Color picker popup */}
+        {pickerOpen && (
+          <div
+            className="absolute top-8 left-0 flex gap-1.5 rounded-full px-2.5 py-2 border backdrop-blur-sm shadow-lg z-50"
+            style={{
+              background: 'rgba(15,12,25,0.95)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            {TINT_ORDER.map((name) => {
+              const c = CONTAINER_TINTS[name];
+              return (
+                <button
+                  key={name}
+                  title={name}
+                  className="w-4 h-4 rounded-full transition-transform hover:scale-110 focus:outline-none flex-shrink-0"
+                  style={{
+                    background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.mid})`,
+                    outline: element.tintColor === name ? '2px solid rgba(255,255,255,0.9)' : 'none',
+                    outlineOffset: 2,
+                    boxShadow: element.tintColor === name ? `0 0 6px ${c.mid}88` : 'none',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdate({ tintColor: name });
+                    setPickerOpen(false);
+                  }}
+                />
+              );
+            })}
           </div>
         )}
-      </div>
-      {/* Container content area */}
-      <div className="flex-1 p-2 text-xs text-muted-foreground/50 text-center">
-        {isSelected && <span>Drop elements here to group</span>}
-        {isDropTarget && !isSelected && (
-          <span className="text-primary font-medium">Drop to attach</span>
+
+        {/* Editable label */}
+        {isEditing ? (
+          <input
+            autoFocus
+            value={element.label ?? ''}
+            onChange={(e) => onUpdate({ label: e.target.value })}
+            onBlur={onBlur}
+            placeholder="Group"
+            className="flex-1 min-w-0 bg-transparent border-0 p-0 text-xs font-medium focus:outline-none"
+            style={{
+              color: `rgba(${hexToRgb(tint.light)}, 0.85)`,
+              fontFamily: 'monospace',
+            }}
+          />
+        ) : (
+          <span
+            className="flex-1 min-w-0 truncate text-xs font-medium"
+            style={{
+              color: `rgba(${hexToRgb(tint.light)}, 0.85)`,
+              fontFamily: 'monospace',
+            }}
+          >
+            {element.label || 'Group'}
+          </span>
         )}
+
+        {/* Item count badge */}
+        <span
+          className="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0"
+          style={{
+            color: `rgba(${hexToRgb(tint.light)}, 0.45)`,
+            background: `rgba(${hexToRgb(tint.mid)}, 0.10)`,
+            fontFamily: 'monospace',
+          }}
+        >
+          {childCount} {childCount === 1 ? 'item' : 'items'}
+        </span>
+
+        {/* Collapse button */}
+        <button
+          className="flex-shrink-0 flex items-center justify-center rounded focus:outline-none"
+          style={{
+            width: 18,
+            height: 18,
+            background: 'rgba(255,255,255,0.07)',
+            border: '1px solid rgba(255,255,255,0.10)',
+            color: 'rgba(255,255,255,0.45)',
+            fontSize: 9,
+          }}
+          onClick={(e) => { e.stopPropagation(); onUpdate({ collapsed: !element.collapsed }); }}
+          title={element.collapsed ? 'Expand' : 'Collapse'}
+        >
+          {element.collapsed ? '▸' : '▾'}
+        </button>
+
+        {/* Lock button */}
+        <button
+          className="flex-shrink-0 flex items-center justify-center rounded focus:outline-none"
+          style={{
+            width: 18,
+            height: 18,
+            background: element.locked
+              ? `rgba(${hexToRgb(tint.mid)}, 0.25)`
+              : 'rgba(255,255,255,0.07)',
+            border: `1px solid ${element.locked ? tint.mid + '88' : 'rgba(255,255,255,0.10)'}`,
+            fontSize: 9,
+          }}
+          onClick={(e) => { e.stopPropagation(); handleLock(); }}
+          title={element.locked ? 'Unlock' : 'Lock'}
+        >
+          {element.locked ? '🔒' : '🔓'}
+        </button>
       </div>
+
+      {/* ── Body (hidden when collapsed) ── */}
+      {!element.collapsed && (
+        <div className="flex-1 relative">
+          {isDropTarget && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span
+                className="text-xs font-medium"
+                style={{ color: `rgba(${hexToRgb(tint.light)}, 0.7)` }}
+              >
+                Drop to attach
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
