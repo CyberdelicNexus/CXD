@@ -229,6 +229,7 @@ interface CXDState {
 
   // Actions - Canvas Elements
   addCanvasElement: (element: CanvasElement) => void;
+  addCanvasElements: (elements: CanvasElement[]) => void;
   updateCanvasElement: (elementId: string, updates: Partial<CanvasElement>) => void;
   removeCanvasElement: (elementId: string) => void;
   /** Write positions directly to Zustand without touching Yjs (used during drag for instant visual feedback). */
@@ -1468,6 +1469,48 @@ export const useCXDStore = create<CXDState>()(
         }
       },
 
+      addCanvasElements: (elements) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        const activeBoardId = get().activeBoardId;
+        const activeSurface = get().activeSurface;
+
+        const prepared = elements.map(el => ({
+          ...el,
+          boardId: el.boardId !== undefined ? el.boardId : activeBoardId,
+          surface: el.surface !== undefined ? el.surface : activeSurface,
+        }));
+
+        const { yDoc } = get();
+        if (yDoc) {
+          // Batch all Yjs mutations in a single transaction
+          // yjsAddElement uses doc.transact internally; nested transactions merge into outer one
+          yDoc.transact(() => {
+            prepared.forEach(el => {
+              yjsAddElement(yDoc, el);
+            });
+          }, 'local');
+        } else {
+          // Fallback: single Zustand update
+          get().pushCanvasHistory();
+          set((state) => ({
+            projects: state.projects.map((p) =>
+              p.id === currentProject.id
+                ? {
+                  ...p,
+                  canvasLayout: {
+                    ...(p.canvasLayout || {}),
+                    elements: [...(p.canvasLayout?.elements || []), ...prepared]
+                  },
+                  updatedAt: new Date().toISOString()
+                }
+                : p
+            ),
+          }));
+        }
+      },
+
       updateCanvasElement: (elementId, updates) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
@@ -1756,9 +1799,8 @@ export const useCXDStore = create<CXDState>()(
       enterBoard: (boardId, title) => {
         const { boardPath, saveCurrentViewport, restoreViewport } = get();
 
-        // Guard: skip if already at this board (prevents duplicate entries)
-        const lastEntry = boardPath[boardPath.length - 1];
-        if (lastEntry && lastEntry.id === boardId) {
+        // Guard: skip if this board is already the last entry OR already anywhere in the path
+        if (boardPath.some(entry => entry.id === boardId)) {
           return;
         }
 

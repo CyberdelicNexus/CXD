@@ -33,6 +33,8 @@ import {
   Palette,
   Loader2,
   Home,
+  MoreHorizontal,
+  ChevronsRight,
 } from "lucide-react";
 import { Link } from "lucide-react";
 import NextLink from "next/link";
@@ -211,7 +213,7 @@ export function CXDNavbar() {
   };
 
   // Collapsible navbar buttons state
-  const [navButtonsExpanded, setNavButtonsExpanded] = useState(true);
+  const [navButtonsExpanded, setNavButtonsExpanded] = useState(false);
 
   // Collaboration state
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
@@ -563,13 +565,18 @@ export function CXDNavbar() {
           {/* Toggle button for collapsible toolbar */}
           <button
             onClick={() => setNavButtonsExpanded(!navButtonsExpanded)}
-            className="h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 transition-all flex-shrink-0"
+            className={cn(
+              "h-8 px-2 flex items-center justify-center rounded-full transition-all duration-200 flex-shrink-0",
+              navButtonsExpanded
+                ? "bg-white/10 border border-white/20 text-white/60 hover:text-white"
+                : "bg-purple-600/20 border border-purple-500/30 text-purple-300 hover:bg-purple-600/30"
+            )}
             title={navButtonsExpanded ? "Hide toolbar" : "Show toolbar"}
           >
             {navButtonsExpanded ? (
-              <ChevronRight className="w-4 h-4 text-white/60" />
+              <ChevronsRight className="w-4 h-4" />
             ) : (
-              <ChevronLeft className="w-4 h-4 text-white/60" />
+              <MoreHorizontal className="w-4 h-4" />
             )}
           </button>
 

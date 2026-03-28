@@ -127,12 +127,14 @@ export default function CXDPage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data } = await supabase.from('users').select('full_name, name, profile_picture').eq('id', user.id).single();
-          if (data) {
-            setCachedUserProfile({
-              name: data.full_name || data.name || user.email?.split('@')[0] || 'You',
-              avatar: data.profile_picture || user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
-            });
-          }
+          const avatar = data?.profile_picture
+            || user.user_metadata?.avatar_url
+            || user.user_metadata?.picture
+            || null;
+          setCachedUserProfile({
+            name: data?.full_name || data?.name || user.email?.split('@')[0] || 'You',
+            avatar,
+          });
         }
       } catch (err) {
         console.error('[CXD] Error loading user profile for comments:', err);

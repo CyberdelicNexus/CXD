@@ -61,7 +61,7 @@ function TemplateMiniPreview({ template }: { template: TemplateDefinition }) {
 }
 
 export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps) {
-  const addCanvasElement = useCXDStore((s) => s.addCanvasElement);
+  const addCanvasElements = useCXDStore((s) => s.addCanvasElements);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
 
   const filtered = useMemo(() => {
@@ -74,9 +74,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     if (!tpl) return;
 
     const freshElements = remapTemplateIds(tpl.elements);
-    freshElements.forEach((el) => {
-      addCanvasElement(el);
-    });
+    addCanvasElements(freshElements);
 
     onClose();
   };
