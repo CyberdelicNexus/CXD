@@ -281,10 +281,20 @@ function OKRCard({ okr, compact = false, onDragStart, onDragEnd, isDragging = fa
   };
 
   const handleAddKeyResult = () => {
-    if (okr.objectives.length === 0) {
-      addObjective(okr.id, 'Key Results');
+    const store = useCXDStore.getState();
+    const currentProject = store.getCurrentProject();
+    if (!currentProject) return;
+    const latestOkr = (currentProject.okrs || []).find(o => o.id === okr.id);
+    if (!latestOkr) return;
+
+    if (latestOkr.objectives.length === 0) {
+      const objId = addObjective(okr.id, 'Key Results');
+      // Objective was just created — add key result to it after a tick
+      requestAnimationFrame(() => {
+        addKeyResult(okr.id, objId);
+      });
     } else {
-      addKeyResult(okr.id, okr.objectives[0].id);
+      addKeyResult(okr.id, latestOkr.objectives[0].id);
     }
   };
 
@@ -422,15 +432,15 @@ function OKRCard({ okr, compact = false, onDragStart, onDragEnd, isDragging = fa
                 keyResult={kr}
               />
             ))}
-            <Button
-              onClick={handleAddKeyResult}
-              size="sm"
-              variant="ghost"
-              className="w-full gap-1 text-white/40 hover:text-white/70 text-xs h-7 border border-dashed border-white/10 hover:border-white/20"
-            >
-              <Plus className="w-3 h-3" />
-              Add Key Result
-            </Button>
+            <div className="relative w-full rounded-lg p-[1px] bg-gradient-to-r from-amber-500/20 via-amber-400/40 to-amber-500/20 hover:from-amber-500/30 hover:via-amber-400/50 hover:to-amber-500/30 transition-all">
+              <button
+                onClick={handleAddKeyResult}
+                className="w-full flex items-center justify-center gap-1.5 text-amber-300/70 hover:text-amber-200 text-sm h-9 rounded-[7px] bg-black/60 hover:bg-black/40 transition-all"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Key Result
+              </button>
+            </div>
           </div>
         </div>
       )}
