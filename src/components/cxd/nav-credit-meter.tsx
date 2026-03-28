@@ -99,7 +99,7 @@ export function NavCreditMeter() {
 
       {/* Popover */}
       {isOpen && (
-        <div className="absolute left-0 top-full mt-2 w-72 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-[fadeIn_150ms_ease-out]">
+        <div className="absolute right-0 top-full mt-2 w-72 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-[fadeIn_150ms_ease-out]">
           {/* Credit summary */}
           <div className="px-4 pt-4 pb-3">
             <div className="flex items-center justify-between mb-2">
