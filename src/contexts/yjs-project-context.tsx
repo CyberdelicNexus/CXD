@@ -12,10 +12,11 @@ import { createContext, useContext, useEffect, useRef, useState, ReactNode } fro
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { useCXDStore } from '@/store/cxd-store';
-import { createProjectYDoc, initializeYDoc } from '@/lib/yjs/y-doc-factory';
+import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2 } from '@/lib/yjs/y-doc-factory';
 import { YjsZustandBridge, BridgeCallbacks } from '@/lib/yjs/y-zustand-bridge';
 import { LocalPersistence } from '@/lib/yjs/indexeddb-persistence';
 import { SupabasePersistence } from '@/lib/yjs/supabase-persistence';
+import { saveProject } from '@/lib/supabase-projects';
 import type { CXDProject } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 
@@ -122,29 +123,36 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     // 2. Supabase (remote, latest shared state)
     // 3. Project data (fallback if no persisted state)
     //
-    // LOAD ORDER AUDIT (2026-03-18): Promise.all is safe here because both
-    // sources apply state via Y.applyUpdate on the same Y.Doc. Y.js CRDT
-    // semantics guarantee that concurrent applyUpdate calls are merged
-    // idempotently — neither source "replaces" the doc. The doc is never
-    // recreated after load (which would discard IndexedDB state). Sequential
-    // load is NOT required; CRDT merge produces the same result regardless
-    // of which source resolves first.
-    //
-    // Since bridge.start() was called before persistence setup, the bridge
-    // observes Y.Doc changes from persistence load via observeDeep callbacks.
-    // We additionally call forceInitialSync() after load completes to ensure
-    // all persisted elements are in Zustand even if RAF hasn't fired yet.
+    // IMPORTANT: setYDoc(newDoc) is called AFTER Promise.all resolves, not before.
+    // Reason: if setYDoc fires while Y.Doc is still empty, store actions switch to
+    // CRDT mode immediately. Any removeCanvasElement/commitDragPositionsToYjs calls
+    // hit an empty Y.Doc (no-op) instead of updating Zustand directly. This makes
+    // elements appear frozen — delete does nothing, drag positions reset on sync.
+    // By delaying setYDoc until Y.Doc is populated, the store stays in LWW mode
+    // (direct Zustand updates) during loading, so all interactions work correctly.
     Promise.all([
       localPersist.whenSynced(),
       supabasePersist.load(),
     ]).then(([_, supabaseLoaded]) => {
+      // Guard: if this provider was cleaned up while loading, bail out
+      if (bridgeRef.current !== bridge) return;
+
       if (!supabaseLoaded) {
-        // No persisted Yjs state in Supabase - hydrate from project data
-        console.log('[YjsProject] No persisted state, initializing from project data');
-        initializeYDoc(newDoc, project);
+        // No persisted Yjs state in Supabase - hydrate from CURRENT project data.
+        // Use getState() here (not captured `project`) so any LWW-mode changes
+        // the user made during loading are included in the Y.Doc initialization.
+        const currentProject = useCXDStore.getState().getCurrentProject();
+        if (currentProject) {
+          console.log('[YjsProject] No persisted state, initializing from project data');
+          initializeYDoc(newDoc, currentProject);
+        }
       } else {
         console.log('[YjsProject] Loaded persisted Yjs state from Supabase');
       }
+
+      // One-time repair: remove duplicate reality planes that may have accumulated
+      // in IndexedDB from a previous bug where initializeYDoc lacked an idempotency guard.
+      deduplicateRealityPlanesV2(newDoc);
 
       // Force-sync all current Y.Doc state to Zustand immediately.
       // This handles two cases:
@@ -152,18 +160,35 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       // 2. Elements in yjs_state that aren't in the JSON project_data
       bridge.forceInitialSync();
 
+      // NOW activate CRDT mode in the store — Y.Doc is populated and in sync
+      // with Zustand. Store actions can safely use CRDT operations from here.
+      setYDoc(newDoc);
+
+      // Immediately write project_data so the fallback column stays fresh after
+      // Yjs hydration. If the user navigates away quickly and yjs_state somehow
+      // fails to save, project_data will still have the correct canvas state.
+      const freshProject = useCXDStore.getState().getCurrentProject();
+      if (freshProject) {
+        saveProject(freshProject).catch((err) =>
+          console.warn('[YjsProject] Failed to update project_data after Yjs load:', err)
+        );
+      }
+
       // Mark as ready after successful hydration
       setIsReady(true);
     }).catch((err) => {
       console.error('[YjsProject] Failed to load persisted state:', err);
+      if (bridgeRef.current !== bridge) return;
       // Fallback to project data on error
-      initializeYDoc(newDoc, project);
+      const currentProject = useCXDStore.getState().getCurrentProject();
+      if (currentProject) {
+        initializeYDoc(newDoc, currentProject);
+      }
+      deduplicateRealityPlanesV2(newDoc);
       bridge.forceInitialSync();
+      setYDoc(newDoc);
       setIsReady(true);
     });
-
-    // Store doc reference in Zustand for store actions to use
-    setYDoc(newDoc);
 
     currentProjectIdRef.current = currentProjectId;
     setDoc(newDoc);
@@ -273,6 +298,33 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
         return {
           ...p,
           canvasLayout: { ...p.canvasLayout, elements: newElements },
+        };
+      });
+    },
+
+    patchElements: (updates) => {
+      updateProject((p) => {
+        const elements = [...(p.canvasLayout?.elements ?? [])];
+        for (const { id, element } of updates) {
+          const idx = elements.findIndex((e) => e.id === id);
+          if (idx >= 0) {
+            const existing = elements[idx];
+            elements[idx] = {
+              ...existing,
+              ...element,
+              x: isNaN(element.x) ? existing.x : element.x,
+              y: isNaN(element.y) ? existing.y : element.y,
+              width: isNaN(element.width) ? existing.width : element.width,
+              height: isNaN(element.height) ? existing.height : element.height,
+              locked: element.locked !== undefined ? element.locked : existing.locked,
+            } as CanvasElement;
+          } else {
+            elements.push(element);
+          }
+        }
+        return {
+          ...p,
+          canvasLayout: { ...p.canvasLayout, elements },
         };
       });
     },

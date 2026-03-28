@@ -83,12 +83,12 @@ const experienceJourney: TemplateDefinition = {
     { id: 'ej-c3', type: 'container', x: 810,  y: 100, width: 340, height: 420, zIndex: 0, label: 'Engagement',    tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
     { id: 'ej-c4', type: 'container', x: 1190, y: 100, width: 340, height: 420, zIndex: 0, label: 'Experience',    tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
     { id: 'ej-c5', type: 'container', x: 1570, y: 100, width: 340, height: 420, zIndex: 0, label: 'Reflection',    tintColor: 'rose',    collapsed: false, locked: false, style: containerStyle },
-    // 5 freeform notes (one per container)
-    { id: 'ej-n1', type: 'freeform', x: 90,   y: 160, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ej-c1', content: 'How does the audience first discover this experience? What channels or triggers create awareness?', cardType: 'note' },
-    { id: 'ej-n2', type: 'freeform', x: 470,  y: 160, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ej-c2', content: 'What motivates someone to commit? What barriers or hesitations exist at this stage?', cardType: 'note' },
-    { id: 'ej-n3', type: 'freeform', x: 850,  y: 160, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ej-c3', content: 'What is the core interaction? Describe the peak moment of participation.', cardType: 'note' },
-    { id: 'ej-n4', type: 'freeform', x: 1230, y: 160, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ej-c4', content: 'What sensory and emotional elements define the lived experience?', cardType: 'note' },
-    { id: 'ej-n5', type: 'freeform', x: 1610, y: 160, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ej-c5', content: 'How do participants reflect on and share the experience afterward?', cardType: 'note' },
+    // 5 text prompts (one per container)
+    { id: 'ej-n1', type: 'text', x: 90,   y: 160, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'ej-c1', content: 'How does the audience first discover this experience? What channels or triggers create awareness?', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-n2', type: 'text', x: 470,  y: 160, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'ej-c2', content: 'What motivates someone to commit? What barriers or hesitations exist at this stage?', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-n3', type: 'text', x: 850,  y: 160, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'ej-c3', content: 'What is the core interaction? Describe the peak moment of participation.', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-n4', type: 'text', x: 1230, y: 160, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'ej-c4', content: 'What sensory and emotional elements define the lived experience?', style: promptStyle, textAlign: 'left' },
+    { id: 'ej-n5', type: 'text', x: 1610, y: 160, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'ej-c5', content: 'How do participants reflect on and share the experience afterward?', style: promptStyle, textAlign: 'left' },
     // 3 circle shapes (emotion markers between containers)
     { id: 'ej-s1', type: 'shape', x: 385,  y: 290, width: 50, height: 50, zIndex: 1, locked: false, shapeType: 'circle', content: '😊', style: { bgColor: 'rgba(139,92,246,0.3)', textColor: '#c084fc' } },
     { id: 'ej-s2', type: 'shape', x: 765,  y: 290, width: 50, height: 50, zIndex: 1, locked: false, shapeType: 'circle', content: '🔥', style: { bgColor: 'rgba(34,211,238,0.3)', textColor: '#22d3ee' } },
@@ -123,15 +123,15 @@ const immersiveCanvas: TemplateDefinition = {
     // 1 diamond shape inside Concept (central focal point)
     { id: 'ic-s1', type: 'shape', x: 580, y: 260, width: 80, height: 80, zIndex: 1, locked: false, containerId: 'ic-c1', shapeType: 'diamond', content: '💎', style: { bgColor: 'rgba(139,92,246,0.35)', textColor: '#c084fc' } },
     // 5 hexagon shapes inside Sensory Domains (arranged in a row)
-    { id: 'ic-s2', type: 'shape', x: 910,  y: 120, width: 55, height: 55, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👁️', style: { bgColor: 'rgba(139,92,246,0.25)', textColor: '#c084fc' } },
-    { id: 'ic-s3', type: 'shape', x: 975,  y: 120, width: 55, height: 55, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👂', style: { bgColor: 'rgba(34,211,238,0.25)', textColor: '#22d3ee' } },
-    { id: 'ic-s4', type: 'shape', x: 1040, y: 120, width: 55, height: 55, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '✋', style: { bgColor: 'rgba(52,211,153,0.25)', textColor: '#34d399' } },
-    { id: 'ic-s5', type: 'shape', x: 1105, y: 120, width: 55, height: 55, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👃', style: { bgColor: 'rgba(251,146,60,0.25)', textColor: '#fb923c' } },
-    { id: 'ic-s6', type: 'shape', x: 1170, y: 120, width: 55, height: 55, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👅', style: { bgColor: 'rgba(244,114,182,0.25)', textColor: '#f472b6' } },
-    // 3 freeform notes (Audience, Concept, Narrative Arc)
-    { id: 'ic-n1', type: 'freeform', x: 70,  y: 110, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ic-c2', content: 'Who is the intended audience? What prior knowledge or expectations do they bring?', cardType: 'note' },
-    { id: 'ic-n2', type: 'freeform', x: 400, y: 360, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ic-c1', content: 'What is the central concept? What world are you creating and why does it matter?', cardType: 'note' },
-    { id: 'ic-n3', type: 'freeform', x: 910, y: 440, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ic-c5', content: 'Map the narrative arc: beginning, rising tension, climax, and resolution.', cardType: 'note' },
+    { id: 'ic-s2', type: 'shape', x: 910,  y: 110, width: 60, height: 60, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👁️', style: { bgColor: 'rgba(139,92,246,0.25)', textColor: '#c084fc' } },
+    { id: 'ic-s3', type: 'shape', x: 980,  y: 110, width: 60, height: 60, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👂', style: { bgColor: 'rgba(34,211,238,0.25)', textColor: '#22d3ee' } },
+    { id: 'ic-s4', type: 'shape', x: 1050, y: 110, width: 60, height: 60, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '✋', style: { bgColor: 'rgba(52,211,153,0.25)', textColor: '#34d399' } },
+    { id: 'ic-s5', type: 'shape', x: 1120, y: 110, width: 60, height: 60, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👃', style: { bgColor: 'rgba(251,146,60,0.25)', textColor: '#fb923c' } },
+    { id: 'ic-s6', type: 'shape', x: 1190, y: 110, width: 60, height: 60, zIndex: 1, locked: false, containerId: 'ic-c3', shapeType: 'hexagon', content: '👅', style: { bgColor: 'rgba(244,114,182,0.25)', textColor: '#f472b6' } },
+    // 3 text prompts (Audience, Concept, Narrative Arc)
+    { id: 'ic-n1', type: 'text', x: 70,  y: 110, width: 270, height: 70, zIndex: 1, locked: false, containerId: 'ic-c2', content: 'Who is the intended audience? What prior knowledge or expectations do they bring?', style: promptStyle, textAlign: 'left' },
+    { id: 'ic-n2', type: 'text', x: 400, y: 360, width: 270, height: 70, zIndex: 1, locked: false, containerId: 'ic-c1', content: 'What is the central concept? What world are you creating and why does it matter?', style: promptStyle, textAlign: 'left' },
+    { id: 'ic-n3', type: 'text', x: 910, y: 440, width: 270, height: 70, zIndex: 1, locked: false, containerId: 'ic-c5', content: 'Map the narrative arc: beginning, rising tension, climax, and resolution.', style: promptStyle, textAlign: 'left' },
     // 1 board "Personas" inside Audience
     { id: 'ic-b1', type: 'board', x: 70, y: 260, width: 160, height: 50, zIndex: 1, locked: false, containerId: 'ic-c2', childBoardId: 'ic-board-personas', title: 'Personas' },
     // 1 image placeholder inside Spatial Layout
@@ -161,9 +161,9 @@ const eventBlueprint: TemplateDefinition = {
     // 2 freeform tasks inside Pre-Production
     { id: 'eb-ft1', type: 'freeform', x: 70,  y: 160, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'eb-c1', content: 'Venue scouting & logistics planning', cardType: 'task' },
     { id: 'eb-ft2', type: 'freeform', x: 70,  y: 260, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'eb-c1', content: 'Technical setup & equipment checklist', cardType: 'task' },
-    // 2 freeform notes (Live + Post)
-    { id: 'eb-n1', type: 'freeform', x: 610, y: 160, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'eb-c2', content: 'What is the peak moment? Map the guest journey from arrival to finale.', cardType: 'note' },
-    { id: 'eb-n2', type: 'freeform', x: 1150, y: 160, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'eb-c3', content: 'How will you gather feedback and measure success? Plan surveys and thank-yous.', cardType: 'note' },
+    // 2 text prompts (Live + Post)
+    { id: 'eb-n1', type: 'text', x: 610, y: 160, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'eb-c2', content: 'What is the peak moment? Map the guest journey from arrival to finale.', style: promptStyle, textAlign: 'left' },
+    { id: 'eb-n2', type: 'text', x: 1150, y: 160, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'eb-c3', content: 'How will you gather feedback and measure success? Plan surveys and thank-yous.', style: promptStyle, textAlign: 'left' },
     // 2 arrow lines connecting the 3 phases
     { id: 'eb-l1', type: 'line', x: 0, y: 0, width: 0, height: 0, zIndex: 1, locked: false, start: { x: 550, y: 325 }, end: { x: 590, y: 325 }, style: { kind: 'solid', widthPx: 2, color: 'rgba(34,211,238,0.4)', endCap: 'arrow' } },
     { id: 'eb-l2', type: 'line', x: 0, y: 0, width: 0, height: 0, zIndex: 1, locked: false, start: { x: 1090, y: 325 }, end: { x: 1130, y: 325 }, style: { kind: 'solid', widthPx: 2, color: 'rgba(52,211,153,0.4)', endCap: 'arrow' } },
@@ -197,19 +197,19 @@ const productCanvas: TemplateDefinition = {
     { id: 'pc-c6', type: 'container', x: 50,  y: 670, width: 960, height: 200, zIndex: 0, label: 'Key Metrics',       tintColor: 'glacier', collapsed: false, locked: false, style: containerStyle },
     // 1 diamond shape inside Value Proposition
     { id: 'pc-s1', type: 'shape', x: 490, y: 430, width: 70, height: 70, zIndex: 1, locked: false, containerId: 'pc-c4', shapeType: 'diamond', content: '💎', style: { bgColor: 'rgba(139,92,246,0.35)', textColor: '#c084fc' } },
-    // 4 freeform notes (Problem, Solution, Channels, Metrics)
-    { id: 'pc-n1', type: 'freeform', x: 70,  y: 110, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'pc-c1', content: 'What problem are you solving? Who feels this pain most acutely?', cardType: 'note' },
-    { id: 'pc-n2', type: 'freeform', x: 500, y: 110, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'pc-c2', content: 'How does your product solve it? What is the core mechanism?', cardType: 'note' },
-    { id: 'pc-n3', type: 'freeform', x: 750, y: 420, width: 240, height: 140, zIndex: 1, locked: false, containerId: 'pc-c5', content: 'How do customers find and access the product?', cardType: 'note' },
-    { id: 'pc-n4', type: 'freeform', x: 380, y: 520, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'pc-c4', content: '"We help [audience] to [outcome] by [method]."', cardType: 'note' },
+    // 4 text prompts (Problem, Solution, Channels, Value Prop)
+    { id: 'pc-n1', type: 'text', x: 70,  y: 110, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'pc-c1', content: 'What problem are you solving? Who feels this pain most acutely?', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-n2', type: 'text', x: 500, y: 110, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'pc-c2', content: 'How does your product solve it? What is the core mechanism?', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-n3', type: 'text', x: 750, y: 420, width: 250, height: 70, zIndex: 1, locked: false, containerId: 'pc-c5', content: 'How do customers find and access the product?', style: promptStyle, textAlign: 'left' },
+    { id: 'pc-n4', type: 'text', x: 380, y: 520, width: 280, height: 60, zIndex: 1, locked: false, containerId: 'pc-c4', content: '"We help [audience] to [outcome] by [method]."', style: promptStyle, textAlign: 'left' },
     // 1 board "User Research" inside Audience
     { id: 'pc-b1', type: 'board', x: 70, y: 560, width: 160, height: 50, zIndex: 1, locked: false, containerId: 'pc-c3', childBoardId: 'pc-board-research', title: 'User Research' },
     // 1 image placeholder inside Solution
     { id: 'pc-i1', type: 'image', x: 790, y: 110, width: 70, height: 140, zIndex: 1, locked: false, containerId: 'pc-c2', src: '', alt: 'Solution screenshot' },
     // 1 freeform task (KPI tracking) inside Metrics
     { id: 'pc-ft1', type: 'freeform', x: 70, y: 720, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'pc-c6', content: 'Define North Star metric and 3-5 supporting KPIs', cardType: 'task' },
-    // 1 freeform note inside Audience
-    { id: 'pc-n5', type: 'freeform', x: 70, y: 420, width: 240, height: 120, zIndex: 1, locked: false, containerId: 'pc-c3', content: 'Describe your ideal customer persona and early adopters.', cardType: 'note' },
+    // 1 text prompt inside Audience
+    { id: 'pc-n5', type: 'text', x: 70, y: 420, width: 250, height: 60, zIndex: 1, locked: false, containerId: 'pc-c3', content: 'Describe your ideal customer persona and early adopters.', style: promptStyle, textAlign: 'left' },
     // Additional elements to reach 20
     // Line from Problem to Value Prop
     { id: 'pc-l1', type: 'line', x: 0, y: 0, width: 0, height: 0, zIndex: 1, locked: false, start: { x: 250, y: 330 }, end: { x: 430, y: 400 }, style: { kind: 'solid', widthPx: 2, color: 'rgba(139,92,246,0.4)', endCap: 'arrow' } },
@@ -243,8 +243,8 @@ const brandAssets: TemplateDefinition = {
     { id: 'ba-i1', type: 'image', x: 580, y: 120, width: 440, height: 240, zIndex: 1, locked: false, containerId: 'ba-c2', src: '', alt: 'Upload logo' },
     { id: 'ba-i2', type: 'image', x: 580, y: 490, width: 210, height: 150, zIndex: 1, locked: false, containerId: 'ba-c4', src: '', alt: 'Photo style example 1' },
     { id: 'ba-i3', type: 'image', x: 810, y: 490, width: 210, height: 150, zIndex: 1, locked: false, containerId: 'ba-c4', src: '', alt: 'Photo style example 2' },
-    // 1 freeform note inside Typography
-    { id: 'ba-n1', type: 'freeform', x: 70, y: 490, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'ba-c3', content: 'Define heading and body typefaces. Note weights, sizes, and line-height guidelines.', cardType: 'note' },
+    // 1 text prompt inside Typography
+    { id: 'ba-n1', type: 'text', x: 70, y: 490, width: 280, height: 70, zIndex: 1, locked: false, containerId: 'ba-c3', content: 'Define heading and body typefaces. Note weights, sizes, and line-height guidelines.', style: promptStyle, textAlign: 'left' },
     // 1 board "Font Samples" inside Typography
     { id: 'ba-b1', type: 'board', x: 70, y: 670, width: 160, height: 60, zIndex: 1, locked: false, containerId: 'ba-c3', childBoardId: 'ba-board-fonts', title: 'Font Samples' },
     // 1 text label
@@ -280,9 +280,9 @@ const moodBoard: TemplateDefinition = {
     { id: 'mb-s5', type: 'shape', x: 380, y: 470, width: 55, height: 55, zIndex: 1, locked: false, containerId: 'mb-c2', shapeType: 'circle', content: '', style: { bgColor: 'rgba(244,114,182,0.6)', textColor: '#f472b6' } },
     // 1 link element inside References
     { id: 'mb-lk1', type: 'link', x: 580, y: 470, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'mb-c3', url: '', linkMode: 'bookmark', title: 'Reference link', description: 'Add a reference URL' },
-    // 2 freeform notes (one in References, one in Notes & Keywords)
-    { id: 'mb-n1', type: 'freeform', x: 580, y: 570, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'mb-c3', content: 'Describe design references, inspirations, and mood keywords.', cardType: 'note' },
-    { id: 'mb-n2', type: 'freeform', x: 70,  y: 770, width: 260, height: 100, zIndex: 1, locked: false, containerId: 'mb-c4', content: 'Key words: warm, organic, bold, minimal... capture the feeling here.', cardType: 'note' },
+    // 2 text prompts (one in References, one in Notes & Keywords)
+    { id: 'mb-n1', type: 'text', x: 580, y: 570, width: 280, height: 60, zIndex: 1, locked: false, containerId: 'mb-c3', content: 'Describe design references, inspirations, and mood keywords.', style: promptStyle, textAlign: 'left' },
+    { id: 'mb-n2', type: 'text', x: 70,  y: 770, width: 280, height: 60, zIndex: 1, locked: false, containerId: 'mb-c4', content: 'Key words: warm, organic, bold, minimal... capture the feeling here.', style: promptStyle, textAlign: 'left' },
     // 1 text label
     { id: 'mb-t1', type: 'text', x: 50, y: 10, width: 250, height: 30, zIndex: 1, locked: false, content: 'Mood & Inspiration', style: labelStyle, textAlign: 'left' },
   ] as CanvasElement[],
@@ -309,16 +309,16 @@ const leanCanvas: TemplateDefinition = {
     // Row 3: Cost Structure | Revenue Streams
     { id: 'lc-c8', type: 'container', x: 50,   y: 440, width: 780, height: 200, zIndex: 0, label: 'Cost Structure',          tintColor: 'sunset',  collapsed: false, locked: false, style: containerStyle },
     { id: 'lc-c9', type: 'container', x: 850,  y: 440, width: 780, height: 200, zIndex: 0, label: 'Revenue Streams',         tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
-    // 9 freeform notes (one per container)
-    { id: 'lc-n1', type: 'freeform', x: 70,   y: 110, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'lc-c1', content: 'Top 3 problems your customers face', cardType: 'note' },
-    { id: 'lc-n2', type: 'freeform', x: 390,  y: 110, width: 260, height: 80,  zIndex: 1, locked: false, containerId: 'lc-c2', content: 'Top 3 features or capabilities', cardType: 'note' },
-    { id: 'lc-n3', type: 'freeform', x: 710,  y: 110, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'lc-c3', content: 'Single clear compelling message that states why you are different and worth paying attention to', cardType: 'note' },
-    { id: 'lc-n4', type: 'freeform', x: 1030, y: 110, width: 260, height: 80,  zIndex: 1, locked: false, containerId: 'lc-c4', content: 'What can\'t be easily copied or bought', cardType: 'note' },
-    { id: 'lc-n5', type: 'freeform', x: 1350, y: 110, width: 260, height: 140, zIndex: 1, locked: false, containerId: 'lc-c5', content: 'Target customers and early adopters', cardType: 'note' },
-    { id: 'lc-n6', type: 'freeform', x: 390,  y: 290, width: 260, height: 80,  zIndex: 1, locked: false, containerId: 'lc-c6', content: 'Key numbers that tell you how your business is doing', cardType: 'note' },
-    { id: 'lc-n7', type: 'freeform', x: 1030, y: 290, width: 260, height: 80,  zIndex: 1, locked: false, containerId: 'lc-c7', content: 'Path to customers (online, direct, partners)', cardType: 'note' },
-    { id: 'lc-n8', type: 'freeform', x: 70,   y: 500, width: 260, height: 100, zIndex: 1, locked: false, containerId: 'lc-c8', content: 'Customer acquisition costs, hosting, salaries, fixed and variable costs', cardType: 'note' },
-    { id: 'lc-n9', type: 'freeform', x: 870,  y: 500, width: 260, height: 100, zIndex: 1, locked: false, containerId: 'lc-c9', content: 'Revenue model, pricing, lifetime value, gross margin', cardType: 'note' },
+    // 9 text prompts (one per container)
+    { id: 'lc-n1', type: 'text', x: 70,   y: 110, width: 270, height: 60, zIndex: 1, locked: false, containerId: 'lc-c1', content: 'Top 3 problems your customers face', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n2', type: 'text', x: 390,  y: 110, width: 270, height: 60, zIndex: 1, locked: false, containerId: 'lc-c2', content: 'Top 3 features or capabilities', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n3', type: 'text', x: 710,  y: 110, width: 270, height: 80, zIndex: 1, locked: false, containerId: 'lc-c3', content: 'Single clear compelling message that states why you are different and worth paying attention to', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n4', type: 'text', x: 1030, y: 110, width: 270, height: 60, zIndex: 1, locked: false, containerId: 'lc-c4', content: 'What can\'t be easily copied or bought', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n5', type: 'text', x: 1350, y: 110, width: 270, height: 60, zIndex: 1, locked: false, containerId: 'lc-c5', content: 'Target customers and early adopters', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n6', type: 'text', x: 390,  y: 290, width: 270, height: 60, zIndex: 1, locked: false, containerId: 'lc-c6', content: 'Key numbers that tell you how your business is doing', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n7', type: 'text', x: 1030, y: 290, width: 270, height: 60, zIndex: 1, locked: false, containerId: 'lc-c7', content: 'Path to customers (online, direct, partners)', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n8', type: 'text', x: 70,   y: 500, width: 270, height: 70, zIndex: 1, locked: false, containerId: 'lc-c8', content: 'Customer acquisition costs, hosting, salaries, fixed and variable costs', style: promptStyle, textAlign: 'left' },
+    { id: 'lc-n9', type: 'text', x: 870,  y: 500, width: 270, height: 70, zIndex: 1, locked: false, containerId: 'lc-c9', content: 'Revenue model, pricing, lifetime value, gross margin', style: promptStyle, textAlign: 'left' },
     // 1 diamond shape inside UVP
     { id: 'lc-s1', type: 'shape', x: 810, y: 280, width: 60, height: 60, zIndex: 1, locked: false, containerId: 'lc-c3', shapeType: 'diamond', content: '💎', style: { bgColor: 'rgba(139,92,246,0.35)', textColor: '#c084fc' } },
     // 1 board "Customer Research" inside Customer Segments
@@ -338,15 +338,15 @@ const brainstormBoard: TemplateDefinition = {
     { id: 'bs-c1', type: 'container', x: 50,  y: 50,  width: 700, height: 420, zIndex: 0, label: 'Diverge — Generate Ideas', tintColor: 'violet',  collapsed: false, locked: false, style: containerStyle },
     { id: 'bs-c2', type: 'container', x: 780, y: 50,  width: 400, height: 420, zIndex: 0, label: 'Converge — Prioritize',    tintColor: 'emerald', collapsed: false, locked: false, style: containerStyle },
     { id: 'bs-c3', type: 'container', x: 50,  y: 500, width: 1130, height: 220, zIndex: 0, label: 'Action Items',            tintColor: 'ocean',   collapsed: false, locked: false, style: containerStyle },
-    // 3 freeform notes inside Diverge (idea starters)
-    { id: 'bs-n1', type: 'freeform', x: 70,  y: 110, width: 200, height: 140, zIndex: 1, locked: false, containerId: 'bs-c1', content: 'How might we reframe the core challenge?', cardType: 'note' },
-    { id: 'bs-n2', type: 'freeform', x: 290, y: 110, width: 200, height: 140, zIndex: 1, locked: false, containerId: 'bs-c1', content: 'What if we removed every constraint?', cardType: 'note' },
-    { id: 'bs-n3', type: 'freeform', x: 510, y: 110, width: 200, height: 140, zIndex: 1, locked: false, containerId: 'bs-c1', content: 'What would the opposite approach look like?', cardType: 'note' },
+    // 3 text prompts inside Diverge (idea starters)
+    { id: 'bs-n1', type: 'text', x: 70,  y: 110, width: 200, height: 60, zIndex: 1, locked: false, containerId: 'bs-c1', content: 'How might we reframe the core challenge?', style: promptStyle, textAlign: 'left' },
+    { id: 'bs-n2', type: 'text', x: 290, y: 110, width: 200, height: 60, zIndex: 1, locked: false, containerId: 'bs-c1', content: 'What if we removed every constraint?', style: promptStyle, textAlign: 'left' },
+    { id: 'bs-n3', type: 'text', x: 510, y: 110, width: 200, height: 60, zIndex: 1, locked: false, containerId: 'bs-c1', content: 'What would the opposite approach look like?', style: promptStyle, textAlign: 'left' },
     // 4 rectangle shapes inside Converge (priority zones)
-    { id: 'bs-s1', type: 'shape', x: 800,  y: 120, width: 80, height: 60, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'High', style: { bgColor: 'rgba(52,211,153,0.35)', textColor: '#34d399' } },
-    { id: 'bs-s2', type: 'shape', x: 900,  y: 120, width: 80, height: 60, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'Maybe', style: { bgColor: 'rgba(250,204,21,0.35)', textColor: '#facc15' } },
-    { id: 'bs-s3', type: 'shape', x: 1000, y: 120, width: 80, height: 60, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'Low', style: { bgColor: 'rgba(248,113,113,0.35)', textColor: '#f87171' } },
-    { id: 'bs-s4', type: 'shape', x: 1100, y: 120, width: 80, height: 60, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'Park', style: { bgColor: 'rgba(139,92,246,0.35)', textColor: '#c084fc' } },
+    { id: 'bs-s1', type: 'shape', x: 800,  y: 120, width: 90, height: 90, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'High', style: { bgColor: 'rgba(52,211,153,0.35)', textColor: '#34d399' } },
+    { id: 'bs-s2', type: 'shape', x: 900,  y: 120, width: 90, height: 90, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'Maybe', style: { bgColor: 'rgba(250,204,21,0.35)', textColor: '#facc15' } },
+    { id: 'bs-s3', type: 'shape', x: 1000, y: 120, width: 90, height: 90, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'Low', style: { bgColor: 'rgba(248,113,113,0.35)', textColor: '#f87171' } },
+    { id: 'bs-s4', type: 'shape', x: 1100, y: 120, width: 90, height: 90, zIndex: 1, locked: false, containerId: 'bs-c2', shapeType: 'rectangle', content: 'Park', style: { bgColor: 'rgba(139,92,246,0.35)', textColor: '#c084fc' } },
     // 2 freeform tasks inside Action Items
     { id: 'bs-ft1', type: 'freeform', x: 70,  y: 560, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'bs-c3', content: 'Define owner, first step, and deadline for top idea', cardType: 'task' },
     { id: 'bs-ft2', type: 'freeform', x: 360, y: 560, width: 260, height: 80, zIndex: 1, locked: false, containerId: 'bs-c3', content: 'Schedule follow-up review session', cardType: 'task' },

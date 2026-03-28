@@ -31,6 +31,8 @@ export interface BridgeCallbacks {
   setEdges: (edges: CanvasEdge[]) => void;
   /** Update a single element by ID (partial update in the array) */
   patchElement: (elementId: string, element: CanvasElement) => void;
+  /** Batch update multiple elements at once (for performance) */
+  patchElements?: (updates: Array<{ id: string; element: CanvasElement }>) => void;
   /** Remove a single element by ID */
   removeElement: (elementId: string) => void;
   /** Update a single edge by ID */
@@ -109,6 +111,12 @@ export class YjsZustandBridge {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (events: Y.YEvent<any>[]) => {
+      // 'drag-commit' transactions are written by commitDragPositionsToYjs after
+      // the drag ends. Zustand was already updated directly (updateElementsPositionLocal)
+      // throughout the drag, so skipping the bridge flush here avoids a redundant
+      // Zustand setState with identical data.
+      if (events[0]?.transaction?.origin === 'drag-commit') return;
+
       for (const event of events) {
         if (event.target === yElements) {
           // Top-level changes to the elements map (add/delete keys)
@@ -366,14 +374,31 @@ export class YjsZustandBridge {
     });
     this.pendingElementRemovals.clear();
 
-    // Process element changes (add or update)
-    this.pendingElementChanges.forEach((id) => {
-      const yEl = yElements.get(id);
-      if (yEl instanceof Y.Map) {
-        this.callbacks.patchElement(id, yMapToCanvasElement(yEl));
+    // Process element changes (add or update) - BATCHED for performance
+    if (this.pendingElementChanges.size > 0) {
+      if (this.callbacks.patchElements && this.pendingElementChanges.size > 1) {
+        // Batch path for multiple elements — single Zustand setState
+        const updates: Array<{ id: string; element: CanvasElement }> = [];
+        this.pendingElementChanges.forEach((id) => {
+          const yEl = yElements.get(id);
+          if (yEl instanceof Y.Map) {
+            updates.push({ id, element: yMapToCanvasElement(yEl) });
+          }
+        });
+        if (updates.length > 0) {
+          this.callbacks.patchElements(updates);
+        }
+      } else {
+        // Single element — use original path
+        this.pendingElementChanges.forEach((id) => {
+          const yEl = yElements.get(id);
+          if (yEl instanceof Y.Map) {
+            this.callbacks.patchElement(id, yMapToCanvasElement(yEl));
+          }
+        });
       }
-    });
-    this.pendingElementChanges.clear();
+      this.pendingElementChanges.clear();
+    }
 
     // Process edge removals
     this.pendingEdgeRemovals.forEach((id) => {

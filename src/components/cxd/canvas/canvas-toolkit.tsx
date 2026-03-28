@@ -410,13 +410,13 @@ export function CanvasToolkit({
         data-tour-id="canvas-toolkit"
         className={cn(
           "fixed top-28 left-1/2 -translate-x-1/2 z-30 flex items-center justify-center p-1.5 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6)] transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
-          isCollapsed ? "w-[52px] overflow-hidden" : "w-[500px] overflow-visible"
+          isCollapsed ? "w-[52px] overflow-hidden" : "w-[540px] overflow-visible"
         )}
       >
         <div
           className={cn(
             "flex items-center flex-shrink-0 transition-all duration-[3000ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
-            isCollapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100 w-[380px] gap-1.5 px-1.5 mr-1 overflow-visible"
+            isCollapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100 w-[440px] gap-1.5 px-1.5 mr-1 overflow-visible"
           )}
         >
           {TOOLKIT_TOOLS.map((tool) => {
@@ -533,13 +533,12 @@ export function CanvasToolkit({
               </div>
             );
           })}
+          {/* Divider */}
+          <div className="w-px h-6 bg-white/10 flex-shrink-0 mx-0.5" />
+
+          {/* Comment Mode Toggle */}
+          <CommentModeToggle onActivate={() => setActiveTool(null)} />
         </div>
-
-        {/* Divider */}
-        <div className="w-px h-6 bg-white/10 flex-shrink-0 mx-0.5" />
-
-        {/* Comment Mode Toggle */}
-        <CommentModeToggle onActivate={() => setActiveTool(null)} />
 
         {/* Collapse/Expand Toggle Wrapper */}
         <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center">
