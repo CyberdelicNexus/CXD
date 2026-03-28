@@ -432,10 +432,10 @@ function OKRCard({ okr, compact = false, onDragStart, onDragEnd, isDragging = fa
                 keyResult={kr}
               />
             ))}
-            <div className="relative w-full rounded-lg p-[1px] bg-gradient-to-r from-amber-500/20 via-amber-400/40 to-amber-500/20 hover:from-amber-500/30 hover:via-amber-400/50 hover:to-amber-500/30 transition-all">
+            <div className="relative w-full rounded-lg overflow-hidden p-[1px] bg-gradient-to-r from-amber-500/20 via-amber-400/40 to-amber-500/20 hover:from-amber-500/30 hover:via-amber-400/50 hover:to-amber-500/30 transition-all">
               <button
                 onClick={handleAddKeyResult}
-                className="w-full flex items-center justify-center gap-1.5 text-amber-300/70 hover:text-amber-200 text-sm h-9 rounded-[7px] bg-black/60 hover:bg-black/40 transition-all"
+                className="w-full flex items-center justify-center gap-1.5 text-amber-300/70 hover:text-amber-200 text-sm h-9 rounded-[calc(0.5rem-1px)] bg-black/60 hover:bg-black/40 transition-all"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Key Result

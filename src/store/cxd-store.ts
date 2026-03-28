@@ -2655,11 +2655,12 @@ export const useCXDStore = create<CXDState>()(
           updatedAt: new Date().toISOString(),
         };
 
+        // Always update Zustand directly (bridge doesn't observe OKRs)
+        const updatedObjectives = [...okr.objectives, newObjective];
+        get().updateOKR(okrId, { objectives: updatedObjectives });
+
         if (yDoc) {
           yjsAddObjective(yDoc, okrId, newObjective);
-        } else {
-          const updatedObjectives = [...okr.objectives, newObjective];
-          get().updateOKR(okrId, { objectives: updatedObjectives });
         }
 
         return objectiveId;
@@ -2723,15 +2724,16 @@ export const useCXDStore = create<CXDState>()(
           updatedAt: new Date().toISOString(),
         };
 
+        // Always update Zustand directly (bridge doesn't observe OKRs)
+        const updatedObjectives = okr.objectives.map((obj) =>
+          obj.id === objectiveId
+            ? { ...obj, keyResults: [...obj.keyResults, newKR] }
+            : obj
+        );
+        get().updateOKR(okrId, { objectives: updatedObjectives });
+
         if (yDoc) {
           yjsAddKeyResult(yDoc, okrId, objectiveId, newKR);
-        } else {
-          const updatedObjectives = okr.objectives.map((obj) =>
-            obj.id === objectiveId
-              ? { ...obj, keyResults: [...obj.keyResults, newKR] }
-              : obj
-          );
-          get().updateOKR(okrId, { objectives: updatedObjectives });
         }
 
         return krId;
