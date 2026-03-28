@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useCXDStore } from "@/store/cxd-store";
-import { extractCenterColor, hexToRgba } from "@/lib/utils";
+import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import {
@@ -209,6 +209,9 @@ export function CXDNavbar() {
       setIsRenaming(false);
     }
   };
+
+  // Collapsible navbar buttons state
+  const [navButtonsExpanded, setNavButtonsExpanded] = useState(true);
 
   // Collaboration state
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
@@ -557,24 +560,179 @@ export function CXDNavbar() {
             <NavCreditMeter />
           )}
 
-          {/* Tour replay button */}
-          <div
-            className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
-            onClick={() => {
-              const state = useCXDStore.getState();
-              let tourIdForView: 'canvas' | 'map' | 'plan' = 'canvas';
-              if (canvasViewMode === 'hexagon' || canvasViewMode === 'hypercube') tourIdForView = 'map';
-              else if (canvasViewMode === 'plan') tourIdForView = 'plan';
-              state.startTour(tourIdForView);
-            }}
-            title="Replay tour"
+          {/* Toggle button for collapsible toolbar */}
+          <button
+            onClick={() => setNavButtonsExpanded(!navButtonsExpanded)}
+            className="h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 transition-all flex-shrink-0"
+            title={navButtonsExpanded ? "Hide toolbar" : "Show toolbar"}
           >
-            <HelpCircle className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
+            {navButtonsExpanded ? (
+              <ChevronRight className="w-4 h-4 text-white/60" />
+            ) : (
+              <ChevronLeft className="w-4 h-4 text-white/60" />
+            )}
+          </button>
+
+          {/* Collapsible button group: Tour, Shortcuts, Share, Export, Notifications */}
+          <div className={cn(
+            "flex items-center gap-2 overflow-hidden transition-all duration-300",
+            navButtonsExpanded ? "max-w-[500px] opacity-100" : "max-w-0 opacity-0"
+          )}>
+            {/* Tour replay button */}
+            <div
+              className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
+              onClick={() => {
+                const state = useCXDStore.getState();
+                let tourIdForView: 'canvas' | 'map' | 'plan' = 'canvas';
+                if (canvasViewMode === 'hexagon' || canvasViewMode === 'hypercube') tourIdForView = 'map';
+                else if (canvasViewMode === 'plan') tourIdForView = 'plan';
+                state.startTour(tourIdForView);
+              }}
+              title="Replay tour"
+            >
+              <HelpCircle className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
+            </div>
+
+            {/* Shortcuts Guide */}
+            <ShortcutsGuide />
+
+            {project && viewMode !== "home" && (
+              <>
+                <div
+                  className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
+                  onClick={handleShare}
+                >
+                  <Share2 className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                </div>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <div className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
+                      <Download className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                    </div>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="bg-zinc-900/95 backdrop-blur-xl border-white/10 p-1 shadow-2xl"
+                  >
+                    <DropdownMenuItem onClick={handleExportJSON} className="hover:bg-white/5 cursor-pointer rounded-md">
+                      Export as JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="hover:bg-white/5 cursor-not-allowed text-white/40 rounded-md"
+                      onClick={() =>
+                        toast({
+                          title: "Coming Soon",
+                          description: "PDF export will be available in V1",
+                        })
+                      }
+                    >
+                      Export as PDF (Soon)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
+
+            {/* Notifications */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <div className="relative cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
+                  <Bell className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-2 right-2 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
+                  )}
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-80 bg-zinc-900/95 backdrop-blur-xl border-white/10 p-0 shadow-2xl"
+              >
+                <div className="flex items-center justify-between p-4 border-b border-white/10">
+                  <h3 className="font-semibold text-sm">Notifications</h3>
+                  {unreadCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={markAllAsRead}
+                      className="text-xs text-violet-400 hover:text-violet-300 h-auto p-1 hover:bg-transparent"
+                    >
+                      Mark all read
+                    </Button>
+                  )}
+                </div>
+
+                <ScrollArea className="h-[400px]">
+                  {loading ? (
+                    <div className="flex items-center justify-center p-8">
+                      <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+                    </div>
+                  ) : notifications.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-8 text-center">
+                      <Bell className="w-12 h-12 text-white/10 mb-3" />
+                      <p className="text-sm text-white/40">No notifications yet</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-white/5">
+                      {notifications.map((notification) => (
+                        <div
+                          key={notification.id}
+                          className={`p-4 hover:bg-white/5 cursor-pointer transition-colors ${!notification.is_read ? 'bg-violet-500/5' : ''
+                            }`}
+                          onClick={() => markAsRead(notification.id)}
+                        >
+                          <div className="flex gap-3">
+                            <div className="flex-shrink-0 mt-0.5">
+                              {notificationIcons[notification.type]}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2 mb-1">
+                                <p className="text-sm font-medium text-white">
+                                  {notification.title}
+                                </p>
+                                {!notification.is_read && (
+                                  <div className="w-2 h-2 bg-violet-500 rounded-full flex-shrink-0 mt-1 shadow-[0_0_8px_rgba(139,92,246,0.8)]" />
+                                )}
+                              </div>
+                              <p className="text-xs text-white/50 line-clamp-2 mb-2 leading-relaxed">
+                                {notification.message}
+                              </p>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-white/30">
+                                  {formatTimeAgo(notification.created_at)}
+                                </span>
+                                {notification.is_read && (
+                                  <Check className="w-3 h-3 text-white/20" />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+                {notifications.length > 0 && (
+                  <div className="border-t border-white/5 p-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearAll();
+                      }}
+                    >
+                      Clear All
+                    </Button>
+                  </div>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
-          {/* Shortcuts Guide - Always visible */}
-          <ShortcutsGuide />
-
+          {/* Always visible: Collaborate and Account */}
           {project && viewMode !== "home" && (
             <>
               {/* Collaboration section — single button with hover-reveal bubbles */}
@@ -646,139 +804,8 @@ export function CXDNavbar() {
                   </div>
                 )}
               </div>
-
-              <div
-                className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
-                onClick={handleShare}
-              >
-                <Share2 className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
-              </div>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <div className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
-                    <Download className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
-                  </div>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className="bg-zinc-900/95 backdrop-blur-xl border-white/10 p-1 shadow-2xl"
-                >
-                  <DropdownMenuItem onClick={handleExportJSON} className="hover:bg-white/5 cursor-pointer rounded-md">
-                    Export as JSON
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="hover:bg-white/5 cursor-not-allowed text-white/40 rounded-md"
-                    onClick={() =>
-                      toast({
-                        title: "Coming Soon",
-                        description: "PDF export will be available in V1",
-                      })
-                    }
-                  >
-                    Export as PDF (Soon)
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </>
           )}
-
-          {/* Notifications */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <div className="relative cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
-                <Bell className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
-                {unreadCount > 0 && (
-                  <span className="absolute top-2 right-2 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
-                )}
-              </div>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="w-80 bg-zinc-900/95 backdrop-blur-xl border-white/10 p-0 shadow-2xl"
-            >
-              <div className="flex items-center justify-between p-4 border-b border-white/10">
-                <h3 className="font-semibold text-sm">Notifications</h3>
-                {unreadCount > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={markAllAsRead}
-                    className="text-xs text-violet-400 hover:text-violet-300 h-auto p-1 hover:bg-transparent"
-                  >
-                    Mark all read
-                  </Button>
-                )}
-              </div>
-
-              <ScrollArea className="h-[400px]">
-                {loading ? (
-                  <div className="flex items-center justify-center p-8">
-                    <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
-                  </div>
-                ) : notifications.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center p-8 text-center">
-                    <Bell className="w-12 h-12 text-white/10 mb-3" />
-                    <p className="text-sm text-white/40">No notifications yet</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-white/5">
-                    {notifications.map((notification) => (
-                      <div
-                        key={notification.id}
-                        className={`p-4 hover:bg-white/5 cursor-pointer transition-colors ${!notification.is_read ? 'bg-violet-500/5' : ''
-                          }`}
-                        onClick={() => markAsRead(notification.id)}
-                      >
-                        <div className="flex gap-3">
-                          <div className="flex-shrink-0 mt-0.5">
-                            {notificationIcons[notification.type]}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <p className="text-sm font-medium text-white">
-                                {notification.title}
-                              </p>
-                              {!notification.is_read && (
-                                <div className="w-2 h-2 bg-violet-500 rounded-full flex-shrink-0 mt-1 shadow-[0_0_8px_rgba(139,92,246,0.8)]" />
-                              )}
-                            </div>
-                            <p className="text-xs text-white/50 line-clamp-2 mb-2 leading-relaxed">
-                              {notification.message}
-                            </p>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] text-white/30">
-                                {formatTimeAgo(notification.created_at)}
-                              </span>
-                              {notification.is_read && (
-                                <Check className="w-3 h-3 text-white/20" />
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
-              {notifications.length > 0 && (
-                <div className="border-t border-white/5 p-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      clearAll();
-                    }}
-                  >
-                    Clear All
-                  </Button>
-                </div>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
 
           {/* Account Menu - Shows tier, credits, trial countdown in dropdown - Far right */}
           <AccountMenu

@@ -870,6 +870,11 @@ export function CXDCanvas() {
             setMarqueeStart({ x, y });
             setMarqueeEnd({ x, y });
 
+            // Close any open comment thread when clicking empty canvas
+            if (activeCommentId) {
+              setActiveComment(null);
+            }
+
             // GLOBAL RULE: Clicking background deselects all elements and closes all menus
             setSelectedElementId(null);
             setSelectedElementIds(new Set());

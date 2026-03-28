@@ -130,7 +130,7 @@ export default function CXDPage() {
           if (data) {
             setCachedUserProfile({
               name: data.full_name || data.name || user.email?.split('@')[0] || 'You',
-              avatar: data.profile_picture || user.user_metadata?.avatar_url || null,
+              avatar: data.profile_picture || user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
             });
           }
         }

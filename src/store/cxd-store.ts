@@ -2958,6 +2958,13 @@ export const useCXDStore = create<CXDState>()(
                 : p,
             ),
           }));
+          // Persist tour completion to localStorage so it survives refresh
+          try {
+            const stored = JSON.parse(localStorage.getItem('cxd-tour-completed') || '{}');
+            const key = `${currentProjectId}_${tourId}`;
+            stored[key] = true;
+            localStorage.setItem('cxd-tour-completed', JSON.stringify(stored));
+          } catch {}
           // Clear tourId after state update
           set({ tourId: null });
         } else {
@@ -2967,7 +2974,15 @@ export const useCXDStore = create<CXDState>()(
 
       isTourCompleted: (tourId) => {
         const project = get().getCurrentProject();
-        return project?.tourCompleted?.[tourId] ?? false;
+        if (project?.tourCompleted?.[tourId]) return true;
+        // Fallback: check localStorage for persisted tour completion
+        try {
+          const stored = JSON.parse(localStorage.getItem('cxd-tour-completed') || '{}');
+          const key = `${project?.id || get().currentProjectId}_${tourId}`;
+          return stored[key] === true;
+        } catch {
+          return false;
+        }
       },
     }),
     {

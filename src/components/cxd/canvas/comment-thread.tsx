@@ -175,7 +175,13 @@ export function CommentThreadPanel({
         </div>
 
         {/* Messages */}
-        <div className="max-h-64 overflow-y-auto">
+        <div
+          className="max-h-64 overflow-y-auto comment-thread-scroll"
+          style={{
+            scrollbarWidth: 'thin',
+            scrollbarColor: 'rgba(255,255,255,0.1) transparent',
+          }}
+        >
           {/* Root comment */}
           <div className={cn("px-3 py-2.5", isResolved && "opacity-60")}>
             <div className="flex items-center gap-2 mb-1">
