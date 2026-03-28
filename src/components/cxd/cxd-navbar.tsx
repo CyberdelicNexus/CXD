@@ -582,13 +582,16 @@ export function CXDNavbar() {
           </button>
 
           {/* Collapsible button group: Tour, Shortcuts, Share, Export, Notifications */}
+          {/* AI model selector — always visible */}
+          {project && viewMode !== "home" && (
+            <NavCreditMeter />
+          )}
+
+          {/* Collapsible button group: Tour, Shortcuts, Share, Export, Notifications */}
           <div className={cn(
             "flex items-center gap-2 overflow-hidden transition-all duration-300",
             navButtonsExpanded ? "max-w-[500px] opacity-100" : "max-w-0 opacity-0"
           )}>
-            {project && viewMode !== "home" && (
-              <NavCreditMeter />
-            )}
             {/* Tour replay button */}
             <div
               className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
