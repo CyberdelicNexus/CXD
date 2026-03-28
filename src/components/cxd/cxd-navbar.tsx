@@ -558,10 +558,6 @@ export function CXDNavbar() {
 
         {/* Right section */}
         <div className="flex items-center gap-2 flex-1 justify-end">
-          {project && viewMode !== "home" && (
-            <NavCreditMeter />
-          )}
-
           {/* Hidden gradient definition for expand/collapse icon */}
           <svg width="0" height="0" className="absolute overflow-hidden">
             <defs>
@@ -572,7 +568,7 @@ export function CXDNavbar() {
             </defs>
           </svg>
 
-          {/* Toggle button for collapsible toolbar — far left, floating icon */}
+          {/* Toggle button for collapsible toolbar — first icon from left */}
           <button
             onClick={() => setNavButtonsExpanded(!navButtonsExpanded)}
             className="flex items-center justify-center flex-shrink-0 transition-all duration-200 hover:scale-110 hover:drop-shadow-[0_0_8px_rgba(192,132,252,0.5)]"
@@ -590,6 +586,9 @@ export function CXDNavbar() {
             "flex items-center gap-2 overflow-hidden transition-all duration-300",
             navButtonsExpanded ? "max-w-[500px] opacity-100" : "max-w-0 opacity-0"
           )}>
+            {project && viewMode !== "home" && (
+              <NavCreditMeter />
+            )}
             {/* Tour replay button */}
             <div
               className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
