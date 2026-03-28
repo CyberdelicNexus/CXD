@@ -1499,17 +1499,14 @@ export const useCXDStore = create<CXDState>()(
           ),
         }));
 
-        // Sync to Yjs in background (for persistence/collaboration)
+        // Write to Yjs synchronously with 'template-batch' origin so bridge ignores it
         const { yDoc } = get();
         if (yDoc) {
-          // Schedule Yjs write in next microtask to not block render
-          Promise.resolve().then(() => {
-            yDoc.transact(() => {
-              prepared.forEach(el => {
-                yjsAddElement(yDoc, el);
-              });
-            }, 'local');
-          });
+          yDoc.transact(() => {
+            prepared.forEach(el => {
+              yjsAddElement(yDoc, el);
+            });
+          }, 'template-batch');
         }
       },
 

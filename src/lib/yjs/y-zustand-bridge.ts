@@ -115,7 +115,8 @@ export class YjsZustandBridge {
       // the drag ends. Zustand was already updated directly (updateElementsPositionLocal)
       // throughout the drag, so skipping the bridge flush here avoids a redundant
       // Zustand setState with identical data.
-      if (events[0]?.transaction?.origin === 'drag-commit') return;
+      const origin = events[0]?.transaction?.origin;
+      if (origin === 'drag-commit' || origin === 'template-batch') return;
 
       for (const event of events) {
         if (event.target === yElements) {

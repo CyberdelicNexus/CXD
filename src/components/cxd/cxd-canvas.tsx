@@ -4766,7 +4766,7 @@ export function CXDCanvas() {
               <span className="text-xs font-medium text-purple-300">New Comment</span>
             </div>
             <div className="p-2">
-              <div className="relative">
+              <div className="relative overflow-visible">
                 <textarea
                   ref={newCommentInputRef}
                   autoFocus
@@ -4796,7 +4796,7 @@ export function CXDCanvas() {
                   <SmilePlus className="w-4 h-4" />
                 </button>
                 {showNewCommentEmoji && (
-                  <div className="absolute bottom-full right-0 mb-1 flex flex-wrap gap-0.5 p-1.5 rounded-lg bg-[rgba(12,10,22,0.97)] border border-white/10 shadow-xl z-10 max-w-[200px]">
+                  <div className="absolute bottom-full right-0 mb-1 flex flex-wrap gap-0.5 p-1.5 rounded-lg bg-[rgba(12,10,22,0.97)] border border-white/10 shadow-xl z-50 max-w-[200px]">
                     {NEW_COMMENT_EMOJIS.map(emoji => (
                       <button
                         key={emoji}
