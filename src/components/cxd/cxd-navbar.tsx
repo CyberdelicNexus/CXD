@@ -33,7 +33,7 @@ import {
   Palette,
   Loader2,
   Home,
-  MoreHorizontal,
+  ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
 import { Link } from "lucide-react";
@@ -562,21 +562,26 @@ export function CXDNavbar() {
             <NavCreditMeter />
           )}
 
-          {/* Toggle button for collapsible toolbar */}
+          {/* Hidden gradient definition for expand/collapse icon */}
+          <svg width="0" height="0" className="absolute overflow-hidden">
+            <defs>
+              <linearGradient id="expand-icon-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#c084fc" />
+                <stop offset="100%" stopColor="#f472b6" />
+              </linearGradient>
+            </defs>
+          </svg>
+
+          {/* Toggle button for collapsible toolbar — far left, floating icon */}
           <button
             onClick={() => setNavButtonsExpanded(!navButtonsExpanded)}
-            className={cn(
-              "h-8 px-2 flex items-center justify-center rounded-full transition-all duration-200 flex-shrink-0",
-              navButtonsExpanded
-                ? "bg-white/10 border border-white/20 text-white/60 hover:text-white"
-                : "bg-purple-600/20 border border-purple-500/30 text-purple-300 hover:bg-purple-600/30"
-            )}
+            className="flex items-center justify-center flex-shrink-0 transition-all duration-200 hover:scale-110 hover:drop-shadow-[0_0_8px_rgba(192,132,252,0.5)]"
             title={navButtonsExpanded ? "Hide toolbar" : "Show toolbar"}
           >
             {navButtonsExpanded ? (
-              <ChevronsRight className="w-4 h-4" />
+              <ChevronsRight className="w-5 h-5" style={{ stroke: 'url(#expand-icon-grad)' }} />
             ) : (
-              <MoreHorizontal className="w-4 h-4" />
+              <ChevronsLeft className="w-5 h-5" style={{ stroke: 'url(#expand-icon-grad)' }} />
             )}
           </button>
 
