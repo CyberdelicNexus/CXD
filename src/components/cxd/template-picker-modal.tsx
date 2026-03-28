@@ -74,14 +74,24 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     if (!tpl) return;
 
     const freshElements = remapTemplateIds(tpl.elements);
-    addCanvasElements(freshElements);
 
+    // Close dialog FIRST so Radix cleans up pointer-events on body,
+    // then add elements after dialog unmount completes
     onClose();
+    requestAnimationFrame(() => {
+      addCanvasElements(freshElements);
+      // Safety: ensure Radix didn't leave pointer-events: none on body
+      document.body.style.pointerEvents = '';
+    });
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="bg-zinc-900/95 border-white/10 text-white sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
+      <DialogContent
+        className="bg-zinc-900/95 border-white/10 text-white sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Add a Template</DialogTitle>
           <DialogDescription className="text-white/60">
