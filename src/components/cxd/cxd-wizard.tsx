@@ -627,11 +627,11 @@ export function CXDWizard() {
       />
 
       {/* Left Sidebar - Vertical Progress Bar (Fixed, centered vertically) */}
-      <div className="fixed left-[180px] top-1/2 -translate-y-1/2 z-20 flex flex-col items-start gap-3">
+      <div className="fixed left-4 lg:left-[calc(50%-28rem)] 2xl:left-[180px] top-1/2 -translate-y-1/2 z-20 flex flex-col items-start gap-3">
         {/* Progress bar with phase dots and labels */}
         <div className="relative flex items-center gap-3 h-[500px]">
-          {/* Phase labels (horizontal text) - LEFT SIDE */}
-          <div className="relative h-full w-24">
+          {/* Phase labels (horizontal text) - LEFT SIDE — hidden below 2xl */}
+          <div className="relative h-full w-24 hidden 2xl:block">
             {WIZARD_PHASES.map((phase, index) => {
               const phaseStartStep = phase.steps[0];
               const totalSteps = WIZARD_STEPS.length;
@@ -705,8 +705,8 @@ export function CXDWizard() {
         </div>
       </div>
 
-      {/* Content Container with gap */}
-      <div className="flex gap-[10px] max-w-4xl w-full px-4 relative z-10">
+      {/* Content Container with gap — px adds space so sidebars don't overlap at smaller screens */}
+      <div className="flex gap-[10px] max-w-4xl w-full px-16 2xl:px-4 relative z-10">
 
         {/* Center Column - Main Content */}
         <div className="flex-1 overflow-y-auto">
@@ -801,7 +801,7 @@ export function CXDWizard() {
         </div>
 
         {/* Right Sidebar - Navigation Buttons (Fixed, centered vertically) */}
-        <div className="fixed right-[230px] top-1/2 -translate-y-1/2 z-20 w-16 flex flex-col items-center">
+        <div className="fixed right-4 lg:right-[calc(50%-28rem)] 2xl:right-[230px] top-1/2 -translate-y-1/2 z-20 w-16 flex flex-col items-center">
           <div className="flex flex-col gap-4 items-center">
             {/* Previous Button */}
             <div className="flex flex-col items-center gap-2">

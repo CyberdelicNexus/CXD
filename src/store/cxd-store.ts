@@ -1482,32 +1482,34 @@ export const useCXDStore = create<CXDState>()(
           surface: el.surface !== undefined ? el.surface : activeSurface,
         }));
 
+        // Direct Zustand update (single setState — no Yjs observer cascade)
+        get().pushCanvasHistory();
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  elements: [...(p.canvasLayout?.elements || []), ...prepared]
+                },
+                updatedAt: new Date().toISOString()
+              }
+              : p
+          ),
+        }));
+
+        // Sync to Yjs in background (for persistence/collaboration)
         const { yDoc } = get();
         if (yDoc) {
-          // Batch all Yjs mutations in a single transaction
-          // yjsAddElement uses doc.transact internally; nested transactions merge into outer one
-          yDoc.transact(() => {
-            prepared.forEach(el => {
-              yjsAddElement(yDoc, el);
-            });
-          }, 'local');
-        } else {
-          // Fallback: single Zustand update
-          get().pushCanvasHistory();
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? {
-                  ...p,
-                  canvasLayout: {
-                    ...(p.canvasLayout || {}),
-                    elements: [...(p.canvasLayout?.elements || []), ...prepared]
-                  },
-                  updatedAt: new Date().toISOString()
-                }
-                : p
-            ),
-          }));
+          // Schedule Yjs write in next microtask to not block render
+          Promise.resolve().then(() => {
+            yDoc.transact(() => {
+              prepared.forEach(el => {
+                yjsAddElement(yDoc, el);
+              });
+            }, 'local');
+          });
         }
       },
 
@@ -2320,14 +2322,14 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return [];
         const { activeBoardId } = get();
-        return (currentProject.comments || []).filter(c => c.boardId === activeBoardId);
+        return (currentProject.comments || []).filter(c => (c.boardId ?? null) === (activeBoardId ?? null));
       },
 
       getThreads: () => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return [];
         const { activeBoardId } = get();
-        const allComments = (currentProject.comments || []).filter(c => c.boardId === activeBoardId);
+        const allComments = (currentProject.comments || []).filter(c => (c.boardId ?? null) === (activeBoardId ?? null));
         const roots = allComments.filter(c => c.parentId === null);
         return roots.map(root => ({
           root,

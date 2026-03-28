@@ -4761,8 +4761,8 @@ export function CXDCanvas() {
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="w-64 rounded-xl border border-purple-500/30 bg-[rgba(12,10,22,0.97)] backdrop-blur-xl shadow-2xl overflow-hidden">
-            <div className="px-3 py-2 border-b border-white/10">
+          <div className="w-64 rounded-xl border border-purple-500/30 bg-[rgba(12,10,22,0.97)] backdrop-blur-xl shadow-2xl overflow-visible">
+            <div className="px-3 py-2 border-b border-white/10 rounded-t-xl">
               <span className="text-xs font-medium text-purple-300">New Comment</span>
             </div>
             <div className="p-2">
