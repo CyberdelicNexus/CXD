@@ -14,6 +14,7 @@ import {
   Eye,
   Wand2,
   Grid3X3,
+  ArrowLeft,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { extractCenterColor, hexToRgba } from '@/lib/utils';
@@ -186,7 +187,13 @@ export default function SharePage({ params }: { params: { token: string } }) {
     );
   }
 
-  // Shared view toggle component for framing/canvas views
+  // ── Shared navbar for framing + canvas views ──────────────────
+
+  const canvasBackground = project.canvasBackground || CANVAS_GRADIENTS[0].value;
+  const centerColor = extractCenterColor(canvasBackground);
+  const safeHexColor = centerColor.startsWith('#') ? centerColor : '#1a1a1a';
+  const navBgColor = hexToRgba(safeHexColor, 0.8);
+
   const ViewToggle = () => (
     <div className="flex items-center gap-1 p-1 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6),inset_0_0_20px_rgba(255,255,255,0.15)]">
       {[
@@ -207,15 +214,12 @@ export default function SharePage({ params }: { params: { token: string } }) {
             key={btn.id}
             onClick={() => setViewMode(btn.id)}
             className={cn(
-              "relative flex items-center px-4 py-2 group rounded-full text-white transition-all duration-500 border active:scale-95 cursor-pointer",
+              "relative flex items-center px-5 py-2.5 group rounded-full text-white transition-all duration-500 border active:scale-95 cursor-pointer",
               isActive ? colors[btn.color] : `bg-transparent border-transparent ${colors[btn.color]}`,
             )}
           >
             <btn.icon className={cn("w-4 h-4 transition-colors", isActive ? 'text-white' : 'text-white/60 group-hover:text-white')} />
-            <span className={cn(
-              "text-xs font-bold overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap",
-              isActive ? 'max-w-[100px] ml-2 opacity-100' : 'max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:ml-2 group-hover:opacity-100'
-            )}>
+            <span className="text-xs font-bold ml-2 whitespace-nowrap">
               {btn.label}
             </span>
           </div>
@@ -224,45 +228,43 @@ export default function SharePage({ params }: { params: { token: string } }) {
     </div>
   );
 
-  // Framing view — full-page component with its own layout and back button
-  if (viewMode === 'framing') {
-    return (
-      <ShareFramingPresentation
-        project={project}
-        onBack={() => setViewMode('landing')}
-        viewToggle={<ViewToggle />}
-      />
-    );
-  }
-
-  // Canvas view
-  const canvasBackground = project.canvasBackground || CANVAS_GRADIENTS[0].value;
-  const centerColor = extractCenterColor(canvasBackground);
-  const safeHexColor = centerColor.startsWith('#') ? centerColor : '#1a1a1a';
-  const navBgColor = hexToRgba(safeHexColor, 0.8);
-
   return (
-    <div className="flex flex-col h-screen" style={{ background: canvasBackground }}>
-      {/* Header with back button and view toggle */}
+    <div className="flex flex-col h-screen bg-black" style={viewMode === 'canvas' ? { background: canvasBackground } : undefined}>
+      {/* Shared navbar */}
       <header
-        className="h-14 backdrop-blur-md border-b border-white/10 flex-shrink-0 px-6 flex items-center justify-between"
+        className="h-16 flex-shrink-0 backdrop-blur-md border-b border-white/10 px-6 flex items-center justify-between"
         style={{ backgroundColor: navBgColor }}
       >
-        <button
-          onClick={() => setViewMode('landing')}
-          className="text-sm text-white/50 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          &larr; Back
-        </button>
+        {/* Left: Back + project name */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setViewMode('landing')}
+            className="flex items-center gap-1.5 text-sm text-white/50 hover:text-white transition-colors cursor-pointer flex-shrink-0"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </button>
+          <span className="text-white/20 flex-shrink-0">|</span>
+          <span className="text-sm text-white/70 truncate">{project.name}</span>
+        </div>
+
+        {/* Center: View toggle */}
         <ViewToggle />
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.05] border border-white/10 text-white/50 text-xs">
+
+        {/* Right: Read Only badge */}
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.05] border border-white/10 text-white/50 text-xs flex-shrink-0">
           <Eye className="w-3.5 h-3.5" />
           Read Only
         </div>
       </header>
 
+      {/* Content */}
       <main className="flex-1 overflow-hidden">
-        <CXDCanvasReadOnly project={project} />
+        {viewMode === 'framing' ? (
+          <ShareFramingPresentation project={project} />
+        ) : (
+          <CXDCanvasReadOnly project={project} />
+        )}
       </main>
     </div>
   );
