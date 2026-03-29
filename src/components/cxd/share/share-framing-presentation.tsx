@@ -53,6 +53,7 @@ import {
   RadarComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import 'echarts-gl';
 
 echarts.use([
   RadarChart,
@@ -149,9 +150,17 @@ function ReadOnlyField({ label, value }: { label: string; value: string | undefi
   );
 }
 
+const PURPLE_CARD_STYLE = {
+  background: 'linear-gradient(135deg, rgba(30, 15, 55, 0.9) 0%, rgba(20, 10, 40, 0.85) 50%, rgba(15, 8, 30, 0.9) 100%)',
+  boxShadow: '0 0 15px rgba(139,92,246,0.1), inset 0 1px 0 rgba(255,255,255,0.03)',
+};
+
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
   return (
-    <div className="flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl bg-white/[0.03] border border-white/5 backdrop-blur-sm flex-1 min-w-[100px]">
+    <div
+      className="flex flex-col items-center gap-1.5 px-4 py-3 rounded-xl border border-purple-500/15 backdrop-blur-sm flex-1 min-w-[100px]"
+      style={PURPLE_CARD_STYLE}
+    >
       <span className="text-violet-400">{icon}</span>
       <span className="text-xl font-bold text-white/90">{value}</span>
       <span className="text-[10px] text-white/40 uppercase tracking-wider">{label}</span>
@@ -161,7 +170,10 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
 
 function ChartCard({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('rounded-xl p-4 bg-white/[0.03] border border-white/[0.06] backdrop-blur-md', className)}>
+    <div
+      className={cn('rounded-xl p-4 border border-purple-500/15 backdrop-blur-md', className)}
+      style={PURPLE_CARD_STYLE}
+    >
       <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-3">{title}</h3>
       {children}
     </div>
@@ -314,7 +326,8 @@ function WizardRealityPlanesSection({ project }: { project: CXDProject }) {
         return (
           <div
             key={plane.code}
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-md p-4 space-y-2"
+            className="rounded-xl border border-purple-500/15 backdrop-blur-md p-4 space-y-2"
+            style={PURPLE_CARD_STYLE}
           >
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-lg bg-violet-500/15 flex items-center justify-center text-xs font-bold text-violet-300">
@@ -358,7 +371,8 @@ function WizardStateMappingSection({ project }: { project: CXDProject }) {
       {STATE_QUADRANTS.map((quadrant) => (
         <div
           key={quadrant.code}
-          className="rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-md p-4 space-y-2"
+          className="rounded-xl border border-purple-500/15 backdrop-blur-md p-4 space-y-2"
+          style={PURPLE_CARD_STYLE}
         >
           <div className="flex items-center gap-2">
             <span className="text-violet-400">{quadrantIcons[quadrant.code]}</span>
@@ -394,7 +408,8 @@ function WizardTraitMappingSection({ project }: { project: CXDProject }) {
       {TRAIT_QUADRANTS.map((quadrant) => (
         <div
           key={quadrant.code}
-          className="rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-md p-4 space-y-2"
+          className="rounded-xl border border-purple-500/15 backdrop-blur-md p-4 space-y-2"
+          style={PURPLE_CARD_STYLE}
         >
           <div className="flex items-center gap-2">
             <span className="text-violet-400">{quadrantIcons[quadrant.code]}</span>
@@ -762,6 +777,16 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
           value={faceData.leastDeveloped?.face.split(' ')[0] || '--'}
         />
         <StatCard icon={<Layers className="w-4 h-4" />} label="Untagged" value={faceData.untaggedCount} />
+      </div>
+
+      {/* 3D Hypercube Surface */}
+      <div className="rounded-xl overflow-hidden border border-purple-500/15" style={{ background: 'linear-gradient(135deg, rgba(10,5,20,0.95) 0%, rgba(5,2,15,0.95) 100%)' }}>
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildHypercube3DOption()}
+          style={{ height: '400px' }}
+          opts={{ renderer: 'canvas' }}
+        />
       </div>
 
       {/* Graph chart - Hypercube Network */}
@@ -1453,6 +1478,89 @@ function buildTaskGanttOption(
   };
 }
 
+/* ── hypercube 3D surface builder ──────────────────────────────── */
+
+// @ts-ignore — echarts-gl types are not fully compatible with EChartsCoreOption
+function buildHypercube3DOption(): any {
+  // Breather surface parameters
+  const aa = 0.4;
+  const r = 1 - aa * aa;
+  const w = Math.sqrt(r);
+
+  return {
+    backgroundColor: 'transparent',
+    visualMap: {
+      show: false,
+      dimension: 2,
+      min: -3,
+      max: 3,
+      inRange: {
+        color: [
+          '#0d0025',  // deep void
+          '#1a0050',  // deep purple
+          '#4B1B6B',  // violet
+          '#8B5CF6',  // purple
+          '#c084fc',  // light purple
+          '#f472b6',  // pink
+          '#ffffff',  // white peak
+        ],
+      },
+    },
+    xAxis3D: { type: 'value', show: false },
+    yAxis3D: { type: 'value', show: false },
+    zAxis3D: { type: 'value', show: false },
+    grid3D: {
+      show: false,
+      boxHeight: 80,
+      boxWidth: 80,
+      boxDepth: 80,
+      environment: 'transparent',
+      light: {
+        main: { intensity: 1.2, shadow: false },
+        ambient: { intensity: 0.3 },
+      },
+      viewControl: {
+        autoRotate: true,
+        autoRotateSpeed: 4,
+        distance: 180,
+        alpha: 25,
+        beta: 30,
+      },
+      postEffect: {
+        enable: true,
+        bloom: {
+          enable: true,
+          bloomIntensity: 0.15,
+        },
+      },
+    },
+    series: [{
+      type: 'surface',
+      parametric: true,
+      shading: 'color',
+      silent: true,
+      wireframe: { show: false },
+      itemStyle: { opacity: 0.85 },
+      parametricEquation: {
+        u: { min: -13.2, max: 13.2, step: 0.5 },
+        v: { min: -37.4, max: 37.4, step: 0.5 },
+        x: function (u: number, v: number) {
+          const denom = aa * ((w * Math.cosh(aa * u)) ** 2 + (aa * Math.sin(w * v)) ** 2);
+          return -u + (2 * r * Math.cosh(aa * u) * Math.sinh(aa * u)) / denom;
+        },
+        y: function (u: number, v: number) {
+          const denom = aa * ((w * Math.cosh(aa * u)) ** 2 + (aa * Math.sin(w * v)) ** 2);
+          return (2 * w * Math.cosh(aa * u) * (-(w * Math.cos(v) * Math.cos(w * v)) - Math.sin(v) * Math.sin(w * v))) / denom;
+        },
+        z: function (u: number, v: number) {
+          const denom = aa * ((w * Math.cosh(aa * u)) ** 2 + (aa * Math.sin(w * v)) ** 2);
+          return (2 * w * Math.cosh(aa * u) * (-(w * Math.sin(v) * Math.cos(w * v)) + Math.cos(v) * Math.sin(w * v))) / denom;
+        },
+      },
+    }],
+  };
+}
+
 /* ── hypercube chart builders ───────────────────────────────────── */
 
 function buildHypercubeRadarOption(entries: { face: string; count: number; color: string }[]): echarts.EChartsCoreOption {
@@ -1889,7 +1997,10 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
         </div>
 
         {/* Section content */}
-        <div className="p-5 rounded-xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm">
+        <div
+          className="p-5 rounded-xl border border-purple-500/15 backdrop-blur-sm"
+          style={PURPLE_CARD_STYLE}
+        >
           {currentSection.renderContent(project)}
         </div>
       </div>
@@ -1897,7 +2008,7 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
   };
 
   return (
-    <div className="h-full flex overflow-hidden relative">
+    <div className="h-full overflow-hidden relative">
       {/* ShimmerGrid background */}
       <ShimmerGrid
         dotSize={1.5}
@@ -1908,43 +2019,44 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
         className="!absolute inset-0 !z-0"
       />
 
-      {/* Main content area */}
-      <div
-        className="flex-1 overflow-y-auto relative z-10 bg-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-violet-500/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-violet-500/30"
-        style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,92,246,0.2) transparent' }}
-      >
-        <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
+      {/* Centered container holding content + sidebar */}
+      <div className="h-full flex gap-6 mx-auto relative z-10" style={{ width: '80vw', maxWidth: '1200px' }}>
+        {/* Main content area */}
+        <div
+          className="flex-1 min-w-0 overflow-y-auto py-6 px-4 bg-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-violet-500/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-violet-500/30"
+          style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,92,246,0.2) transparent' }}
+        >
           {renderSectionPage()}
         </div>
-      </div>
 
-      {/* Right sidebar with floating section buttons */}
-      <div className="w-[200px] flex-shrink-0 overflow-y-auto py-6 pr-4 space-y-1.5 relative z-10">
-        {SECTIONS.map((section) => {
-          const isActive = activeSection === section.id;
-          const hasData = section.id === 'overview' || section.hasData(project);
-          return (
-            <button
-              key={section.id}
-              onClick={() => setActiveSection(section.id)}
-              className={cn(
-                'w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg border transition-all duration-200 cursor-pointer text-left',
-                isActive
-                  ? 'bg-violet-500/15 border-violet-500/30 text-white'
-                  : 'bg-white/[0.03] border-white/[0.06] text-white/50 hover:bg-white/[0.06]',
-                !hasData && !isActive && 'opacity-50',
-              )}
-            >
-              <span className={cn(
-                'flex-shrink-0 transition-colors',
-                isActive ? 'text-violet-400' : 'text-white/40',
-              )}>
-                {section.icon}
-              </span>
-              <span className="font-medium truncate">{section.title}</span>
-            </button>
-          );
-        })}
+        {/* Sidebar buttons - closer to content, no background */}
+        <div className="w-[180px] flex-shrink-0 overflow-y-auto py-6 space-y-1.5">
+          {SECTIONS.map((section) => {
+            const isActive = activeSection === section.id;
+            const hasData = section.id === 'overview' || section.hasData(project);
+            return (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  'w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg border transition-all duration-200 cursor-pointer text-left',
+                  isActive
+                    ? 'bg-violet-500/15 border-violet-500/30 text-white'
+                    : 'bg-white/[0.03] border-white/[0.06] text-white/50 hover:bg-white/[0.06]',
+                  !hasData && !isActive && 'opacity-50',
+                )}
+              >
+                <span className={cn(
+                  'flex-shrink-0 transition-colors',
+                  isActive ? 'text-violet-400' : 'text-white/40',
+                )}>
+                  {section.icon}
+                </span>
+                <span className="font-medium truncate">{section.title}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
