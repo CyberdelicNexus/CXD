@@ -6,6 +6,7 @@ import { CXDProject } from '@/types/cxd-schema';
 import { fetchProjectByShareToken } from '@/lib/supabase-projects';
 import { CXDCanvasReadOnly } from '@/components/cxd/cxd-canvas-readonly';
 import { ShareLandingPage } from '@/components/cxd/share/share-landing-page';
+import { ShareFramingPresentation } from '@/components/cxd/share/share-framing-presentation';
 import { createClient } from '@/supabase/client';
 import {
   Lock,
@@ -182,7 +183,17 @@ export default function SharePage({ params }: { params: { token: string } }) {
     );
   }
 
-  // Dynamic background from project canvas
+  // Framing view — full-page component with its own layout and back button
+  if (viewMode === 'framing') {
+    return (
+      <ShareFramingPresentation
+        project={project}
+        onBack={() => setViewMode('landing')}
+      />
+    );
+  }
+
+  // Canvas view
   const canvasBackground = project.canvasBackground || CANVAS_GRADIENTS[0].value;
   const centerColor = extractCenterColor(canvasBackground);
   const safeHexColor = centerColor.startsWith('#') ? centerColor : '#1a1a1a';
@@ -209,13 +220,7 @@ export default function SharePage({ params }: { params: { token: string } }) {
       </header>
 
       <main className="flex-1 overflow-hidden">
-        {viewMode === 'framing' ? (
-          <div className="flex-1 flex items-center justify-center text-white/50">
-            Framing presentation coming soon
-          </div>
-        ) : (
-          <CXDCanvasReadOnly project={project} />
-        )}
+        <CXDCanvasReadOnly project={project} />
       </main>
     </div>
   );
