@@ -12,6 +12,8 @@ import {
   TRAIT_QUADRANTS,
 } from '@/types/cxd-schema';
 import type { EngagementLevelCode, StagePresenceTypeCode } from '@/types/cxd-schema';
+import type { HypercubeFaceTag } from '@/types/canvas-elements';
+import { HYPERCUBE_FACE_TAGS } from '@/types/canvas-elements';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 import { cn } from '@/lib/utils';
 import {
@@ -35,12 +37,15 @@ import {
   Clock,
   Route,
   Home,
+  ListTodo,
+  CalendarDays,
+  Boxes,
 } from 'lucide-react';
 
 // ECharts tree-shakeable imports
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
-import { RadarChart, BarChart, PieChart, LineChart } from 'echarts/charts';
+import { RadarChart, BarChart, PieChart, LineChart, CustomChart } from 'echarts/charts';
 import {
   GridComponent,
   TooltipComponent,
@@ -54,6 +59,7 @@ echarts.use([
   BarChart,
   PieChart,
   LineChart,
+  CustomChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
@@ -76,6 +82,18 @@ const tooltipStyle = {
   borderWidth: 1,
   textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY, fontSize: 12 },
   extraCssText: 'backdrop-filter:blur(12px);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.4);',
+};
+
+/* ── hypercube face colors ──────────────────────────────────────── */
+
+const HYPERCUBE_FACE_COLORS: Record<HypercubeFaceTag, string> = {
+  'Reality Planes': '#8B5CF6',
+  'Sensory Domains': '#EC4899',
+  'Presence Types': '#06B6D4',
+  'State Mapping': '#F59E0B',
+  'Trait Mapping': '#10B981',
+  'Meaning Architecture': '#6366F1',
+  'Core': '#F97316',
 };
 
 /* ── sensory/presence metadata (wizard-matching) ─────────────── */
@@ -398,6 +416,386 @@ function WizardTraitMappingSection({ project }: { project: CXDProject }) {
   );
 }
 
+/* ── Planning section renderer ──────────────────────────────────── */
+
+function PlanningSection({ project }: { project: CXDProject }) {
+  const elements = project.canvasLayout?.elements || [];
+  const tasks = elements.filter((el) => el.type === 'freeform' && (el.cardType === 'task' || el.taskMetadata));
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { not_started: 0, in_progress: 0, completed: 0, blocked: 0 };
+    for (const t of tasks) {
+      if (t.type === 'freeform') {
+        const status = t.taskMetadata?.status || 'not_started';
+        counts[status] = (counts[status] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [tasks]);
+
+  const priorityCounts = useMemo(() => {
+    const counts: Record<string, number> = { low: 0, medium: 0, high: 0, urgent: 0 };
+    for (const t of tasks) {
+      if (t.type === 'freeform') {
+        const priority = t.taskMetadata?.priority || 'medium';
+        counts[priority] = (counts[priority] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [tasks]);
+
+  if (tasks.length === 0) {
+    return <div className="text-sm text-white/30 italic">No tasks defined yet</div>;
+  }
+
+  const statusColors: Record<string, string> = {
+    completed: '#10B981',
+    in_progress: '#3B82F6',
+    not_started: '#6B7280',
+    blocked: '#EF4444',
+  };
+
+  const statusLabels: Record<string, string> = {
+    not_started: 'Not Started',
+    in_progress: 'In Progress',
+    completed: 'Completed',
+    blocked: 'Blocked',
+  };
+
+  const priorityColors: Record<string, string> = {
+    low: '#6B7280',
+    medium: '#3B82F6',
+    high: '#F59E0B',
+    urgent: '#EF4444',
+  };
+
+  // Status stacked bar data
+  const total = tasks.length;
+  const statusBarData = Object.entries(statusCounts)
+    .filter(([, count]) => count > 0)
+    .map(([status, count]) => ({
+      status,
+      count,
+      pct: Math.round((count / total) * 100),
+      color: statusColors[status] || '#6B7280',
+      label: statusLabels[status] || status,
+    }));
+
+  // Tasks with dates for gantt-like view
+  const tasksWithDates = tasks
+    .filter((t) => t.type === 'freeform' && (t.taskMetadata?.startDate || t.taskMetadata?.dueDate))
+    .map((t) => {
+      if (t.type !== 'freeform') return null;
+      const title = t.noteTitle || t.content?.slice(0, 40) || 'Untitled';
+      const start = t.taskMetadata?.startDate ? new Date(t.taskMetadata.startDate).getTime() : null;
+      const due = t.taskMetadata?.dueDate ? new Date(t.taskMetadata.dueDate).getTime() : null;
+      return { title, start, due, status: t.taskMetadata?.status || 'not_started' };
+    })
+    .filter(Boolean) as { title: string; start: number | null; due: number | null; status: string }[];
+
+  return (
+    <div className="space-y-6">
+      {/* Summary stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard icon={<ListTodo className="w-4 h-4" />} label="Total Tasks" value={total} />
+        <StatCard
+          icon={<div className="w-3 h-3 rounded-full" style={{ backgroundColor: statusColors.completed }} />}
+          label="Completed"
+          value={statusCounts.completed}
+        />
+        <StatCard
+          icon={<div className="w-3 h-3 rounded-full" style={{ backgroundColor: statusColors.in_progress }} />}
+          label="In Progress"
+          value={statusCounts.in_progress}
+        />
+        <StatCard
+          icon={<div className="w-3 h-3 rounded-full" style={{ backgroundColor: statusColors.blocked }} />}
+          label="Blocked"
+          value={statusCounts.blocked}
+        />
+      </div>
+
+      {/* Status distribution stacked bar */}
+      <ChartCard title="Task Status Distribution">
+        <div className="space-y-3">
+          <div className="flex h-8 rounded-lg overflow-hidden">
+            {statusBarData.map((item) => (
+              <div
+                key={item.status}
+                className="flex items-center justify-center text-[10px] font-bold text-white/90 transition-all"
+                style={{ width: `${item.pct}%`, backgroundColor: item.color, minWidth: item.pct > 0 ? '24px' : '0' }}
+                title={`${item.label}: ${item.count} (${item.pct}%)`}
+              >
+                {item.pct >= 10 ? `${item.pct}%` : ''}
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {statusBarData.map((item) => (
+              <div key={item.status} className="flex items-center gap-1.5 text-xs text-white/50">
+                <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: item.color }} />
+                {item.label} ({item.count})
+              </div>
+            ))}
+          </div>
+        </div>
+      </ChartCard>
+
+      {/* Priority distribution bar chart */}
+      <ChartCard title="Priority Distribution">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={{
+            backgroundColor: 'transparent',
+            textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY },
+            tooltip: { ...tooltipStyle, trigger: 'axis' },
+            grid: { left: '3%', right: '4%', bottom: '8%', top: '8%', containLabel: true },
+            xAxis: {
+              type: 'category',
+              data: ['Low', 'Medium', 'High', 'Urgent'],
+              axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 11 },
+              axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+              axisTick: { show: false },
+            },
+            yAxis: {
+              type: 'value',
+              axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 11 },
+              splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
+              axisLine: { show: false },
+              axisTick: { show: false },
+            },
+            series: [{
+              type: 'bar',
+              data: ['low', 'medium', 'high', 'urgent'].map((p) => ({
+                value: priorityCounts[p],
+                itemStyle: {
+                  color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: priorityColors[p] },
+                    { offset: 1, color: priorityColors[p] + '66' },
+                  ]),
+                  borderRadius: [4, 4, 0, 0],
+                  shadowColor: priorityColors[p] + '40',
+                  shadowBlur: 8,
+                },
+              })),
+              barMaxWidth: 40,
+            }],
+            animation: false,
+          }}
+          style={{ height: '200px' }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
+
+      {/* Gantt-like timeline for tasks with dates */}
+      {tasksWithDates.length > 0 && (
+        <ChartCard title="Task Timeline (Gantt)">
+          <ReactEChartsCore
+            echarts={echarts}
+            option={buildTaskGanttOption(tasksWithDates, statusColors)}
+            style={{ height: `${Math.max(200, tasksWithDates.length * 36 + 60)}px` }}
+            opts={{ renderer: 'canvas' }}
+          />
+        </ChartCard>
+      )}
+      {tasksWithDates.length === 0 && (
+        <ChartCard title="Task Timeline">
+          <div className="text-sm text-white/30 italic py-4 text-center">No tasks with dates set</div>
+        </ChartCard>
+      )}
+
+      {/* Task list table */}
+      <ChartCard title="Task List">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-white/30 uppercase tracking-wider border-b border-white/5">
+                <th className="text-left py-2 px-2 font-medium">Title</th>
+                <th className="text-left py-2 px-2 font-medium">Status</th>
+                <th className="text-left py-2 px-2 font-medium">Priority</th>
+                <th className="text-left py-2 px-2 font-medium">Due Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((t) => {
+                if (t.type !== 'freeform') return null;
+                const title = t.noteTitle || t.content?.slice(0, 50) || 'Untitled';
+                const status = t.taskMetadata?.status || 'not_started';
+                const priority = t.taskMetadata?.priority || 'medium';
+                const dueDate = t.taskMetadata?.dueDate;
+                return (
+                  <tr key={t.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                    <td className="py-2 px-2 text-white/70 max-w-[200px] truncate">{title}</td>
+                    <td className="py-2 px-2">
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                        style={{ backgroundColor: statusColors[status] + '20', color: statusColors[status] }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColors[status] }} />
+                        {statusLabels[status]}
+                      </span>
+                    </td>
+                    <td className="py-2 px-2">
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium capitalize"
+                        style={{ backgroundColor: priorityColors[priority] + '20', color: priorityColors[priority] }}
+                      >
+                        {priority}
+                      </span>
+                    </td>
+                    <td className="py-2 px-2 text-white/40">
+                      {dueDate ? new Date(dueDate).toLocaleDateString() : '--'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </ChartCard>
+    </div>
+  );
+}
+
+/* ── Timeline section renderer ──────────────────────────────────── */
+
+function TimelineSection({ project }: { project: CXDProject }) {
+  const elements = project.canvasLayout?.elements || [];
+  const tasksWithDates = elements
+    .filter((el) => el.type === 'freeform' && (el.cardType === 'task' || el.taskMetadata) && (el.taskMetadata?.startDate || el.taskMetadata?.dueDate))
+    .map((el) => {
+      if (el.type !== 'freeform') return null;
+      const title = el.noteTitle || el.content?.slice(0, 40) || 'Untitled';
+      const start = el.taskMetadata?.startDate ? new Date(el.taskMetadata.startDate).getTime() : null;
+      const due = el.taskMetadata?.dueDate ? new Date(el.taskMetadata.dueDate).getTime() : null;
+      return { title, start, due, status: el.taskMetadata?.status || 'not_started' };
+    })
+    .filter(Boolean) as { title: string; start: number | null; due: number | null; status: string }[];
+
+  const statusColors: Record<string, string> = {
+    completed: '#10B981',
+    in_progress: '#3B82F6',
+    not_started: '#6B7280',
+    blocked: '#EF4444',
+  };
+
+  if (tasksWithDates.length === 0) {
+    return <div className="text-sm text-white/30 italic">No tasks with dates set</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <ChartCard title="Project Timeline">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildTaskGanttOption(tasksWithDates, statusColors)}
+          style={{ height: `${Math.max(250, tasksWithDates.length * 36 + 60)}px` }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
+    </div>
+  );
+}
+
+/* ── Hypercube Map section renderer ─────────────────────────────── */
+
+function HypercubeMapSection({ project }: { project: CXDProject }) {
+  const elements = project.canvasLayout?.elements || [];
+
+  const faceData = useMemo(() => {
+    const counts: Record<HypercubeFaceTag, number> = {
+      'Reality Planes': 0,
+      'Sensory Domains': 0,
+      'Presence Types': 0,
+      'State Mapping': 0,
+      'Trait Mapping': 0,
+      'Meaning Architecture': 0,
+      'Core': 0,
+    };
+    let taggedCount = 0;
+    let untaggedCount = 0;
+
+    for (const el of elements) {
+      const tags = el.hypercubeTags;
+      if (tags && tags.length > 0) {
+        taggedCount++;
+        for (const tag of tags) {
+          if (counts[tag] !== undefined) {
+            counts[tag]++;
+          }
+        }
+      } else {
+        untaggedCount++;
+      }
+    }
+
+    const entries = HYPERCUBE_FACE_TAGS.map((face) => ({
+      face,
+      count: counts[face],
+      color: HYPERCUBE_FACE_COLORS[face],
+    }));
+
+    const mostDeveloped = entries.reduce((a, b) => (b.count > a.count ? b : a), entries[0]);
+    const leastDeveloped = entries.filter((e) => e.count > 0).reduce((a, b) => (b.count < a.count ? b : a), entries.find((e) => e.count > 0) || entries[0]);
+
+    return { counts, entries, taggedCount, untaggedCount, mostDeveloped, leastDeveloped };
+  }, [elements]);
+
+  if (faceData.taggedCount === 0) {
+    return <div className="text-sm text-white/30 italic">No elements tagged to hypercube faces yet</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Summary stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard icon={<Boxes className="w-4 h-4" />} label="Tagged Elements" value={faceData.taggedCount} />
+        <StatCard
+          icon={<div className="w-3 h-3 rounded-full" style={{ backgroundColor: faceData.mostDeveloped.color }} />}
+          label="Most Developed"
+          value={faceData.mostDeveloped.face.split(' ')[0]}
+        />
+        <StatCard
+          icon={<div className="w-3 h-3 rounded-full" style={{ backgroundColor: faceData.leastDeveloped?.color || '#666' }} />}
+          label="Least Developed"
+          value={faceData.leastDeveloped?.face.split(' ')[0] || '--'}
+        />
+        <StatCard icon={<Layers className="w-4 h-4" />} label="Untagged" value={faceData.untaggedCount} />
+      </div>
+
+      {/* Radar chart - Experience Design Coverage */}
+      <ChartCard title="Experience Design Coverage">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildHypercubeRadarOption(faceData.entries)}
+          style={{ height: '300px' }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
+
+      {/* Donut chart - Face Distribution */}
+      <ChartCard title="Face Distribution">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildHypercubeDonutOption(faceData.entries)}
+          style={{ height: '280px' }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
+
+      {/* Horizontal bar chart - Elements per Face */}
+      <ChartCard title="Elements per Face">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildHypercubeBarOption(faceData.entries)}
+          style={{ height: `${Math.max(200, faceData.entries.length * 40 + 60)}px` }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
+    </div>
+  );
+}
+
 /* ── section definitions ─────────────────────────────────────────── */
 
 interface SectionDef {
@@ -524,6 +922,27 @@ const SECTIONS: SectionDef[] = [
     icon: <Heart className="w-4 h-4" />,
     hasData: (p) => !!(p.traitMapping && Object.values(p.traitMapping).some((v) => v && v.trim())),
     renderContent: (p) => <WizardTraitMappingSection project={p} />,
+  },
+  {
+    id: 'planning',
+    title: 'Planning',
+    icon: <ListTodo className="w-4 h-4" />,
+    hasData: (p) => !!(p.canvasLayout?.elements?.some((el) => el.type === 'freeform' && (el.cardType === 'task' || el.taskMetadata))),
+    renderContent: (p) => <PlanningSection project={p} />,
+  },
+  {
+    id: 'timeline',
+    title: 'Timeline',
+    icon: <CalendarDays className="w-4 h-4" />,
+    hasData: (p) => !!(p.canvasLayout?.elements?.some((el) => el.type === 'freeform' && (el.cardType === 'task' || el.taskMetadata) && (el.taskMetadata?.startDate || el.taskMetadata?.dueDate))),
+    renderContent: (p) => <TimelineSection project={p} />,
+  },
+  {
+    id: 'hypercube',
+    title: 'Hypercube Map',
+    icon: <Boxes className="w-4 h-4" />,
+    hasData: (p) => !!(p.canvasLayout?.elements?.some((el) => el.hypercubeTags && el.hypercubeTags.length > 0)),
+    renderContent: (p) => <HypercubeMapSection project={p} />,
   },
 ];
 
@@ -922,6 +1341,265 @@ function buildStagePresenceRadarOption(project: CXDProject): echarts.EChartsCore
   };
 }
 
+/* ── task gantt chart builder ───────────────────────────────────── */
+
+function buildTaskGanttOption(
+  tasks: { title: string; start: number | null; due: number | null; status: string }[],
+  statusColors: Record<string, string>,
+): echarts.EChartsCoreOption {
+  // Find min/max date range
+  const allDates = tasks.flatMap((t) => [t.start, t.due].filter(Boolean)) as number[];
+  const minDate = Math.min(...allDates);
+  const maxDate = Math.max(...allDates);
+  const range = maxDate - minDate || 86400000; // at least 1 day
+
+  const names = tasks.map((t) => t.title);
+
+  return {
+    backgroundColor: 'transparent',
+    textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY },
+    tooltip: {
+      ...tooltipStyle,
+      trigger: 'item',
+      formatter: (params: unknown) => {
+        const p = params as { name: string; value: number[]; dataIndex: number };
+        const task = tasks[p.dataIndex];
+        const startStr = task.start ? new Date(task.start).toLocaleDateString() : 'N/A';
+        const dueStr = task.due ? new Date(task.due).toLocaleDateString() : 'N/A';
+        return `<span style="color:rgba(255,255,255,0.8)">${task.title}</span><br/>Start: ${startStr}<br/>Due: ${dueStr}`;
+      },
+    },
+    grid: { left: '3%', right: '6%', bottom: '12%', top: '4%', containLabel: true },
+    xAxis: {
+      type: 'time',
+      min: minDate - range * 0.05,
+      max: maxDate + range * 0.05,
+      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 10 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+      splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
+    },
+    yAxis: {
+      type: 'category',
+      data: names,
+      inverse: true,
+      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 10, width: 100, overflow: 'truncate' },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+    },
+    series: [{
+      type: 'custom',
+      encode: { x: [1, 2], y: 0 },
+      data: tasks.map((t, i) => {
+        const start = t.start || t.due || minDate;
+        const due = t.due || t.start || maxDate;
+        return {
+          value: [i, start, due],
+          itemStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+              { offset: 0, color: statusColors[t.status] || '#6B7280' },
+              { offset: 1, color: (statusColors[t.status] || '#6B7280') + 'AA' },
+            ]),
+            borderRadius: 3,
+            shadowColor: (statusColors[t.status] || '#6B7280') + '40',
+            shadowBlur: 6,
+          },
+        };
+      }),
+      renderItem: (_params: unknown, api: {
+        value: (idx: number) => number;
+        coord: (vals: [number, number]) => number[];
+        size: (vals: [number, number]) => number[];
+        style: () => Record<string, unknown>;
+      }) => {
+        const categoryIndex = api.value(0);
+        const start = api.coord([api.value(1), categoryIndex]);
+        const end = api.coord([api.value(2), categoryIndex]);
+        const height = api.size([0, 1])[1] * 0.6;
+        const task = tasks[categoryIndex];
+        const color = statusColors[task.status] || '#6B7280';
+        return {
+          type: 'rect',
+          shape: {
+            x: start[0],
+            y: start[1] - height / 2,
+            width: Math.max(end[0] - start[0], 4),
+            height,
+            r: 3,
+          },
+          style: {
+            fill: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+              { offset: 0, color },
+              { offset: 1, color: color + 'AA' },
+            ]),
+            shadowColor: color + '40',
+            shadowBlur: 6,
+          },
+        };
+      },
+    }],
+    animation: false,
+  };
+}
+
+/* ── hypercube chart builders ───────────────────────────────────── */
+
+function buildHypercubeRadarOption(entries: { face: string; count: number; color: string }[]): echarts.EChartsCoreOption {
+  const maxCount = Math.max(...entries.map((e) => e.count), 1);
+  const indicators = entries.map((e) => ({
+    name: e.face,
+    max: maxCount,
+  }));
+  const values = entries.map((e) => e.count);
+
+  return {
+    backgroundColor: 'transparent',
+    textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY },
+    tooltip: { ...tooltipStyle, trigger: 'item' },
+    radar: {
+      indicator: indicators,
+      shape: 'polygon',
+      axisName: { color: AXIS_LABEL_COLOR, fontSize: 10, fontFamily: CHART_FONT_FAMILY },
+      splitArea: { show: false },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+    },
+    series: [
+      {
+        type: 'radar',
+        data: [
+          {
+            value: values,
+            name: 'Design Coverage',
+            areaStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: 'rgba(139, 92, 246, 0.35)' },
+                { offset: 1, color: 'rgba(99, 102, 241, 0.05)' },
+              ]),
+              shadowColor: 'rgba(139, 92, 246, 0.3)',
+              shadowBlur: 20,
+            },
+            lineStyle: {
+              color: 'rgba(192, 132, 252, 0.8)',
+              width: 2,
+              shadowColor: 'rgba(168, 85, 247, 0.5)',
+              shadowBlur: 10,
+            },
+            itemStyle: {
+              color: '#fff',
+              borderColor: 'rgba(168, 85, 247, 0.8)',
+              borderWidth: 2,
+              shadowColor: 'rgba(168, 85, 247, 0.5)',
+              shadowBlur: 8,
+            },
+            symbol: 'circle',
+            symbolSize: 7,
+          },
+        ],
+      },
+    ],
+    animation: false,
+  };
+}
+
+function buildHypercubeDonutOption(entries: { face: string; count: number; color: string }[]): echarts.EChartsCoreOption {
+  const filtered = entries.filter((e) => e.count > 0);
+  const data = filtered.map((e) => ({
+    value: e.count,
+    name: e.face,
+    itemStyle: {
+      color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+        { offset: 0, color: e.color },
+        { offset: 1, color: e.color + 'AA' },
+      ]),
+      shadowColor: e.color + '40',
+      shadowBlur: 12,
+    },
+  }));
+
+  return {
+    backgroundColor: 'transparent',
+    textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY },
+    tooltip: {
+      ...tooltipStyle,
+      trigger: 'item',
+      formatter: (params: unknown) => {
+        const p = params as { name: string; value: number; percent: number };
+        return `<span style="color:rgba(255,255,255,0.7)">${p.name}</span><br/><span style="font-weight:bold">${p.value} elements</span> <span style="color:rgba(255,255,255,0.3)">(${p.percent?.toFixed(0)}%)</span>`;
+      },
+    },
+    legend: {
+      bottom: 0,
+      textStyle: { color: AXIS_LABEL_COLOR, fontSize: 10, fontFamily: CHART_FONT_FAMILY },
+      itemWidth: 10,
+      itemHeight: 10,
+      itemGap: 8,
+    },
+    series: [
+      {
+        type: 'pie',
+        radius: ['40%', '70%'],
+        center: ['50%', '42%'],
+        avoidLabelOverlap: true,
+        padAngle: 2,
+        itemStyle: { borderRadius: 4 },
+        label: { show: false },
+        emphasis: {
+          label: { show: true, color: 'rgba(255,255,255,0.8)', fontSize: 12 },
+          itemStyle: { shadowBlur: 20, shadowColor: 'rgba(139,92,246,0.4)' },
+        },
+        data,
+      },
+    ],
+    animation: false,
+  };
+}
+
+function buildHypercubeBarOption(entries: { face: string; count: number; color: string }[]): echarts.EChartsCoreOption {
+  const names = entries.map((e) => e.face);
+  const data = entries.map((e) => ({
+    value: e.count,
+    itemStyle: {
+      color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+        { offset: 0, color: e.color },
+        { offset: 1, color: e.color + '88' },
+      ]),
+      borderRadius: [0, 4, 4, 0],
+      shadowColor: e.color + '40',
+      shadowBlur: 8,
+    },
+  }));
+
+  return {
+    backgroundColor: 'transparent',
+    textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY },
+    tooltip: { ...tooltipStyle, trigger: 'axis' },
+    grid: { left: '3%', right: '6%', bottom: '8%', top: '4%', containLabel: true },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 11 },
+      splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      axisLine: { show: false },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'category',
+      data: names,
+      inverse: true,
+      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 10, width: 120, overflow: 'truncate' },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+    },
+    series: [{
+      type: 'bar',
+      data,
+      barMaxWidth: 24,
+    }],
+    animation: false,
+  };
+}
+
 /* ── section-specific content with inline charts ───────────────── */
 
 function FlowSectionContent({ project }: { project: CXDProject }) {
@@ -1126,7 +1804,7 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden relative">
+    <div className="h-full flex overflow-hidden relative">
       {/* ShimmerGrid background */}
       <ShimmerGrid
         dotSize={1.5}
@@ -1137,43 +1815,41 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
         className="!absolute inset-0 !z-0"
       />
 
-      {/* Horizontal floating button bar */}
-      <div className="relative z-10 w-full max-w-6xl mx-auto px-4 pt-4 pb-2 flex-shrink-0">
-        <div className="flex gap-2 justify-center flex-wrap overflow-x-auto scrollbar-hide">
-          {SECTIONS.map((section) => {
-            const isActive = activeSection === section.id;
-            const hasData = section.id === 'overview' || section.hasData(project);
-            return (
-              <button
-                key={section.id}
-                onClick={() => setActiveSection(section.id)}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border transition-all duration-200 cursor-pointer whitespace-nowrap flex-shrink-0',
-                  isActive
-                    ? 'bg-violet-500/15 border-violet-500/30 text-white'
-                    : 'bg-white/[0.03] border-white/[0.06] text-white/50 hover:bg-white/[0.06]',
-                  !hasData && !isActive && 'opacity-50',
-                )}
-              >
-                <span className={cn(
-                  'flex-shrink-0 transition-colors',
-                  isActive ? 'text-violet-400' : 'text-white/40',
-                )}>
-                  {section.icon}
-                </span>
-                <span className="font-medium">{section.title}</span>
-              </button>
-            );
-          })}
+      {/* Main content area with gradient background */}
+      <div className="flex-1 overflow-y-auto relative z-10" style={{ background: 'linear-gradient(135deg, rgba(30,9,56,0.7) 0%, rgba(21,10,40,0.5) 50%, rgba(13,6,24,0.7) 100%)' }}>
+        <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
+          {renderSectionPage()}
         </div>
       </div>
 
-      {/* Main content area — single column, full width */}
-      <main className="relative z-10 flex-1 overflow-y-auto px-4 md:px-8 pb-8">
-        <div className="max-w-6xl mx-auto">
-          {renderSectionPage()}
-        </div>
-      </main>
+      {/* Right sidebar with vertical section buttons */}
+      <div className="w-[220px] flex-shrink-0 border-l border-white/5 bg-black/30 backdrop-blur-sm overflow-y-auto p-3 space-y-1 relative z-10">
+        {SECTIONS.map((section) => {
+          const isActive = activeSection === section.id;
+          const hasData = section.id === 'overview' || section.hasData(project);
+          return (
+            <button
+              key={section.id}
+              onClick={() => setActiveSection(section.id)}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg border transition-all duration-200 cursor-pointer text-left',
+                isActive
+                  ? 'bg-violet-500/15 border-violet-500/30 text-white'
+                  : 'bg-white/[0.03] border-white/[0.06] text-white/50 hover:bg-white/[0.06]',
+                !hasData && !isActive && 'opacity-50',
+              )}
+            >
+              <span className={cn(
+                'flex-shrink-0 transition-colors',
+                isActive ? 'text-violet-400' : 'text-white/40',
+              )}>
+                {section.icon}
+              </span>
+              <span className="font-medium truncate">{section.title}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
