@@ -59,23 +59,27 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
     try {
       const supabase = createClient();
       const ext = file.name.split(".").pop();
-      const path = `share/${project.id}/${type}-${Date.now()}.${ext}`;
+      // Use same bucket & path pattern as dashboard image uploads
+      const fileName = `dashboard-images/${project.id}-share-${type}-${Date.now()}.${ext}`;
       const { data, error } = await supabase.storage
-        .from("project-assets")
-        .upload(path, file, { upsert: true });
+        .from("canvas-uploads")
+        .upload(fileName, file, {
+          cacheControl: "3600",
+          upsert: true,
+        });
       if (error) throw error;
-      const { data: urlData } = supabase.storage
-        .from("project-assets")
-        .getPublicUrl(data.path);
+      const { data: { publicUrl } } = supabase.storage
+        .from("canvas-uploads")
+        .getPublicUrl(fileName);
       const updates =
         type === "cover"
-          ? { shareCoverImage: urlData.publicUrl }
-          : { shareThumbnail: urlData.publicUrl };
+          ? { shareCoverImage: publicUrl }
+          : { shareThumbnail: publicUrl };
       updateProject(updates);
       toast({ title: `${type === "cover" ? "Cover image" : "Thumbnail"} uploaded` });
     } catch (err) {
       console.error("Upload error:", err);
-      toast({ title: "Upload failed", description: "Please try again" });
+      toast({ title: "Upload failed", description: String(err) });
     } finally {
       setUploading(null);
     }
