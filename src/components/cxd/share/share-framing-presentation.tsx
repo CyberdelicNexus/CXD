@@ -45,7 +45,7 @@ import {
 // ECharts tree-shakeable imports
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
-import { RadarChart, BarChart, PieChart, LineChart, CustomChart } from 'echarts/charts';
+import { RadarChart, BarChart, PieChart, LineChart, CustomChart, GraphChart } from 'echarts/charts';
 import {
   GridComponent,
   TooltipComponent,
@@ -60,6 +60,7 @@ echarts.use([
   PieChart,
   LineChart,
   CustomChart,
+  GraphChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
@@ -762,6 +763,16 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
         />
         <StatCard icon={<Layers className="w-4 h-4" />} label="Untagged" value={faceData.untaggedCount} />
       </div>
+
+      {/* Graph chart - Hypercube Network */}
+      <ChartCard title="Hypercube Network">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildHypercubeGraphOption(faceData.entries, faceData.taggedCount)}
+          style={{ height: '350px' }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
 
       {/* Radar chart - Experience Design Coverage */}
       <ChartCard title="Experience Design Coverage">
@@ -1600,6 +1611,79 @@ function buildHypercubeBarOption(entries: { face: string; count: number; color: 
   };
 }
 
+function buildHypercubeGraphOption(
+  entries: { face: string; count: number; color: string }[],
+  totalElements: number,
+): echarts.EChartsCoreOption {
+  const faces = entries.filter((e) => e.count > 0);
+  return {
+    backgroundColor: 'transparent',
+    textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY },
+    tooltip: {
+      ...tooltipStyle,
+      trigger: 'item',
+      formatter: (params: unknown) => {
+        const p = params as { data: { name: string; value: number }; dataType: string };
+        if (p.dataType === 'edge') return '';
+        return `<span style="color:rgba(255,255,255,0.8);font-weight:bold">${p.data.name}</span><br/><span style="color:rgba(139,92,246,0.9)">${p.data.value} elements</span>`;
+      },
+    },
+    series: [
+      {
+        type: 'graph',
+        layout: 'circular',
+        roam: true,
+        label: {
+          show: true,
+          color: 'rgba(255,255,255,0.7)',
+          fontSize: 10,
+          fontFamily: CHART_FONT_FAMILY,
+        },
+        edgeSymbol: ['none', 'arrow'],
+        edgeSymbolSize: 6,
+        lineStyle: {
+          color: 'rgba(139,92,246,0.3)',
+          width: 1.5,
+          curveness: 0.1,
+        },
+        emphasis: {
+          focus: 'adjacency' as const,
+          lineStyle: { width: 3 },
+        },
+        data: [
+          {
+            name: 'Experience',
+            value: totalElements,
+            symbolSize: 50,
+            itemStyle: {
+              color: 'rgba(255,255,255,0.9)',
+              shadowColor: 'rgba(255,255,255,0.4)',
+              shadowBlur: 20,
+            },
+            label: { fontSize: 12, fontWeight: 'bold' as const },
+          },
+          ...faces.map((f) => ({
+            name: f.face,
+            value: f.count,
+            symbolSize: Math.max(25, Math.min(55, f.count * 4)),
+            itemStyle: {
+              color: f.color,
+              shadowColor: f.color,
+              shadowBlur: 15,
+            },
+          })),
+        ],
+        links: faces.map((f) => ({
+          source: 'Experience',
+          target: f.face,
+          lineStyle: { color: f.color + '40' },
+        })),
+      },
+    ],
+    animation: false,
+  };
+}
+
 /* ── section-specific content with inline charts ───────────────── */
 
 function FlowSectionContent({ project }: { project: CXDProject }) {
@@ -1715,6 +1799,15 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
             {mainConcept}
           </p>
         )}
+
+        {(project.shareDescription || project.description) && (
+          <div className="space-y-2">
+            <h2 className="text-xs font-medium text-white/30 uppercase tracking-wider">About This Experience</h2>
+            <p className="text-sm text-white/60 leading-relaxed">
+              {project.shareDescription || project.description}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Stats row */}
@@ -1815,15 +1908,18 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
         className="!absolute inset-0 !z-0"
       />
 
-      {/* Main content area with gradient background */}
-      <div className="flex-1 overflow-y-auto relative z-10" style={{ background: 'linear-gradient(135deg, rgba(30,9,56,0.7) 0%, rgba(21,10,40,0.5) 50%, rgba(13,6,24,0.7) 100%)' }}>
+      {/* Main content area */}
+      <div
+        className="flex-1 overflow-y-auto relative z-10 bg-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-violet-500/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-violet-500/30"
+        style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,92,246,0.2) transparent' }}
+      >
         <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">
           {renderSectionPage()}
         </div>
       </div>
 
-      {/* Right sidebar with vertical section buttons */}
-      <div className="w-[220px] flex-shrink-0 border-l border-white/5 bg-black/30 backdrop-blur-sm overflow-y-auto p-3 space-y-1 relative z-10">
+      {/* Right sidebar with floating section buttons */}
+      <div className="w-[200px] flex-shrink-0 overflow-y-auto py-6 pr-4 space-y-1.5 relative z-10">
         {SECTIONS.map((section) => {
           const isActive = activeSection === section.id;
           const hasData = section.id === 'overview' || section.hasData(project);
