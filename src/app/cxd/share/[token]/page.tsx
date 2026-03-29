@@ -1,19 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { CXDProject } from '@/types/cxd-schema';
 import { fetchProjectByShareToken } from '@/lib/supabase-projects';
 import { CXDCanvasReadOnly } from '@/components/cxd/cxd-canvas-readonly';
-import { CXDShareSummary } from '@/components/cxd/cxd-share-summary';
-import Image from 'next/image';
+import { ShareLandingPage } from '@/components/cxd/share/share-landing-page';
+import { createClient } from '@/supabase/client';
 import {
   Lock,
   Loader2,
-  List,
-  Grid3X3,
   Eye,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { extractCenterColor, hexToRgba } from '@/lib/utils';
 
 // Canvas gradients (matching navbar)
@@ -26,15 +24,18 @@ const CANVAS_GRADIENTS = [
   { name: 'Void', value: '#000000' },
 ];
 
-type ViewMode = 'summary' | 'canvas';
+type ViewMode = 'landing' | 'framing' | 'canvas';
 
 export default function SharePage({ params }: { params: { token: string } }) {
   const token = useMemo(() => decodeURIComponent(params.token), [params.token]);
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [project, setProject] = useState<CXDProject | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('summary');
+  const [viewMode, setViewMode] = useState<ViewMode>('landing');
 
+  // Load project
   useEffect(() => {
     async function loadProject() {
       setLoading(true);
@@ -55,6 +56,94 @@ export default function SharePage({ params }: { params: { token: string } }) {
     }
     loadProject();
   }, [token]);
+
+  // Handle ?join=true collaboration flow
+  useEffect(() => {
+    const join = searchParams.get('join');
+    if (join !== 'true' || !project) return;
+
+    // Capture project in a const so TypeScript narrows the type inside the async fn
+    const currentProject = project;
+
+    async function handleJoin() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+          // Not authenticated — the sign-up page handles redirect via returnTo
+          return;
+        }
+
+        // Check if user is already a collaborator
+        const { data: existingCollab } = await supabase
+          .from('canvas_collaborators')
+          .select('id')
+          .eq('canvas_id', currentProject.id)
+          .eq('user_id', user.id)
+          .single();
+
+        if (existingCollab) {
+          // Already a collaborator, just redirect
+          router.replace('/cxd');
+          return;
+        }
+
+        // Insert new collaborator record
+        const { error: collabError } = await supabase
+          .from('canvas_collaborators')
+          .insert({
+            canvas_id: currentProject.id,
+            user_id: user.id,
+            role: 'collaborator',
+            added_by: currentProject.ownerId,
+          });
+
+        if (collabError) {
+          console.error('Error joining as collaborator:', collabError);
+          return;
+        }
+
+        // Get current user's name for notification
+        const { data: userProfile } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', user.id)
+          .single();
+
+        const userName = userProfile?.name || userProfile?.email?.split('@')[0] || 'Someone';
+
+        // Notify the project owner
+        if (currentProject.ownerId) {
+          await supabase
+            .from('notifications')
+            .insert({
+              user_id: currentProject.ownerId,
+              title: 'New Collaborator',
+              message: `${userName} joined your project "${currentProject.name}" via share link`,
+              type: 'success',
+              is_global: false,
+              metadata: {
+                canvasId: currentProject.id,
+                canvasName: currentProject.name,
+                collaboratorId: user.id,
+                collaboratorName: userName,
+              },
+            });
+        }
+
+        // Redirect to CXD dashboard
+        router.replace('/cxd');
+      } catch (err) {
+        console.error('Error handling join flow:', err);
+      }
+    }
+
+    handleJoin();
+  }, [searchParams, project, router]);
+
+  const handleViewFraming = useCallback(() => setViewMode('framing'), []);
+  const handleViewCanvas = useCallback(() => setViewMode('canvas'), []);
 
   if (loading) {
     return (
@@ -81,6 +170,18 @@ export default function SharePage({ params }: { params: { token: string } }) {
     );
   }
 
+  // Landing page view
+  if (viewMode === 'landing') {
+    return (
+      <ShareLandingPage
+        project={project}
+        onViewFraming={handleViewFraming}
+        onViewCanvas={handleViewCanvas}
+        shareToken={token}
+      />
+    );
+  }
+
   // Dynamic background from project canvas
   const canvasBackground = project.canvasBackground || CANVAS_GRADIENTS[0].value;
   const centerColor = extractCenterColor(canvasBackground);
@@ -89,84 +190,29 @@ export default function SharePage({ params }: { params: { token: string } }) {
 
   return (
     <div className="flex flex-col h-screen" style={{ background: canvasBackground }}>
-      {/* Header - matching main navbar style */}
+      {/* Minimal header with back button */}
       <header
-        className="h-16 backdrop-blur-md border-b border-white/10 flex-shrink-0 relative overflow-visible transition-colors duration-500"
+        className="h-14 backdrop-blur-md border-b border-white/10 flex-shrink-0 px-6 flex items-center justify-between"
         style={{ backgroundColor: navBgColor }}
       >
-        {/* Glass reflections */}
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-30" />
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-20" />
-        <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
-
-        <div className="h-full px-6 flex items-center justify-between relative z-10">
-          {/* Left: Logo + Project Name */}
-          <div className="flex items-center gap-3">
-            <Image
-              src="/images/hypercube-logo.webp"
-              alt="CXD"
-              width={28}
-              height={28}
-              className="object-contain"
-              priority
-            />
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10">
-              <span className="text-sm font-medium text-white/70">{project.name}</span>
-            </div>
-          </div>
-
-          {/* Center: View Toggle */}
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1 p-1 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6),inset_0_0_20px_rgba(255,255,255,0.15)]">
-            {[
-              { id: 'summary' as ViewMode, label: 'Summary', icon: List, color: 'violet' },
-              { id: 'canvas' as ViewMode, label: 'Canvas', icon: Grid3X3, color: 'cyan' },
-            ].map((btn) => {
-              const isActive = viewMode === btn.id;
-              const colors: Record<string, string> = {
-                violet: isActive
-                  ? 'bg-gradient-to-b from-violet-400/20 to-violet-950/60 border-violet-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
-                  : 'hover:bg-violet-500/10 hover:border-violet-500/30',
-                cyan: isActive
-                  ? 'bg-gradient-to-b from-cyan-400/20 to-cyan-950/60 border-cyan-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
-                  : 'hover:bg-cyan-500/10 hover:border-cyan-500/30',
-              };
-
-              return (
-                <div
-                  key={btn.id}
-                  onClick={() => setViewMode(btn.id)}
-                  className={cn(
-                    "relative flex items-center px-4 py-2 group rounded-full text-white transition-all duration-500 border active:scale-95 cursor-pointer",
-                    isActive ? colors[btn.color] : `bg-transparent border-transparent ${colors[btn.color]}`,
-                  )}
-                >
-                  <btn.icon className={cn("w-4 h-4 transition-colors", isActive ? 'text-white' : 'text-white/60 group-hover:text-white')} />
-                  <span className={cn(
-                    "text-xs font-bold overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap",
-                    isActive ? 'max-w-[100px] ml-2 opacity-100' : 'max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:ml-2 group-hover:opacity-100'
-                  )}>
-                    {btn.label}
-                  </span>
-                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Right: Read Only badge */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.05] border border-white/10 text-white/50 text-xs">
-              <Eye className="w-3.5 h-3.5" />
-              Read Only
-            </div>
-          </div>
+        <button
+          onClick={() => setViewMode('landing')}
+          className="text-sm text-white/50 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+        >
+          &larr; Back to overview
+        </button>
+        <span className="text-sm text-white/60">{project.name}</span>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.05] border border-white/10 text-white/50 text-xs">
+          <Eye className="w-3.5 h-3.5" />
+          Read Only
         </div>
       </header>
 
-      {/* Content */}
       <main className="flex-1 overflow-hidden">
-        {viewMode === 'summary' ? (
-          <CXDShareSummary project={project} />
+        {viewMode === 'framing' ? (
+          <div className="flex-1 flex items-center justify-center text-white/50">
+            Framing presentation coming soon
+          </div>
         ) : (
           <CXDCanvasReadOnly project={project} />
         )}
