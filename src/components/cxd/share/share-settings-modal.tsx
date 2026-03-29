@@ -166,6 +166,18 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
             </div>
           </div>
 
+          {/* Description */}
+          <div>
+            <label className="text-[10px] text-white/40 uppercase tracking-wider font-medium mb-1.5 block">Description</label>
+            <textarea
+              value={project.shareDescription || ''}
+              onChange={(e) => updateProject({ shareDescription: e.target.value })}
+              placeholder="Add a description for your share page..."
+              rows={3}
+              className="w-full bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-2 text-[11px] text-white/80 font-mono placeholder:text-white/20 resize-none focus:outline-none focus:border-violet-500/30 transition-colors"
+            />
+          </div>
+
           {/* Divider */}
           <div className="h-px bg-gradient-to-r from-transparent via-purple-500/20 to-transparent" />
 

@@ -4,6 +4,7 @@ import { CXDProject } from '@/types/cxd-schema';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 import Image from 'next/image';
 import Link from 'next/link';
+import { Sparkles, LayoutGrid, Users } from 'lucide-react';
 
 interface ShareLandingPageProps {
   project: CXDProject;
@@ -21,6 +22,18 @@ export function ShareLandingPage({
   const coverImage = project.shareCoverImage;
   const thumbnail = project.shareThumbnail;
   const concept = project.intentionCore?.mainConcept;
+  const description = project.shareDescription;
+  const authorName = project.intentionCore?.projectName
+    ? 'CXD Creator'
+    : 'CXD Creator';
+
+  // Generate initials from project name as fallback
+  const initials = (project.name || 'CX')
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <div className="min-h-screen bg-black">
@@ -36,10 +49,10 @@ export function ShareLandingPage({
 
       {/* Main content */}
       <div className="relative z-10 flex flex-col items-center min-h-screen">
-        {/* Cover image hero */}
+        {/* Cover image hero — reduced height */}
         <div className="w-full relative">
           {coverImage ? (
-            <div className="relative w-full h-[340px] md:h-[420px] overflow-hidden">
+            <div className="relative w-full h-[200px] md:h-[260px] overflow-hidden">
               <img
                 src={coverImage}
                 alt="Cover"
@@ -51,7 +64,7 @@ export function ShareLandingPage({
             </div>
           ) : (
             <div
-              className="w-full h-[220px] md:h-[280px]"
+              className="w-full h-[160px] md:h-[200px] relative"
               style={{
                 background:
                   'linear-gradient(135deg, #1a0a2e, #2a1040, #0f1a3a)',
@@ -64,8 +77,8 @@ export function ShareLandingPage({
           )}
         </div>
 
-        {/* Content card */}
-        <div className="w-full max-w-2xl mx-auto px-6 -mt-16 relative z-10 flex flex-col items-center gap-8 pb-16">
+        {/* Content */}
+        <div className="w-full max-w-2xl mx-auto px-6 -mt-16 relative z-10 flex flex-col items-center gap-6 pb-16">
           {/* CXD Branding */}
           <div className="flex items-center gap-3">
             <Image
@@ -81,17 +94,27 @@ export function ShareLandingPage({
             </span>
           </div>
 
-          {/* Project info */}
-          <div className="text-center flex flex-col items-center gap-3">
-            <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
-              {project.name}
-            </h1>
-            {concept && (
-              <p className="text-base md:text-lg text-white/60 max-w-lg leading-relaxed">
-                {concept}
-              </p>
-            )}
+          {/* Project name */}
+          <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight text-center">
+            {project.name}
+          </h1>
+
+          {/* Author profile */}
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/40 to-purple-600/40 border border-violet-500/20 flex items-center justify-center">
+              <span className="text-[10px] font-bold text-white/70">{initials}</span>
+            </div>
+            <span className="text-sm text-white/50">
+              Experience by <span className="text-white/70 font-medium">{authorName}</span>
+            </span>
           </div>
+
+          {/* Concept */}
+          {concept && (
+            <p className="text-base md:text-lg text-white/60 max-w-lg leading-relaxed text-center">
+              {concept}
+            </p>
+          )}
 
           {/* Thumbnail */}
           {thumbnail && (
@@ -104,45 +127,56 @@ export function ShareLandingPage({
             </div>
           )}
 
-          {/* View buttons */}
-          <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-md">
-            <button
-              onClick={onViewFraming}
-              className="w-full sm:w-auto flex-1 px-8 py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-violet-600 to-purple-700 shadow-[0_0_24px_rgba(139,92,246,0.35)] hover:shadow-[0_0_32px_rgba(139,92,246,0.5)] transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-            >
-              View Experience Design
-            </button>
-            <button
-              onClick={onViewCanvas}
-              className="w-full sm:w-auto flex-1 px-8 py-3 rounded-xl text-sm font-semibold text-white bg-white/[0.05] border border-white/15 backdrop-blur-md hover:bg-white/[0.08] hover:border-white/25 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-            >
-              View Canvas
-            </button>
-          </div>
+          {/* Description */}
+          {description && (
+            <p className="text-sm text-white/50 max-w-md leading-relaxed text-center">
+              {description}
+            </p>
+          )}
 
-          {/* Divider */}
-          <div className="w-full max-w-sm h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+          {/* Buttons — all same gradient-border style, stacked vertically */}
+          <div className="flex flex-col items-center gap-3 w-full max-w-sm">
+            {/* View Experience Design — purple gradient */}
+            <div className="w-full rounded-xl p-px bg-gradient-to-r from-violet-500/30 via-purple-400/40 to-violet-500/30">
+              <button
+                onClick={onViewFraming}
+                className="w-full px-6 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                View Experience Design
+              </button>
+            </div>
 
-          {/* CTA section */}
-          <div className="flex flex-col items-center gap-4">
-            {/* Request to Collaborate */}
-            <div className="rounded-xl p-px bg-gradient-to-r from-purple-500/20 via-pink-500/30 to-purple-500/20">
+            {/* View Canvas — cyan/teal gradient */}
+            <div className="w-full rounded-xl p-px bg-gradient-to-r from-cyan-500/30 via-teal-400/40 to-cyan-500/30">
+              <button
+                onClick={onViewCanvas}
+                className="w-full px-6 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                View Canvas
+              </button>
+            </div>
+
+            {/* Request to Collaborate — pink/purple gradient */}
+            <div className="w-full rounded-xl p-px bg-gradient-to-r from-purple-500/20 via-pink-500/30 to-purple-500/20">
               <Link
                 href={`/sign-up?returnTo=/cxd/share/${shareToken}&join=true`}
-                className="block px-8 py-3 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-medium text-white/80 hover:text-white hover:bg-black/60 transition-all duration-300"
+                className="w-full px-6 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
               >
+                <Users className="w-4 h-4" />
                 Request to Collaborate
               </Link>
             </div>
-
-            {/* Create your own */}
-            <Link
-              href="/"
-              className="text-sm font-medium bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent hover:from-purple-300 hover:to-pink-300 transition-all duration-300"
-            >
-              Create your own experience design &rarr;
-            </Link>
           </div>
+
+          {/* Create your own */}
+          <Link
+            href="/"
+            className="text-sm font-medium bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent hover:from-purple-300 hover:to-pink-300 transition-all duration-300"
+          >
+            Create your own experience design &rarr;
+          </Link>
         </div>
       </div>
     </div>

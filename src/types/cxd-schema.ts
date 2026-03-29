@@ -284,6 +284,7 @@ export interface CXDProject {
   shareToken?: string;
   shareCoverImage?: string;   // URL to uploaded cover image for share page
   shareThumbnail?: string;    // URL to uploaded thumbnail for share page
+  shareDescription?: string;  // Project description for share page
   canvasBackground?: string; // CSS gradient string for canvas background
 
   // Section data
