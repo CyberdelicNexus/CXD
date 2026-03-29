@@ -112,14 +112,15 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
       <DialogContent
-        className="!max-w-[560px] !w-[calc(100vw-2rem)] !bg-gradient-to-br !from-[#1a0f2e] !to-[#0f0a1e] !backdrop-blur-xl !border !border-purple-500/25 !rounded-2xl !p-0 !gap-0 [&>button:last-child]:hidden"
+        className="!max-w-[520px] !w-[calc(100vw-2rem)] !backdrop-blur-xl !border !border-purple-500/25 !rounded-2xl !p-0 !gap-0 [&>button:last-child]:hidden !overflow-hidden"
         style={{
-          boxShadow: '0 0 15px rgba(139, 92, 246, 0.2), 0 0 40px rgba(139, 92, 246, 0.1), 0 0 80px rgba(88, 28, 135, 0.15), 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
+          background: 'linear-gradient(135deg, #1e0938 0%, #150a28 40%, #0d0618 100%)',
+          boxShadow: '0 0 15px rgba(139, 92, 246, 0.25), 0 0 40px rgba(139, 92, 246, 0.12), 0 0 80px rgba(88, 28, 135, 0.15), 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
         }}
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
-        <div className="p-6">
+        <div className="p-5">
           {/* Header */}
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2.5">
@@ -168,7 +169,7 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
               </div>
 
               {/* Thumbnail */}
-              <div className="w-24">
+              <div className="w-20 flex-shrink-0">
                 <label className="text-[10px] text-white/40 uppercase tracking-wider font-medium mb-1.5 block">Thumbnail</label>
                 <input ref={thumbInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -203,14 +204,14 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
             <div className="mb-4">
               <label className="text-[10px] text-white/40 uppercase tracking-wider font-medium mb-1.5 block">Share Link</label>
               <div className="flex gap-2">
-                <div className="flex-1 bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-2.5 text-xs text-white/40 overflow-hidden text-ellipsis whitespace-nowrap font-mono">
+                <div className="flex-1 min-w-0 bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-2 text-[11px] text-white/40 truncate font-mono">
                   {shareUrl || "No link generated yet"}
                 </div>
                 <button
                   onClick={handleCopyLink}
-                  className="px-4 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white text-xs font-medium flex items-center gap-1.5 transition-all hover:shadow-[0_0_20px_rgba(139,92,246,0.3)] flex-shrink-0"
+                  className="px-3 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white text-[11px] font-medium flex items-center gap-1 transition-all hover:shadow-[0_0_20px_rgba(139,92,246,0.3)] flex-shrink-0"
                 >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                   {copied ? "Copied" : shareUrl ? "Copy" : "Generate"}
                 </button>
               </div>
