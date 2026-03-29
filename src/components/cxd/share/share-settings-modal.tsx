@@ -112,7 +112,7 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
       <DialogContent
-        className="bg-gradient-to-br from-[#1a0f2e]/95 to-[#0f0a1e]/95 backdrop-blur-xl border border-purple-500/15 shadow-[0_8px_40px_rgba(88,28,135,0.2),0_0_80px_rgba(88,28,135,0.08)] rounded-2xl p-0 sm:max-w-[420px] [&>button:last-child]:hidden"
+        className="!bg-gradient-to-br !from-[#1a0f2e] !to-[#0f0a1e] backdrop-blur-xl !border !border-purple-500/20 !shadow-[0_8px_40px_rgba(88,28,135,0.3),0_0_80px_rgba(139,92,246,0.12),inset_0_1px_0_rgba(255,255,255,0.04)] !rounded-2xl !p-0 sm:max-w-[420px] [&>button:last-child]:hidden"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
