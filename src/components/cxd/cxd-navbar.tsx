@@ -62,6 +62,7 @@ import { useAICredits } from "@/hooks/use-ai-credits";
 import { UpgradeModal } from "@/components/modals/upgrade-modal";
 import { SettingsModal } from "@/components/modals/settings-modal";
 import { TemplatePickerModal } from './template-picker-modal';
+import { ShareSettingsModal } from './share/share-settings-modal';
 import { Lock } from "lucide-react";
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
@@ -218,6 +219,7 @@ export function CXDNavbar() {
   // Collaboration state
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const { collaborators, isConnected, currentUser, followingCollaboratorId, setFollowingCollaboratorId } = useCollaborationContext();
   const { role: canvasRole } = useCanvasPermissions(project?.id || null);
 
@@ -614,7 +616,7 @@ export function CXDNavbar() {
               <>
                 <div
                   className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
-                  onClick={handleShare}
+                  onClick={() => setShowShareModal(true)}
                 >
                   <Share2 className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
                 </div>
@@ -866,6 +868,12 @@ export function CXDNavbar() {
           onClose={() => setShowTemplatesModal(false)}
         />
       )}
+
+      {/* Share Settings Modal */}
+      <ShareSettingsModal
+        open={showShareModal}
+        onClose={() => setShowShareModal(false)}
+      />
     </nav>
   );
 }
