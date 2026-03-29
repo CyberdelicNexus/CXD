@@ -125,9 +125,10 @@ function ReadOnlyField({ label, description, value }: { label: string; descripti
 interface ShareFramingPresentationProps {
   project: CXDProject;
   onBack: () => void;
+  viewToggle?: React.ReactNode;
 }
 
-export function ShareFramingPresentation({ project, onBack }: ShareFramingPresentationProps) {
+export function ShareFramingPresentation({ project, onBack, viewToggle }: ShareFramingPresentationProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const stepNavRef = useRef<HTMLDivElement>(null);
   const stepButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -517,6 +518,13 @@ export function ShareFramingPresentation({ project, onBack }: ShareFramingPresen
 
   return (
     <div className="min-h-screen relative flex justify-center py-8" style={{ background: canvasBackground }}>
+      {/* View toggle — centered at top */}
+      {viewToggle && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-30">
+          {viewToggle}
+        </div>
+      )}
+
       {/* Interactive Shimmer Grid Background */}
       <ShimmerGrid
         dotSize={1.5}
@@ -661,7 +669,7 @@ export function ShareFramingPresentation({ project, onBack }: ShareFramingPresen
 
             {/* Main Content Card */}
             <Card
-              className="gradient-border backdrop-blur h-fit overflow-visible"
+              className="glass-purple rounded-xl h-fit overflow-visible"
               style={{ backgroundColor: cardBgColor }}
             >
               <CardHeader>

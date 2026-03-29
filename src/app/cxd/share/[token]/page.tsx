@@ -12,7 +12,10 @@ import {
   Lock,
   Loader2,
   Eye,
+  Wand2,
+  Grid3X3,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { extractCenterColor, hexToRgba } from '@/lib/utils';
 
 // Canvas gradients (matching navbar)
@@ -183,12 +186,51 @@ export default function SharePage({ params }: { params: { token: string } }) {
     );
   }
 
+  // Shared view toggle component for framing/canvas views
+  const ViewToggle = () => (
+    <div className="flex items-center gap-1 p-1 rounded-full bg-white/[0.04] backdrop-blur-2xl border border-white/10 shadow-[0_12px_40px_rgba(0,0,0,0.6),inset_0_0_20px_rgba(255,255,255,0.15)]">
+      {[
+        { id: 'framing' as const, label: 'Experience', icon: Wand2, color: 'violet' },
+        { id: 'canvas' as const, label: 'Canvas', icon: Grid3X3, color: 'cyan' },
+      ].map((btn) => {
+        const isActive = viewMode === btn.id;
+        const colors: Record<string, string> = {
+          violet: isActive
+            ? 'bg-gradient-to-b from-violet-400/20 to-violet-950/60 border-violet-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+            : 'hover:bg-violet-500/10 hover:border-violet-500/30',
+          cyan: isActive
+            ? 'bg-gradient-to-b from-cyan-400/20 to-cyan-950/60 border-cyan-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+            : 'hover:bg-cyan-500/10 hover:border-cyan-500/30',
+        };
+        return (
+          <div
+            key={btn.id}
+            onClick={() => setViewMode(btn.id)}
+            className={cn(
+              "relative flex items-center px-4 py-2 group rounded-full text-white transition-all duration-500 border active:scale-95 cursor-pointer",
+              isActive ? colors[btn.color] : `bg-transparent border-transparent ${colors[btn.color]}`,
+            )}
+          >
+            <btn.icon className={cn("w-4 h-4 transition-colors", isActive ? 'text-white' : 'text-white/60 group-hover:text-white')} />
+            <span className={cn(
+              "text-xs font-bold overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap",
+              isActive ? 'max-w-[100px] ml-2 opacity-100' : 'max-w-0 opacity-0 group-hover:max-w-[100px] group-hover:ml-2 group-hover:opacity-100'
+            )}>
+              {btn.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   // Framing view — full-page component with its own layout and back button
   if (viewMode === 'framing') {
     return (
       <ShareFramingPresentation
         project={project}
         onBack={() => setViewMode('landing')}
+        viewToggle={<ViewToggle />}
       />
     );
   }
@@ -201,7 +243,7 @@ export default function SharePage({ params }: { params: { token: string } }) {
 
   return (
     <div className="flex flex-col h-screen" style={{ background: canvasBackground }}>
-      {/* Minimal header with back button */}
+      {/* Header with back button and view toggle */}
       <header
         className="h-14 backdrop-blur-md border-b border-white/10 flex-shrink-0 px-6 flex items-center justify-between"
         style={{ backgroundColor: navBgColor }}
@@ -210,9 +252,9 @@ export default function SharePage({ params }: { params: { token: string } }) {
           onClick={() => setViewMode('landing')}
           className="text-sm text-white/50 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
         >
-          &larr; Back to overview
+          &larr; Back
         </button>
-        <span className="text-sm text-white/60">{project.name}</span>
+        <ViewToggle />
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.05] border border-white/10 text-white/50 text-xs">
           <Eye className="w-3.5 h-3.5" />
           Read Only

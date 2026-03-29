@@ -112,29 +112,27 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
       <DialogContent
-        className="bg-transparent border-none shadow-none p-0 sm:max-w-[420px]"
+        className="bg-gradient-to-br from-[#1a0f2e]/95 to-[#0f0a1e]/95 backdrop-blur-xl border border-purple-500/15 shadow-[0_8px_40px_rgba(88,28,135,0.2),0_0_80px_rgba(88,28,135,0.08)] rounded-2xl p-0 sm:max-w-[420px] [&>button:last-child]:hidden"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
-        {/* Ghost gradient border wrapper */}
-        <div className="gradient-border rounded-2xl overflow-hidden">
-          <div className="p-6">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-600/20 border border-violet-500/20 flex items-center justify-center">
-                  <Share2 className="w-4 h-4 text-violet-400" />
-                </div>
-                <h2 className="text-base font-semibold text-white">Share Project</h2>
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-600/20 border border-violet-500/20 flex items-center justify-center">
+                <Share2 className="w-4 h-4 text-violet-400" />
               </div>
-              <button
-                onClick={onClose}
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-white/30 hover:text-white/60 hover:bg-white/5 transition-all"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <h2 className="text-base font-semibold text-white">Share Project</h2>
             </div>
-            <p className="text-xs text-white/40 mb-5 ml-[42px]">Customize how your project appears to visitors</p>
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white/30 hover:text-white/60 hover:bg-white/5 transition-all"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-white/40 mb-5 ml-[42px]">Customize how your project appears to visitors</p>
 
             {/* Images row — cover and thumbnail side by side */}
             <div className="flex gap-3 mb-5">
@@ -235,7 +233,6 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
               </div>
             )}
           </div>
-        </div>
       </DialogContent>
     </Dialog>
   );

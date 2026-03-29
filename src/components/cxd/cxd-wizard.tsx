@@ -763,7 +763,7 @@ export function CXDWizard() {
 
             {/* Main Content Card */}
             <Card
-              className="gradient-border backdrop-blur h-fit overflow-visible"
+              className="glass-purple rounded-xl h-fit overflow-visible"
               style={{ backgroundColor: cardBgColor }}
             >
               <CardHeader>
