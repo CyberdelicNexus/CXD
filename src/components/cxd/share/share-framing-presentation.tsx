@@ -8,6 +8,8 @@ import {
   PRESENCE_TYPES,
   ENGAGEMENT_LEVELS,
   STAGE_PRESENCE_TYPES,
+  STATE_QUADRANTS,
+  TRAIT_QUADRANTS,
 } from '@/types/cxd-schema';
 import type { EngagementLevelCode, StagePresenceTypeCode } from '@/types/cxd-schema';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
@@ -21,6 +23,12 @@ import {
   Wand2,
   Layers,
   Eye,
+  Ear,
+  Wind,
+  Apple,
+  Fingerprint,
+  PersonStanding,
+  Zap,
   Radio,
   Brain,
   Heart,
@@ -59,14 +67,8 @@ const CHART_TEXT_COLOR = 'rgba(255,255,255,0.5)';
 const CHART_FONT_FAMILY = 'Inter, system-ui, sans-serif';
 const TOOLTIP_BG = 'rgba(15,10,30,0.92)';
 const TOOLTIP_BORDER = 'rgba(139,92,246,0.3)';
-const AXIS_LABEL_COLOR = 'rgba(255,255,255,0.4)';
-const GRID_LINE_COLOR = 'rgba(255,255,255,0.06)';
-const VIOLET_LINE = 'rgba(139,92,246,0.6)';
-const VIOLET_AREA_START = 'rgba(139,92,246,0.2)';
-const VIOLET_AREA_END = 'rgba(139,92,246,0.05)';
-const INDIGO_LINE = 'rgba(99,102,241,0.6)';
-const INDIGO_AREA_START = 'rgba(99,102,241,0.2)';
-const INDIGO_AREA_END = 'rgba(99,102,241,0.05)';
+const AXIS_LABEL_COLOR = 'rgba(255,255,255,0.35)';
+const GRID_LINE_COLOR = 'rgba(255,255,255,0.04)';
 
 const tooltipStyle = {
   backgroundColor: TOOLTIP_BG,
@@ -76,7 +78,40 @@ const tooltipStyle = {
   extraCssText: 'backdrop-filter:blur(12px);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.4);',
 };
 
+/* ── sensory/presence metadata (wizard-matching) ─────────────── */
+
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  visual: { icon: <Eye className="w-5 h-5" />, color: 'from-blue-950 to-blue-400', colorRaw: '59, 130, 246' },
+  auditory: { icon: <Ear className="w-5 h-5" />, color: 'from-indigo-950 to-indigo-400', colorRaw: '99, 102, 241' },
+  olfactory: { icon: <Wind className="w-5 h-5" />, color: 'from-teal-950 to-teal-400', colorRaw: '20, 184, 166' },
+  gustatory: { icon: <Apple className="w-5 h-5" />, color: 'from-rose-950 to-rose-400', colorRaw: '244, 63, 94' },
+  haptic: { icon: <Fingerprint className="w-5 h-5" />, color: 'from-purple-950 to-purple-400', colorRaw: '168, 85, 247' },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  mental: { icon: <Brain className="w-5 h-5" />, color: 'from-blue-950 to-blue-400', colorRaw: '59, 130, 246' },
+  emotional: { icon: <Heart className="w-5 h-5" />, color: 'from-red-950 to-red-400', colorRaw: '239, 68, 68' },
+  social: { icon: <Users className="w-5 h-5" />, color: 'from-violet-950 to-violet-400', colorRaw: '139, 92, 246' },
+  embodied: { icon: <PersonStanding className="w-5 h-5" />, color: 'from-orange-950 to-orange-400', colorRaw: '249, 115, 22' },
+  environmental: { icon: <Globe className="w-5 h-5" />, color: 'from-emerald-950 to-emerald-400', colorRaw: '16, 185, 129' },
+  active: { icon: <Zap className="w-5 h-5" />, color: 'from-yellow-950 to-yellow-400', colorRaw: '234, 179, 8' },
+};
+
+const INTENSITY_LEVELS = [
+  { value: 0, label: 'None' },
+  { value: 25, label: 'Minimal' },
+  { value: 50, label: 'Moderate' },
+  { value: 75, label: 'Significant' },
+  { value: 100, label: 'Primary' },
+];
+
 /* ── helpers ─────────────────────────────────────────────────────── */
+
+function getClosestLevel(value: number) {
+  return INTENSITY_LEVELS.reduce((prev, curr) =>
+    Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev,
+  );
+}
 
 function ReadOnlyField({ label, value }: { label: string; value: string | undefined }) {
   const hasContent = value && value.trim().length > 0;
@@ -107,9 +142,258 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
 
 function ChartCard({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('glass-purple rounded-xl p-4', className)}>
+    <div className={cn('rounded-xl p-4 bg-white/[0.03] border border-white/[0.06] backdrop-blur-md', className)}>
       <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-3">{title}</h3>
       {children}
+    </div>
+  );
+}
+
+/* ── wizard-style section renderers ─────────────────────────────── */
+
+function WizardSensorySection({ project }: { project: CXDProject }) {
+  return (
+    <div className="space-y-6">
+      {SENSORY_DOMAINS.map((domain) => {
+        const val = project.sensoryDomains[domain.code] ?? 0;
+        const closest = getClosestLevel(val);
+        const meta = SENSORY_METADATA[domain.code];
+        if (!meta) return null;
+
+        return (
+          <div key={domain.code} className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg bg-gradient-to-br ${meta.color} bg-opacity-10 text-white shadow-sm`}>
+                {meta.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-white/90 tracking-tight">{domain.label}</div>
+                <p className="text-xs text-white/40">{domain.description}</p>
+              </div>
+              <span className="text-xs text-white/40 font-medium">{closest.label}</span>
+            </div>
+            <div className="flex gap-2">
+              {INTENSITY_LEVELS.map((level) => {
+                const isSelected = closest.value === level.value;
+                const baseClass = 'flex-1 py-2.5 px-3 text-sm rounded-xl transition-all duration-300 flex items-center justify-center';
+                let intensityStyle = '';
+
+                if (isSelected) {
+                  const color = meta.color;
+                  const raw = meta.colorRaw;
+                  if (level.value === 0) intensityStyle = 'bg-zinc-600 text-white shadow-md';
+                  else if (level.value === 25) intensityStyle = `bg-gradient-to-br ${color} opacity-70 text-white shadow-sm`;
+                  else if (level.value === 50) intensityStyle = `bg-gradient-to-br ${color} opacity-90 text-white shadow-[0_0_15px_rgba(${raw},0.3)]`;
+                  else if (level.value === 75) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_20px_rgba(${raw},0.4)]`;
+                  else if (level.value === 100) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_30px_rgba(${raw},0.6)] scale-105 font-bold border border-white/20`;
+                } else {
+                  intensityStyle = 'bg-secondary/40 text-muted-foreground/70';
+                }
+
+                return (
+                  <div
+                    key={level.value}
+                    className={`${baseClass} ${intensityStyle} cursor-default`}
+                  >
+                    {level.label}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Radar chart */}
+      <ChartCard title="Sensory Profile">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildSensoryRadarOption(project)}
+          style={{ height: '280px' }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
+    </div>
+  );
+}
+
+function WizardPresenceSection({ project }: { project: CXDProject }) {
+  return (
+    <div className="space-y-6">
+      {PRESENCE_TYPES.map((presence) => {
+        const val = project.presenceTypes[presence.code] ?? 0;
+        const closest = getClosestLevel(val);
+        const meta = PRESENCE_METADATA[presence.code];
+        if (!meta) return null;
+
+        return (
+          <div key={presence.code} className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg bg-gradient-to-br ${meta.color} bg-opacity-10 text-white shadow-sm`}>
+                {meta.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-white/90 tracking-tight">{presence.label}</div>
+                <p className="text-xs text-white/40">{presence.description}</p>
+              </div>
+              <span className="text-xs text-white/40 font-medium">{closest.label}</span>
+            </div>
+            <div className="flex gap-2">
+              {INTENSITY_LEVELS.map((level) => {
+                const isSelected = closest.value === level.value;
+                const baseClass = 'flex-1 py-2.5 px-3 text-sm rounded-xl transition-all duration-300 flex items-center justify-center';
+                let intensityStyle = '';
+
+                if (isSelected) {
+                  const color = meta.color;
+                  const raw = meta.colorRaw;
+                  if (level.value === 0) intensityStyle = 'bg-zinc-600 text-white shadow-md';
+                  else if (level.value === 25) intensityStyle = `bg-gradient-to-br ${color} opacity-70 text-white shadow-sm`;
+                  else if (level.value === 50) intensityStyle = `bg-gradient-to-br ${color} opacity-90 text-white shadow-[0_0_15px_rgba(${raw},0.3)]`;
+                  else if (level.value === 75) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_20px_rgba(${raw},0.4)]`;
+                  else if (level.value === 100) intensityStyle = `bg-gradient-to-br ${color} text-white shadow-[0_0_30px_rgba(${raw},0.6)] scale-105 font-bold border border-white/20`;
+                } else {
+                  intensityStyle = 'bg-secondary/40 text-muted-foreground/70';
+                }
+
+                return (
+                  <div
+                    key={level.value}
+                    className={`${baseClass} ${intensityStyle} cursor-default`}
+                  >
+                    {level.label}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Radar chart */}
+      <ChartCard title="Presence Profile">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={buildPresenceRadarOption(project)}
+          style={{ height: '280px' }}
+          opts={{ renderer: 'canvas' }}
+        />
+      </ChartCard>
+    </div>
+  );
+}
+
+function WizardRealityPlanesSection({ project }: { project: CXDProject }) {
+  const v2 = project.realityPlanesV2;
+  if (!v2 || v2.length === 0) return <div className="text-sm text-white/30 italic">Not yet defined</div>;
+  const sorted = [...v2].sort((a, b) => a.priority - b.priority);
+
+  return (
+    <div className="space-y-3">
+      {sorted.map((plane) => {
+        const meta = REALITY_PLANES.find((r) => r.code === plane.code);
+        return (
+          <div
+            key={plane.code}
+            className="rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-md p-4 space-y-2"
+          >
+            <div className="flex items-center gap-3">
+              <span className="w-7 h-7 rounded-lg bg-violet-500/15 flex items-center justify-center text-xs font-bold text-violet-300">
+                {plane.priority + 1}
+              </span>
+              <span className="font-mono text-sm font-bold text-violet-300">{plane.code}</span>
+              <span className="text-sm text-white/70 flex-1">{meta?.label || plane.code}</span>
+              <div
+                className={cn(
+                  'px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border',
+                  plane.enabled
+                    ? 'bg-violet-500/15 border-violet-500/30 text-violet-300'
+                    : 'bg-white/[0.03] border-white/[0.06] text-white/30',
+                )}
+              >
+                {plane.enabled ? 'Enabled' : 'Disabled'}
+              </div>
+            </div>
+            {plane.enabled && plane.interfaceModality && plane.interfaceModality.trim() && (
+              <div className="ml-10 text-xs text-white/40 leading-relaxed">
+                {plane.interfaceModality}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function WizardStateMappingSection({ project }: { project: CXDProject }) {
+  const quadrantIcons: Record<string, React.ReactNode> = {
+    cognitive: <Brain className="w-4 h-4" />,
+    emotional: <Heart className="w-4 h-4" />,
+    somatic: <PersonStanding className="w-4 h-4" />,
+    relational: <Users className="w-4 h-4" />,
+  };
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {STATE_QUADRANTS.map((quadrant) => (
+        <div
+          key={quadrant.code}
+          className="rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-md p-4 space-y-2"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-violet-400">{quadrantIcons[quadrant.code]}</span>
+            <span className="text-sm font-semibold text-white/90">{quadrant.label}</span>
+          </div>
+          <p className="text-[11px] text-white/30">{quadrant.description}</p>
+          <div
+            className={cn(
+              'rounded-lg px-3 py-2.5 text-sm leading-relaxed border border-white/5 bg-white/[0.03]',
+              project.stateMapping?.[quadrant.code as keyof typeof project.stateMapping]
+                ? 'text-white/80 whitespace-pre-wrap'
+                : 'italic text-white/20',
+            )}
+          >
+            {project.stateMapping?.[quadrant.code as keyof typeof project.stateMapping] || 'Not yet defined'}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WizardTraitMappingSection({ project }: { project: CXDProject }) {
+  const quadrantIcons: Record<string, React.ReactNode> = {
+    cognitive: <Brain className="w-4 h-4" />,
+    emotional: <Heart className="w-4 h-4" />,
+    somatic: <PersonStanding className="w-4 h-4" />,
+    relational: <Users className="w-4 h-4" />,
+  };
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {TRAIT_QUADRANTS.map((quadrant) => (
+        <div
+          key={quadrant.code}
+          className="rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-md p-4 space-y-2"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-violet-400">{quadrantIcons[quadrant.code]}</span>
+            <span className="text-sm font-semibold text-white/90">{quadrant.label}</span>
+          </div>
+          <p className="text-[11px] text-white/30">{quadrant.description}</p>
+          <div
+            className={cn(
+              'rounded-lg px-3 py-2.5 text-sm leading-relaxed border border-white/5 bg-white/[0.03]',
+              project.traitMapping?.[quadrant.code as keyof typeof project.traitMapping]
+                ? 'text-white/80 whitespace-pre-wrap'
+                : 'italic text-white/20',
+            )}
+          >
+            {project.traitMapping?.[quadrant.code as keyof typeof project.traitMapping] || 'Not yet defined'}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -211,69 +495,35 @@ const SECTIONS: SectionDef[] = [
     title: 'Reality Planes',
     icon: <Layers className="w-4 h-4" />,
     hasData: (p) => !!(p.realityPlanesV2 && p.realityPlanesV2.some((pl) => pl.enabled)),
-    renderContent: (p) => {
-      const v2 = p.realityPlanesV2;
-      if (!v2 || v2.length === 0) return <div className="text-sm text-white/30 italic">Not yet defined</div>;
-      const sorted = [...v2].sort((a, b) => a.priority - b.priority);
-      return (
-        <div className="space-y-2">
-          {sorted.filter((pl) => pl.enabled).map((plane) => {
-            const meta = REALITY_PLANES.find((r) => r.code === plane.code);
-            return (
-              <div key={plane.code} className="flex items-center gap-3 p-2.5 rounded-lg border border-white/5 bg-white/[0.02]">
-                <span className="font-mono text-xs font-bold text-violet-300 w-7">{plane.code}</span>
-                <span className="text-sm text-white/70 flex-1">{meta?.label || plane.code}</span>
-                {plane.interfaceModality && plane.interfaceModality.trim() && (
-                  <span className="text-xs text-white/40 max-w-[200px] truncate">{plane.interfaceModality}</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      );
-    },
+    renderContent: (p) => <WizardRealityPlanesSection project={p} />,
   },
   {
     id: 'sensory',
     title: 'Sensory Domains',
     icon: <Eye className="w-4 h-4" />,
     hasData: (p) => SENSORY_DOMAINS.some((d) => (p.sensoryDomains[d.code] ?? 0) > 0),
-    renderContent: (p) => <SensorySectionContent project={p} />,
+    renderContent: (p) => <WizardSensorySection project={p} />,
   },
   {
     id: 'presence',
     title: 'Presence Types',
     icon: <Radio className="w-4 h-4" />,
     hasData: (p) => PRESENCE_TYPES.some((pt) => (p.presenceTypes[pt.code] ?? 0) > 0),
-    renderContent: (p) => <PresenceSectionContent project={p} />,
+    renderContent: (p) => <WizardPresenceSection project={p} />,
   },
   {
     id: 'state',
     title: 'State Mapping',
     icon: <Brain className="w-4 h-4" />,
     hasData: (p) => !!(p.stateMapping && Object.values(p.stateMapping).some((v) => v && v.trim())),
-    renderContent: (p) => (
-      <div className="space-y-4">
-        <ReadOnlyField label="Cognitive" value={p.stateMapping?.cognitive} />
-        <ReadOnlyField label="Emotional" value={p.stateMapping?.emotional} />
-        <ReadOnlyField label="Somatic" value={p.stateMapping?.somatic} />
-        <ReadOnlyField label="Relational" value={p.stateMapping?.relational} />
-      </div>
-    ),
+    renderContent: (p) => <WizardStateMappingSection project={p} />,
   },
   {
     id: 'trait',
     title: 'Trait Mapping',
     icon: <Heart className="w-4 h-4" />,
     hasData: (p) => !!(p.traitMapping && Object.values(p.traitMapping).some((v) => v && v.trim())),
-    renderContent: (p) => (
-      <div className="space-y-4">
-        <ReadOnlyField label="Cognitive" value={p.traitMapping?.cognitive} />
-        <ReadOnlyField label="Emotional" value={p.traitMapping?.emotional} />
-        <ReadOnlyField label="Somatic" value={p.traitMapping?.somatic} />
-        <ReadOnlyField label="Relational" value={p.traitMapping?.relational} />
-      </div>
-    ),
+    renderContent: (p) => <WizardTraitMappingSection project={p} />,
   },
 ];
 
@@ -295,8 +545,8 @@ function buildSensoryRadarOption(project: CXDProject): echarts.EChartsCoreOption
       shape: 'polygon',
       axisName: { color: AXIS_LABEL_COLOR, fontSize: 11, fontFamily: CHART_FONT_FAMILY },
       splitArea: { show: false },
-      splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
-      axisLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
     },
     series: [
       {
@@ -307,14 +557,27 @@ function buildSensoryRadarOption(project: CXDProject): echarts.EChartsCoreOption
             name: 'Sensory Intensity',
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: VIOLET_AREA_START },
-                { offset: 1, color: VIOLET_AREA_END },
+                { offset: 0, color: 'rgba(139, 92, 246, 0.3)' },
+                { offset: 1, color: 'rgba(139, 92, 246, 0.05)' },
               ]),
+              shadowColor: 'rgba(139, 92, 246, 0.3)',
+              shadowBlur: 20,
             },
-            lineStyle: { color: VIOLET_LINE, width: 2 },
-            itemStyle: { color: VIOLET_LINE },
+            lineStyle: {
+              color: 'rgba(192, 132, 252, 0.7)',
+              width: 2,
+              shadowColor: 'rgba(168, 85, 247, 0.4)',
+              shadowBlur: 8,
+            },
+            itemStyle: {
+              color: '#fff',
+              borderColor: 'rgba(168, 85, 247, 0.8)',
+              borderWidth: 2,
+              shadowColor: 'rgba(168, 85, 247, 0.5)',
+              shadowBlur: 8,
+            },
             symbol: 'circle',
-            symbolSize: 5,
+            symbolSize: 6,
           },
         ],
       },
@@ -339,8 +602,8 @@ function buildPresenceRadarOption(project: CXDProject): echarts.EChartsCoreOptio
       shape: 'polygon',
       axisName: { color: AXIS_LABEL_COLOR, fontSize: 11, fontFamily: CHART_FONT_FAMILY },
       splitArea: { show: false },
-      splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
-      axisLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
     },
     series: [
       {
@@ -351,14 +614,27 @@ function buildPresenceRadarOption(project: CXDProject): echarts.EChartsCoreOptio
             name: 'Presence Level',
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: INDIGO_AREA_START },
-                { offset: 1, color: INDIGO_AREA_END },
+                { offset: 0, color: 'rgba(139, 92, 246, 0.3)' },
+                { offset: 1, color: 'rgba(139, 92, 246, 0.05)' },
               ]),
+              shadowColor: 'rgba(139, 92, 246, 0.3)',
+              shadowBlur: 20,
             },
-            lineStyle: { color: INDIGO_LINE, width: 2 },
-            itemStyle: { color: INDIGO_LINE },
+            lineStyle: {
+              color: 'rgba(192, 132, 252, 0.7)',
+              width: 2,
+              shadowColor: 'rgba(168, 85, 247, 0.4)',
+              shadowBlur: 8,
+            },
+            itemStyle: {
+              color: '#fff',
+              borderColor: 'rgba(168, 85, 247, 0.8)',
+              borderWidth: 2,
+              shadowColor: 'rgba(168, 85, 247, 0.5)',
+              shadowBlur: 8,
+            },
             symbol: 'circle',
-            symbolSize: 5,
+            symbolSize: 6,
           },
         ],
       },
@@ -378,7 +654,7 @@ function buildTimelineOption(project: CXDProject): echarts.EChartsCoreOption {
     tooltip: {
       ...tooltipStyle,
       trigger: 'axis',
-      axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(139,92,246,0.06)' } },
+      axisPointer: { type: 'cross', crossStyle: { color: 'rgba(139,92,246,0.2)' } },
       formatter: (params: unknown) => {
         const p = Array.isArray(params) ? params[0] : params;
         const item = p as { name: string; value: number };
@@ -395,33 +671,46 @@ function buildTimelineOption(project: CXDProject): echarts.EChartsCoreOption {
     xAxis: {
       type: 'category',
       data: names,
-      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 10, fontFamily: CHART_FONT_FAMILY, rotate: names.length > 6 ? 30 : 0 },
-      axisLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      axisLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 11, fontFamily: CHART_FONT_FAMILY, rotate: names.length > 6 ? 30 : 0 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'value',
       name: 'Minutes',
-      nameTextStyle: { color: AXIS_LABEL_COLOR, fontSize: 10 },
-      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 10 },
-      splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      nameTextStyle: { color: 'rgba(255,255,255,0.35)', fontSize: 11 },
+      axisLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
       axisLine: { show: false },
       axisTick: { show: false },
     },
     series: [
       {
-        type: 'bar',
-        data: minutes.map((val) => ({
-          value: val,
-          itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(139,92,246,0.8)' },
-              { offset: 1, color: 'rgba(168,85,247,0.3)' },
-            ]),
-            borderRadius: [4, 4, 0, 0],
-          },
-        })),
-        barMaxWidth: 40,
+        type: 'line',
+        smooth: true,
+        data: minutes,
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(168, 85, 247, 0.5)' },
+            { offset: 0.5, color: 'rgba(139, 92, 246, 0.2)' },
+            { offset: 1, color: 'rgba(139, 92, 246, 0)' },
+          ]),
+        },
+        lineStyle: {
+          color: 'rgba(192, 132, 252, 0.8)',
+          width: 3,
+          shadowColor: 'rgba(168, 85, 247, 0.5)',
+          shadowBlur: 10,
+        },
+        symbolSize: 8,
+        symbol: 'circle',
+        itemStyle: {
+          color: '#fff',
+          borderColor: 'rgba(168, 85, 247, 0.8)',
+          borderWidth: 2,
+          shadowColor: 'rgba(168, 85, 247, 0.5)',
+          shadowBlur: 8,
+        },
       },
     ],
     animation: false,
@@ -451,17 +740,24 @@ function buildEngagementOption(project: CXDProject): echarts.EChartsCoreOption {
     }
   }
 
-  const colors = [
-    'rgba(139,92,246,0.7)',  // observer - violet
-    'rgba(99,102,241,0.7)',  // engager - indigo
-    'rgba(168,85,247,0.7)',  // coCreator - purple
-    'rgba(192,132,252,0.7)', // architect - lighter purple
+  const purplePinkGradients = [
+    { start: 'rgba(139, 92, 246, 0.9)', end: 'rgba(168, 85, 247, 0.6)' },  // observer
+    { start: 'rgba(168, 85, 247, 0.9)', end: 'rgba(192, 132, 252, 0.6)' },  // engager
+    { start: 'rgba(192, 132, 252, 0.9)', end: 'rgba(236, 72, 153, 0.6)' },  // coCreator
+    { start: 'rgba(236, 72, 153, 0.9)', end: 'rgba(244, 114, 182, 0.6)' },  // architect
   ];
 
   const data = ENGAGEMENT_LEVELS.map((lvl, i) => ({
     value: avgEngagement[lvl.code],
     name: lvl.label,
-    itemStyle: { color: colors[i] },
+    itemStyle: {
+      color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+        { offset: 0, color: purplePinkGradients[i].start },
+        { offset: 1, color: purplePinkGradients[i].end },
+      ]),
+      shadowColor: 'rgba(168, 85, 247, 0.4)',
+      shadowBlur: 12,
+    },
   }));
 
   return {
@@ -543,14 +839,14 @@ function buildStageEngagementStackedOption(project: CXDProject): echarts.ECharts
     xAxis: {
       type: 'category',
       data: names,
-      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 10 },
-      axisLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      axisLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 11 },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: AXIS_LABEL_COLOR, fontSize: 10 },
-      splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      axisLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
       axisLine: { show: false },
       axisTick: { show: false },
     },
@@ -585,9 +881,18 @@ function buildStagePresenceRadarOption(project: CXDProject): echarts.EChartsCore
   const data = stages.map((stage, i) => ({
     value: STAGE_PRESENCE_TYPES.map((pt) => stage.presenceTypes[pt.code as StagePresenceTypeCode] ?? 0),
     name: stage.name,
-    lineStyle: { color: stageColors[i % stageColors.length], width: 2 },
+    lineStyle: {
+      color: stageColors[i % stageColors.length],
+      width: 2,
+      shadowColor: 'rgba(168, 85, 247, 0.4)',
+      shadowBlur: 8,
+    },
     itemStyle: { color: stageColors[i % stageColors.length] },
-    areaStyle: { color: stageColors[i % stageColors.length].replace('0.6', '0.08') },
+    areaStyle: {
+      color: stageColors[i % stageColors.length].replace('0.6', '0.08'),
+      shadowColor: 'rgba(139, 92, 246, 0.2)',
+      shadowBlur: 15,
+    },
     symbol: 'circle',
     symbolSize: 4,
   }));
@@ -609,8 +914,8 @@ function buildStagePresenceRadarOption(project: CXDProject): echarts.EChartsCore
       radius: '60%',
       axisName: { color: AXIS_LABEL_COLOR, fontSize: 10, fontFamily: CHART_FONT_FAMILY },
       splitArea: { show: false },
-      splitLine: { lineStyle: { color: GRID_LINE_COLOR } },
-      axisLine: { lineStyle: { color: GRID_LINE_COLOR } },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
     },
     series: [{ type: 'radar', data }],
     animation: false,
@@ -649,7 +954,7 @@ function FlowSectionContent({ project }: { project: CXDProject }) {
         ))}
       </div>
 
-      {/* Timeline chart */}
+      {/* Timeline chart — smooth area curve */}
       {stages.some((s) => s.estimatedMinutes != null && s.estimatedMinutes > 0) && (
         <ChartCard title="Stage Duration Timeline">
           <ReactEChartsCore
@@ -677,70 +982,6 @@ function FlowSectionContent({ project }: { project: CXDProject }) {
           echarts={echarts}
           option={buildStagePresenceRadarOption(project)}
           style={{ height: '300px' }}
-          opts={{ renderer: 'canvas' }}
-        />
-      </ChartCard>
-    </div>
-  );
-}
-
-function SensorySectionContent({ project }: { project: CXDProject }) {
-  return (
-    <div className="space-y-6">
-      {/* Bar list */}
-      <div className="space-y-2">
-        {SENSORY_DOMAINS.map((domain) => {
-          const val = project.sensoryDomains[domain.code] ?? 0;
-          return (
-            <div key={domain.code} className="flex items-center gap-3 p-2.5 rounded-lg border border-white/5 bg-white/[0.02]">
-              <span className="text-sm text-white/70 flex-1">{domain.label}</span>
-              <div className="w-24 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-400" style={{ width: `${val}%` }} />
-              </div>
-              <span className="text-xs text-white/40 w-8 text-right">{val}%</span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Radar chart */}
-      <ChartCard title="Sensory Profile">
-        <ReactEChartsCore
-          echarts={echarts}
-          option={buildSensoryRadarOption(project)}
-          style={{ height: '280px' }}
-          opts={{ renderer: 'canvas' }}
-        />
-      </ChartCard>
-    </div>
-  );
-}
-
-function PresenceSectionContent({ project }: { project: CXDProject }) {
-  return (
-    <div className="space-y-6">
-      {/* Bar list */}
-      <div className="space-y-2">
-        {PRESENCE_TYPES.map((presence) => {
-          const val = project.presenceTypes[presence.code] ?? 0;
-          return (
-            <div key={presence.code} className="flex items-center gap-3 p-2.5 rounded-lg border border-white/5 bg-white/[0.02]">
-              <span className="text-sm text-white/70 flex-1">{presence.label}</span>
-              <div className="w-24 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-400" style={{ width: `${val}%` }} />
-              </div>
-              <span className="text-xs text-white/40 w-8 text-right">{val}%</span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Radar chart */}
-      <ChartCard title="Presence Profile">
-        <ReactEChartsCore
-          echarts={echarts}
-          option={buildPresenceRadarOption(project)}
-          style={{ height: '280px' }}
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
@@ -831,7 +1072,7 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
         </ChartCard>
       </div>
 
-      {/* Charts row 2: Experience Flow Timeline (full width) */}
+      {/* Charts row 2: Experience Flow Timeline (full width) — smooth area */}
       <ChartCard title="Experience Flow Timeline">
         <ReactEChartsCore
           echarts={echarts}
@@ -877,7 +1118,7 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
         </div>
 
         {/* Section content */}
-        <div className="p-5 rounded-xl border border-white/5 bg-white/[0.02] backdrop-blur-sm">
+        <div className="p-5 rounded-xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm">
           {currentSection.renderContent(project)}
         </div>
       </div>
@@ -885,7 +1126,7 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
   };
 
   return (
-    <div className="h-full flex overflow-hidden relative">
+    <div className="h-full flex flex-col overflow-hidden relative">
       {/* ShimmerGrid background */}
       <ShimmerGrid
         dotSize={1.5}
@@ -896,47 +1137,43 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
         className="!absolute inset-0 !z-0"
       />
 
-      {/* Centered container for sidebar + content */}
-      <div className="relative z-10 flex w-full max-w-6xl mx-auto h-full">
-        {/* Main content area */}
-        <main className="flex-1 overflow-y-auto p-6 md:p-8 min-w-0">
-          {renderSectionPage()}
-        </main>
-
-        {/* Right sidebar */}
-        <aside className="w-[240px] flex-shrink-0 border-l border-white/[0.06] bg-white/[0.02] backdrop-blur-md overflow-y-auto">
-          <div className="p-3 space-y-1">
-            <h3 className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2 px-1">
-              Sections
-            </h3>
-            {SECTIONS.map((section) => {
-              const isActive = activeSection === section.id;
-              const hasData = section.id === 'overview' || section.hasData(project);
-              return (
-                <button
-                  key={section.id}
-                  onClick={() => setActiveSection(section.id)}
-                  className={cn(
-                    'w-full flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-all duration-200 cursor-pointer',
-                    isActive
-                      ? 'bg-violet-500/15 border-violet-500/30 text-white'
-                      : 'bg-white/[0.02] border-white/5 text-white/60 hover:bg-white/[0.04] hover:text-white/80',
-                    !hasData && !isActive && 'opacity-50',
-                  )}
-                >
-                  <span className={cn(
-                    'flex-shrink-0 transition-colors',
-                    isActive ? 'text-violet-400' : 'text-white/40',
-                  )}>
-                    {section.icon}
-                  </span>
-                  <span className="text-xs font-medium truncate">{section.title}</span>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
+      {/* Horizontal floating button bar */}
+      <div className="relative z-10 w-full max-w-6xl mx-auto px-4 pt-4 pb-2 flex-shrink-0">
+        <div className="flex gap-2 justify-center flex-wrap overflow-x-auto scrollbar-hide">
+          {SECTIONS.map((section) => {
+            const isActive = activeSection === section.id;
+            const hasData = section.id === 'overview' || section.hasData(project);
+            return (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border transition-all duration-200 cursor-pointer whitespace-nowrap flex-shrink-0',
+                  isActive
+                    ? 'bg-violet-500/15 border-violet-500/30 text-white'
+                    : 'bg-white/[0.03] border-white/[0.06] text-white/50 hover:bg-white/[0.06]',
+                  !hasData && !isActive && 'opacity-50',
+                )}
+              >
+                <span className={cn(
+                  'flex-shrink-0 transition-colors',
+                  isActive ? 'text-violet-400' : 'text-white/40',
+                )}>
+                  {section.icon}
+                </span>
+                <span className="font-medium">{section.title}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {/* Main content area — single column, full width */}
+      <main className="relative z-10 flex-1 overflow-y-auto px-4 md:px-8 pb-8">
+        <div className="max-w-6xl mx-auto">
+          {renderSectionPage()}
+        </div>
+      </main>
     </div>
   );
 }
