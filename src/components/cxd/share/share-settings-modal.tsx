@@ -103,14 +103,17 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
       <DialogContent
-        className="!max-w-md !rounded-2xl !p-0 !gap-0 !border-purple-500/25 !overflow-hidden [&>button:last-child]:hidden"
-        style={{
-          background: 'linear-gradient(135deg, #1e0938 0%, #150a28 40%, #0d0618 100%)',
-          boxShadow: '0 0 15px rgba(139,92,246,0.25), 0 0 40px rgba(139,92,246,0.12), 0 0 80px rgba(88,28,135,0.15), 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)',
-        }}
+        className="!p-0 !gap-0 !border-0 !bg-transparent !shadow-none !max-w-[28rem] [&>button:last-child]:!hidden"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
+        <div
+          className="rounded-2xl overflow-hidden border border-purple-500/25"
+          style={{
+            background: 'linear-gradient(135deg, #1e0938 0%, #150a28 40%, #0d0618 100%)',
+            boxShadow: '0 0 15px rgba(139,92,246,0.25), 0 0 40px rgba(139,92,246,0.12), 0 0 80px rgba(88,28,135,0.15), 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06)',
+          }}
+        >
         <div className="p-5 space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between">
@@ -193,6 +196,7 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
               </button>
             </div>
           )}
+        </div>
         </div>
       </DialogContent>
     </Dialog>
