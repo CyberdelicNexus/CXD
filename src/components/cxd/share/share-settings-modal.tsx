@@ -6,11 +6,7 @@ import { createClient } from "@/supabase/client";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import {
   Upload,
   Copy,
@@ -18,6 +14,8 @@ import {
   Trash2,
   Check,
   Image as ImageIcon,
+  Share2,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { updateProjectShareToken } from "@/lib/supabase-projects";
@@ -31,16 +29,11 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
   const { getCurrentProject, generateShareToken } = useCXDStore();
   const project = getCurrentProject();
   const { toast } = useToast();
-  const [uploading, setUploading] = useState<"cover" | "thumbnail" | null>(
-    null
-  );
+  const [uploading, setUploading] = useState<"cover" | "thumbnail" | null>(null);
   const [copied, setCopied] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const thumbInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper to update arbitrary fields on the current project in the store.
-  // The store does not expose a generic `syncUpdateProject`, so we replicate
-  // the pattern used by `generateShareToken` — direct setState with map.
   const updateProject = useCallback(
     (updates: Record<string, unknown>) => {
       if (!project) return;
@@ -79,9 +72,7 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
           ? { shareCoverImage: urlData.publicUrl }
           : { shareThumbnail: urlData.publicUrl };
       updateProject(updates);
-      toast({
-        title: `${type === "cover" ? "Cover image" : "Thumbnail"} uploaded`,
-      });
+      toast({ title: `${type === "cover" ? "Cover image" : "Thumbnail"} uploaded` });
     } catch (err) {
       console.error("Upload error:", err);
       toast({ title: "Upload failed", description: "Please try again" });
@@ -92,7 +83,6 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
 
   const handleCopyLink = () => {
     if (!shareUrl) {
-      // Generate token first
       const token = generateShareToken();
       const url = `${window.location.origin}/cxd/share/${token}`;
       navigator.clipboard.writeText(url);
@@ -111,167 +101,136 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
 
   const handleRevoke = () => {
     updateProject({ shareToken: undefined });
-    // Also clear the token in the database
     updateProjectShareToken(project.id, "");
     toast({ title: "Share link revoked" });
   };
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-      modal={false}
-    >
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
       <DialogContent
-        className="bg-zinc-900/95 backdrop-blur-xl border-white/10 text-white sm:max-w-md"
+        className="bg-transparent border-none shadow-none p-0 sm:max-w-[420px]"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
-        <DialogHeader>
-          <DialogTitle>Share Project</DialogTitle>
-          <DialogDescription className="text-white/50">
-            Customize how your project appears to visitors
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-5 pt-2">
-          {/* Cover Image */}
-          <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider font-medium mb-2 block">
-              Cover Image
-            </label>
-            <input
-              ref={coverInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleUpload("cover", file);
-              }}
-            />
-            {project.shareCoverImage ? (
-              <div className="relative w-full h-24 rounded-xl overflow-hidden border border-white/10 group">
-                <img
-                  src={project.shareCoverImage}
-                  alt="Cover"
-                  className="w-full h-full object-cover"
-                />
-                <button
-                  onClick={() => coverInputRef.current?.click()}
-                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white"
-                >
-                  Change
-                </button>
+        {/* Ghost gradient border wrapper */}
+        <div className="gradient-border rounded-2xl overflow-hidden">
+          <div className="p-6">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-600/20 border border-violet-500/20 flex items-center justify-center">
+                  <Share2 className="w-4 h-4 text-violet-400" />
+                </div>
+                <h2 className="text-base font-semibold text-white">Share Project</h2>
               </div>
-            ) : (
               <button
-                onClick={() => coverInputRef.current?.click()}
-                disabled={uploading === "cover"}
-                className="w-full h-24 rounded-xl border-2 border-dashed border-purple-500/20 hover:border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10 transition-all flex flex-col items-center justify-center gap-1"
+                onClick={onClose}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-white/30 hover:text-white/60 hover:bg-white/5 transition-all"
               >
-                <Upload className="w-5 h-5 text-white/30" />
-                <span className="text-xs text-white/30">
-                  {uploading === "cover"
-                    ? "Uploading..."
-                    : "Upload cover image"}
-                </span>
+                <X className="w-4 h-4" />
               </button>
-            )}
-          </div>
+            </div>
+            <p className="text-xs text-white/40 mb-5 ml-[42px]">Customize how your project appears to visitors</p>
 
-          {/* Thumbnail */}
-          <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider font-medium mb-2 block">
-              Project Thumbnail
-            </label>
-            <input
-              ref={thumbInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleUpload("thumbnail", file);
-              }}
-            />
-            {project.shareThumbnail ? (
-              <div className="relative w-32 h-20 rounded-lg overflow-hidden border border-white/10 group">
-                <img
-                  src={project.shareThumbnail}
-                  alt="Thumbnail"
-                  className="w-full h-full object-cover"
-                />
-                <button
-                  onClick={() => thumbInputRef.current?.click()}
-                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white"
-                >
-                  Change
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => thumbInputRef.current?.click()}
-                disabled={uploading === "thumbnail"}
-                className="w-32 h-20 rounded-lg border-2 border-dashed border-purple-500/20 hover:border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10 transition-all flex flex-col items-center justify-center gap-1"
-              >
-                <ImageIcon className="w-4 h-4 text-white/30" />
-                <span className="text-[10px] text-white/30">
-                  {uploading === "thumbnail" ? "Uploading..." : "Upload"}
-                </span>
-              </button>
-            )}
-          </div>
-
-          {/* Share Link */}
-          <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider font-medium mb-2 block">
-              Share Link
-            </label>
-            <div className="flex gap-2">
-              <div className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/50 overflow-hidden text-ellipsis whitespace-nowrap">
-                {shareUrl || "No link generated yet"}
-              </div>
-              <Button
-                onClick={handleCopyLink}
-                size="sm"
-                className="bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white text-xs gap-1.5"
-              >
-                {copied ? (
-                  <Check className="w-3.5 h-3.5" />
+            {/* Images row — cover and thumbnail side by side */}
+            <div className="flex gap-3 mb-5">
+              {/* Cover Image */}
+              <div className="flex-1">
+                <label className="text-[10px] text-white/40 uppercase tracking-wider font-medium mb-1.5 block">Cover Image</label>
+                <input ref={coverInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUpload("cover", file);
+                }} />
+                {project.shareCoverImage ? (
+                  <div className="relative w-full h-[72px] rounded-lg overflow-hidden border border-white/10 group cursor-pointer" onClick={() => coverInputRef.current?.click()}>
+                    <img src={project.shareCoverImage} alt="Cover" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[10px] text-white font-medium">
+                      Change
+                    </div>
+                  </div>
                 ) : (
-                  <Copy className="w-3.5 h-3.5" />
+                  <button
+                    onClick={() => coverInputRef.current?.click()}
+                    disabled={uploading === "cover"}
+                    className="w-full h-[72px] rounded-lg border border-dashed border-white/10 hover:border-violet-500/30 bg-white/[0.02] hover:bg-violet-500/5 transition-all flex flex-col items-center justify-center gap-1"
+                  >
+                    <Upload className="w-4 h-4 text-white/20" />
+                    <span className="text-[10px] text-white/20">
+                      {uploading === "cover" ? "Uploading..." : "Upload cover"}
+                    </span>
+                  </button>
                 )}
-                {copied ? "Copied" : shareUrl ? "Copy" : "Generate & Copy"}
-              </Button>
-            </div>
-          </div>
+              </div>
 
-          {/* Actions */}
-          {shareUrl && (
-            <div className="flex gap-2">
-              <Button
-                onClick={handleGenerateNew}
-                variant="outline"
-                size="sm"
-                className="flex-1 border-purple-500/30 text-purple-300 hover:bg-purple-500/10 gap-1.5 text-xs"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                New Link
-              </Button>
-              <Button
-                onClick={handleRevoke}
-                variant="outline"
-                size="sm"
-                className="border-red-500/20 text-red-400/70 hover:bg-red-500/10 gap-1.5 text-xs"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Revoke
-              </Button>
+              {/* Thumbnail */}
+              <div className="w-24">
+                <label className="text-[10px] text-white/40 uppercase tracking-wider font-medium mb-1.5 block">Thumbnail</label>
+                <input ref={thumbInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUpload("thumbnail", file);
+                }} />
+                {project.shareThumbnail ? (
+                  <div className="relative w-full h-[72px] rounded-lg overflow-hidden border border-white/10 group cursor-pointer" onClick={() => thumbInputRef.current?.click()}>
+                    <img src={project.shareThumbnail} alt="Thumb" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[10px] text-white font-medium">
+                      Change
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => thumbInputRef.current?.click()}
+                    disabled={uploading === "thumbnail"}
+                    className="w-full h-[72px] rounded-lg border border-dashed border-white/10 hover:border-violet-500/30 bg-white/[0.02] hover:bg-violet-500/5 transition-all flex flex-col items-center justify-center gap-1"
+                  >
+                    <ImageIcon className="w-4 h-4 text-white/20" />
+                    <span className="text-[10px] text-white/20">
+                      {uploading === "thumbnail" ? "..." : "Upload"}
+                    </span>
+                  </button>
+                )}
+              </div>
             </div>
-          )}
+
+            {/* Divider */}
+            <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-5" />
+
+            {/* Share Link */}
+            <div className="mb-4">
+              <label className="text-[10px] text-white/40 uppercase tracking-wider font-medium mb-1.5 block">Share Link</label>
+              <div className="flex gap-2">
+                <div className="flex-1 bg-white/[0.03] border border-white/[0.06] rounded-lg px-3 py-2.5 text-xs text-white/40 overflow-hidden text-ellipsis whitespace-nowrap font-mono">
+                  {shareUrl || "No link generated yet"}
+                </div>
+                <button
+                  onClick={handleCopyLink}
+                  className="px-4 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white text-xs font-medium flex items-center gap-1.5 transition-all hover:shadow-[0_0_20px_rgba(139,92,246,0.3)] flex-shrink-0"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? "Copied" : shareUrl ? "Copy" : "Generate"}
+                </button>
+              </div>
+            </div>
+
+            {/* Actions */}
+            {shareUrl && (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleGenerateNew}
+                  className="flex-1 px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] text-white/50 hover:text-white/70 text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  New Link
+                </button>
+                <button
+                  onClick={handleRevoke}
+                  className="px-3 py-2 rounded-lg border border-red-500/10 bg-red-500/[0.03] hover:bg-red-500/10 text-red-400/50 hover:text-red-400/80 text-xs font-medium flex items-center gap-1.5 transition-all"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Revoke
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
