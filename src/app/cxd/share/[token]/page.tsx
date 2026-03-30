@@ -224,12 +224,12 @@ export default function SharePage({ params }: { params: { token: string } }) {
             key={btn.id}
             onClick={() => setViewMode(btn.id)}
             className={cn(
-              "relative flex items-center px-5 py-2.5 group rounded-full text-white transition-all duration-500 border active:scale-95 cursor-pointer",
+              "relative flex items-center px-3 py-2 sm:px-5 sm:py-2.5 group rounded-full text-white transition-all duration-500 border active:scale-95 cursor-pointer",
               isActive ? colors[btn.color] : `bg-transparent border-transparent ${colors[btn.color]}`,
             )}
           >
             <btn.icon className={cn("w-4 h-4 transition-colors", isActive ? 'text-white' : 'text-white/60 group-hover:text-white')} />
-            <span className="text-xs font-bold ml-2 whitespace-nowrap">
+            <span className="text-xs font-bold ml-2 whitespace-nowrap hidden sm:inline">
               {btn.label}
             </span>
           </div>
@@ -242,7 +242,7 @@ export default function SharePage({ params }: { params: { token: string } }) {
     <div className="flex flex-col h-screen bg-black" style={viewMode === 'canvas' ? { background: canvasBackground } : undefined}>
       {/* Shared navbar */}
       <header
-        className="h-16 flex-shrink-0 backdrop-blur-md border-b border-white/10 px-6 flex items-center justify-between"
+        className="h-14 sm:h-16 flex-shrink-0 backdrop-blur-md border-b border-white/10 px-3 sm:px-6 flex items-center justify-between gap-2"
         style={{ backgroundColor: navBgColor }}
       >
         {/* Left: Back + project name */}
@@ -252,19 +252,19 @@ export default function SharePage({ params }: { params: { token: string } }) {
             className="flex items-center gap-1.5 text-sm text-white/50 hover:text-white transition-colors cursor-pointer flex-shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back
+            <span className="hidden sm:inline">Back</span>
           </button>
           <span className="text-white/20 flex-shrink-0">|</span>
-          <span className="text-sm text-white/70 truncate">{project.name}</span>
+          <span className="text-sm text-white/70 truncate max-w-[120px] sm:max-w-none">{project.name}</span>
         </div>
 
         {/* Center: View toggle */}
         <ViewToggle />
 
         {/* Right: Read Only badge */}
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.05] border border-white/10 text-white/50 text-xs flex-shrink-0">
+        <div className="flex items-center gap-1.5 px-2 py-1.5 sm:px-3 rounded-full bg-white/[0.05] border border-white/10 text-white/50 text-xs flex-shrink-0">
           <Eye className="w-3.5 h-3.5" />
-          Read Only
+          <span className="hidden sm:inline">Read Only</span>
         </div>
       </header>
 

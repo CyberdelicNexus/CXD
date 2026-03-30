@@ -90,10 +90,10 @@ export function ShareLandingPage({
         </div>
 
         {/* 2-column content — thumbnail left, info+buttons right */}
-        <div className="w-full max-w-4xl mx-auto px-8 relative z-10 pb-16">
-          <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-10 items-center">
+        <div className="w-full max-w-4xl mx-auto px-4 sm:px-8 relative z-10 pb-16">
+          <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6 lg:gap-10 items-center">
             {/* Left column — thumbnail */}
-            <div>
+            <div className="max-w-[280px] mx-auto lg:max-w-none lg:mx-0">
               {thumbnail ? (
                 <div className="w-full aspect-square rounded-2xl overflow-hidden border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
                   <img src={thumbnail} alt="Preview" className="w-full h-full object-cover" />
@@ -106,13 +106,13 @@ export function ShareLandingPage({
             </div>
 
             {/* Right column — info + buttons */}
-            <div className="space-y-5">
-              <h1 className="text-4xl md:text-5xl font-bold text-white tracking-tight leading-tight">
+            <div className="space-y-5 text-center lg:text-left">
+              <h1 className="text-3xl md:text-5xl font-bold text-white tracking-tight leading-tight">
                 {project.name}
               </h1>
 
               {/* Author */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 justify-center lg:justify-start">
                 {ownerAvatar ? (
                   <img src={ownerAvatar} alt={ownerName} className="w-10 h-10 rounded-full object-cover border-2 border-violet-500/30" />
                 ) : (
@@ -132,7 +132,7 @@ export function ShareLandingPage({
               )}
 
               {/* Buttons */}
-              <div className="space-y-3 pt-2 w-[85%]">
+              <div className="space-y-3 pt-2 w-full lg:w-[85%]">
                 <div className="rounded-xl p-px bg-gradient-to-r from-violet-500/30 via-purple-400/40 to-violet-500/30 hover:from-violet-500/40 hover:via-purple-400/50 hover:to-violet-500/40 transition-all duration-300">
                   <button onClick={onViewFraming} className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2">
                     <Sparkles className="w-4 h-4" />
@@ -162,7 +162,7 @@ export function ShareLandingPage({
         </div>
 
         {/* Footer — CXD Branding */}
-        <div className="flex items-center justify-center gap-3 py-10 relative z-10">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 py-10 relative z-10">
           <Image
             src="/images/hypercube-logo.webp"
             alt="CXD"

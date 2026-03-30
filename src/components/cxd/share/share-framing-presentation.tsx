@@ -209,14 +209,14 @@ function WizardSensorySection({ project }: { project: CXDProject }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-white/90 tracking-tight">{domain.label}</div>
-                <p className="text-xs text-white/40">{domain.description}</p>
+                <p className="text-xs text-white/40 hidden sm:block">{domain.description}</p>
               </div>
               <span className="text-xs text-white/40 font-medium">{closest.label}</span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap sm:flex-nowrap gap-1.5 sm:gap-2">
               {INTENSITY_LEVELS.map((level) => {
                 const isSelected = closest.value === level.value;
-                const baseClass = 'flex-1 py-2.5 px-3 text-sm rounded-xl transition-all duration-300 flex items-center justify-center';
+                const baseClass = 'flex-1 py-1.5 sm:py-2.5 px-2 sm:px-3 text-[10px] sm:text-sm rounded-xl transition-all duration-300 flex items-center justify-center min-w-[55px] sm:min-w-0';
                 let intensityStyle = '';
 
                 if (isSelected) {
@@ -250,7 +250,7 @@ function WizardSensorySection({ project }: { project: CXDProject }) {
         <ReactEChartsCore
           echarts={echarts}
           option={buildSensoryRadarOption(project)}
-          style={{ height: '280px' }}
+          style={{ height: 'min(280px, 60vw)' }}
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
@@ -275,14 +275,14 @@ function WizardPresenceSection({ project }: { project: CXDProject }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-white/90 tracking-tight">{presence.label}</div>
-                <p className="text-xs text-white/40">{presence.description}</p>
+                <p className="text-xs text-white/40 hidden sm:block">{presence.description}</p>
               </div>
               <span className="text-xs text-white/40 font-medium">{closest.label}</span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap sm:flex-nowrap gap-1.5 sm:gap-2">
               {INTENSITY_LEVELS.map((level) => {
                 const isSelected = closest.value === level.value;
-                const baseClass = 'flex-1 py-2.5 px-3 text-sm rounded-xl transition-all duration-300 flex items-center justify-center';
+                const baseClass = 'flex-1 py-1.5 sm:py-2.5 px-2 sm:px-3 text-[10px] sm:text-sm rounded-xl transition-all duration-300 flex items-center justify-center min-w-[55px] sm:min-w-0';
                 let intensityStyle = '';
 
                 if (isSelected) {
@@ -316,7 +316,7 @@ function WizardPresenceSection({ project }: { project: CXDProject }) {
         <ReactEChartsCore
           echarts={echarts}
           option={buildPresenceRadarOption(project)}
-          style={{ height: '280px' }}
+          style={{ height: 'min(280px, 60vw)' }}
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
@@ -339,12 +339,12 @@ function WizardRealityPlanesSection({ project }: { project: CXDProject }) {
             className="rounded-xl border border-purple-500/15 backdrop-blur-md p-4 space-y-2"
             style={PURPLE_CARD_STYLE}
           >
-            <div className="flex items-center gap-3">
-              <span className="w-7 h-7 rounded-lg bg-violet-500/15 flex items-center justify-center text-xs font-bold text-violet-300">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
+              <span className="w-7 h-7 rounded-lg bg-violet-500/15 flex items-center justify-center text-xs font-bold text-violet-300 flex-shrink-0">
                 {plane.priority + 1}
               </span>
-              <span className="font-mono text-sm font-bold text-violet-300">{plane.code}</span>
-              <span className="text-sm text-white/70 flex-1">{meta?.label || plane.code}</span>
+              <span className="font-mono text-xs sm:text-sm font-bold text-violet-300">{plane.code}</span>
+              <span className="text-xs sm:text-sm text-white/70 flex-1 min-w-0">{meta?.label || plane.code}</span>
               <div
                 className={cn(
                   'px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border',
@@ -636,7 +636,7 @@ function PlanningSection({ project }: { project: CXDProject }) {
 
         {/* Kanban view */}
         {taskView === 'kanban' && (
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {['not_started', 'in_progress', 'completed', 'blocked'].map((status) => {
               const columnTasks = tasks.filter((t) => t.type === 'freeform' && (t.taskMetadata?.status || 'not_started') === status);
               return (
@@ -820,7 +820,7 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
   return (
     <div className="space-y-6">
       {/* Interactive 3D Hypercube — only the rotating cube, no UI */}
-      <div className="hypercube-readonly rounded-xl overflow-hidden border border-purple-500/15 h-[400px] relative" style={{ background: 'rgba(5,2,12,0.8)' }}>
+      <div className="hypercube-readonly rounded-xl overflow-hidden border border-purple-500/15 h-[280px] sm:h-[400px] relative" style={{ background: 'rgba(5,2,12,0.8)' }}>
         <Hypercube3D
           project={project}
           onSelectSection={noop}
@@ -854,7 +854,7 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
         <ReactEChartsCore
           echarts={echarts}
           option={buildHypercubeRadarOption(faceData.entries)}
-          style={{ height: '300px' }}
+          style={{ height: 'min(300px, 65vw)' }}
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
@@ -864,7 +864,7 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
         <ReactEChartsCore
           echarts={echarts}
           option={buildHypercubeDonutOption(faceData.entries)}
-          style={{ height: '280px' }}
+          style={{ height: 'min(280px, 70vw)' }}
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
@@ -1747,7 +1747,7 @@ function FlowSectionContent({ project }: { project: CXDProject }) {
         <ReactEChartsCore
           echarts={echarts}
           option={buildStagePresenceRadarOption(project)}
-          style={{ height: '300px' }}
+          style={{ height: 'min(300px, 65vw)' }}
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
@@ -1793,7 +1793,7 @@ export function ShareFramingPresentation({ project, defaultSection }: ShareFrami
 
         {coreMessage && coreMessage.trim() && (
           <blockquote className="border-l-2 border-violet-500/40 pl-5 py-2">
-            <p className="text-lg text-white/60 italic leading-relaxed">
+            <p className="text-base sm:text-lg text-white/60 italic leading-relaxed">
               &ldquo;{coreMessage}&rdquo;
             </p>
           </blockquote>
@@ -1863,7 +1863,7 @@ export function ShareFramingPresentation({ project, defaultSection }: ShareFrami
         <ReactEChartsCore
           echarts={echarts}
           option={buildEngagementOption(project)}
-          style={{ height: '260px' }}
+          style={{ height: 'min(260px, 65vw)' }}
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
@@ -1916,17 +1916,46 @@ export function ShareFramingPresentation({ project, defaultSection }: ShareFrami
       />
 
       {/* Centered container holding content + sidebar */}
-      <div className="h-full flex gap-6 mx-auto relative z-10" style={{ width: '80vw', maxWidth: '1200px' }}>
+      <div className="h-full flex flex-col lg:flex-row gap-0 lg:gap-6 mx-auto relative z-10 w-full px-4 sm:px-6 lg:px-0 lg:w-[80vw]" style={{ maxWidth: '1200px' }}>
+        {/* Mobile sidebar - horizontal scroll row at top */}
+        <div className="lg:hidden overflow-x-auto flex gap-2 py-3 -mx-4 px-4 sm:-mx-6 sm:px-6 flex-shrink-0">
+          {SECTIONS.filter((s) => s.id !== 'planning' && s.id !== 'timeline' && s.id !== 'hypercube').map((section) => {
+            const isActive = activeSection === section.id;
+            const hasData = section.id === 'overview' || section.hasData(project);
+            return (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border transition-all duration-200 cursor-pointer whitespace-nowrap flex-shrink-0',
+                  isActive
+                    ? 'bg-violet-500/15 border-violet-500/30 text-white'
+                    : 'bg-white/[0.03] border-white/[0.06] text-white/50 hover:bg-white/[0.06]',
+                  !hasData && !isActive && 'opacity-50',
+                )}
+              >
+                <span className={cn(
+                  'flex-shrink-0 transition-colors',
+                  isActive ? 'text-violet-400' : 'text-white/40',
+                )}>
+                  {section.icon}
+                </span>
+                <span className="font-medium">{section.title}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Main content area */}
         <div
-          className="flex-1 min-w-0 overflow-y-auto py-6 px-4 bg-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-violet-500/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-violet-500/30"
+          className="flex-1 min-w-0 overflow-y-auto py-4 lg:py-6 px-0 lg:px-4 bg-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-violet-500/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-violet-500/30"
           style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,92,246,0.2) transparent' }}
         >
           {renderSectionPage()}
         </div>
 
-        {/* Sidebar buttons - floating next to content */}
-        <div className="w-[190px] flex-shrink-0 py-6 space-y-1.5 overflow-hidden">
+        {/* Desktop sidebar buttons - floating next to content */}
+        <div className="hidden lg:block w-[190px] flex-shrink-0 py-6 space-y-1.5 overflow-hidden">
           {SECTIONS.filter((s) => s.id !== 'planning' && s.id !== 'timeline' && s.id !== 'hypercube').map((section) => {
             const isActive = activeSection === section.id;
             const hasData = section.id === 'overview' || section.hasData(project);
