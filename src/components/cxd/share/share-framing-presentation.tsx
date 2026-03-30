@@ -53,8 +53,6 @@ import {
   RadarComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import 'echarts-gl';
-
 echarts.use([
   RadarChart,
   BarChart,
@@ -150,9 +148,14 @@ function ReadOnlyField({ label, value }: { label: string; value: string | undefi
   );
 }
 
-const PURPLE_CARD_STYLE = {
-  background: 'linear-gradient(135deg, rgba(30, 15, 55, 0.9) 0%, rgba(20, 10, 40, 0.85) 50%, rgba(15, 8, 30, 0.9) 100%)',
-  boxShadow: '0 0 15px rgba(139,92,246,0.1), inset 0 1px 0 rgba(255,255,255,0.03)',
+const PURPLE_CARD_STYLE: React.CSSProperties = {
+  background: 'linear-gradient(135deg, rgba(20, 10, 40, 0.6) 0%, rgba(12, 6, 25, 0.5) 50%, rgba(8, 4, 18, 0.6) 100%)',
+  boxShadow: '0 0 10px rgba(139,92,246,0.06), inset 0 1px 0 rgba(255,255,255,0.02)',
+};
+
+const CHART_CARD_STYLE: React.CSSProperties = {
+  background: 'linear-gradient(135deg, rgba(8, 4, 18, 0.9) 0%, rgba(4, 2, 10, 0.85) 100%)',
+  boxShadow: '0 0 10px rgba(139,92,246,0.04)',
 };
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
@@ -171,8 +174,8 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
 function ChartCard({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
     <div
-      className={cn('rounded-xl p-4 border border-purple-500/15 backdrop-blur-md', className)}
-      style={PURPLE_CARD_STYLE}
+      className={cn('rounded-lg p-3 border border-purple-500/10 backdrop-blur-md', className)}
+      style={CHART_CARD_STYLE}
     >
       <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-3">{title}</h3>
       {children}
@@ -779,16 +782,6 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
         <StatCard icon={<Layers className="w-4 h-4" />} label="Untagged" value={faceData.untaggedCount} />
       </div>
 
-      {/* 3D Hypercube Surface */}
-      <div className="rounded-xl overflow-hidden border border-purple-500/15" style={{ background: 'linear-gradient(135deg, rgba(10,5,20,0.95) 0%, rgba(5,2,15,0.95) 100%)' }}>
-        <ReactEChartsCore
-          echarts={echarts}
-          option={buildHypercube3DOption()}
-          style={{ height: '400px' }}
-          opts={{ renderer: 'canvas' }}
-        />
-      </div>
-
       {/* Graph chart - Hypercube Network */}
       <ChartCard title="Hypercube Network">
         <ReactEChartsCore
@@ -1012,23 +1005,23 @@ function buildSensoryRadarOption(project: CXDProject): echarts.EChartsCoreOption
             name: 'Sensory Intensity',
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(139, 92, 246, 0.3)' },
+                { offset: 0, color: 'rgba(6, 182, 212, 0.2)' },
                 { offset: 1, color: 'rgba(139, 92, 246, 0.05)' },
               ]),
-              shadowColor: 'rgba(139, 92, 246, 0.3)',
+              shadowColor: 'rgba(6, 182, 212, 0.3)',
               shadowBlur: 20,
             },
             lineStyle: {
-              color: 'rgba(192, 132, 252, 0.7)',
+              color: 'rgba(6, 182, 212, 0.7)',
               width: 2,
-              shadowColor: 'rgba(168, 85, 247, 0.4)',
+              shadowColor: 'rgba(6, 182, 212, 0.4)',
               shadowBlur: 8,
             },
             itemStyle: {
               color: '#fff',
-              borderColor: 'rgba(168, 85, 247, 0.8)',
+              borderColor: 'rgba(6, 182, 212, 0.8)',
               borderWidth: 2,
-              shadowColor: 'rgba(168, 85, 247, 0.5)',
+              shadowColor: 'rgba(6, 182, 212, 0.5)',
               shadowBlur: 8,
             },
             symbol: 'circle',
@@ -1069,23 +1062,23 @@ function buildPresenceRadarOption(project: CXDProject): echarts.EChartsCoreOptio
             name: 'Presence Level',
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(139, 92, 246, 0.3)' },
+                { offset: 0, color: 'rgba(6, 182, 212, 0.2)' },
                 { offset: 1, color: 'rgba(139, 92, 246, 0.05)' },
               ]),
-              shadowColor: 'rgba(139, 92, 246, 0.3)',
+              shadowColor: 'rgba(6, 182, 212, 0.3)',
               shadowBlur: 20,
             },
             lineStyle: {
-              color: 'rgba(192, 132, 252, 0.7)',
+              color: 'rgba(6, 182, 212, 0.7)',
               width: 2,
-              shadowColor: 'rgba(168, 85, 247, 0.4)',
+              shadowColor: 'rgba(6, 182, 212, 0.4)',
               shadowBlur: 8,
             },
             itemStyle: {
               color: '#fff',
-              borderColor: 'rgba(168, 85, 247, 0.8)',
+              borderColor: 'rgba(6, 182, 212, 0.8)',
               borderWidth: 2,
-              shadowColor: 'rgba(168, 85, 247, 0.5)',
+              shadowColor: 'rgba(6, 182, 212, 0.5)',
               shadowBlur: 8,
             },
             symbol: 'circle',
@@ -1146,24 +1139,24 @@ function buildTimelineOption(project: CXDProject): echarts.EChartsCoreOption {
         data: minutes,
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(168, 85, 247, 0.5)' },
-            { offset: 0.5, color: 'rgba(139, 92, 246, 0.2)' },
-            { offset: 1, color: 'rgba(139, 92, 246, 0)' },
+            { offset: 0, color: 'rgba(6, 182, 212, 0.8)' },
+            { offset: 0.5, color: 'rgba(139, 92, 246, 0.6)' },
+            { offset: 1, color: 'rgba(6, 182, 212, 0.3)' },
           ]),
         },
         lineStyle: {
-          color: 'rgba(192, 132, 252, 0.8)',
+          color: 'rgba(6, 182, 212, 0.8)',
           width: 3,
-          shadowColor: 'rgba(168, 85, 247, 0.5)',
+          shadowColor: 'rgba(6, 182, 212, 0.5)',
           shadowBlur: 10,
         },
         symbolSize: 8,
         symbol: 'circle',
         itemStyle: {
           color: '#fff',
-          borderColor: 'rgba(168, 85, 247, 0.8)',
+          borderColor: 'rgba(6, 182, 212, 0.8)',
           borderWidth: 2,
-          shadowColor: 'rgba(168, 85, 247, 0.5)',
+          shadowColor: 'rgba(6, 182, 212, 0.5)',
           shadowBlur: 8,
         },
       },
@@ -1195,22 +1188,17 @@ function buildEngagementOption(project: CXDProject): echarts.EChartsCoreOption {
     }
   }
 
-  const purplePinkGradients = [
-    { start: 'rgba(139, 92, 246, 0.9)', end: 'rgba(168, 85, 247, 0.6)' },  // observer
-    { start: 'rgba(168, 85, 247, 0.9)', end: 'rgba(192, 132, 252, 0.6)' },  // engager
-    { start: 'rgba(192, 132, 252, 0.9)', end: 'rgba(236, 72, 153, 0.6)' },  // coCreator
-    { start: 'rgba(236, 72, 153, 0.9)', end: 'rgba(244, 114, 182, 0.6)' },  // architect
-  ];
+  const ENGAGEMENT_COLORS = ['#06b6d4', '#8b5cf6', '#34d399', '#6366f1']; // cyan, purple, emerald, indigo
 
   const data = ENGAGEMENT_LEVELS.map((lvl, i) => ({
     value: avgEngagement[lvl.code],
     name: lvl.label,
     itemStyle: {
       color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-        { offset: 0, color: purplePinkGradients[i].start },
-        { offset: 1, color: purplePinkGradients[i].end },
+        { offset: 0, color: ENGAGEMENT_COLORS[i] },
+        { offset: 1, color: ENGAGEMENT_COLORS[i] + 'AA' },
       ]),
-      shadowColor: 'rgba(168, 85, 247, 0.4)',
+      shadowColor: ENGAGEMENT_COLORS[i] + '60',
       shadowBlur: 12,
     },
   }));
@@ -1260,10 +1248,10 @@ function buildStageEngagementStackedOption(project: CXDProject): echarts.ECharts
   const names = stages.map((s) => s.name);
 
   const colors: Record<EngagementLevelCode, string> = {
-    observer: 'rgba(139,92,246,0.7)',
-    engager: 'rgba(99,102,241,0.7)',
-    coCreator: 'rgba(168,85,247,0.7)',
-    architect: 'rgba(192,132,252,0.7)',
+    observer: 'rgba(6,182,212,0.7)',
+    engager: 'rgba(139,92,246,0.7)',
+    coCreator: 'rgba(52,211,153,0.7)',
+    architect: 'rgba(52,211,153,0.7)',
   };
 
   const series = ENGAGEMENT_LEVELS.map((lvl) => ({
@@ -1475,89 +1463,6 @@ function buildTaskGanttOption(
       },
     }],
     animation: false,
-  };
-}
-
-/* ── hypercube 3D surface builder ──────────────────────────────── */
-
-// @ts-ignore — echarts-gl types are not fully compatible with EChartsCoreOption
-function buildHypercube3DOption(): any {
-  // Breather surface parameters
-  const aa = 0.4;
-  const r = 1 - aa * aa;
-  const w = Math.sqrt(r);
-
-  return {
-    backgroundColor: 'transparent',
-    visualMap: {
-      show: false,
-      dimension: 2,
-      min: -3,
-      max: 3,
-      inRange: {
-        color: [
-          '#0d0025',  // deep void
-          '#1a0050',  // deep purple
-          '#4B1B6B',  // violet
-          '#8B5CF6',  // purple
-          '#c084fc',  // light purple
-          '#f472b6',  // pink
-          '#ffffff',  // white peak
-        ],
-      },
-    },
-    xAxis3D: { type: 'value', show: false },
-    yAxis3D: { type: 'value', show: false },
-    zAxis3D: { type: 'value', show: false },
-    grid3D: {
-      show: false,
-      boxHeight: 80,
-      boxWidth: 80,
-      boxDepth: 80,
-      environment: 'transparent',
-      light: {
-        main: { intensity: 1.2, shadow: false },
-        ambient: { intensity: 0.3 },
-      },
-      viewControl: {
-        autoRotate: true,
-        autoRotateSpeed: 4,
-        distance: 180,
-        alpha: 25,
-        beta: 30,
-      },
-      postEffect: {
-        enable: true,
-        bloom: {
-          enable: true,
-          bloomIntensity: 0.15,
-        },
-      },
-    },
-    series: [{
-      type: 'surface',
-      parametric: true,
-      shading: 'color',
-      silent: true,
-      wireframe: { show: false },
-      itemStyle: { opacity: 0.85 },
-      parametricEquation: {
-        u: { min: -13.2, max: 13.2, step: 0.5 },
-        v: { min: -37.4, max: 37.4, step: 0.5 },
-        x: function (u: number, v: number) {
-          const denom = aa * ((w * Math.cosh(aa * u)) ** 2 + (aa * Math.sin(w * v)) ** 2);
-          return -u + (2 * r * Math.cosh(aa * u) * Math.sinh(aa * u)) / denom;
-        },
-        y: function (u: number, v: number) {
-          const denom = aa * ((w * Math.cosh(aa * u)) ** 2 + (aa * Math.sin(w * v)) ** 2);
-          return (2 * w * Math.cosh(aa * u) * (-(w * Math.cos(v) * Math.cos(w * v)) - Math.sin(v) * Math.sin(w * v))) / denom;
-        },
-        z: function (u: number, v: number) {
-          const denom = aa * ((w * Math.cosh(aa * u)) ** 2 + (aa * Math.sin(w * v)) ** 2);
-          return (2 * w * Math.cosh(aa * u) * (-(w * Math.sin(v) * Math.cos(w * v)) + Math.cos(v) * Math.sin(w * v))) / denom;
-        },
-      },
-    }],
   };
 }
 
@@ -1998,8 +1903,7 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
 
         {/* Section content */}
         <div
-          className="p-5 rounded-xl border border-purple-500/15 backdrop-blur-sm"
-          style={PURPLE_CARD_STYLE}
+          className="p-5 rounded-xl border border-purple-500/15 bg-transparent"
         >
           {currentSection.renderContent(project)}
         </div>
@@ -2029,8 +1933,8 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
           {renderSectionPage()}
         </div>
 
-        {/* Sidebar buttons - closer to content, no background */}
-        <div className="w-[180px] flex-shrink-0 overflow-y-auto py-6 space-y-1.5">
+        {/* Sidebar buttons - floating next to content */}
+        <div className="w-[190px] flex-shrink-0 py-6 space-y-1.5 overflow-hidden">
           {SECTIONS.map((section) => {
             const isActive = activeSection === section.id;
             const hasData = section.id === 'overview' || section.hasData(project);
@@ -2039,7 +1943,7 @@ export function ShareFramingPresentation({ project }: ShareFramingPresentationPr
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg border transition-all duration-200 cursor-pointer text-left',
+                  'w-full flex items-center gap-2.5 px-4 py-3 text-sm rounded-lg border transition-all duration-200 cursor-pointer text-left',
                   isActive
                     ? 'bg-violet-500/15 border-violet-500/30 text-white'
                     : 'bg-white/[0.03] border-white/[0.06] text-white/50 hover:bg-white/[0.06]',
