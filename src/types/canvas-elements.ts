@@ -57,6 +57,10 @@ export const TEXT_GRADIENTS = [
   'linear-gradient(90deg, #60A5FA, #34D399)', // Blue to green
   'linear-gradient(90deg, #A78BFA, #22D3EE, #F472B6)', // Lavender-cyan-pink
   'linear-gradient(90deg, #34D399, #22D3EE)', // Green to cyan
+  'linear-gradient(90deg, #F59E0B, #EF4444)', // Amber to red
+  'linear-gradient(90deg, #8B5CF6, #EC4899, #F59E0B)', // Purple-pink-amber
+  'linear-gradient(90deg, #10B981, #6366F1)', // Emerald to indigo
+  'linear-gradient(90deg, #F97316, #C084FC)', // Orange to violet
 ] as const;
 
 // Font families for text elements

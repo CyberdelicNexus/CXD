@@ -2679,7 +2679,7 @@ function TextColorPicker({
 
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[200px] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[180px] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2710,7 +2710,7 @@ function TextColorPicker({
       </div>
       {/* Solid color swatches */}
       {mode === "solid" && (
-        <div className="grid grid-cols-5 gap-2">
+        <div className="flex flex-wrap gap-2 justify-center">
           {solidColors.map((color) => (
             <button
               key={color}
@@ -2719,9 +2719,9 @@ function TextColorPicker({
                 onClose();
               }}
               className={cn(
-                "w-8 h-8 rounded-md border-2 transition-all hover:scale-110",
+                "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
                 currentColor === color && !currentGradient
-                  ? "border-foreground shadow-lg"
+                  ? "border-foreground shadow-lg scale-110"
                   : "border-border/50 hover:border-border",
               )}
               style={{ backgroundColor: color }}
@@ -2730,9 +2730,9 @@ function TextColorPicker({
           ))}
         </div>
       )}
-      {/* Gradient swatches */}
+      {/* Gradient swatches — circular previews */}
       {mode === "gradient" && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-wrap gap-2 justify-center">
           {TEXT_GRADIENTS.map((gradient, index) => (
             <button
               key={index}
@@ -2741,9 +2741,9 @@ function TextColorPicker({
                 onClose();
               }}
               className={cn(
-                "h-10 rounded-md border-2 transition-all hover:scale-105",
+                "w-7 h-7 rounded-full border-2 transition-all hover:scale-110 flex-shrink-0",
                 currentGradient === gradient
-                  ? "border-foreground shadow-lg"
+                  ? "border-foreground shadow-lg scale-110"
                   : "border-border/50 hover:border-border",
               )}
               style={{ background: gradient }}
@@ -2752,13 +2752,6 @@ function TextColorPicker({
           ))}
         </div>
       )}
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        Done
-      </button>
     </div>
   );
 }
