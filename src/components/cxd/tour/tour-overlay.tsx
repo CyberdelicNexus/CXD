@@ -64,10 +64,10 @@ export function TourOverlay() {
     if (el) {
       // Debug: log what we found and where it is
       const r = el.getBoundingClientRect();
-      console.log(`[Tour] Step "${currentStep.title}" target="${currentStep.targetId}" rect:`, {
+      console.log(`[Tour] Step ${tourStep}/${steps.length} "${currentStep.title}" target="${currentStep.targetId}" rect:`, {
         top: Math.round(r.top), left: Math.round(r.left),
         width: Math.round(r.width), height: Math.round(r.height),
-        tagName: el.tagName, className: (el as HTMLElement).className?.slice(0, 80),
+        tagName: el.tagName, id: (el as HTMLElement).id,
       });
       // Scroll element into view if it's outside the viewport (skip for
       // canvas elements that are positioned via CSS transforms)
@@ -92,7 +92,9 @@ export function TourOverlay() {
       } else {
         // Element found but zero-size — skip after a few polls
         missingTargetCountRef.current++;
+        console.warn(`[Tour] Step ${tourStep} "${currentStep.title}" target="${currentStep.targetId}" found but ZERO SIZE (attempt ${missingTargetCountRef.current})`);
         if (missingTargetCountRef.current > 4) {
+          console.warn(`[Tour] SKIPPING step ${tourStep} "${currentStep.title}" — zero size after 4 attempts`);
           missingTargetCountRef.current = 0;
           nextTourStep();
         }
@@ -100,7 +102,9 @@ export function TourOverlay() {
     } else {
       // Element not found — auto-skip after ~2 seconds of polling (4 x 500ms)
       missingTargetCountRef.current++;
+      console.warn(`[Tour] Step ${tourStep} "${currentStep.title}" target="${currentStep.targetId}" NOT FOUND (attempt ${missingTargetCountRef.current})`);
       if (missingTargetCountRef.current > 4) {
+        console.warn(`[Tour] SKIPPING step ${tourStep} "${currentStep.title}" — not found after 4 attempts`);
         missingTargetCountRef.current = 0;
         nextTourStep();
       }
