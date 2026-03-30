@@ -120,18 +120,20 @@ export function TourOverlay() {
     missingTargetCountRef.current = 0;
 
     // Transition animation between steps
-    if (prevStepRef.current !== tourStep) {
+    const isNewStep = prevStepRef.current !== tourStep;
+    if (isNewStep) {
       setIsTransitioning(true);
-      const timer = setTimeout(() => {
+      prevStepRef.current = tourStep;
+      // Brief fade, then measure the new target
+      const fadeTimer = setTimeout(() => {
         setIsTransitioning(false);
-        prevStepRef.current = tourStep;
-      }, 300);
-      return () => clearTimeout(timer);
+        measureTarget();
+      }, 200);
+      return () => clearTimeout(fadeTimer);
     }
 
+    // Initial mount or same step — measure immediately and start polling
     measureTarget();
-
-    // Poll for element position since elements may load dynamically
     measureIntervalRef.current = setInterval(measureTarget, 500);
 
     window.addEventListener("resize", measureTarget);
