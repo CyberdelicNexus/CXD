@@ -103,25 +103,30 @@ export function useCollaboration(
     onCollaboratorLeaveRef.current = options.onCollaboratorLeave;
   });
 
-  // Get current user on mount
+  // Get current user on mount — wrapped in try-catch to handle auth lock contention
   useEffect(() => {
     async function getUser() {
-      const { data: { user } } = await supabaseRef.current.auth.getUser();
-      if (user) {
-        // Try to get profile_picture from users table as fallback for OAuth avatar
-        let avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
-        try {
-          const { data } = await supabaseRef.current.from('users').select('profile_picture').eq('id', user.id).single();
-          if (data?.profile_picture) {
-            avatarUrl = data.profile_picture;
-          }
-        } catch {}
-        setCurrentUser({
-          id: user.id,
-          email: user.email || '',
-          name: user.user_metadata?.name || user.email?.split('@')[0],
-          avatarUrl,
-        });
+      try {
+        const { data: { user } } = await supabaseRef.current.auth.getUser();
+        if (user) {
+          let avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
+          try {
+            const { data } = await supabaseRef.current.from('users').select('profile_picture').eq('id', user.id).single();
+            if (data?.profile_picture) {
+              avatarUrl = data.profile_picture;
+            }
+          } catch {}
+          setCurrentUser({
+            id: user.id,
+            email: user.email || '',
+            name: user.user_metadata?.name || user.email?.split('@')[0],
+            avatarUrl,
+          });
+        }
+      } catch (err) {
+        // Auth lock contention — retry once after a short delay
+        console.warn('[Collaboration] Auth lock error, retrying:', err);
+        setTimeout(getUser, 500);
       }
     }
     getUser();
