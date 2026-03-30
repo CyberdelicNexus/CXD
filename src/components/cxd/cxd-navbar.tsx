@@ -216,6 +216,13 @@ export function CXDNavbar() {
   // Collapsible navbar buttons state
   const [navButtonsExpanded, setNavButtonsExpanded] = useState(false);
 
+  // Listen for tour event to auto-expand navbar
+  useEffect(() => {
+    const handler = () => setNavButtonsExpanded(true);
+    document.addEventListener('tour-expand-navbar', handler);
+    return () => document.removeEventListener('tour-expand-navbar', handler);
+  }, []);
+
   // Collaboration state
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);

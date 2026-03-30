@@ -3,6 +3,7 @@ export interface TourStep {
   title: string;
   content: string;
   position: 'top' | 'bottom' | 'left' | 'right';
+  preAction?: string; // Action to perform before showing this step
 }
 
 export const TOUR_STEPS: Record<'canvas' | 'map' | 'plan', TourStep[]> = {
@@ -13,8 +14,8 @@ export const TOUR_STEPS: Record<'canvas' | 'map' | 'plan', TourStep[]> = {
     { targetId: 'canvas-board-tool', title: 'Nested Boards', content: 'Create nested boards to organize complex projects. Double-click a board to dive inside it.', position: 'top' },
     { targetId: 'canvas-experience-sidebar', title: 'Experience Elements', content: 'Drag experience elements from here onto the canvas, or click them to view details about each experience stage.', position: 'left' },
     { targetId: 'canvas-experience-flow', title: 'Experience Flow', content: 'Map the stages of your experience here. This timeline shows how your experience flows from start to finish.', position: 'top' },
-    { targetId: 'canvas-collaborate-btn', title: 'Collaborate', content: 'Invite teammates to work on this canvas together in real-time.', position: 'bottom' },
-    { targetId: 'canvas-shortcuts-btn', title: 'Keyboard Shortcuts', content: 'View all keyboard shortcuts and navigation controls here.', position: 'bottom' },
+    { targetId: 'canvas-collaborate-btn', title: 'Collaborate', content: 'Invite teammates to work on this canvas together in real-time.', position: 'bottom', preAction: 'expandNavbar' },
+    { targetId: 'canvas-shortcuts-btn', title: 'Keyboard Shortcuts', content: 'View all keyboard shortcuts and navigation controls here.', position: 'bottom', preAction: 'expandNavbar' },
   ],
   map: [
     { targetId: 'map-face-selector', title: 'Face Selector', content: 'Select a face of the Hypercube to explore. Each face represents a different dimension of your experience.', position: 'bottom' },

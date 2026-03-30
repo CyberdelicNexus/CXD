@@ -427,10 +427,11 @@ export function CanvasToolkit({
             const isBeingDragged = isDragging && dragType === tool.type;
 
             return (
-              <div key={tool.type} className="relative flex-shrink-0" {...(tool.type === "board" ? { "data-tour-id": "canvas-board-tool" } : {})}>
+              <div key={tool.type} className="relative flex-shrink-0">
                 <button
                   draggable={tool.type !== "shape"}
                   onClick={() => handleToolClick(tool.type)}
+                  {...(tool.type === "board" ? { "data-tour-id": "canvas-board-tool" } : {})}
                   onDragStart={(e) => handleDragStart(e, tool.type)}
                   onDrag={handleDrag}
                   onDragEnd={handleDragEnd}

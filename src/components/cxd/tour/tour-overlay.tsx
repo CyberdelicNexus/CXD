@@ -43,11 +43,22 @@ export function TourOverlay() {
   // Track how long we've been polling for a missing/zero-size target
   const missingTargetCountRef = useRef(0);
 
+  // Execute preAction before measuring
+  const preActionExecutedRef = useRef<string | null>(null);
+
   // Measure target element position
   const measureTarget = useCallback(() => {
     if (!currentStep) {
       setTargetRect(null);
       return;
+    }
+
+    // Execute preAction once per step
+    if (currentStep.preAction && preActionExecutedRef.current !== `${tourStep}-${currentStep.preAction}`) {
+      preActionExecutedRef.current = `${tourStep}-${currentStep.preAction}`;
+      if (currentStep.preAction === 'expandNavbar') {
+        document.dispatchEvent(new CustomEvent('tour-expand-navbar'));
+      }
     }
     const el = document.querySelector(`[data-tour-id="${currentStep.targetId}"]`);
     if (el) {
@@ -89,7 +100,7 @@ export function TourOverlay() {
       }
       setTargetRect(null);
     }
-  }, [currentStep, nextTourStep]);
+  }, [currentStep, nextTourStep, tourStep]);
 
   // Re-measure on step change, resize, scroll
   useEffect(() => {
