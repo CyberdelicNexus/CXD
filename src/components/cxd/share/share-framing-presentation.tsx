@@ -14,6 +14,13 @@ import {
 import type { EngagementLevelCode, StagePresenceTypeCode } from '@/types/cxd-schema';
 import type { HypercubeFaceTag } from '@/types/canvas-elements';
 import { HYPERCUBE_FACE_TAGS } from '@/types/canvas-elements';
+import dynamic from 'next/dynamic';
+
+// Lazy-load Hypercube3D to avoid SSR issues with Three.js
+const Hypercube3D = dynamic(
+  () => import('@/components/cxd/canvas/hypercube-3d').then((mod) => mod.Hypercube3D),
+  { ssr: false, loading: () => <div className="h-[400px] flex items-center justify-center text-white/20">Loading hypercube...</div> }
+);
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 import { cn } from '@/lib/utils';
 import {
@@ -719,6 +726,8 @@ function TimelineSection({ project }: { project: CXDProject }) {
 /* ── Hypercube Map section renderer ─────────────────────────────── */
 
 function HypercubeMapSection({ project }: { project: CXDProject }) {
+  // No-op handlers for read-only hypercube
+  const noop = () => {};
   const elements = project.canvasLayout?.elements || [];
 
   const faceData = useMemo(() => {
@@ -760,12 +769,22 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
     return { counts, entries, taggedCount, untaggedCount, mostDeveloped, leastDeveloped };
   }, [elements]);
 
-  if (faceData.taggedCount === 0) {
-    return <div className="text-sm text-white/30 italic">No elements tagged to hypercube faces yet</div>;
-  }
-
   return (
     <div className="space-y-6">
+      {/* Interactive 3D Hypercube */}
+      <div className="rounded-xl overflow-hidden border border-purple-500/15 h-[400px] relative" style={{ background: 'rgba(5,2,12,0.8)' }}>
+        <Hypercube3D
+          project={project}
+          onSelectSection={noop}
+          onCoreClick={noop}
+          selectedSection={null}
+        />
+      </div>
+
+      {faceData.taggedCount === 0 ? (
+        <div className="text-sm text-white/30 italic">No elements tagged to hypercube faces yet</div>
+      ) : (
+      <>
       {/* Summary stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard icon={<Boxes className="w-4 h-4" />} label="Tagged Elements" value={faceData.taggedCount} />
@@ -821,6 +840,8 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
           opts={{ renderer: 'canvas' }}
         />
       </ChartCard>
+      </>
+      )}
     </div>
   );
 }
@@ -1005,23 +1026,23 @@ function buildSensoryRadarOption(project: CXDProject): echarts.EChartsCoreOption
             name: 'Sensory Intensity',
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(6, 182, 212, 0.2)' },
+                { offset: 0, color: 'rgba(168, 85, 247, 0.25)' },
                 { offset: 1, color: 'rgba(139, 92, 246, 0.05)' },
               ]),
-              shadowColor: 'rgba(6, 182, 212, 0.3)',
+              shadowColor: 'rgba(168, 85, 247, 0.3)',
               shadowBlur: 20,
             },
             lineStyle: {
-              color: 'rgba(6, 182, 212, 0.7)',
+              color: 'rgba(192, 132, 252, 0.7)',
               width: 2,
-              shadowColor: 'rgba(6, 182, 212, 0.4)',
+              shadowColor: 'rgba(168, 85, 247, 0.4)',
               shadowBlur: 8,
             },
             itemStyle: {
               color: '#fff',
-              borderColor: 'rgba(6, 182, 212, 0.8)',
+              borderColor: 'rgba(192, 132, 252, 0.8)',
               borderWidth: 2,
-              shadowColor: 'rgba(6, 182, 212, 0.5)',
+              shadowColor: 'rgba(168, 85, 247, 0.5)',
               shadowBlur: 8,
             },
             symbol: 'circle',
@@ -1062,23 +1083,23 @@ function buildPresenceRadarOption(project: CXDProject): echarts.EChartsCoreOptio
             name: 'Presence Level',
             areaStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: 'rgba(6, 182, 212, 0.2)' },
+                { offset: 0, color: 'rgba(168, 85, 247, 0.25)' },
                 { offset: 1, color: 'rgba(139, 92, 246, 0.05)' },
               ]),
-              shadowColor: 'rgba(6, 182, 212, 0.3)',
+              shadowColor: 'rgba(168, 85, 247, 0.3)',
               shadowBlur: 20,
             },
             lineStyle: {
-              color: 'rgba(6, 182, 212, 0.7)',
+              color: 'rgba(192, 132, 252, 0.7)',
               width: 2,
-              shadowColor: 'rgba(6, 182, 212, 0.4)',
+              shadowColor: 'rgba(168, 85, 247, 0.4)',
               shadowBlur: 8,
             },
             itemStyle: {
               color: '#fff',
-              borderColor: 'rgba(6, 182, 212, 0.8)',
+              borderColor: 'rgba(192, 132, 252, 0.8)',
               borderWidth: 2,
-              shadowColor: 'rgba(6, 182, 212, 0.5)',
+              shadowColor: 'rgba(168, 85, 247, 0.5)',
               shadowBlur: 8,
             },
             symbol: 'circle',
@@ -1139,24 +1160,24 @@ function buildTimelineOption(project: CXDProject): echarts.EChartsCoreOption {
         data: minutes,
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(6, 182, 212, 0.8)' },
+            { offset: 0, color: 'rgba(192, 132, 252, 0.8)' },
             { offset: 0.5, color: 'rgba(139, 92, 246, 0.6)' },
-            { offset: 1, color: 'rgba(6, 182, 212, 0.3)' },
+            { offset: 1, color: 'rgba(168, 85, 247, 0.3)' },
           ]),
         },
         lineStyle: {
-          color: 'rgba(6, 182, 212, 0.8)',
+          color: 'rgba(192, 132, 252, 0.8)',
           width: 3,
-          shadowColor: 'rgba(6, 182, 212, 0.5)',
+          shadowColor: 'rgba(168, 85, 247, 0.5)',
           shadowBlur: 10,
         },
         symbolSize: 8,
         symbol: 'circle',
         itemStyle: {
           color: '#fff',
-          borderColor: 'rgba(6, 182, 212, 0.8)',
+          borderColor: 'rgba(192, 132, 252, 0.8)',
           borderWidth: 2,
-          shadowColor: 'rgba(6, 182, 212, 0.5)',
+          shadowColor: 'rgba(168, 85, 247, 0.5)',
           shadowBlur: 8,
         },
       },
@@ -1188,7 +1209,7 @@ function buildEngagementOption(project: CXDProject): echarts.EChartsCoreOption {
     }
   }
 
-  const ENGAGEMENT_COLORS = ['#06b6d4', '#8b5cf6', '#34d399', '#6366f1']; // cyan, purple, emerald, indigo
+  const ENGAGEMENT_COLORS = ['#8b5cf6', '#c084fc', '#34d399', '#a855f7']; // purple, light purple, emerald, violet
 
   const data = ENGAGEMENT_LEVELS.map((lvl, i) => ({
     value: avgEngagement[lvl.code],
@@ -1248,7 +1269,7 @@ function buildStageEngagementStackedOption(project: CXDProject): echarts.ECharts
   const names = stages.map((s) => s.name);
 
   const colors: Record<EngagementLevelCode, string> = {
-    observer: 'rgba(6,182,212,0.7)',
+    observer: 'rgba(139,92,246,0.7)',
     engager: 'rgba(139,92,246,0.7)',
     coCreator: 'rgba(52,211,153,0.7)',
     architect: 'rgba(52,211,153,0.7)',
@@ -1936,7 +1957,7 @@ export function ShareFramingPresentation({ project, defaultSection }: ShareFrami
 
         {/* Sidebar buttons - floating next to content */}
         <div className="w-[190px] flex-shrink-0 py-6 space-y-1.5 overflow-hidden">
-          {SECTIONS.map((section) => {
+          {SECTIONS.filter((s) => s.id !== 'planning' && s.id !== 'timeline' && s.id !== 'hypercube').map((section) => {
             const isActive = activeSection === section.id;
             const hasData = section.id === 'overview' || section.hasData(project);
             return (

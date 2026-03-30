@@ -89,12 +89,27 @@ export function ShareLandingPage({
           )}
         </div>
 
-        {/* 2-column content */}
-        <div className="w-full max-w-5xl mx-auto px-6 -mt-16 relative z-10 pb-16">
-          <div className="flex flex-col lg:flex-row gap-12 items-center">
-            {/* Left column */}
-            <div className="flex-1 space-y-6 min-w-0">
-              <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
+        {/* CXD Branding — top center */}
+        <div className="flex items-center gap-3 -mt-8 mb-8 relative z-10">
+          <Image
+            src="/images/hypercube-logo.webp"
+            alt="CXD"
+            width={32}
+            height={32}
+            className="object-contain"
+            priority
+          />
+          <span className="text-sm font-medium text-white/40 tracking-wide">
+            Cyberdelic Experience Design
+          </span>
+        </div>
+
+        {/* 2-column content — tightly centered */}
+        <div className="w-full max-w-4xl mx-auto px-8 relative z-10 pb-16">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-10 items-start">
+            {/* Left column — info + thumbnail */}
+            <div className="space-y-5">
+              <h1 className="text-4xl md:text-5xl font-bold text-white tracking-tight leading-tight">
                 {project.name}
               </h1>
 
@@ -104,95 +119,77 @@ export function ShareLandingPage({
                   <img
                     src={ownerAvatar}
                     alt={ownerName}
-                    className="w-10 h-10 rounded-full object-cover border border-violet-500/20"
+                    className="w-10 h-10 rounded-full object-cover border-2 border-violet-500/30"
                   />
                 ) : (
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-sm font-bold text-white">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-sm font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)]">
                     {initials}
                   </div>
                 )}
                 <div>
-                  <p className="text-sm text-white/70">Experience by</p>
-                  <p className="text-sm font-medium text-white">{ownerName}</p>
+                  <p className="text-xs text-white/40 uppercase tracking-wider">Experience by</p>
+                  <p className="text-sm font-semibold text-white/90">{ownerName}</p>
                 </div>
               </div>
 
               {/* Description */}
               {(project.shareDescription || project.description) && (
-                <p className="text-sm text-white/60 leading-relaxed">
+                <p className="text-sm text-white/50 leading-relaxed max-w-lg">
                   {project.shareDescription || project.description}
                 </p>
               )}
 
               {/* Thumbnail */}
               {thumbnail && (
-                <div className="w-full max-w-[320px] aspect-square rounded-xl overflow-hidden border border-white/10">
+                <div className="w-full max-w-[360px] aspect-square rounded-2xl overflow-hidden border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
                   <img src={thumbnail} alt="Preview" className="w-full h-full object-cover" />
                 </div>
               )}
             </div>
 
-            {/* Right column */}
-            <div className="lg:w-[320px] flex-shrink-0 space-y-4">
-              {/* Buttons */}
-              <div className="flex flex-col gap-3 w-full">
-                {/* View Experience Design — purple gradient */}
-                <div className="w-full rounded-xl p-px bg-gradient-to-r from-violet-500/30 via-purple-400/40 to-violet-500/30">
-                  <button
-                    onClick={onViewFraming}
-                    className="w-full px-6 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    View Experience Design
-                  </button>
-                </div>
-
-                {/* View Canvas — cyan/teal gradient */}
-                <div className="w-full rounded-xl p-px bg-gradient-to-r from-cyan-500/30 via-teal-400/40 to-cyan-500/30">
-                  <button
-                    onClick={onViewCanvas}
-                    className="w-full px-6 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
-                  >
-                    <LayoutGrid className="w-4 h-4" />
-                    View Canvas
-                  </button>
-                </div>
-
-                {/* Request to Collaborate — pink/purple gradient */}
-                <div className="w-full rounded-xl p-px bg-gradient-to-r from-purple-500/20 via-pink-500/30 to-purple-500/20">
-                  <Link
-                    href={`/sign-up?returnTo=/cxd/share/${shareToken}&join=true`}
-                    className="w-full px-6 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
-                  >
-                    <Users className="w-4 h-4" />
-                    Request to Collaborate
-                  </Link>
-                </div>
+            {/* Right column — actions */}
+            <div className="space-y-3 lg:pt-4">
+              {/* View Experience Design — purple gradient */}
+              <div className="rounded-xl p-px bg-gradient-to-r from-violet-500/30 via-purple-400/40 to-violet-500/30 hover:from-violet-500/40 hover:via-purple-400/50 hover:to-violet-500/40 transition-all duration-300">
+                <button
+                  onClick={onViewFraming}
+                  className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  View Experience Design
+                </button>
               </div>
 
-              {/* Create your own */}
-              <div className="text-center">
-                <Link
-                  href="/"
-                  className="text-sm font-medium bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent hover:from-purple-300 hover:to-pink-300 transition-all duration-300"
+              {/* View Canvas — emerald gradient */}
+              <div className="rounded-xl p-px bg-gradient-to-r from-emerald-500/25 via-teal-400/35 to-emerald-500/25 hover:from-emerald-500/35 hover:via-teal-400/45 hover:to-emerald-500/35 transition-all duration-300">
+                <button
+                  onClick={onViewCanvas}
+                  className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
                 >
-                  Create your own experience design &rarr;
+                  <LayoutGrid className="w-4 h-4" />
+                  View Canvas
+                </button>
+              </div>
+
+              {/* Request to Collaborate — purple/violet gradient */}
+              <div className="rounded-xl p-px bg-gradient-to-r from-purple-500/20 via-violet-400/30 to-purple-500/20 hover:from-purple-500/30 hover:via-violet-400/40 hover:to-purple-500/30 transition-all duration-300">
+                <Link
+                  href={`/sign-up?returnTo=/cxd/share/${shareToken}&join=true`}
+                  className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                  <Users className="w-4 h-4" />
+                  Request to Collaborate
                 </Link>
               </div>
 
-              {/* CXD Branding */}
-              <div className="flex items-center gap-3 pt-6 justify-center">
-                <Image
-                  src="/images/hypercube-logo.webp"
-                  alt="CXD"
-                  width={36}
-                  height={36}
-                  className="object-contain"
-                  priority
-                />
-                <span className="text-sm font-medium text-white/50 tracking-wide">
-                  Cyberdelic Experience Design
-                </span>
+              {/* Create your own */}
+              <div className="text-center pt-2">
+                <Link
+                  href="/"
+                  className="text-xs font-medium text-violet-400/70 hover:text-violet-300 transition-colors"
+                >
+                  Create your own experience design &rarr;
+                </Link>
               </div>
             </div>
           </div>
