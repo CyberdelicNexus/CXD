@@ -868,6 +868,7 @@ export function CanvasElementRenderer({
                     strokeWidth={(element as ShapeElement).style?.borderWidth}
                     fillOpacity={(element as ShapeElement).style?.fillOpacity}
                     textColor={(element as ShapeElement).style?.textColor}
+                    fontSize={(element as ShapeElement).style?.fontSize}
                     onFillColorChange={(color) =>
                       onUpdate({ style: { ...element.style, bgColor: color } })
                     }
@@ -888,6 +889,9 @@ export function CanvasElementRenderer({
                     }
                     onTextColorChange={(color) =>
                       onUpdate({ style: { ...element.style, textColor: color } })
+                    }
+                    onFontSizeChange={(size) =>
+                      onUpdate({ style: { ...element.style, fontSize: size } })
                     }
                     onClose={() => setShowColorPicker(false)}
                   />
@@ -2195,11 +2199,13 @@ function ShapeColorPicker({
   strokeWidth,
   fillOpacity,
   textColor,
+  fontSize,
   onFillColorChange,
   onStrokeColorChange,
   onStrokeWidthChange,
   onFillOpacityChange,
   onTextColorChange,
+  onFontSizeChange,
   onClose,
 }: {
   fillColor?: string;
@@ -2207,60 +2213,43 @@ function ShapeColorPicker({
   strokeWidth?: number;
   fillOpacity?: number;
   textColor?: string;
+  fontSize?: number;
   onFillColorChange: (color: string) => void;
   onStrokeColorChange: (color: string) => void;
   onStrokeWidthChange: (width: number) => void;
   onFillOpacityChange: (opacity: number) => void;
   onTextColorChange?: (color: string) => void;
+  onFontSizeChange?: (size: number) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"fill" | "stroke" | "text">("fill");
+  const customColorRef = useRef<HTMLInputElement>(null);
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
+  const currentFontSize = fontSize || 16;
 
-  // Convert color to hex for color picker
   const colorToHex = (color?: string): string => {
     if (!color || color === "transparent" || color === "inherit") return "#ffffff";
     if (color.startsWith("#")) return color;
-    // Handle HSL colors
     if (color.startsWith("hsl")) {
       try {
         const match = color.match(/hsl\((\d+)\s+(\d+)%\s+(\d+)%\)/);
         if (match) {
           const [, h, s, l] = match;
-          return hslToHex(Number(h), Number(s), Number(l));
+          const hN = Number(h); const sN = Number(s); const lN = Number(l) / 100;
+          const a = (sN * Math.min(lN, 1 - lN)) / 100;
+          const f = (n: number) => { const k = (n + hN / 30) % 12; return Math.round(255 * (lN - a * Math.max(Math.min(k - 3, 9 - k, 1), -1))).toString(16).padStart(2, "0"); };
+          return `#${f(0)}${f(8)}${f(4)}`;
         }
-      } catch (e) {
-        console.error("Error parsing HSL color:", e);
-      }
+      } catch {}
     }
     return "#A855F7";
   };
 
-  const hslToHex = (h: number, s: number, l: number): string => {
-    l /= 100;
-    const a = (s * Math.min(l, 1 - l)) / 100;
-    const f = (n: number) => {
-      const k = (n + h / 30) % 12;
-      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-      return Math.round(255 * color)
-        .toString(16)
-        .padStart(2, "0");
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
-  };
-
-  const currentFillHex = colorToHex(fillColor);
-  const currentStrokeHex = colorToHex(strokeColor);
-  const currentTextHex = colorToHex(textColor);
-
-  const getCurrentColor = () => {
-    switch (mode) {
-      case "fill": return currentFillHex;
-      case "stroke": return currentStrokeHex;
-      case "text": return currentTextHex;
-    }
-  };
+  const presetColors = [
+    "#ffffff", "#e5e5e5", "#a3a3a3", "#737373", "#404040",
+    "#22D3EE", "#A855F7", "#F472B6", "#34D399", "#60A5FA", "#F59E0B",
+  ];
 
   const handleColorChange = (color: string) => {
     switch (mode) {
@@ -2270,140 +2259,127 @@ function ShapeColorPicker({
     }
   };
 
+  const getCurrentColor = () => {
+    switch (mode) {
+      case "fill": return colorToHex(fillColor);
+      case "stroke": return colorToHex(strokeColor);
+      case "text": return colorToHex(textColor);
+    }
+  };
+
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto w-[220px] p-3"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Compact single row layout */}
-      <div className="flex items-center gap-1 px-2 py-1.5">
-        {/* Mode toggle buttons */}
+      {/* Mode tabs: Fill / Outline / Text */}
+      <div className="flex gap-1 mb-3 p-0.5 bg-muted/50 rounded-md">
         <button
           onClick={() => setMode("fill")}
-          className={cn(
-            "p-1.5 rounded hover:bg-primary/20 transition-colors",
-            mode === "fill" && "bg-primary/30 ring-1 ring-primary",
-          )}
-          title="Fill"
+          className={cn("flex-1 py-1.5 px-2 text-xs rounded transition-colors flex items-center justify-center gap-1",
+            mode === "fill" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
         >
-          <Paintbrush className="w-4 h-4" />
+          <Paintbrush className="w-3 h-3" /> Fill
         </button>
         <button
           onClick={() => setMode("stroke")}
-          className={cn(
-            "p-1.5 rounded hover:bg-primary/20 transition-colors",
-            mode === "stroke" && "bg-primary/30 ring-1 ring-primary",
-          )}
-          title="Outline"
+          className={cn("flex-1 py-1.5 px-2 text-xs rounded transition-colors flex items-center justify-center gap-1",
+            mode === "stroke" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
         >
-          <PenLine className="w-4 h-4" />
+          <PenLine className="w-3 h-3" /> Outline
         </button>
         {onTextColorChange && (
           <button
             onClick={() => setMode("text")}
-            className={cn(
-              "p-1.5 rounded hover:bg-primary/20 transition-colors",
-              mode === "text" && "bg-primary/30 ring-1 ring-primary",
-            )}
-            title="Text Color"
+            className={cn("flex-1 py-1.5 px-2 text-xs rounded transition-colors flex items-center justify-center gap-1",
+              mode === "text" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
           >
-            <Type className="w-4 h-4" />
+            <Type className="w-3 h-3" /> Text
           </button>
         )}
+      </div>
 
-        <div className="w-px h-4 bg-border/50 mx-0.5" />
+      {/* Color swatches — circular */}
+      <div className="flex flex-wrap gap-2 justify-center mb-3">
+        {presetColors.map((color) => (
+          <button
+            key={color}
+            onClick={() => handleColorChange(color)}
+            className={cn(
+              "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
+              getCurrentColor() === color ? "border-foreground shadow-lg scale-110" : "border-border/50 hover:border-border",
+            )}
+            style={{ backgroundColor: color }}
+          />
+        ))}
+        {/* Transparent swatch */}
+        {mode === "fill" && (
+          <button
+            onClick={() => onFillColorChange("transparent")}
+            className={cn(
+              "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
+              fillColor === "transparent" ? "border-foreground shadow-lg" : "border-border/50",
+              "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+            )}
+            title="Transparent"
+          />
+        )}
+        {/* Rainbow color picker */}
+        <button
+          onClick={() => customColorRef.current?.click()}
+          className={cn(
+            "w-7 h-7 rounded-full border-2 transition-all hover:scale-110 relative overflow-hidden",
+            getCurrentColor() && !presetColors.includes(getCurrentColor()) ? "border-foreground shadow-lg scale-110" : "border-border/50",
+          )}
+          style={{ background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
+          title="Custom color"
+        >
+          <input
+            ref={customColorRef}
+            type="color"
+            value={getCurrentColor()}
+            onChange={(e) => handleColorChange(e.target.value)}
+            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+          />
+        </button>
+      </div>
 
-        {/* Color picker */}
-        <input
-          type="color"
-          value={getCurrentColor()}
-          onChange={(e) => handleColorChange(e.target.value)}
-          className="w-6 h-6 rounded cursor-pointer border-0"
-          title="Color"
-        />
-
-        {/* Transparent/Default button */}
+      {/* Slider — context-dependent */}
+      <div className="flex items-center gap-2">
         {mode === "fill" && (
           <>
-            <button
-              onClick={() => onFillColorChange("transparent")}
-              className={cn(
-                "w-6 h-6 rounded border-2 transition-all",
-                fillColor === "transparent"
-                  ? "border-primary"
-                  : "border-border",
-                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
-              )}
-              title="Transparent"
+            <span className="text-[10px] text-muted-foreground w-12">Opacity</span>
+            <input
+              type="range" value={currentOpacity} onChange={(e) => onFillOpacityChange(parseInt(e.target.value))}
+              min={0} max={100} step={1}
+              className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
             />
-            <div className="w-px h-4 bg-border/50 mx-0.5" />
+            <span className="text-[10px] text-muted-foreground w-8 text-right">{currentOpacity}%</span>
           </>
         )}
-
-        {mode === "text" && onTextColorChange && (
-          <>
-            <button
-              onClick={() => onTextColorChange("inherit")}
-              className={cn(
-                "w-6 h-6 rounded border-2 transition-all flex items-center justify-center text-[8px] font-medium",
-                textColor === "inherit" || !textColor
-                  ? "border-primary bg-primary/20"
-                  : "border-border bg-white/10",
-              )}
-              title="Default (Auto)"
-            >
-              A
-            </button>
-            <div className="w-px h-4 bg-border/50 mx-0.5" />
-          </>
-        )}
-
-        {/* Stroke width slider - only show when in stroke mode */}
         {mode === "stroke" && (
           <>
+            <span className="text-[10px] text-muted-foreground w-12">Width</span>
             <input
-              type="range"
-              value={currentWidth}
-              onChange={(e) => onStrokeWidthChange(parseInt(e.target.value))}
-              min={1}
-              max={12}
-              step={1}
-              className="w-16 h-1 rounded-full appearance-none bg-muted cursor-pointer"
-              title={`Width: ${currentWidth}px`}
+              type="range" value={currentWidth} onChange={(e) => onStrokeWidthChange(parseInt(e.target.value))}
+              min={0} max={12} step={1}
+              className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
             />
+            <span className="text-[10px] text-muted-foreground w-8 text-right">{currentWidth}px</span>
           </>
         )}
-
-        {/* Fill opacity slider - only show when in fill mode */}
-        {mode === "fill" && (
+        {mode === "text" && onFontSizeChange && (
           <>
-            <span className="text-xs text-muted-foreground px-1">
-              {currentOpacity}%
-            </span>
+            <span className="text-[10px] text-muted-foreground w-12">Size</span>
             <input
-              type="range"
-              value={currentOpacity}
-              onChange={(e) => onFillOpacityChange(parseInt(e.target.value))}
-              min={0}
-              max={100}
-              step={1}
-              className="w-20 h-1 rounded-full appearance-none bg-muted cursor-pointer"
-              title={`Opacity: ${currentOpacity}%`}
+              type="range" value={currentFontSize} onChange={(e) => onFontSizeChange(parseInt(e.target.value))}
+              min={8} max={72} step={1}
+              className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
             />
+            <span className="text-[10px] text-muted-foreground w-8 text-right">{currentFontSize}</span>
           </>
         )}
-
-        <div className="w-px h-4 bg-border/50 mx-0.5" />
-
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-          title="Close"
-        >
-          <X className="w-4 h-4" />
-        </button>
       </div>
     </div>
   );
