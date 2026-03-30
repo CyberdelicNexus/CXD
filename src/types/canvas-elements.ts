@@ -89,6 +89,8 @@ export interface ElementStyle {
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: 'normal' | 'medium' | 'semibold' | 'bold' | '300';
+  fontStyle?: 'normal' | 'italic';
+  textDecoration?: 'none' | 'underline';
   textAlign?: 'left' | 'center' | 'right';
   fillOpacity?: number; // 0-100 for shapes
 }

@@ -112,6 +112,9 @@ import {
   AlertCircle,
   Download,
   ALargeSmall,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
@@ -1829,17 +1832,20 @@ function ResizeHandle({
 
         // For images, maintain aspect ratio
         const isImage = element.type === "image";
-        const aspectRatio = isImage ? startWidth / startHeight : null;
+        // Shift key: maintain aspect ratio for any element type
+        const shouldMaintainAspectRatio = isImage || moveEvent.shiftKey;
+        const aspectRatio = shouldMaintainAspectRatio ? startWidth / startHeight : null;
+
         if (position.includes("e")) {
           newWidth = Math.max(minWidth, startWidth + deltaX);
-          if (isImage && aspectRatio) {
+          if (shouldMaintainAspectRatio && aspectRatio) {
             newHeight = newWidth / aspectRatio;
           }
         }
         if (position.includes("w")) {
           newWidth = Math.max(minWidth, startWidth - deltaX);
           newX = startPosX + (startWidth - newWidth);
-          if (isImage && aspectRatio) {
+          if (shouldMaintainAspectRatio && aspectRatio) {
             newHeight = newWidth / aspectRatio;
           }
         }
@@ -1848,14 +1854,14 @@ function ResizeHandle({
         if (!isResizableNote) {
           if (position.includes("s")) {
             newHeight = Math.max(minHeight, startHeight + deltaY);
-            if (isImage && aspectRatio) {
+            if (shouldMaintainAspectRatio && aspectRatio) {
               newWidth = newHeight * aspectRatio;
             }
           }
           if (position.includes("n")) {
             newHeight = Math.max(minHeight, startHeight - deltaY);
             newY = startPosY + (startHeight - newHeight);
-            if (isImage && aspectRatio) {
+            if (shouldMaintainAspectRatio && aspectRatio) {
               newWidth = newHeight * aspectRatio;
             }
           }
@@ -1873,8 +1879,8 @@ function ResizeHandle({
           }
         }
 
-        // For corner handles on images, resize proportionally
-        if (isImage && aspectRatio && (position === "nw" || position === "ne" || position === "sw" || position === "se")) {
+        // For corner handles on images (or shift-held), resize proportionally
+        if (shouldMaintainAspectRatio && aspectRatio && (position === "nw" || position === "ne" || position === "sw" || position === "se")) {
           // Use the larger delta to determine resize
           const delta = Math.max(Math.abs(deltaX), Math.abs(deltaY)) * Math.sign(position.includes("e") ? deltaX : -deltaX);
           newWidth = Math.max(minWidth, startWidth + delta);
@@ -1886,6 +1892,17 @@ function ResizeHandle({
           if (position.includes("n")) {
             newY = startPosY + (startHeight - newHeight);
           }
+        }
+
+        // Alt key: resize from center (both sides move equally)
+        if (moveEvent.altKey) {
+          const widthDiff = newWidth - startWidth;
+          const heightDiff = newHeight - startHeight;
+          newX = startPosX - widthDiff / 2;
+          newY = startPosY - heightDiff / 2;
+          // Double the size change since we're expanding in both directions
+          newWidth = startWidth + widthDiff;
+          newHeight = startHeight + heightDiff;
         }
 
         // For experience blocks, mark as manually resized to prevent auto-resize from overriding
@@ -2124,6 +2141,9 @@ function ShapeTextStylePicker({
   const currentFontFamily = style?.fontFamily || 'inherit';
   const currentFontSize = style?.fontSize || 14;
   const isBold = currentFontWeight === 'bold' || currentFontWeight === 'semibold';
+  const isItalic = style?.fontStyle === 'italic';
+  const isUnderline = style?.textDecoration === 'underline';
+  const currentTextAlign = style?.textAlign || 'center';
 
   return (
     <div
@@ -2155,7 +2175,7 @@ function ShapeTextStylePicker({
         <span className="text-[10px] text-muted-foreground w-6 text-right">{currentFontSize}</span>
       </div>
 
-      {/* Formatting buttons row */}
+      {/* Formatting buttons row: B | I | U | divider | AlignLeft | AlignCenter | AlignRight */}
       <div className="flex items-center gap-1 mb-2">
         {/* Bold */}
         <button
@@ -2164,6 +2184,48 @@ function ShapeTextStylePicker({
           title="Bold"
         >
           B
+        </button>
+        {/* Italic */}
+        <button
+          onClick={() => onStyleChange({ fontStyle: isItalic ? 'normal' : 'italic' })}
+          className={cn("p-1.5 rounded transition-colors text-xs italic", isItalic ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Italic"
+        >
+          I
+        </button>
+        {/* Underline */}
+        <button
+          onClick={() => onStyleChange({ textDecoration: isUnderline ? 'none' : 'underline' })}
+          className={cn("p-1.5 rounded transition-colors text-xs underline", isUnderline ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Underline"
+        >
+          U
+        </button>
+        {/* Divider */}
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+        {/* Align Left */}
+        <button
+          onClick={() => onStyleChange({ textAlign: 'left' })}
+          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'left' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Left"
+        >
+          <AlignLeft className="w-3.5 h-3.5" />
+        </button>
+        {/* Align Center */}
+        <button
+          onClick={() => onStyleChange({ textAlign: 'center' })}
+          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'center' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Center"
+        >
+          <AlignCenter className="w-3.5 h-3.5" />
+        </button>
+        {/* Align Right */}
+        <button
+          onClick={() => onStyleChange({ textAlign: 'right' })}
+          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'right' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Right"
+        >
+          <AlignRight className="w-3.5 h-3.5" />
         </button>
       </div>
 
@@ -2213,6 +2275,7 @@ function ShapeColorPicker({
   defaultMode?: "fill" | "stroke" | "text";
 }) {
   const [mode, setMode] = useState<"fill" | "stroke" | "text">(defaultMode || "fill");
+  const [lastCustomColor, setLastCustomColor] = useState<string | null>(null);
   const customColorRef = useRef<HTMLInputElement>(null);
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
@@ -2245,6 +2308,13 @@ function ShapeColorPicker({
       case "fill": onFillColorChange(color); break;
       case "stroke": onStrokeColorChange(color); break;
       case "text": onTextColorChange?.(color); break;
+    }
+  };
+
+  const handleCustomColorChange = (color: string) => {
+    handleColorChange(color);
+    if (!presetColors.includes(color)) {
+      setLastCustomColor(color);
     }
   };
 
@@ -2289,9 +2359,9 @@ function ShapeColorPicker({
         )}
       </div>
 
-      {/* Color swatches — two rows: presets, then specials+gradients */}
+      {/* Color swatches — two rows */}
       <div className="space-y-2 mb-3">
-        {/* Row 1: preset solid colors */}
+        {/* Row 1: white, gray, dark gray, dynamic (last picked), transparent, rainbow wheel */}
         <div className="flex flex-wrap gap-1.5 justify-center">
           {presetColors.map((color) => (
             <button
@@ -2304,15 +2374,34 @@ function ShapeColorPicker({
               style={{ backgroundColor: color }}
             />
           ))}
-        </div>
-        {/* Row 2: rainbow picker + transparent + gradient circles */}
-        <div className="flex flex-wrap gap-1.5 justify-center">
+          {/* Dynamic last custom color swatch */}
+          {lastCustomColor && !presetColors.includes(lastCustomColor) && (
+            <button
+              onClick={() => handleColorChange(lastCustomColor)}
+              className={cn(
+                "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+                getCurrentColor() === lastCustomColor ? "border-foreground shadow-lg scale-110" : "border-border/50 hover:border-border",
+              )}
+              style={{ backgroundColor: lastCustomColor }}
+              title="Last custom color"
+            />
+          )}
+          {/* Transparent swatch — all modes */}
+          <button
+            onClick={() => handleColorChange("transparent")}
+            className={cn(
+              "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+              (mode === "fill" ? fillColor : mode === "stroke" ? strokeColor : textColor) === "transparent" ? "border-foreground shadow-lg" : "border-border/50",
+              "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+            )}
+            title="Transparent"
+          />
           {/* Rainbow color picker */}
           <button
             onClick={() => customColorRef.current?.click()}
             className={cn(
               "w-6 h-6 rounded-full border-2 transition-all hover:scale-110 relative overflow-hidden",
-              getCurrentColor() && !presetColors.includes(getCurrentColor()) ? "border-foreground shadow-lg scale-110" : "border-border/50",
+              getCurrentColor() && !presetColors.includes(getCurrentColor()) && getCurrentColor() !== lastCustomColor ? "border-foreground shadow-lg scale-110" : "border-border/50",
             )}
             style={{ background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
             title="Custom color"
@@ -2321,24 +2410,14 @@ function ShapeColorPicker({
               ref={customColorRef}
               type="color"
               value={getCurrentColor()}
-              onChange={(e) => handleColorChange(e.target.value)}
+              onChange={(e) => handleCustomColorChange(e.target.value)}
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             />
           </button>
-          {/* Transparent swatch */}
-          {(mode === "fill" || mode === "stroke") && (
-            <button
-              onClick={() => mode === "fill" ? onFillColorChange("transparent") : onStrokeColorChange("transparent")}
-              className={cn(
-                "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
-                (mode === "fill" ? fillColor : strokeColor) === "transparent" ? "border-foreground shadow-lg" : "border-border/50",
-                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
-              )}
-              title="Transparent"
-            />
-          )}
-          {/* Gradient circles — only in Fill mode */}
-          {mode === "fill" && TEXT_GRADIENTS.slice(0, 6).map((gradient, i) => (
+        </div>
+        {/* Row 2: 6 gradient circles — all modes */}
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {TEXT_GRADIENTS.slice(0, 6).map((gradient, i) => (
             <button
               key={i}
               onClick={() => handleColorChange(gradient)}
@@ -5525,13 +5604,81 @@ function ShapeCard({
     return color;
   };
 
+  // Helper to extract colors from gradient strings (defined before renderSVGShape uses it)
+  const extractGradientColor = (gradient: string, position: number): string => {
+    // Extract colors from linear-gradient string
+    const matches = gradient.match(/#[0-9A-Fa-f]{6}/g);
+    if (matches && matches.length > position) {
+      return matches[position];
+    }
+    return "#a855f7"; // fallback
+  };
+
+  const isGradientStroke = borderColor?.includes("gradient");
+
   const renderSVGShape = () => {
     const fill = bgColor.includes("gradient")
       ? `url(#gradient-${element.id})`
       : getBackgroundWithOpacity(bgColor, fillOpacity);
-    const stroke = borderColor;
+    const stroke = isGradientStroke
+      ? `url(#stroke-gradient-${element.id})`
+      : borderColor;
     const strokeWidth = borderWidth;
     const opacity = bgColor.includes("gradient") ? fillOpacity / 100 : 1;
+
+    // Build gradient defs for both fill and stroke
+    const gradientDefs = (
+      <defs>
+        {bgColor.includes("gradient") && (
+          <linearGradient
+            id={`gradient-${element.id}`}
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop
+              offset="0%"
+              style={{
+                stopColor: extractGradientColor(bgColor, 0),
+                stopOpacity: 1,
+              }}
+            />
+            <stop
+              offset="100%"
+              style={{
+                stopColor: extractGradientColor(bgColor, 1),
+                stopOpacity: 1,
+              }}
+            />
+          </linearGradient>
+        )}
+        {isGradientStroke && (
+          <linearGradient
+            id={`stroke-gradient-${element.id}`}
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop
+              offset="0%"
+              style={{
+                stopColor: extractGradientColor(borderColor, 0),
+                stopOpacity: 1,
+              }}
+            />
+            <stop
+              offset="100%"
+              style={{
+                stopColor: extractGradientColor(borderColor, 1),
+                stopOpacity: 1,
+              }}
+            />
+          </linearGradient>
+        )}
+      </defs>
+    );
 
     switch (element.shapeType) {
       case "circle":
@@ -5544,32 +5691,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <circle
               cx="50"
               cy="50"
@@ -5591,32 +5713,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <polygon
               points="50,5 95,50 50,95 5,50"
               fill={fill}
@@ -5636,32 +5733,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <polygon
               points="50,5 93.3,25 93.3,75 50,95 6.7,75 6.7,25"
               fill={fill}
@@ -5681,32 +5753,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <path
               d="M50,10 L61,40 L92,40 L68,60 L78,90 L50,70 L22,90 L32,60 L8,40 L39,40 Z"
               fill={fill}
@@ -5726,32 +5773,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <polygon
               points="50,10 90,90 10,90"
               fill={fill}
@@ -5771,32 +5793,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <rect
               x="2"
               y="2"
@@ -5813,22 +5810,41 @@ function ShapeCard({
     }
   };
 
-  // Helper to extract colors from gradient strings
-  const extractGradientColor = (gradient: string, position: number): string => {
-    // Extract colors from linear-gradient string
-    const matches = gradient.match(/#[0-9A-Fa-f]{6}/g);
-    if (matches && matches.length > position) {
-      return matches[position];
-    }
-    return "#a855f7"; // fallback
-  };
-
   // Check if this shape is actionable
   const isActionable =
     element.taskMetadata?.isActionable ||
     element.content?.includes("[ ]") ||
     element.content?.includes("[x]") ||
     (element.hypercubeTags && element.hypercubeTags.length > 0);
+
+  // Gradient text detection
+  const isGradientText = textColor?.includes("gradient");
+  const shapeTextAlign = element.style?.textAlign || 'center';
+  const shapeFontStyle = element.style?.fontStyle || 'normal';
+  const shapeTextDecoration = element.style?.textDecoration || 'none';
+
+  // Common text styles (shared between editing and display)
+  const baseTextStyle: React.CSSProperties = {
+    fontSize: element.style?.fontSize || 14,
+    fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
+    fontFamily: element.style?.fontFamily || 'inherit',
+    fontStyle: shapeFontStyle,
+    textDecoration: shapeTextDecoration,
+    textAlign: shapeTextAlign,
+    wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+    lineHeight: 1.3,
+  };
+
+  // Text color styles (gradient or solid)
+  const textColorStyle: React.CSSProperties = isGradientText
+    ? {
+        background: textColor,
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        backgroundClip: 'text',
+      }
+    : { color: textColor };
 
   return (
     <div className="relative w-full h-full flex items-center justify-center overflow-visible">
@@ -5841,10 +5857,13 @@ function ShapeCard({
       )}
       {renderSVGShape()}
       <div
-        className="absolute inset-0 z-10 flex items-center justify-center"
+        className="absolute inset-0 z-10 overflow-hidden"
         style={{
-          padding: '50px',
-          textAlign: 'center',
+          padding: '8%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: shapeTextAlign,
         }}
       >
         {isEditing ? (
@@ -5853,16 +5872,10 @@ function ShapeCard({
             value={element.content || ""}
             onChange={(e) => onUpdate({ content: e.target.value })}
             onBlur={onBlur}
-            className="w-full bg-transparent border-0 focus:outline-none resize-none text-center"
+            className="w-full bg-transparent border-0 focus:outline-none resize-none"
             style={{
-              color: textColor,
-              fontSize: element.style?.fontSize || 14,
-              fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
-              fontFamily: element.style?.fontFamily || 'inherit',
-              textAlign: 'center',
-              wordBreak: 'break-word',
-              overflowWrap: 'break-word',
-              lineHeight: 1.3,
+              ...baseTextStyle,
+              ...textColorStyle,
               maxHeight: '100%',
               height: 'auto',
               minHeight: '1.3em',
@@ -5880,15 +5893,12 @@ function ShapeCard({
         ) : (
           <span
             style={{
-              color: textColor,
-              fontSize: element.style?.fontSize || 14,
-              fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
-              fontFamily: element.style?.fontFamily || 'inherit',
-              wordBreak: 'break-word',
-              overflowWrap: 'break-word',
+              ...baseTextStyle,
+              ...textColorStyle,
               display: 'block',
-              textAlign: 'center',
-              lineHeight: 1.3,
+              maxWidth: '100%',
+              maxHeight: '100%',
+              overflow: 'hidden',
             }}
           >
             {element.content}

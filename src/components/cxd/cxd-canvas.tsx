@@ -1667,14 +1667,18 @@ export function CXDCanvas() {
         const newElement: CanvasElement = {
           ...element,
           id: uuidv4(),
-          x: element.x + 20,
-          y: element.y + 20,
+          x: element.x,
+          y: element.y,
         };
         syncAddElement(newElement);
         setSelectedElementId(newElement.id);
         setSelectedElementIds(new Set([newElement.id]));
         setDraggingElement(newElement.id);
         setDragElementStart({ x: e.clientX, y: e.clientY });
+        // Set original position so drag delta is calculated correctly
+        const altDragPositions = new Map<string, { x: number; y: number }>();
+        altDragPositions.set(newElement.id, { x: newElement.x, y: newElement.y });
+        dragOriginalPositionsRef.current = altDragPositions;
         return;
       }
 
