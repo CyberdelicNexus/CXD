@@ -1948,8 +1948,7 @@ export function ShareFramingPresentation({ project, defaultSection }: ShareFrami
 
         {/* Main content area */}
         <div
-          className="flex-1 min-w-0 overflow-y-auto py-4 lg:py-6 px-0 lg:px-4 bg-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-violet-500/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-violet-500/30"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,92,246,0.2) transparent' }}
+          className="flex-1 min-w-0 overflow-y-auto py-4 lg:py-6 px-0 lg:px-4 bg-transparent"
         >
           {renderSectionPage()}
         </div>
