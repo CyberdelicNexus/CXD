@@ -104,9 +104,6 @@ import {
   Brain,
   Users,
   Inbox,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
   CaseSensitive,
   ChevronDown,
   ListTodo,
@@ -247,6 +244,7 @@ export function CanvasElementRenderer({
   const [showTagMenu, setShowTagMenu] = useState(false);
   const [showShapeTypePicker, setShowShapeTypePicker] = useState(false);
   const [showTextStyleMenu, setShowTextStyleMenu] = useState(false);
+  const [colorPickerDefaultMode, setColorPickerDefaultMode] = useState<"fill" | "stroke" | "text">("fill");
   const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
   const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
   const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
@@ -305,6 +303,11 @@ export function CanvasElementRenderer({
     closeAllSubmenus();
     setShowTagMenu(true);
   }, [closeAllSubmenus]);
+
+  // Close all submenus when element is deselected
+  useEffect(() => {
+    if (!isSelected) closeAllSubmenus();
+  }, [isSelected, closeAllSubmenus]);
 
   // Close all submenus when clicking outside
   useEffect(() => {
@@ -811,7 +814,12 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    showColorPicker ? closeAllSubmenus() : openColorPicker();
+                    if (showColorPicker) {
+                      closeAllSubmenus();
+                    } else {
+                      setColorPickerDefaultMode("fill");
+                      openColorPicker();
+                    }
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -854,6 +862,7 @@ export function CanvasElementRenderer({
                       onUpdate({ style: { ...element.style, fontSize: size } })
                     }
                     onClose={() => setShowColorPicker(false)}
+                    defaultMode={colorPickerDefaultMode}
                   />
                 )}
               </div>
@@ -887,6 +896,7 @@ export function CanvasElementRenderer({
                     }
                     onOpenColorPicker={() => {
                       setShowTextStyleMenu(false);
+                      setColorPickerDefaultMode("text");
                       openColorPicker();
                     }}
                     onClose={() => setShowTextStyleMenu(false)}
@@ -932,19 +942,6 @@ export function CanvasElementRenderer({
                 )}
               </div>
 
-              {/* Edit Text */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditing(true);
-                }}
-                className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-                title="Edit Text"
-              >
-                <Type className="w-4 h-4" />
-              </button>
-
-              <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
           {element.type === "freeform" && (
@@ -2074,17 +2071,17 @@ function ShapeTypePicker({
   onClose: () => void;
 }) {
   const shapeTypes: { type: ShapeType; label: string; icon: React.ReactNode }[] = [
-    { type: "rectangle", label: "Rectangle", icon: <div className="w-4 h-3 border-2 border-current rounded-sm" /> },
-    { type: "circle", label: "Circle", icon: <div className="w-4 h-4 border-2 border-current rounded-full" /> },
-    { type: "diamond", label: "Diamond", icon: <div className="w-3 h-3 border-2 border-current rotate-45" /> },
+    { type: "rectangle", label: "Rectangle", icon: <div className="w-4 h-3 bg-current rounded-sm" /> },
+    { type: "circle", label: "Circle", icon: <div className="w-4 h-4 bg-current rounded-full" /> },
+    { type: "diamond", label: "Diamond", icon: <div className="w-3 h-3 bg-current rotate-45" /> },
     { type: "triangle", label: "Triangle", icon: <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-current" /> },
     { type: "hexagon", label: "Hexagon", icon: <div className="w-4 h-4 bg-current" style={{ clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }} /> },
-    { type: "star", label: "Star", icon: <Star className="w-4 h-4" /> },
+    { type: "star", label: "Star", icon: <Star className="w-4 h-4 fill-current" /> },
   ];
 
   return (
     <div
-      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 p-2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[180px]"
+      className="absolute top-full mt-2 left-1/2 -translate-x-1/2 p-2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[180px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2127,8 +2124,6 @@ function ShapeTextStylePicker({
   const currentFontFamily = style?.fontFamily || 'inherit';
   const currentFontSize = style?.fontSize || 14;
   const isBold = currentFontWeight === 'bold' || currentFontWeight === 'semibold';
-  // textAlign is on ElementStyle
-  const currentAlign = style?.textAlign || 'center';
 
   return (
     <div
@@ -2170,40 +2165,6 @@ function ShapeTextStylePicker({
         >
           B
         </button>
-        {/* Light */}
-        <button
-          onClick={() => onStyleChange({ fontWeight: currentFontWeight === '300' ? 'normal' : '300' })}
-          className={cn("p-1.5 rounded transition-colors text-xs", currentFontWeight === '300' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          style={{ fontWeight: 300 }}
-          title="Light"
-        >
-          L
-        </button>
-
-        <div className="w-px h-4 bg-border/30 mx-0.5" />
-
-        {/* Text align */}
-        <button
-          onClick={() => onStyleChange({ textAlign: 'left' })}
-          className={cn("p-1.5 rounded transition-colors", currentAlign === 'left' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Left"
-        >
-          <AlignLeft className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => onStyleChange({ textAlign: 'center' })}
-          className={cn("p-1.5 rounded transition-colors", currentAlign === 'center' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Center"
-        >
-          <AlignCenter className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => onStyleChange({ textAlign: 'right' })}
-          className={cn("p-1.5 rounded transition-colors", currentAlign === 'right' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Right"
-        >
-          <AlignRight className="w-3.5 h-3.5" />
-        </button>
       </div>
 
       {/* Text color button */}
@@ -2234,6 +2195,7 @@ function ShapeColorPicker({
   onTextColorChange,
   onFontSizeChange,
   onClose,
+  defaultMode,
 }: {
   fillColor?: string;
   strokeColor?: string;
@@ -2248,8 +2210,9 @@ function ShapeColorPicker({
   onTextColorChange?: (color: string) => void;
   onFontSizeChange?: (size: number) => void;
   onClose: () => void;
+  defaultMode?: "fill" | "stroke" | "text";
 }) {
-  const [mode, setMode] = useState<"fill" | "stroke" | "text">("fill");
+  const [mode, setMode] = useState<"fill" | "stroke" | "text">(defaultMode || "fill");
   const customColorRef = useRef<HTMLInputElement>(null);
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
@@ -2274,8 +2237,7 @@ function ShapeColorPicker({
   };
 
   const presetColors = [
-    "#ffffff", "#e5e5e5", "#a3a3a3", "#737373", "#404040",
-    "#22D3EE", "#A855F7", "#F472B6", "#34D399", "#60A5FA", "#F59E0B",
+    "#ffffff", "#a3a3a3", "#404040",
   ];
 
   const handleColorChange = (color: string) => {
@@ -2375,8 +2337,8 @@ function ShapeColorPicker({
               title="Transparent"
             />
           )}
-          {/* Gradient circles */}
-          {TEXT_GRADIENTS.slice(0, 8).map((gradient, i) => (
+          {/* Gradient circles — only in Fill mode */}
+          {mode === "fill" && TEXT_GRADIENTS.slice(0, 6).map((gradient, i) => (
             <button
               key={i}
               onClick={() => handleColorChange(gradient)}
