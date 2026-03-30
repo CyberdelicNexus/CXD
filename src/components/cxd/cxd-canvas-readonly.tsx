@@ -129,15 +129,19 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
     );
 
     const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || rect.width === 0 || rect.height === 0) return;
 
     const padding = 100;
     const contentWidth = bounds.maxX - bounds.minX + padding * 2;
     const contentHeight = bounds.maxY - bounds.minY + padding * 2;
 
+    if (contentWidth <= 0 || contentHeight <= 0) return;
+
     const zoomX = rect.width / contentWidth;
     const zoomY = rect.height / contentHeight;
     const newZoom = Math.min(Math.max(Math.min(zoomX, zoomY), MIN_ZOOM), MAX_ZOOM);
+
+    if (!isFinite(newZoom) || isNaN(newZoom)) return;
 
     const centerX = (bounds.minX + bounds.maxX) / 2;
     const centerY = (bounds.minY + bounds.maxY) / 2;
@@ -166,9 +170,19 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
     }
   }, [boardPath]);
 
-  // Auto-fit all elements on initial load
+  // Auto-fit all elements on initial load — retry until container has dimensions
   useEffect(() => {
-    const timer = setTimeout(() => handleFitAll(), 100);
+    let attempts = 0;
+    const tryFit = () => {
+      attempts++;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect && rect.width > 0 && rect.height > 0) {
+        handleFitAll();
+      } else if (attempts < 10) {
+        setTimeout(tryFit, 200);
+      }
+    };
+    const timer = setTimeout(tryFit, 200);
     return () => clearTimeout(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

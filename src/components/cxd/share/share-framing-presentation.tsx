@@ -1593,9 +1593,9 @@ function buildHypercubeDonutOption(entries: { face: string; count: number; color
     name: e.face,
     itemStyle: {
       color: new echarts.graphic.LinearGradient(0, 0, 1, 1, [
-        { offset: 0, color: e.color },
-        { offset: 0.6, color: e.color + 'CC' },
-        { offset: 1, color: '#1a0a30' },
+        { offset: 0, color: '#1a0a30' },
+        { offset: 0.4, color: e.color + '99' },
+        { offset: 1, color: e.color },
       ]),
       shadowColor: e.color + '50',
       shadowBlur: 15,
@@ -1648,9 +1648,9 @@ function buildHypercubeBarOption(entries: { face: string; count: number; color: 
     value: e.count,
     itemStyle: {
       color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-        { offset: 0, color: e.color },
-        { offset: 0.7, color: e.color + 'AA' },
-        { offset: 1, color: '#1a0a30' },
+        { offset: 0, color: '#1a0a30' },
+        { offset: 0.3, color: e.color + '88' },
+        { offset: 1, color: e.color },
       ]),
       borderRadius: [0, 4, 4, 0],
       shadowColor: e.color + '50',
