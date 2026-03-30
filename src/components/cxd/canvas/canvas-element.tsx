@@ -805,46 +805,6 @@ export function CanvasElementRenderer({
           {/* Element-specific actions */}
           {element.type === "shape" && (
             <>
-              {/* Font Family Dropdown - Dark themed */}
-              <select
-                value={(element as ShapeElement).style?.fontFamily || 'inherit'}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  onUpdate({ style: { ...element.style, fontFamily: e.target.value } });
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="h-7 px-2 text-[11px] rounded bg-zinc-800/90 border border-zinc-700/50 text-zinc-100 cursor-pointer hover:bg-zinc-700/90 transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none"
-                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', paddingRight: '24px' }}
-                title="Font"
-              >
-                {FONT_FAMILIES.map(({ value, label }) => (
-                  <option key={value} value={value} className="bg-zinc-800 text-zinc-100">
-                    {label}
-                  </option>
-                ))}
-              </select>
-
-              {/* Font Size Dropdown - Dark themed */}
-              <select
-                value={(element as ShapeElement).style?.fontSize || 14}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  onUpdate({ style: { ...element.style, fontSize: parseInt(e.target.value) } });
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="h-7 px-2 text-[11px] rounded bg-zinc-800/90 border border-zinc-700/50 text-zinc-100 cursor-pointer hover:bg-zinc-700/90 transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none"
-                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center', paddingRight: '24px' }}
-                title="Size"
-              >
-                <option value={12} className="bg-zinc-800 text-zinc-100">Small</option>
-                <option value={14} className="bg-zinc-800 text-zinc-100">Medium</option>
-                <option value={18} className="bg-zinc-800 text-zinc-100">Large</option>
-                <option value={24} className="bg-zinc-800 text-zinc-100">XL</option>
-                <option value={32} className="bg-zinc-800 text-zinc-100">2XL</option>
-              </select>
-
-              <div className="w-px h-4 bg-border/50 mx-0.5" />
-
               {/* Color Picker (Fill/Stroke/Text unified) */}
               <div className="relative">
                 <button
@@ -898,7 +858,7 @@ export function CanvasElementRenderer({
                 )}
               </div>
 
-              {/* Font Weight (Aa) - Secondary popover */}
+              {/* Text Formatting Dropdown */}
               <div className="relative">
                 <button
                   onClick={(e) => {
@@ -915,9 +875,9 @@ export function CanvasElementRenderer({
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
                     showTextStyleMenu && "bg-primary/20 text-primary",
                   )}
-                  title="Font Weight"
+                  title="Text Formatting"
                 >
-                  <Bold className="w-4 h-4" />
+                  <Type className="w-4 h-4" />
                 </button>
                 {showTextStyleMenu && (
                   <ShapeTextStylePicker
@@ -925,6 +885,10 @@ export function CanvasElementRenderer({
                     onStyleChange={(updates) =>
                       onUpdate({ style: { ...element.style, ...updates } })
                     }
+                    onOpenColorPicker={() => {
+                      setShowTextStyleMenu(false);
+                      openColorPicker();
+                    }}
                     onClose={() => setShowTextStyleMenu(false)}
                   />
                 )}
@@ -2151,43 +2115,106 @@ function ShapeTypePicker({
 function ShapeTextStylePicker({
   style,
   onStyleChange,
+  onOpenColorPicker,
   onClose,
 }: {
   style?: ElementStyle;
-  onStyleChange: (updates: Pick<ElementStyle, 'fontWeight'>) => void;
+  onStyleChange: (updates: Partial<ElementStyle>) => void;
+  onOpenColorPicker?: () => void;
   onClose: () => void;
 }) {
   const currentFontWeight = style?.fontWeight || 'normal';
-
-  const fontWeights: { value: '300' | 'normal' | 'bold'; label: string; cssWeight: number }[] = [
-    { value: '300', label: 'Light', cssWeight: 300 },
-    { value: 'normal', label: 'Regular', cssWeight: 400 },
-    { value: 'bold', label: 'Bold', cssWeight: 700 },
-  ];
+  const currentFontFamily = style?.fontFamily || 'inherit';
+  const currentFontSize = style?.fontSize || 14;
+  const isBold = currentFontWeight === 'bold' || currentFontWeight === 'semibold';
+  // textAlign is on ElementStyle
+  const currentAlign = style?.textAlign || 'center';
 
   return (
     <div
-      className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100]"
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[200px] p-3 pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-0.5 p-1">
-        {fontWeights.map(({ value, label, cssWeight }) => (
-          <button
-            key={value}
-            onClick={() => onStyleChange({ fontWeight: value })}
-            className={cn(
-              "px-3 py-1.5 text-[11px] rounded transition-colors whitespace-nowrap",
-              currentFontWeight === value
-                ? "bg-primary/20 text-primary"
-                : "hover:bg-white/10 text-muted-foreground hover:text-foreground"
-            )}
-            style={{ fontWeight: cssWeight }}
-          >
-            {label}
-          </button>
+      {/* Font family */}
+      <select
+        value={currentFontFamily}
+        onChange={(e) => onStyleChange({ fontFamily: e.target.value })}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full h-7 px-2 mb-2 text-[11px] rounded bg-muted/50 border border-border/50 text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/50"
+      >
+        {FONT_FAMILIES.map(({ value, label }) => (
+          <option key={value} value={value}>{label}</option>
         ))}
+      </select>
+
+      {/* Font size slider */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] text-muted-foreground w-8">Size</span>
+        <input
+          type="range" value={currentFontSize}
+          onChange={(e) => onStyleChange({ fontSize: parseInt(e.target.value) })}
+          min={8} max={72} step={1}
+          className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+        />
+        <span className="text-[10px] text-muted-foreground w-6 text-right">{currentFontSize}</span>
       </div>
+
+      {/* Formatting buttons row */}
+      <div className="flex items-center gap-1 mb-2">
+        {/* Bold */}
+        <button
+          onClick={() => onStyleChange({ fontWeight: isBold ? 'normal' : 'bold' })}
+          className={cn("p-1.5 rounded transition-colors text-xs font-bold", isBold ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Bold"
+        >
+          B
+        </button>
+        {/* Light */}
+        <button
+          onClick={() => onStyleChange({ fontWeight: currentFontWeight === '300' ? 'normal' : '300' })}
+          className={cn("p-1.5 rounded transition-colors text-xs", currentFontWeight === '300' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          style={{ fontWeight: 300 }}
+          title="Light"
+        >
+          L
+        </button>
+
+        <div className="w-px h-4 bg-border/30 mx-0.5" />
+
+        {/* Text align */}
+        <button
+          onClick={() => onStyleChange({ textAlign: 'left' })}
+          className={cn("p-1.5 rounded transition-colors", currentAlign === 'left' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Left"
+        >
+          <AlignLeft className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => onStyleChange({ textAlign: 'center' })}
+          className={cn("p-1.5 rounded transition-colors", currentAlign === 'center' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Center"
+        >
+          <AlignCenter className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => onStyleChange({ textAlign: 'right' })}
+          className={cn("p-1.5 rounded transition-colors", currentAlign === 'right' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Right"
+        >
+          <AlignRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Text color button */}
+      {onOpenColorPicker && (
+        <button
+          onClick={() => { onClose(); onOpenColorPicker(); }}
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded hover:bg-white/5 transition-colors"
+        >
+          <Palette className="w-3.5 h-3.5" /> Text Color
+        </button>
+      )}
     </div>
   );
 }
@@ -2300,49 +2327,65 @@ function ShapeColorPicker({
         )}
       </div>
 
-      {/* Color swatches — circular */}
-      <div className="flex flex-wrap gap-2 justify-center mb-3">
-        {presetColors.map((color) => (
+      {/* Color swatches — two rows: presets, then specials+gradients */}
+      <div className="space-y-2 mb-3">
+        {/* Row 1: preset solid colors */}
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {presetColors.map((color) => (
+            <button
+              key={color}
+              onClick={() => handleColorChange(color)}
+              className={cn(
+                "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+                getCurrentColor() === color ? "border-foreground shadow-lg scale-110" : "border-border/50 hover:border-border",
+              )}
+              style={{ backgroundColor: color }}
+            />
+          ))}
+        </div>
+        {/* Row 2: rainbow picker + transparent + gradient circles */}
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {/* Rainbow color picker */}
           <button
-            key={color}
-            onClick={() => handleColorChange(color)}
+            onClick={() => customColorRef.current?.click()}
             className={cn(
-              "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
-              getCurrentColor() === color ? "border-foreground shadow-lg scale-110" : "border-border/50 hover:border-border",
+              "w-6 h-6 rounded-full border-2 transition-all hover:scale-110 relative overflow-hidden",
+              getCurrentColor() && !presetColors.includes(getCurrentColor()) ? "border-foreground shadow-lg scale-110" : "border-border/50",
             )}
-            style={{ backgroundColor: color }}
-          />
-        ))}
-        {/* Transparent swatch */}
-        {mode === "fill" && (
-          <button
-            onClick={() => onFillColorChange("transparent")}
-            className={cn(
-              "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
-              fillColor === "transparent" ? "border-foreground shadow-lg" : "border-border/50",
-              "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
-            )}
-            title="Transparent"
-          />
-        )}
-        {/* Rainbow color picker */}
-        <button
-          onClick={() => customColorRef.current?.click()}
-          className={cn(
-            "w-7 h-7 rounded-full border-2 transition-all hover:scale-110 relative overflow-hidden",
-            getCurrentColor() && !presetColors.includes(getCurrentColor()) ? "border-foreground shadow-lg scale-110" : "border-border/50",
+            style={{ background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
+            title="Custom color"
+          >
+            <input
+              ref={customColorRef}
+              type="color"
+              value={getCurrentColor()}
+              onChange={(e) => handleColorChange(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            />
+          </button>
+          {/* Transparent swatch */}
+          {(mode === "fill" || mode === "stroke") && (
+            <button
+              onClick={() => mode === "fill" ? onFillColorChange("transparent") : onStrokeColorChange("transparent")}
+              className={cn(
+                "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+                (mode === "fill" ? fillColor : strokeColor) === "transparent" ? "border-foreground shadow-lg" : "border-border/50",
+                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+              )}
+              title="Transparent"
+            />
           )}
-          style={{ background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
-          title="Custom color"
-        >
-          <input
-            ref={customColorRef}
-            type="color"
-            value={getCurrentColor()}
-            onChange={(e) => handleColorChange(e.target.value)}
-            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-          />
-        </button>
+          {/* Gradient circles */}
+          {TEXT_GRADIENTS.slice(0, 8).map((gradient, i) => (
+            <button
+              key={i}
+              onClick={() => handleColorChange(gradient)}
+              className="w-6 h-6 rounded-full border-2 border-border/50 hover:border-border transition-all hover:scale-110"
+              style={{ background: gradient }}
+              title={`Gradient ${i + 1}`}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Slider — context-dependent */}
@@ -2363,7 +2406,7 @@ function ShapeColorPicker({
             <span className="text-[10px] text-muted-foreground w-12">Width</span>
             <input
               type="range" value={currentWidth} onChange={(e) => onStrokeWidthChange(parseInt(e.target.value))}
-              min={0} max={12} step={1}
+              min={0} max={16} step={1}
               className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
             />
             <span className="text-[10px] text-muted-foreground w-8 text-right">{currentWidth}px</span>
