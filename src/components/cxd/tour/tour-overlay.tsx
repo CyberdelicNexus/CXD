@@ -223,40 +223,31 @@ export function TourOverlay() {
     };
 
     switch (pos) {
-      case "top":
+      case "top": {
         style.bottom = vh - targetRect.top + TOOLTIP_OFFSET;
-        style.left = targetRect.left + targetRect.width / 2;
-        style.transform = "translateX(-50%)";
+        // Center on target, then clamp so tooltip doesn't go off-screen
+        const topCenterX = targetRect.left + targetRect.width / 2 - TOOLTIP_MAX_WIDTH / 2;
+        style.left = Math.max(margin, Math.min(topCenterX, vw - TOOLTIP_MAX_WIDTH - margin));
         break;
-      case "bottom":
+      }
+      case "bottom": {
         style.top = targetRect.top + targetRect.height + TOOLTIP_OFFSET;
-        style.left = targetRect.left + targetRect.width / 2;
-        style.transform = "translateX(-50%)";
+        const bottomCenterX = targetRect.left + targetRect.width / 2 - TOOLTIP_MAX_WIDTH / 2;
+        style.left = Math.max(margin, Math.min(bottomCenterX, vw - TOOLTIP_MAX_WIDTH - margin));
         break;
-      case "left":
-        style.top = targetRect.top + targetRect.height / 2;
+      }
+      case "left": {
+        const leftCenterY = targetRect.top + targetRect.height / 2 - estimatedTooltipHeight / 2;
+        style.top = Math.max(margin, Math.min(leftCenterY, vh - estimatedTooltipHeight - margin));
         style.right = vw - targetRect.left + TOOLTIP_OFFSET;
-        style.transform = "translateY(-50%)";
         break;
-      case "right":
-        style.top = targetRect.top + targetRect.height / 2;
-        style.left = targetRect.left + targetRect.width + TOOLTIP_OFFSET;
-        style.transform = "translateY(-50%)";
+      }
+      case "right": {
+        const rightCenterY = targetRect.top + targetRect.height / 2 - estimatedTooltipHeight / 2;
+        style.top = Math.max(margin, Math.min(rightCenterY, vh - estimatedTooltipHeight - margin));
+        style.left = Math.min(targetRect.left + targetRect.width + TOOLTIP_OFFSET, vw - TOOLTIP_MAX_WIDTH - margin);
         break;
-    }
-
-    // Clamp to viewport bounds
-    if (style.left !== undefined && typeof style.left === "number") {
-      style.left = Math.max(margin, Math.min(style.left, vw - TOOLTIP_MAX_WIDTH - margin));
-    }
-    if (style.top !== undefined && typeof style.top === "number") {
-      style.top = Math.max(margin, Math.min(style.top, vh - estimatedTooltipHeight - margin));
-    }
-    if (style.right !== undefined && typeof style.right === "number") {
-      style.right = Math.max(margin, style.right);
-    }
-    if (style.bottom !== undefined && typeof style.bottom === "number") {
-      style.bottom = Math.max(margin, style.bottom);
+      }
     }
 
     return style;
