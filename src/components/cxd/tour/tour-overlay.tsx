@@ -290,9 +290,10 @@ export function TourOverlay() {
         fontFamily: "Inter, system-ui, sans-serif",
         transition: "opacity 300ms ease",
         opacity: isTransitioning ? 0.6 : 1,
+        pointerEvents: "none",
       }}
     >
-      {/* Dark overlay with cutout */}
+      {/* Dark overlay with cutout — captures clicks to skip tour */}
       <div
         style={{
           position: "fixed",
@@ -300,6 +301,7 @@ export function TourOverlay() {
           backgroundColor: "rgba(0,0,0,0.6)",
           clipPath: getClipPath(),
           transition: "clip-path 300ms ease",
+          pointerEvents: "auto",
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -337,6 +339,7 @@ export function TourOverlay() {
         style={{
           ...getTooltipStyle(),
           zIndex: 100002,
+          pointerEvents: "auto",
           transition: "all 300ms ease",
         }}
       >
@@ -446,6 +449,7 @@ export function TourOverlay() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  console.log('[Tour] NEXT clicked, advancing from step', tourStep);
                   nextTourStep();
                 }}
                 style={{
