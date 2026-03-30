@@ -126,15 +126,25 @@
     backdrop-filter: blur(12px);
   }
 
-  /* Hide all UI overlays inside read-only hypercube — only show the 3D canvas */
-  .hypercube-readonly .absolute {
+  /* Read-only hypercube: hide all UI, show only the rotating 3D cube */
+  .hypercube-readonly {
+    pointer-events: none;
+  }
+  /* Hide face selector nav bar */
+  .hypercube-readonly [data-tour-id] {
     display: none !important;
   }
-  .hypercube-readonly > div > div > div:first-child {
-    display: block !important;
+  /* Hide bottom UI panel */
+  .hypercube-readonly .hypercube-ui-panel {
+    display: none !important;
   }
-  .hypercube-readonly canvas {
-    display: block !important;
+  /* Hide right-side diagnostic/chat panels (z-20 overlay containers) */
+  .hypercube-readonly > div > div > .z-20 {
+    display: none !important;
+  }
+  /* Hide the face selector bar at the top */
+  .hypercube-readonly > div > div > .absolute.top-4 {
+    display: none !important;
   }
 
   .glow-teal {
