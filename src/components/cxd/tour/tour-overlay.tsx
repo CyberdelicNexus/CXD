@@ -90,24 +90,22 @@ export function TourOverlay() {
           height: rect.height,
         });
       } else {
-        // Element found but zero-size — skip after a few polls
+        // Element found but zero-size
         missingTargetCountRef.current++;
-        console.warn(`[Tour] Step ${tourStep} "${currentStep.title}" target="${currentStep.targetId}" found but ZERO SIZE (attempt ${missingTargetCountRef.current})`);
-        if (missingTargetCountRef.current > 4) {
-          console.warn(`[Tour] SKIPPING step ${tourStep} "${currentStep.title}" — zero size after 4 attempts`);
+        if (!currentStep.waitForTarget && missingTargetCountRef.current > 4) {
           missingTargetCountRef.current = 0;
           nextTourStep();
         }
+        // If waitForTarget, keep polling — element might appear later
       }
     } else {
-      // Element not found — auto-skip after ~2 seconds of polling (4 x 500ms)
+      // Element not found
       missingTargetCountRef.current++;
-      console.warn(`[Tour] Step ${tourStep} "${currentStep.title}" target="${currentStep.targetId}" NOT FOUND (attempt ${missingTargetCountRef.current})`);
-      if (missingTargetCountRef.current > 4) {
-        console.warn(`[Tour] SKIPPING step ${tourStep} "${currentStep.title}" — not found after 4 attempts`);
+      if (!currentStep.waitForTarget && missingTargetCountRef.current > 4) {
         missingTargetCountRef.current = 0;
         nextTourStep();
       }
+      // If waitForTarget, keep polling with null rect (shows wait message)
       setTargetRect(null);
     }
   }, [currentStep, nextTourStep, tourStep]);
@@ -124,22 +122,22 @@ export function TourOverlay() {
     if (isNewStep) {
       setIsTransitioning(true);
       prevStepRef.current = tourStep;
-      // Brief fade, then measure the new target
-      const fadeTimer = setTimeout(() => {
-        setIsTransitioning(false);
-        measureTarget();
-      }, 200);
-      return () => clearTimeout(fadeTimer);
     }
 
-    // Initial mount or same step — measure immediately and start polling
-    measureTarget();
-    measureIntervalRef.current = setInterval(measureTarget, 500);
+    // Measure after brief fade for new steps, immediately for same step
+    const delay = isNewStep ? 200 : 0;
+    const startTimer = setTimeout(() => {
+      if (isNewStep) setIsTransitioning(false);
+      measureTarget();
+      // Start polling — needed for waitForTarget steps and dynamic elements
+      measureIntervalRef.current = setInterval(measureTarget, 500);
+    }, delay);
 
     window.addEventListener("resize", measureTarget);
     window.addEventListener("scroll", measureTarget, true);
 
     return () => {
+      clearTimeout(startTimer);
       if (measureIntervalRef.current) {
         clearInterval(measureIntervalRef.current);
       }
@@ -368,17 +366,19 @@ export function TourOverlay() {
             {currentStep.title}
           </h3>
 
-          {/* Content */}
+          {/* Content — show wait message if target not found and waitForTarget is set */}
           <p
             style={{
               margin: 0,
               marginBottom: 16,
               fontSize: 13,
               lineHeight: 1.5,
-              color: "rgba(255,255,255,0.7)",
+              color: !targetRect && currentStep.waitForTarget ? "rgba(192,132,252,0.9)" : "rgba(255,255,255,0.7)",
             }}
           >
-            {currentStep.content}
+            {!targetRect && currentStep.waitForTarget && currentStep.waitMessage
+              ? currentStep.waitMessage
+              : currentStep.content}
           </p>
 
           {/* Step dots and buttons */}

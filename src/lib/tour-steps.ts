@@ -4,12 +4,14 @@ export interface TourStep {
   content: string;
   position: 'top' | 'bottom' | 'left' | 'right';
   preAction?: string; // Action to perform before showing this step
+  waitForTarget?: boolean; // If true, show a prompt and wait for target to appear instead of auto-skipping
+  waitMessage?: string; // Message to show while waiting for target
 }
 
 export const TOUR_STEPS: Record<'canvas' | 'map' | 'plan', TourStep[]> = {
   canvas: [
     { targetId: 'canvas-toolkit', title: 'Your Toolkit', content: 'This is your toolkit. Click any tool to add elements to your canvas — cards, text, images, shapes, containers, and more.', position: 'right' },
-    { targetId: 'canvas-element-sample', title: 'Canvas Elements', content: 'Drag to move, grab corners to resize, right-click for more options. Double-click cards to edit their content.', position: 'top' },
+    { targetId: 'canvas-element-sample', title: 'Canvas Elements', content: 'Drag to move, grab corners to resize, right-click for more options. Double-click cards to edit their content.', position: 'top', waitForTarget: true, waitMessage: 'Try adding an element! Click any tool in the toolkit above to place a card, text, or shape on the canvas.' },
     { targetId: 'canvas-inbox', title: 'Inbox', content: 'Your inbox holds elements waiting to be placed. Drag them onto the canvas when you\'re ready to use them.', position: 'left' },
     { targetId: 'canvas-board-tool', title: 'Nested Boards', content: 'Create nested boards to organize complex projects. Double-click a board to dive inside it.', position: 'top' },
     { targetId: 'canvas-experience-sidebar', title: 'Experience Elements', content: 'Drag experience elements from here onto the canvas, or click them to view details about each experience stage.', position: 'left' },
