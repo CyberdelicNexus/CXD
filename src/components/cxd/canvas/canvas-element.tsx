@@ -2662,6 +2662,8 @@ function TextColorPicker({
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"solid" | "gradient">("solid");
+  const [customColor, setCustomColor] = useState(currentColor || "#ffffff");
+  const colorInputRef = useRef<HTMLInputElement>(null);
 
   // Solid colors for text (white, grays, and some accent colors)
   const solidColors = [
@@ -2675,6 +2677,7 @@ function TextColorPicker({
     "#F472B6", // Pink
     "#34D399", // Green
     "#60A5FA", // Blue
+    "#F59E0B", // Amber
   ];
 
   return (
@@ -2728,6 +2731,31 @@ function TextColorPicker({
               title={color}
             />
           ))}
+          {/* Rainbow color picker button */}
+          <button
+            onClick={() => colorInputRef.current?.click()}
+            className={cn(
+              "w-7 h-7 rounded-full border-2 transition-all hover:scale-110 relative overflow-hidden",
+              currentColor && !solidColors.includes(currentColor) && !currentGradient
+                ? "border-foreground shadow-lg scale-110"
+                : "border-border/50 hover:border-border",
+            )}
+            style={{
+              background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
+            }}
+            title="Custom color"
+          >
+            <input
+              ref={colorInputRef}
+              type="color"
+              value={customColor}
+              onChange={(e) => {
+                setCustomColor(e.target.value);
+                onColorChange(e.target.value);
+              }}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            />
+          </button>
         </div>
       )}
       {/* Gradient swatches — circular previews */}
