@@ -89,21 +89,6 @@ export function ShareLandingPage({
           )}
         </div>
 
-        {/* CXD Branding — top center */}
-        <div className="flex items-center gap-3 -mt-8 mb-8 relative z-10">
-          <Image
-            src="/images/hypercube-logo.webp"
-            alt="CXD"
-            width={32}
-            height={32}
-            className="object-contain"
-            priority
-          />
-          <span className="text-sm font-medium text-white/40 tracking-wide">
-            Cyberdelic Experience Design
-          </span>
-        </div>
-
         {/* 2-column content — thumbnail left, info+buttons right */}
         <div className="w-full max-w-4xl mx-auto px-8 relative z-10 pb-16">
           <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-10 items-center">
@@ -147,7 +132,7 @@ export function ShareLandingPage({
               )}
 
               {/* Buttons */}
-              <div className="space-y-3 pt-2">
+              <div className="space-y-3 pt-2 w-[85%]">
                 <div className="rounded-xl p-px bg-gradient-to-r from-violet-500/30 via-purple-400/40 to-violet-500/30 hover:from-violet-500/40 hover:via-purple-400/50 hover:to-violet-500/40 transition-all duration-300">
                   <button onClick={onViewFraming} className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2">
                     <Sparkles className="w-4 h-4" />
@@ -174,6 +159,21 @@ export function ShareLandingPage({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Footer — CXD Branding */}
+        <div className="flex items-center justify-center gap-3 py-10 relative z-10">
+          <Image
+            src="/images/hypercube-logo.webp"
+            alt="CXD"
+            width={28}
+            height={28}
+            className="object-contain opacity-40"
+            priority
+          />
+          <span className="text-xs font-medium text-white/25 tracking-wide">
+            Cyberdelic Experience Design
+          </span>
         </div>
       </div>
     </div>
