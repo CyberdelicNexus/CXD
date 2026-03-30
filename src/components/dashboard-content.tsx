@@ -800,6 +800,19 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="w-8 h-8 bg-white/10 hover:bg-purple-500/30 text-white/70 hover:text-white border border-white/10 hover:border-purple-500/30"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/cxd/overview/${project.id}`);
+                              }}
+                              title="Project Overview"
+                            >
+                              <BarChart3 className="w-4 h-4" />
+                            </Button>
+
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               className="w-8 h-8 bg-white/10 hover:bg-blue-500/30 text-white/70 hover:text-white border border-white/10 hover:border-blue-500/30"
                               onClick={(e) => {
                                 e.stopPropagation();

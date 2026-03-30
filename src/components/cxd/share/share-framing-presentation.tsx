@@ -52,7 +52,7 @@ import {
 // ECharts tree-shakeable imports
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import * as echarts from 'echarts/core';
-import { RadarChart, BarChart, PieChart, LineChart, CustomChart, GraphChart } from 'echarts/charts';
+import { RadarChart, BarChart, PieChart, LineChart, CustomChart } from 'echarts/charts';
 import {
   GridComponent,
   TooltipComponent,
@@ -66,7 +66,6 @@ echarts.use([
   PieChart,
   LineChart,
   CustomChart,
-  GraphChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
@@ -837,16 +836,6 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
         />
         <StatCard icon={<Layers className="w-4 h-4" />} label="Untagged" value={faceData.untaggedCount} />
       </div>
-
-      {/* Graph chart - Hypercube Network */}
-      <ChartCard title="Hypercube Network">
-        <ReactEChartsCore
-          echarts={echarts}
-          option={buildHypercubeGraphOption(faceData.entries, faceData.taggedCount)}
-          style={{ height: '350px' }}
-          opts={{ renderer: 'canvas' }}
-        />
-      </ChartCard>
 
       {/* Radar chart - Experience Design Coverage */}
       <ChartCard title="Experience Design Coverage">
@@ -1679,79 +1668,6 @@ function buildHypercubeBarOption(entries: { face: string; count: number; color: 
       data,
       barMaxWidth: 24,
     }],
-    animation: false,
-  };
-}
-
-function buildHypercubeGraphOption(
-  entries: { face: string; count: number; color: string }[],
-  totalElements: number,
-): echarts.EChartsCoreOption {
-  const faces = entries.filter((e) => e.count > 0);
-  return {
-    backgroundColor: 'transparent',
-    textStyle: { color: CHART_TEXT_COLOR, fontFamily: CHART_FONT_FAMILY },
-    tooltip: {
-      ...tooltipStyle,
-      trigger: 'item',
-      formatter: (params: unknown) => {
-        const p = params as { data: { name: string; value: number }; dataType: string };
-        if (p.dataType === 'edge') return '';
-        return `<span style="color:rgba(255,255,255,0.8);font-weight:bold">${p.data.name}</span><br/><span style="color:rgba(139,92,246,0.9)">${p.data.value} elements</span>`;
-      },
-    },
-    series: [
-      {
-        type: 'graph',
-        layout: 'circular',
-        roam: true,
-        label: {
-          show: true,
-          color: 'rgba(255,255,255,0.7)',
-          fontSize: 10,
-          fontFamily: CHART_FONT_FAMILY,
-        },
-        edgeSymbol: ['none', 'arrow'],
-        edgeSymbolSize: 6,
-        lineStyle: {
-          color: 'rgba(139,92,246,0.3)',
-          width: 1.5,
-          curveness: 0.1,
-        },
-        emphasis: {
-          focus: 'adjacency' as const,
-          lineStyle: { width: 3 },
-        },
-        data: [
-          {
-            name: 'Experience',
-            value: totalElements,
-            symbolSize: 50,
-            itemStyle: {
-              color: 'rgba(255,255,255,0.9)',
-              shadowColor: 'rgba(255,255,255,0.4)',
-              shadowBlur: 20,
-            },
-            label: { fontSize: 12, fontWeight: 'bold' as const },
-          },
-          ...faces.map((f) => ({
-            name: f.face,
-            value: f.count,
-            symbolSize: Math.max(25, Math.min(55, f.count * 4)),
-            itemStyle: {
-              color: f.color,
-              shadowColor: f.color,
-              shadowBlur: 15,
-            },
-          })),
-        ],
-        links: faces.map((f) => ({
-          source: 'Experience',
-          target: f.face,
-          lineStyle: { color: f.color + '40' },
-        })),
-      },
-    ],
     animation: false,
   };
 }
