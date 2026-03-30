@@ -1768,10 +1768,11 @@ function FlowSectionContent({ project }: { project: CXDProject }) {
 
 interface ShareFramingPresentationProps {
   project: CXDProject;
+  defaultSection?: string;
 }
 
-export function ShareFramingPresentation({ project }: ShareFramingPresentationProps) {
-  const [activeSection, setActiveSection] = useState<string>('overview');
+export function ShareFramingPresentation({ project, defaultSection }: ShareFramingPresentationProps) {
+  const [activeSection, setActiveSection] = useState<string>(defaultSection || 'overview');
 
   const stats = useMemo(() => {
     const stageCount = project.experienceFlowStages?.length || 5;

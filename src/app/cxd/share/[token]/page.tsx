@@ -15,6 +15,8 @@ import {
   Wand2,
   Grid3X3,
   ArrowLeft,
+  Boxes,
+  ListTodo,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { extractCenterColor, hexToRgba } from '@/lib/utils';
@@ -29,7 +31,7 @@ const CANVAS_GRADIENTS = [
   { name: 'Void', value: '#000000' },
 ];
 
-type ViewMode = 'landing' | 'framing' | 'canvas';
+type ViewMode = 'landing' | 'framing' | 'canvas' | 'map' | 'plan';
 
 export default function SharePage({ params }: { params: { token: string } }) {
   const token = useMemo(() => decodeURIComponent(params.token), [params.token]);
@@ -199,6 +201,8 @@ export default function SharePage({ params }: { params: { token: string } }) {
       {[
         { id: 'framing' as const, label: 'Experience', icon: Wand2, color: 'violet' },
         { id: 'canvas' as const, label: 'Canvas', icon: Grid3X3, color: 'cyan' },
+        { id: 'map' as const, label: 'Map', icon: Boxes, color: 'emerald' },
+        { id: 'plan' as const, label: 'Plan', icon: ListTodo, color: 'amber' },
       ].map((btn) => {
         const isActive = viewMode === btn.id;
         const colors: Record<string, string> = {
@@ -208,6 +212,12 @@ export default function SharePage({ params }: { params: { token: string } }) {
           cyan: isActive
             ? 'bg-gradient-to-b from-cyan-400/20 to-cyan-950/60 border-cyan-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
             : 'hover:bg-cyan-500/10 hover:border-cyan-500/30',
+          emerald: isActive
+            ? 'bg-gradient-to-b from-emerald-400/20 to-emerald-950/60 border-emerald-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+            : 'hover:bg-emerald-500/10 hover:border-emerald-500/30',
+          amber: isActive
+            ? 'bg-gradient-to-b from-amber-400/20 to-amber-950/60 border-amber-500/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]'
+            : 'hover:bg-amber-500/10 hover:border-amber-500/30',
         };
         return (
           <div
@@ -260,10 +270,17 @@ export default function SharePage({ params }: { params: { token: string } }) {
 
       {/* Content */}
       <main className="flex-1 overflow-hidden">
-        {viewMode === 'framing' ? (
+        {viewMode === 'framing' && (
           <ShareFramingPresentation project={project} />
-        ) : (
+        )}
+        {viewMode === 'canvas' && (
           <CXDCanvasReadOnly project={project} />
+        )}
+        {viewMode === 'map' && (
+          <ShareFramingPresentation project={project} defaultSection="hypercube" />
+        )}
+        {viewMode === 'plan' && (
+          <ShareFramingPresentation project={project} defaultSection="planning" />
         )}
       </main>
     </div>
