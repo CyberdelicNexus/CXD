@@ -293,33 +293,45 @@ export function TourOverlay() {
         pointerEvents: "none",
       }}
     >
-      {/* Dark overlay with cutout — captures clicks to skip tour */}
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          backgroundColor: "rgba(0,0,0,0.6)",
-          clipPath: getClipPath(),
-          transition: "clip-path 300ms ease",
-          pointerEvents: "auto",
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          skipTour();
-        }}
-      />
-
-      {/* Purple glow around cutout */}
-      {glowStyle && (
+      {/* Dark overlay with cutout — only show when we have a target and NOT in waitForTarget mode without a target */}
+      {!(currentStep.waitForTarget && !targetRect) && (
         <div
           style={{
-            ...glowStyle,
-            transition: "top 300ms ease, left 300ms ease, width 300ms ease, height 300ms ease",
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0,0,0,0.55)",
+            clipPath: getClipPath(),
+            transition: "clip-path 300ms ease",
+            pointerEvents: "auto",
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            // Don't skip tour when clicking overlay — just ignore
           }}
         />
       )}
 
-      {/* Allow clicking the highlighted element */}
+      {/* Purple gradient glow around cutout with rounded corners */}
+      {targetRect && (
+        <div
+          style={{
+            position: "fixed",
+            top: targetRect.top - CUTOUT_PADDING - GLOW_SPREAD,
+            left: targetRect.left - CUTOUT_PADDING - GLOW_SPREAD,
+            width: targetRect.width + (CUTOUT_PADDING + GLOW_SPREAD) * 2,
+            height: targetRect.height + (CUTOUT_PADDING + GLOW_SPREAD) * 2,
+            borderRadius: 12,
+            border: "1.5px solid rgba(139,92,246,0.4)",
+            background: "linear-gradient(135deg, rgba(139,92,246,0.08), rgba(168,85,247,0.04))",
+            boxShadow: "0 0 20px rgba(139,92,246,0.25), 0 0 40px rgba(139,92,246,0.1), inset 0 0 20px rgba(139,92,246,0.05)",
+            pointerEvents: "none",
+            zIndex: 100001,
+            transition: "all 300ms ease",
+          }}
+        />
+      )}
+
+      {/* Clickable pass-through area over the highlighted element */}
       {targetRect && (
         <div
           style={{
@@ -328,7 +340,9 @@ export function TourOverlay() {
             left: targetRect.left - CUTOUT_PADDING,
             width: targetRect.width + CUTOUT_PADDING * 2,
             height: targetRect.height + CUTOUT_PADDING * 2,
+            borderRadius: 12,
             zIndex: 100001,
+            // Let clicks pass through to the actual UI element beneath
             pointerEvents: "none",
           }}
         />
