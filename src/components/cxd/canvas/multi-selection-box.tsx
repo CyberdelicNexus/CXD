@@ -93,11 +93,15 @@ export function MultiSelectionBox({
     };
   }, []);
 
-  // Calculate bounding box
+  // Calculate bounding box with padding to separate group handles from element handles
+  const GROUP_PADDING = 16; // px of padding between elements and group outline
   const bounds = calculateBounds(selectedElements);
   if (!bounds) return null;
 
-  const { minX, minY, maxX, maxY } = bounds;
+  const minX = bounds.minX - GROUP_PADDING;
+  const minY = bounds.minY - GROUP_PADDING;
+  const maxX = bounds.maxX + GROUP_PADDING;
+  const maxY = bounds.maxY + GROUP_PADDING;
   const width = maxX - minX;
   const height = maxY - minY;
 
@@ -169,10 +173,17 @@ export function MultiSelectionBox({
 
       setIsResizing(true);
       setResizeHandle(handle);
+      // Store bounds WITH padding for visual tracking, but use original element bounds for scaling
+      const originalBounds = calculateBounds(selectedElements);
       setResizeStart({
         x: e.clientX,
         y: e.clientY,
-        bounds: { minX, minY, maxX, maxY },
+        bounds: originalBounds ? {
+          minX: originalBounds.minX,
+          minY: originalBounds.minY,
+          maxX: originalBounds.maxX,
+          maxY: originalBounds.maxY,
+        } : { minX, minY, maxX, maxY },
         elements: elementData,
       });
     },
@@ -297,8 +308,8 @@ export function MultiSelectionBox({
           top: minY,
           width,
           height,
-          border: "2px dashed hsl(var(--primary) / 0.6)",
-          borderRadius: 4,
+          border: "1.5px dashed hsl(var(--primary) / 0.5)",
+          borderRadius: 8,
           background: "transparent",
         }}
         onMouseDown={(e) => {
