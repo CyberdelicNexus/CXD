@@ -144,9 +144,10 @@ function ReadOnlyField({ label, value }: { label: string; value: string | undefi
       <div className="text-xs font-medium text-white/50 uppercase tracking-wider">{label}</div>
       <div
         className={cn(
-          'rounded-lg px-3 py-2.5 text-sm leading-relaxed border border-white/5 bg-white/[0.03]',
-          hasContent ? 'text-white/80 whitespace-pre-wrap' : 'italic text-white/20',
+          'rounded-lg px-4 py-3 text-[15px] leading-relaxed border border-purple-500/10',
+          hasContent ? 'text-white/85 whitespace-pre-wrap' : 'italic text-white/20',
         )}
+        style={{ background: 'linear-gradient(135deg, rgba(18, 8, 35, 0.95) 0%, rgba(8, 4, 18, 0.9) 100%)' }}
       >
         {hasContent ? value : 'Not yet defined'}
       </div>
@@ -444,6 +445,7 @@ function WizardTraitMappingSection({ project }: { project: CXDProject }) {
 /* ── Planning section renderer ──────────────────────────────────── */
 
 function PlanningSection({ project }: { project: CXDProject }) {
+  const [taskView, setTaskView] = useState<'kanban' | 'list' | 'timeline'>('kanban');
   const elements = project.canvasLayout?.elements || [];
   const tasks = elements.filter((el) => el.type === 'freeform' && (el.cardType === 'task' || el.taskMetadata));
 
@@ -612,108 +614,118 @@ function PlanningSection({ project }: { project: CXDProject }) {
         />
       </ChartCard>
 
-      {/* Gantt-like timeline for tasks with dates */}
-      {tasksWithDates.length > 0 && (
-        <ChartCard title="Task Timeline (Gantt)">
-          <ReactEChartsCore
-            echarts={echarts}
-            option={buildTaskGanttOption(tasksWithDates, statusColors)}
-            style={{ height: `${Math.max(200, tasksWithDates.length * 36 + 60)}px` }}
-            opts={{ renderer: 'canvas' }}
-          />
-        </ChartCard>
-      )}
-      {tasksWithDates.length === 0 && (
-        <ChartCard title="Task Timeline">
-          <div className="text-sm text-white/30 italic py-4 text-center">No tasks with dates set</div>
-        </ChartCard>
-      )}
+      {/* Task view with filter buttons */}
+      <ChartCard title="Tasks">
+        {/* Filter buttons */}
+        <div className="flex gap-2 mb-4">
+          {(['kanban', 'list', 'timeline'] as const).map((view) => (
+            <button
+              key={view}
+              onClick={() => setTaskView(view)}
+              className={cn(
+                'px-3 py-1.5 text-xs font-medium rounded-lg border transition-all capitalize',
+                taskView === view
+                  ? 'bg-violet-500/15 border-violet-500/30 text-white'
+                  : 'bg-transparent border-white/[0.06] text-white/40 hover:text-white/60 hover:bg-white/[0.04]',
+              )}
+            >
+              {view}
+            </button>
+          ))}
+        </div>
 
-      {/* Kanban Board */}
-      <ChartCard title="Kanban Board">
-        <div className="grid grid-cols-4 gap-3">
-          {['not_started', 'in_progress', 'completed', 'blocked'].map((status) => {
-            const columnTasks = tasks.filter((t) => t.type === 'freeform' && (t.taskMetadata?.status || 'not_started') === status);
-            return (
-              <div key={status} className="space-y-2">
-                <div className="flex items-center gap-2 pb-2 border-b border-white/5">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: statusColors[status] }} />
-                  <span className="text-xs font-medium text-white/60">{statusLabels[status]}</span>
-                  <span className="text-[10px] text-white/30 ml-auto">{columnTasks.length}</span>
-                </div>
-                <div className="space-y-1.5 min-h-[60px]">
-                  {columnTasks.map((t) => {
-                    if (t.type !== 'freeform') return null;
-                    const title = t.noteTitle || t.content?.slice(0, 40) || 'Untitled';
-                    const priority = t.taskMetadata?.priority || 'medium';
-                    return (
-                      <div key={t.id} className="px-2.5 py-2 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                        <p className="text-xs text-white/70 leading-relaxed truncate">{title}</p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: priorityColors[priority] }} />
-                          <span className="text-[10px] text-white/30 capitalize">{priority}</span>
+        {/* Kanban view */}
+        {taskView === 'kanban' && (
+          <div className="grid grid-cols-4 gap-3">
+            {['not_started', 'in_progress', 'completed', 'blocked'].map((status) => {
+              const columnTasks = tasks.filter((t) => t.type === 'freeform' && (t.taskMetadata?.status || 'not_started') === status);
+              return (
+                <div key={status} className="space-y-2">
+                  <div className="flex items-center gap-2 pb-2 border-b border-white/5">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: statusColors[status] }} />
+                    <span className="text-xs font-medium text-white/60">{statusLabels[status]}</span>
+                    <span className="text-[10px] text-white/30 ml-auto">{columnTasks.length}</span>
+                  </div>
+                  <div className="space-y-1.5 min-h-[60px]">
+                    {columnTasks.map((t) => {
+                      if (t.type !== 'freeform') return null;
+                      const title = t.noteTitle || t.content?.slice(0, 40) || 'Untitled';
+                      const priority = t.taskMetadata?.priority || 'medium';
+                      return (
+                        <div key={t.id} className="px-2.5 py-2 rounded-lg border border-purple-500/10 transition-colors" style={{ background: 'rgba(18,8,35,0.8)' }}>
+                          <p className="text-xs text-white/70 leading-relaxed truncate">{title}</p>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: priorityColors[priority] }} />
+                            <span className="text-[10px] text-white/30 capitalize">{priority}</span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                  {columnTasks.length === 0 && (
-                    <div className="text-[10px] text-white/15 italic text-center py-3">No tasks</div>
-                  )}
+                      );
+                    })}
+                    {columnTasks.length === 0 && (
+                      <div className="text-[10px] text-white/15 italic text-center py-3">No tasks</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </ChartCard>
+              );
+            })}
+          </div>
+        )}
 
-      {/* Task list table */}
-      <ChartCard title="Task List">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-white/30 uppercase tracking-wider border-b border-white/5">
-                <th className="text-left py-2 px-2 font-medium">Title</th>
-                <th className="text-left py-2 px-2 font-medium">Status</th>
-                <th className="text-left py-2 px-2 font-medium">Priority</th>
-                <th className="text-left py-2 px-2 font-medium">Due Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((t) => {
-                if (t.type !== 'freeform') return null;
-                const title = t.noteTitle || t.content?.slice(0, 50) || 'Untitled';
-                const status = t.taskMetadata?.status || 'not_started';
-                const priority = t.taskMetadata?.priority || 'medium';
-                const dueDate = t.taskMetadata?.dueDate;
-                return (
-                  <tr key={t.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
-                    <td className="py-2 px-2 text-white/70 max-w-[200px] truncate">{title}</td>
-                    <td className="py-2 px-2">
-                      <span
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                        style={{ backgroundColor: statusColors[status] + '20', color: statusColors[status] }}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColors[status] }} />
-                        {statusLabels[status]}
-                      </span>
-                    </td>
-                    <td className="py-2 px-2">
-                      <span
-                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium capitalize"
-                        style={{ backgroundColor: priorityColors[priority] + '20', color: priorityColors[priority] }}
-                      >
-                        {priority}
-                      </span>
-                    </td>
-                    <td className="py-2 px-2 text-white/40">
-                      {dueDate ? new Date(dueDate).toLocaleDateString() : '--'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        {/* List view */}
+        {taskView === 'list' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-white/30 uppercase tracking-wider border-b border-white/5">
+                  <th className="text-left py-2 px-2 font-medium">Title</th>
+                  <th className="text-left py-2 px-2 font-medium">Status</th>
+                  <th className="text-left py-2 px-2 font-medium">Priority</th>
+                  <th className="text-left py-2 px-2 font-medium">Due Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((t) => {
+                  if (t.type !== 'freeform') return null;
+                  const title = t.noteTitle || t.content?.slice(0, 50) || 'Untitled';
+                  const status = t.taskMetadata?.status || 'not_started';
+                  const priority = t.taskMetadata?.priority || 'medium';
+                  const dueDate = t.taskMetadata?.dueDate;
+                  return (
+                    <tr key={t.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                      <td className="py-2 px-2 text-white/70 max-w-[200px] truncate">{title}</td>
+                      <td className="py-2 px-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ backgroundColor: statusColors[status] + '20', color: statusColors[status] }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColors[status] }} />
+                          {statusLabels[status]}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium capitalize" style={{ backgroundColor: priorityColors[priority] + '20', color: priorityColors[priority] }}>
+                          {priority}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2 text-white/40">{dueDate ? new Date(dueDate).toLocaleDateString() : '--'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Timeline view */}
+        {taskView === 'timeline' && (
+          tasksWithDates.length > 0 ? (
+            <ReactEChartsCore
+              echarts={echarts}
+              option={buildTaskGanttOption(tasksWithDates, statusColors)}
+              style={{ height: `${Math.max(200, tasksWithDates.length * 36 + 60)}px` }}
+              opts={{ renderer: 'canvas' }}
+            />
+          ) : (
+            <div className="text-sm text-white/30 italic py-4 text-center">No tasks with dates set</div>
+          )
+        )}
       </ChartCard>
     </div>
   );
@@ -1580,12 +1592,15 @@ function buildHypercubeDonutOption(entries: { face: string; count: number; color
     value: e.count,
     name: e.face,
     itemStyle: {
-      color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+      color: new echarts.graphic.LinearGradient(0, 0, 1, 1, [
         { offset: 0, color: e.color },
-        { offset: 1, color: e.color + 'AA' },
+        { offset: 0.6, color: e.color + 'CC' },
+        { offset: 1, color: '#1a0a30' },
       ]),
-      shadowColor: e.color + '40',
-      shadowBlur: 12,
+      shadowColor: e.color + '50',
+      shadowBlur: 15,
+      borderColor: 'rgba(0,0,0,0.3)',
+      borderWidth: 1,
     },
   }));
 
@@ -1634,11 +1649,12 @@ function buildHypercubeBarOption(entries: { face: string; count: number; color: 
     itemStyle: {
       color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
         { offset: 0, color: e.color },
-        { offset: 1, color: e.color + '88' },
+        { offset: 0.7, color: e.color + 'AA' },
+        { offset: 1, color: '#1a0a30' },
       ]),
       borderRadius: [0, 4, 4, 0],
-      shadowColor: e.color + '40',
-      shadowBlur: 8,
+      shadowColor: e.color + '50',
+      shadowBlur: 12,
     },
   }));
 

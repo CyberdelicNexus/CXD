@@ -40,9 +40,10 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
   // Canvas background from project
   const canvasBackground = project.canvasBackground || DEFAULT_CANVAS_BG;
 
-  // Filter elements for current board
+  // Filter elements for current board (normalize undefined/null/empty string)
   const visibleElements = useMemo(() => {
-    return canvasElements.filter((el) => el.boardId === currentBoardId);
+    const normalizedBoardId = currentBoardId || null;
+    return canvasElements.filter((el) => (el.boardId || null) === normalizedBoardId);
   }, [canvasElements, currentBoardId]);
 
   // Filter edges for current board
