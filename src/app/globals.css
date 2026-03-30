@@ -117,16 +117,24 @@
 
   .glass-purple {
     background: linear-gradient(135deg,
-        rgba(26, 15, 46, 0.95) 0%,
-        rgba(15, 10, 30, 0.98) 100%);
-    border: 1px solid rgba(139, 92, 246, 0.25);
+        rgba(20, 10, 40, 0.6) 0%,
+        rgba(12, 6, 25, 0.5) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.15);
     box-shadow:
-      0 0 15px rgba(139, 92, 246, 0.2),
-      0 0 40px rgba(139, 92, 246, 0.1),
-      0 0 80px rgba(88, 28, 135, 0.15),
-      0 8px 32px rgba(0, 0, 0, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(20px);
+      0 0 10px rgba(139, 92, 246, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(12px);
+  }
+
+  /* Hide all UI overlays inside read-only hypercube — only show the 3D canvas */
+  .hypercube-readonly .absolute {
+    display: none !important;
+  }
+  .hypercube-readonly > div > div > div:first-child {
+    display: block !important;
+  }
+  .hypercube-readonly canvas {
+    display: block !important;
   }
 
   .glow-teal {

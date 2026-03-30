@@ -630,6 +630,43 @@ function PlanningSection({ project }: { project: CXDProject }) {
         </ChartCard>
       )}
 
+      {/* Kanban Board */}
+      <ChartCard title="Kanban Board">
+        <div className="grid grid-cols-4 gap-3">
+          {['not_started', 'in_progress', 'completed', 'blocked'].map((status) => {
+            const columnTasks = tasks.filter((t) => t.type === 'freeform' && (t.taskMetadata?.status || 'not_started') === status);
+            return (
+              <div key={status} className="space-y-2">
+                <div className="flex items-center gap-2 pb-2 border-b border-white/5">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: statusColors[status] }} />
+                  <span className="text-xs font-medium text-white/60">{statusLabels[status]}</span>
+                  <span className="text-[10px] text-white/30 ml-auto">{columnTasks.length}</span>
+                </div>
+                <div className="space-y-1.5 min-h-[60px]">
+                  {columnTasks.map((t) => {
+                    if (t.type !== 'freeform') return null;
+                    const title = t.noteTitle || t.content?.slice(0, 40) || 'Untitled';
+                    const priority = t.taskMetadata?.priority || 'medium';
+                    return (
+                      <div key={t.id} className="px-2.5 py-2 rounded-lg border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+                        <p className="text-xs text-white/70 leading-relaxed truncate">{title}</p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: priorityColors[priority] }} />
+                          <span className="text-[10px] text-white/30 capitalize">{priority}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {columnTasks.length === 0 && (
+                    <div className="text-[10px] text-white/15 italic text-center py-3">No tasks</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </ChartCard>
+
       {/* Task list table */}
       <ChartCard title="Task List">
         <div className="overflow-x-auto">
@@ -771,8 +808,8 @@ function HypercubeMapSection({ project }: { project: CXDProject }) {
 
   return (
     <div className="space-y-6">
-      {/* Interactive 3D Hypercube */}
-      <div className="rounded-xl overflow-hidden border border-purple-500/15 h-[400px] relative" style={{ background: 'rgba(5,2,12,0.8)' }}>
+      {/* Interactive 3D Hypercube — only the rotating cube, no UI */}
+      <div className="hypercube-readonly rounded-xl overflow-hidden border border-purple-500/15 h-[400px] relative" style={{ background: 'rgba(5,2,12,0.8)' }}>
         <Hypercube3D
           project={project}
           onSelectSection={noop}
@@ -1160,9 +1197,10 @@ function buildTimelineOption(project: CXDProject): echarts.EChartsCoreOption {
         data: minutes,
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(192, 132, 252, 0.8)' },
-            { offset: 0.5, color: 'rgba(139, 92, 246, 0.6)' },
-            { offset: 1, color: 'rgba(168, 85, 247, 0.3)' },
+            { offset: 0, color: 'rgba(139, 92, 246, 0.5)' },
+            { offset: 0.4, color: 'rgba(88, 28, 135, 0.3)' },
+            { offset: 0.7, color: 'rgba(30, 10, 60, 0.15)' },
+            { offset: 1, color: 'rgba(0, 0, 0, 0)' },
           ]),
         },
         lineStyle: {

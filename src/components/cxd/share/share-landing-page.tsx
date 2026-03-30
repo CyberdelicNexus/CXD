@@ -104,10 +104,23 @@ export function ShareLandingPage({
           </span>
         </div>
 
-        {/* 2-column content — tightly centered */}
+        {/* 2-column content — thumbnail left, info+buttons right */}
         <div className="w-full max-w-4xl mx-auto px-8 relative z-10 pb-16">
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-10 items-start">
-            {/* Left column — info + thumbnail */}
+          <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-10 items-center">
+            {/* Left column — thumbnail */}
+            <div>
+              {thumbnail ? (
+                <div className="w-full aspect-square rounded-2xl overflow-hidden border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
+                  <img src={thumbnail} alt="Preview" className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className="w-full aspect-square rounded-2xl border border-white/10 bg-gradient-to-br from-violet-950/50 to-purple-900/30 flex items-center justify-center">
+                  <Image src="/images/hypercube-logo.webp" alt="CXD" width={80} height={80} className="opacity-30" />
+                </div>
+              )}
+            </div>
+
+            {/* Right column — info + buttons */}
             <div className="space-y-5">
               <h1 className="text-4xl md:text-5xl font-bold text-white tracking-tight leading-tight">
                 {project.name}
@@ -116,11 +129,7 @@ export function ShareLandingPage({
               {/* Author */}
               <div className="flex items-center gap-3">
                 {ownerAvatar ? (
-                  <img
-                    src={ownerAvatar}
-                    alt={ownerName}
-                    className="w-10 h-10 rounded-full object-cover border-2 border-violet-500/30"
-                  />
+                  <img src={ownerAvatar} alt={ownerName} className="w-10 h-10 rounded-full object-cover border-2 border-violet-500/30" />
                 ) : (
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-sm font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)]">
                     {initials}
@@ -134,62 +143,34 @@ export function ShareLandingPage({
 
               {/* Description */}
               {(project.shareDescription || project.description) && (
-                <p className="text-sm text-white/50 leading-relaxed max-w-lg">
-                  {project.shareDescription || project.description}
-                </p>
+                <p className="text-sm text-white/50 leading-relaxed">{project.shareDescription || project.description}</p>
               )}
 
-              {/* Thumbnail */}
-              {thumbnail && (
-                <div className="w-full max-w-[360px] aspect-square rounded-2xl overflow-hidden border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
-                  <img src={thumbnail} alt="Preview" className="w-full h-full object-cover" />
+              {/* Buttons */}
+              <div className="space-y-3 pt-2">
+                <div className="rounded-xl p-px bg-gradient-to-r from-violet-500/30 via-purple-400/40 to-violet-500/30 hover:from-violet-500/40 hover:via-purple-400/50 hover:to-violet-500/40 transition-all duration-300">
+                  <button onClick={onViewFraming} className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    View Experience Design
+                  </button>
                 </div>
-              )}
-            </div>
-
-            {/* Right column — actions */}
-            <div className="space-y-3 lg:pt-4">
-              {/* View Experience Design — purple gradient */}
-              <div className="rounded-xl p-px bg-gradient-to-r from-violet-500/30 via-purple-400/40 to-violet-500/30 hover:from-violet-500/40 hover:via-purple-400/50 hover:to-violet-500/40 transition-all duration-300">
-                <button
-                  onClick={onViewFraming}
-                  className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  View Experience Design
-                </button>
-              </div>
-
-              {/* View Canvas — emerald gradient */}
-              <div className="rounded-xl p-px bg-gradient-to-r from-emerald-500/25 via-teal-400/35 to-emerald-500/25 hover:from-emerald-500/35 hover:via-teal-400/45 hover:to-emerald-500/35 transition-all duration-300">
-                <button
-                  onClick={onViewCanvas}
-                  className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                  View Canvas
-                </button>
-              </div>
-
-              {/* Request to Collaborate — purple/violet gradient */}
-              <div className="rounded-xl p-px bg-gradient-to-r from-purple-500/20 via-violet-400/30 to-purple-500/20 hover:from-purple-500/30 hover:via-violet-400/40 hover:to-purple-500/30 transition-all duration-300">
-                <Link
-                  href={`/sign-up?returnTo=/cxd/share/${shareToken}&join=true`}
-                  className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2"
-                >
-                  <Users className="w-4 h-4" />
-                  Request to Collaborate
-                </Link>
-              </div>
-
-              {/* Create your own */}
-              <div className="text-center pt-2">
-                <Link
-                  href="/"
-                  className="text-xs font-medium text-violet-400/70 hover:text-violet-300 transition-colors"
-                >
-                  Create your own experience design &rarr;
-                </Link>
+                <div className="rounded-xl p-px bg-gradient-to-r from-emerald-500/25 via-teal-400/35 to-emerald-500/25 hover:from-emerald-500/35 hover:via-teal-400/45 hover:to-emerald-500/35 transition-all duration-300">
+                  <button onClick={onViewCanvas} className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2">
+                    <LayoutGrid className="w-4 h-4" />
+                    View Canvas
+                  </button>
+                </div>
+                <div className="rounded-xl p-px bg-gradient-to-r from-purple-500/20 via-violet-400/30 to-purple-500/20 hover:from-purple-500/30 hover:via-violet-400/40 hover:to-purple-500/30 transition-all duration-300">
+                  <Link href={`/sign-up?returnTo=/cxd/share/${shareToken}&join=true`} className="w-full px-5 py-3.5 rounded-[11px] bg-black/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-black/60 transition-all duration-300 flex items-center justify-center gap-2">
+                    <Users className="w-4 h-4" />
+                    Request to Collaborate
+                  </Link>
+                </div>
+                <div className="text-center pt-1">
+                  <Link href="/" className="text-xs font-medium text-violet-400/70 hover:text-violet-300 transition-colors">
+                    Create your own experience design &rarr;
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
