@@ -293,20 +293,16 @@ export function TourOverlay() {
         pointerEvents: "none",
       }}
     >
-      {/* Dark overlay with cutout — only show when we have a target and NOT in waitForTarget mode without a target */}
+      {/* Dark overlay with cutout — visual only, does NOT block pointer events */}
       {!(currentStep.waitForTarget && !targetRect) && (
         <div
           style={{
             position: "fixed",
             inset: 0,
-            backgroundColor: "rgba(0,0,0,0.55)",
+            backgroundColor: "rgba(0,0,0,0.5)",
             clipPath: getClipPath(),
             transition: "clip-path 300ms ease",
-            pointerEvents: "auto",
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            // Don't skip tour when clicking overlay — just ignore
+            pointerEvents: "none",
           }}
         />
       )}
@@ -359,7 +355,7 @@ export function TourOverlay() {
       >
         <div
           style={{
-            background: "#1a1a2e",
+            background: "linear-gradient(135deg, #0a0412 0%, #1a0f2e 50%, #1e1040 100%)",
             border: "1px solid rgba(139,92,246,0.3)",
             borderRadius: 12,
             padding: "20px",
