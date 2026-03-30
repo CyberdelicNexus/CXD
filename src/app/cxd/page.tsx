@@ -15,22 +15,38 @@ import { CreditTopUpSuccess } from "@/components/cxd/credit-topup-success";
 import { TourOverlay } from "@/components/cxd/tour/tour-overlay";
 import type { CanvasUpdate } from "@/hooks/use-collaboration";
 
-// Dynamically import heavy components to improve initial load time
-// No loading fallback to prevent showing loading screen when switching tabs
+// Skeleton loader shown while dynamic components are loading their JS chunks
+function ViewSkeleton() {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-10 h-10 border-3 border-purple-500/30 border-t-purple-400 rounded-full animate-spin" />
+        <span className="text-sm text-purple-300/70 animate-pulse">Loading view...</span>
+      </div>
+    </div>
+  );
+}
+
+// Dynamically import heavy components with skeleton loading fallback
 const CXDWizard = dynamic(() => import("@/components/cxd/cxd-wizard").then(mod => ({ default: mod.CXDWizard })), {
-  ssr: false
+  ssr: false,
+  loading: () => <ViewSkeleton />,
 });
 const CXDCanvas = dynamic(() => import("@/components/cxd/cxd-canvas").then(mod => ({ default: mod.CXDCanvas })), {
-  ssr: false
+  ssr: false,
+  loading: () => <ViewSkeleton />,
 });
 const CXDFocusMode = dynamic(() => import("@/components/cxd/cxd-focus-mode").then(mod => ({ default: mod.CXDFocusMode })), {
-  ssr: false
+  ssr: false,
+  loading: () => <ViewSkeleton />,
 });
 const HexagonView = dynamic(() => import("@/components/cxd/canvas/hexagon-view").then(mod => ({ default: mod.HexagonView })), {
-  ssr: false
+  ssr: false,
+  loading: () => <ViewSkeleton />,
 });
 const PlanView = dynamic(() => import("@/components/cxd/plan/plan-view").then(mod => ({ default: mod.PlanView })), {
-  ssr: false
+  ssr: false,
+  loading: () => <ViewSkeleton />,
 });
 
 export default function CXDPage() {
@@ -102,6 +118,12 @@ export default function CXDPage() {
   const [isRestoring, setIsRestoring] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  // Track minimum loading time so LoadingScreen doesn't flash
+  const [minLoadTimePassed, setMinLoadTimePassed] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setMinLoadTimePassed(true), 800);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Wait for Zustand to hydrate from localStorage
   useEffect(() => {
@@ -452,9 +474,9 @@ export default function CXDPage() {
     <YjsProjectProvider>
     <CollaborationProvider onRemoteUpdate={handleRemoteUpdate}>
       <div className="min-h-screen bg-gradient-radial">
-        {!isRestoring && <CXDNavbar />}
-        <main className={!isRestoring ? "pt-20" : ""}>
-          {isRestoring ? (
+        {!isRestoring && minLoadTimePassed && <CXDNavbar />}
+        <main className={!isRestoring && minLoadTimePassed ? "pt-20" : ""}>
+          {isRestoring || !minLoadTimePassed ? (
             <LoadingScreen />
           ) : (
             <div
