@@ -1,15 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Save, RotateCcw, Trash2, Clock, Loader2, History } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Save, RotateCcw, Trash2, Clock, Loader2, History, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { listSnapshots, createSnapshot, restoreSnapshot, deleteSnapshot, type SnapshotMeta } from '@/lib/yjs/snapshot-service';
 import type { Doc } from 'yjs';
@@ -42,6 +37,16 @@ function getLabelColor(label: string): string {
   return 'text-white/40 bg-white/5 border-white/10';
 }
 
+function getLabelTag(label: string): string {
+  if (label.startsWith('Manual:')) return 'Manual';
+  if (label.startsWith('Manual checkpoint')) return 'Manual';
+  if (label.startsWith('Pre-load')) return 'Pre-load';
+  if (label.startsWith('Auto-save')) return 'Auto';
+  if (label.startsWith('Tab close')) return 'Tab close';
+  if (label.startsWith('Project switch')) return 'Switch';
+  return label;
+}
+
 export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: VersionHistoryPanelProps) {
   const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +55,9 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
   const [showCheckpointInput, setShowCheckpointInput] = useState(false);
   const [checkpointLabel, setCheckpointLabel] = useState('');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const fetchSnapshots = useCallback(async () => {
     setLoading(true);
@@ -93,185 +101,198 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
     await fetchSnapshots();
   };
 
-  return (
-    <Dialog open={open} onOpenChange={(isOpen) => {
-      if (!isOpen) {
-        onClose();
-        // Radix Dialog sometimes leaves pointer-events: none on body after close,
-        // which freezes canvas interaction. Reset it explicitly.
-        setTimeout(() => { document.body.style.pointerEvents = ''; }, 0);
-      }
-    }}>
-      <DialogContent
-        className="max-w-lg max-h-[80vh] overflow-hidden bg-zinc-900/95 backdrop-blur-xl border-white/10 shadow-2xl p-0 flex flex-col"
-        onCloseAutoFocus={(e) => e.preventDefault()}
+  if (!mounted || !open) return null;
+
+  return createPortal(
+    <>
+      {/* Backdrop — click to close */}
+      <div
+        className="fixed inset-0 z-[9998] bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Modal */}
+      <div
+        className="fixed z-[9999] inset-0 flex items-center justify-center pointer-events-none"
+        aria-modal="true"
+        role="dialog"
+        aria-label="Version History"
       >
-        {/* Header */}
-        <DialogHeader className="px-5 pt-5 pb-4 border-b border-white/10 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2.5 text-base font-semibold text-white">
-              <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-purple-500/15 border border-purple-500/25">
-                <History className="w-3.5 h-3.5 text-purple-400" />
+        <div
+          className="pointer-events-auto flex flex-col w-full max-w-lg max-h-[80vh] bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="px-5 pt-5 pb-4 border-b border-white/10 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-purple-500/15 border border-purple-500/25">
+                  <History className="w-3.5 h-3.5 text-purple-400" />
+                </div>
+                <h2 className="text-base font-semibold text-white">Version History</h2>
               </div>
-              Version History
-            </DialogTitle>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-3 text-xs text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 border border-purple-500/20 hover:border-purple-500/40 transition-all"
-              onClick={() => setShowCheckpointInput(!showCheckpointInput)}
-            >
-              <Save className="w-3.5 h-3.5 mr-1.5" />
-              Save Checkpoint
-            </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 px-3 text-xs text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 border border-purple-500/20 hover:border-purple-500/40 transition-all"
+                  onClick={() => setShowCheckpointInput(!showCheckpointInput)}
+                >
+                  <Save className="w-3.5 h-3.5 mr-1.5" />
+                  Save Checkpoint
+                </Button>
+                <button
+                  onClick={onClose}
+                  className="flex items-center justify-center w-8 h-8 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Checkpoint input */}
+            {showCheckpointInput && (
+              <div className="mt-3 flex gap-2">
+                <Input
+                  value={checkpointLabel}
+                  onChange={(e) => setCheckpointLabel(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveCheckpoint()}
+                  placeholder="Label your checkpoint (optional)..."
+                  className="h-8 text-xs bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-purple-500/50"
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  className="h-8 px-3 text-xs bg-purple-600 hover:bg-purple-500 shrink-0"
+                  onClick={handleSaveCheckpoint}
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            )}
           </div>
 
-          {/* Checkpoint input */}
-          {showCheckpointInput && (
-            <div className="mt-3 flex gap-2">
-              <Input
-                value={checkpointLabel}
-                onChange={(e) => setCheckpointLabel(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSaveCheckpoint()}
-                placeholder="Label your checkpoint (optional)..."
-                className="h-8 text-xs bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-purple-500/50"
-                autoFocus
-              />
-              <Button
-                size="sm"
-                className="h-8 px-3 text-xs bg-purple-600 hover:bg-purple-500 shrink-0"
-                onClick={handleSaveCheckpoint}
-                disabled={saving}
-              >
-                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
-              </Button>
-            </div>
-          )}
-        </DialogHeader>
-
-        {/* Snapshot list */}
-        <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-purple-500/30 [&::-webkit-scrollbar-thumb]:rounded-full">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <Loader2 className="w-6 h-6 text-purple-400 animate-spin" />
-              <p className="text-xs text-white/40">Loading snapshots...</p>
-            </div>
-          ) : snapshots.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-white/5 border border-white/10 mb-3">
-                <Clock className="w-5 h-5 text-white/20" />
+          {/* Snapshot list */}
+          <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-purple-500/30 [&::-webkit-scrollbar-thumb]:rounded-full">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <Loader2 className="w-6 h-6 text-purple-400 animate-spin" />
+                <p className="text-xs text-white/40">Loading snapshots...</p>
               </div>
-              <p className="text-sm text-white/50 font-medium">No snapshots yet</p>
-              <p className="text-xs text-white/25 mt-1.5 leading-relaxed">
-                Snapshots are created automatically as you work — or save a manual checkpoint above.
-              </p>
-            </div>
-          ) : (
-            <div className="py-2 px-2">
-              {snapshots.map((snap) => (
-                <div
-                  key={snap.id}
-                  className={cn(
-                    "group px-3 py-3 rounded-xl mb-1 transition-all border",
-                    confirmRestoreId === snap.id
-                      ? "bg-amber-500/5 border-amber-500/20"
-                      : "hover:bg-white/[0.04] border-transparent hover:border-white/8"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={cn(
-                          "text-[10px] font-medium px-1.5 py-0.5 rounded border",
-                          getLabelColor(snap.label)
-                        )}>
-                          {snap.label.startsWith('Manual:') ? 'Manual' :
-                           snap.label.startsWith('Pre-load') ? 'Pre-load' :
-                           snap.label.startsWith('Auto-save') ? 'Auto' :
-                           snap.label.startsWith('Tab close') ? 'Tab close' :
-                           snap.label.startsWith('Project switch') ? 'Switch' : snap.label}
-                        </span>
-                        {snap.label.startsWith('Manual:') && (
-                          <p className="text-xs text-white/70 truncate">
-                            {snap.label.replace('Manual: ', '').replace('Manual checkpoint', '')}
-                          </p>
+            ) : snapshots.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                <div className="flex items-center justify-center w-12 h-12 rounded-full bg-white/5 border border-white/10 mb-3">
+                  <Clock className="w-5 h-5 text-white/20" />
+                </div>
+                <p className="text-sm text-white/50 font-medium">No snapshots yet</p>
+                <p className="text-xs text-white/25 mt-1.5 leading-relaxed">
+                  Snapshots are created automatically as you work — or save a manual checkpoint above.
+                </p>
+              </div>
+            ) : (
+              <div className="py-2 px-2">
+                {snapshots.map((snap) => (
+                  <div
+                    key={snap.id}
+                    className={cn(
+                      "group px-3 py-3 rounded-xl mb-1 transition-all border",
+                      confirmRestoreId === snap.id
+                        ? "bg-amber-500/5 border-amber-500/20"
+                        : "hover:bg-white/[0.04] border-transparent hover:border-white/[0.08]"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={cn(
+                            "text-[10px] font-medium px-1.5 py-0.5 rounded border",
+                            getLabelColor(snap.label)
+                          )}>
+                            {getLabelTag(snap.label)}
+                          </span>
+                          {snap.label.startsWith('Manual:') && (
+                            <p className="text-xs text-white/70 truncate">
+                              {snap.label.replace('Manual: ', '')}
+                            </p>
+                          )}
+                        </div>
+                        <p
+                          className="text-[11px] text-white/35 mt-1"
+                          title={new Date(snap.created_at).toLocaleString()}
+                        >
+                          {timeAgo(snap.created_at)} · {new Date(snap.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        {confirmRestoreId === snap.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              className="h-7 px-2.5 text-[11px] bg-amber-600 hover:bg-amber-500 font-medium"
+                              onClick={() => handleRestore(snap.id)}
+                              disabled={restoringId === snap.id}
+                            >
+                              {restoringId === snap.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                'Confirm Restore'
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-[11px] text-white/50 hover:text-white hover:bg-white/5"
+                              onClick={() => setConfirmRestoreId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-[11px] text-purple-400 hover:text-purple-300 hover:bg-purple-500/10"
+                              onClick={() => setConfirmRestoreId(snap.id)}
+                            >
+                              <RotateCcw className="w-3 h-3 mr-1" />
+                              Restore
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-white/20 hover:text-red-400 hover:bg-red-500/10"
+                              onClick={() => handleDelete(snap.id)}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
                         )}
                       </div>
-                      <p
-                        className="text-[11px] text-white/35 mt-1"
-                        title={new Date(snap.created_at).toLocaleString()}
-                      >
-                        {timeAgo(snap.created_at)} · {new Date(snap.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+
+                    {confirmRestoreId === snap.id && (
+                      <p className="text-[10px] text-amber-400/70 mt-2 leading-relaxed">
+                        This will overwrite the current canvas state for all collaborators. This cannot be undone.
                       </p>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      {confirmRestoreId === snap.id ? (
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            size="sm"
-                            className="h-7 px-2.5 text-[11px] bg-amber-600 hover:bg-amber-500 font-medium"
-                            onClick={() => handleRestore(snap.id)}
-                            disabled={restoringId === snap.id}
-                          >
-                            {restoringId === snap.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              'Confirm Restore'
-                            )}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-[11px] text-white/50 hover:text-white hover:bg-white/5"
-                            onClick={() => setConfirmRestoreId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-[11px] text-purple-400 hover:text-purple-300 hover:bg-purple-500/10"
-                            onClick={() => setConfirmRestoreId(snap.id)}
-                          >
-                            <RotateCcw className="w-3 h-3 mr-1" />
-                            Restore
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0 text-white/20 hover:text-red-400 hover:bg-red-500/10"
-                            onClick={() => handleDelete(snap.id)}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
+                    )}
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-                  {confirmRestoreId === snap.id && (
-                    <p className="text-[10px] text-amber-400/70 mt-2 leading-relaxed">
-                      This will overwrite the current canvas state for all collaborators. This cannot be undone.
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Footer */}
+          <div className="px-5 py-3 border-t border-white/10 flex-shrink-0">
+            <p className="text-[10px] text-white/25 text-center">
+              Snapshots are stored in Supabase · Up to 20 per project
+            </p>
+          </div>
         </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-white/10 flex-shrink-0">
-          <p className="text-[10px] text-white/25 text-center">
-            Snapshots are stored in Supabase · Up to 20 per project
-          </p>
-        </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </>,
+    document.body
   );
 }
