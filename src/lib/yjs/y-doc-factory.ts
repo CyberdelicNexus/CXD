@@ -90,15 +90,21 @@ export function initializeYDoc(doc: Y.Doc, project: CXDProject): void {
     // ── Canvas Elements ──
     const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
     const elements = project.canvasLayout?.elements ?? [];
-    for (const element of elements) {
-      yElements.set(element.id, canvasElementToYMap(element));
+    // Guard: skip if already populated (e.g., from IndexedDB)
+    if (yElements.size === 0) {
+      for (const element of elements) {
+        yElements.set(element.id, canvasElementToYMap(element));
+      }
     }
 
     // ── Canvas Edges ──
     const yEdges = doc.getMap(YDOC_KEYS.EDGES);
     const edges = project.canvasLayout?.edges ?? [];
-    for (const edge of edges) {
-      yEdges.set(edge.id, canvasEdgeToYMap(edge));
+    // Guard: skip if already populated (e.g., from IndexedDB)
+    if (yEdges.size === 0) {
+      for (const edge of edges) {
+        yEdges.set(edge.id, canvasEdgeToYMap(edge));
+      }
     }
 
     // ── Design Fields with Y.Text ──
@@ -127,13 +133,17 @@ export function initializeYDoc(doc: Y.Doc, project: CXDProject): void {
     // ── Reality Planes V2 (ordered array) ──
     const yRealityPlanesV2 = doc.getArray(YDOC_KEYS.REALITY_PLANES_V2);
     const rpv2 = project.realityPlanesV2 ?? [];
-    for (const plane of rpv2) {
-      const yPlane = new Y.Map<unknown>();
-      yPlane.set('code', plane.code);
-      yPlane.set('enabled', plane.enabled);
-      yPlane.set('priority', plane.priority);
-      yPlane.set('interfaceModality', createYText(plane.interfaceModality ?? ''));
-      yRealityPlanesV2.push([yPlane]);
+    // Guard: skip if already populated (e.g., loaded from IndexedDB persistence).
+    // Without this, calling initializeYDoc on top of existing data doubles every plane.
+    if (yRealityPlanesV2.length === 0) {
+      for (const plane of rpv2) {
+        const yPlane = new Y.Map<unknown>();
+        yPlane.set('code', plane.code);
+        yPlane.set('enabled', plane.enabled);
+        yPlane.set('priority', plane.priority);
+        yPlane.set('interfaceModality', createYText(plane.interfaceModality ?? ''));
+        yRealityPlanesV2.push([yPlane]);
+      }
     }
 
     // ── Experience Flow (legacy fixed stages) ──
@@ -164,30 +174,33 @@ export function initializeYDoc(doc: Y.Doc, project: CXDProject): void {
     // ── Experience Flow Stages V2 (ordered array) ──
     const yStages = doc.getArray(YDOC_KEYS.EXPERIENCE_FLOW_STAGES);
     const stages = project.experienceFlowStages ?? [];
-    for (const stage of stages) {
-      const yStage = new Y.Map<unknown>();
-      yStage.set('id', stage.id);
-      yStage.set('estimatedMinutes', stage.estimatedMinutes);
+    // Guard: skip if already populated (same race condition as reality planes above)
+    if (yStages.length === 0) {
+      for (const stage of stages) {
+        const yStage = new Y.Map<unknown>();
+        yStage.set('id', stage.id);
+        yStage.set('estimatedMinutes', stage.estimatedMinutes);
 
-      // Text fields → Y.Text
-      for (const field of STAGE_YTEXT_FIELDS) {
-        const value = (stage as unknown as Record<string, unknown>)[field];
-        yStage.set(field, createYText(typeof value === 'string' ? value : ''));
-      }
-
-      // Nested fields → Y.Map
-      for (const field of STAGE_NESTED_FIELDS) {
-        const value = (stage as unknown as Record<string, unknown>)[field];
-        if (value && typeof value === 'object') {
-          const yNested = new Y.Map<unknown>();
-          for (const [nk, nv] of Object.entries(value)) {
-            yNested.set(nk, nv);
-          }
-          yStage.set(field, yNested);
+        // Text fields → Y.Text
+        for (const field of STAGE_YTEXT_FIELDS) {
+          const value = (stage as unknown as Record<string, unknown>)[field];
+          yStage.set(field, createYText(typeof value === 'string' ? value : ''));
         }
-      }
 
-      yStages.push([yStage]);
+        // Nested fields → Y.Map
+        for (const field of STAGE_NESTED_FIELDS) {
+          const value = (stage as unknown as Record<string, unknown>)[field];
+          if (value && typeof value === 'object') {
+            const yNested = new Y.Map<unknown>();
+            for (const [nk, nv] of Object.entries(value)) {
+              yNested.set(nk, nv);
+            }
+            yStage.set(field, yNested);
+          }
+        }
+
+        yStages.push([yStage]);
+      }
     }
 
     // ── Experience Flow Description ──
@@ -353,6 +366,50 @@ export function yDocToProject(doc: Y.Doc): CXDProject {
       sectionPositions: project_canvasLayoutSectionPositions(doc),
     },
   };
+}
+
+// ─── One-time Migration: Deduplicate Reality Planes ──────────────────────────
+
+/**
+ * Removes duplicate reality planes from the Y.Doc, keeping only the first
+ * occurrence of each plane code.
+ *
+ * Previous versions of initializeYDoc lacked an idempotency guard, which
+ * caused planes to accumulate in IndexedDB across sessions. This function
+ * is a one-time repair — it detects duplicates and deletes them in a
+ * transact() so observers see a single clean update.
+ *
+ * Returns true if any duplicates were removed.
+ */
+export function deduplicateRealityPlanesV2(doc: Y.Doc): boolean {
+  const yRPV2 = doc.getArray(YDOC_KEYS.REALITY_PLANES_V2);
+  if (yRPV2.length === 0) return false;
+
+  // Walk the array and collect indices of duplicate codes (keep first occurrence)
+  const seenCodes = new Set<string>();
+  const toDelete: number[] = [];
+
+  for (let i = 0; i < yRPV2.length; i++) {
+    const yPlane = yRPV2.get(i) as Y.Map<unknown>;
+    const code = yPlane.get('code') as string;
+    if (seenCodes.has(code)) {
+      toDelete.push(i);
+    } else {
+      seenCodes.add(code);
+    }
+  }
+
+  if (toDelete.length === 0) return false;
+
+  // Delete from highest index down so earlier indices stay valid
+  doc.transact(() => {
+    for (let i = toDelete.length - 1; i >= 0; i--) {
+      yRPV2.delete(toDelete[i], 1);
+    }
+  }, 'deduplication');
+
+  console.log(`[YjsProject] Removed ${toDelete.length} duplicate reality planes`);
+  return true;
 }
 
 /**

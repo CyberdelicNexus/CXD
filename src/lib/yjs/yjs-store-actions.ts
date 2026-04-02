@@ -41,6 +41,32 @@ export function yjsRemoveElement(doc: Y.Doc, elementId: string): void {
   }, 'local');
 }
 
+/**
+ * Write final drag positions for multiple elements in a single Yjs transaction.
+ * Use origin 'drag-commit' so the bridge can skip re-applying these to Zustand
+ * (Zustand was already updated directly during the drag via updateElementsPositionLocal).
+ */
+export function yjsBatchUpdatePositions(
+  doc: Y.Doc,
+  updates: Array<{ id: string; x: number; y: number; start?: { x: number; y: number }; end?: { x: number; y: number }; bend?: { x: number; y: number } }>,
+): void {
+  if (updates.length === 0) return;
+  doc.transact(() => {
+    const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
+    for (const upd of updates) {
+      const yEl = yElements.get(upd.id);
+      if (yEl instanceof Y.Map) {
+        yEl.set('x', upd.x);
+        yEl.set('y', upd.y);
+        // LineElements also need start/end/bend synced
+        if (upd.start) yEl.set('start', upd.start);
+        if (upd.end) yEl.set('end', upd.end);
+        if (upd.bend) yEl.set('bend', upd.bend);
+      }
+    }
+  }, 'drag-commit');
+}
+
 export function yjsDuplicateElement(doc: Y.Doc, elementId: string): string | null {
   const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
   const yEl = yElements.get(elementId);
