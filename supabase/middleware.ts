@@ -23,7 +23,7 @@ export const updateSession = async (request: NextRequest) => {
               value,
             }));
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
             cookiesToSet.forEach(({ name, value, options }) => {
               request.cookies.set(name, value);
               response = NextResponse.next({
@@ -40,7 +40,15 @@ export const updateSession = async (request: NextRequest) => {
 
     // This will refresh session if expired - required for Server Components
     // https://supabase.com/docs/guides/auth/server-side/nextjs
-    const { data: { user }, error } = await supabase.auth.getUser();
+    // Timeout prevents the middleware from hanging for 2+ minutes when Supabase
+    // is unreachable or a stale session token triggers a slow refresh attempt.
+    const getUserWithTimeout = () => Promise.race([
+      supabase.auth.getUser(),
+      new Promise<{ data: { user: null }; error: Error }>((resolve) =>
+        setTimeout(() => resolve({ data: { user: null }, error: new Error('auth timeout') }), 4000)
+      ),
+    ]);
+    const { data: { user }, error } = await getUserWithTimeout();
 
     // protected routes - redirect to sign-in if not authenticated
     if (request.nextUrl.pathname.startsWith("/dashboard") && error) {

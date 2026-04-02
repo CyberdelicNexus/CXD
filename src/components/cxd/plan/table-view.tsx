@@ -41,6 +41,7 @@ interface TableViewProps {
   onTaskClick: (taskId: string) => void;
   onTaskNavigate: (taskId: string) => void;
   onTaskUpdate: (taskId: string, updates: Partial<TaskProjection>) => void;
+  onQuickAddTask?: (title: string, status?: TaskStatus) => void;
 }
 
 type SortDirection = 'asc' | 'desc';
@@ -137,7 +138,7 @@ const formatValue = (value: unknown): string => {
   return 'Unassigned';
 };
 
-export function TableView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: TableViewProps) {
+export function TableView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate, onQuickAddTask }: TableViewProps) {
   const versions = useCXDStore((state) => state.getVersions());
   const [sortField, setSortField] = useState<ColumnId>('dueDate');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -1010,7 +1011,8 @@ export function TableView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: 
                   </td>
                 </tr>
 
-                {!isCollapsed && group.rows.map(row => {
+                {!isCollapsed && (<>
+                {group.rows.map(row => {
                   const rowTaskId = row.type === 'task' ? row.task.id : row.parent.id;
                   return (
                     <tr
@@ -1056,15 +1058,92 @@ export function TableView({ tasks, onTaskClick, onTaskNavigate, onTaskUpdate }: 
                     </tr>
                   );
                 })}
+                {/* Quick add at the end of each group */}
+                {onQuickAddTask && groupBy !== 'none' && (
+                  <tr>
+                    <td colSpan={visibleColumnDefs.length + 1} className="border-b border-white/5 px-3 py-0.5">
+                      <QuickAddButton
+                        onAdd={(title) => {
+                          // Extract the group value from the key (format: "groupBy:label")
+                          const groupLabel = group.label;
+                          // Pass title + group metadata so the task gets auto-tagged
+                          if (groupBy === 'status') {
+                            onQuickAddTask(title, groupLabel.toLowerCase().replace(' ', '_') as any);
+                          } else {
+                            onQuickAddTask(title);
+                          }
+                        }}
+                        placeholder={`Add to ${group.label}...`}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </>)}
               </React.Fragment>
             );
           })}
         </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={visibleColumnDefs.length + 1} className="px-2 py-1">
+              {onQuickAddTask && (
+                <QuickAddButton onAdd={onQuickAddTask} placeholder="Add a new task..." />
+              )}
+            </td>
+          </tr>
+        </tfoot>
       </table>
 
       {tasks.length === 0 && (
         <div className="flex items-center justify-center py-12 text-muted-foreground">No tasks found</div>
       )}
+    </div>
+  );
+}
+
+function QuickAddButton({ onAdd, placeholder }: { onAdd: (title: string) => void; placeholder: string }) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isAdding) inputRef.current?.focus();
+  }, [isAdding]);
+
+  const handleSubmit = () => {
+    if (text.trim()) {
+      onAdd(text.trim());
+      setText('');
+      setIsAdding(false);
+    }
+  };
+
+  if (!isAdding) {
+    return (
+      <button
+        onClick={() => setIsAdding(true)}
+        className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/5 rounded-lg transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Add task
+      </button>
+    );
+  }
+
+  return (
+    <div className="px-1">
+      <input
+        ref={inputRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+          if (e.key === 'Escape') { setIsAdding(false); setText(''); }
+        }}
+        onBlur={() => { if (!text.trim()) setIsAdding(false); }}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 text-xs bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+      />
     </div>
   );
 }

@@ -305,8 +305,13 @@ export function CXDNavbar() {
       // Go back to canvas from wizard
       setViewMode("canvas");
     } else if (viewMode === "canvas") {
-      // Navigate back to dashboard from canvas
-      router.push("/dashboard");
+      // Flush pending saves BEFORE navigating to prevent data loss
+      import('@/hooks/use-project-sync').then(async ({ flushPendingSave }) => {
+        await flushPendingSave();
+        router.push("/dashboard");
+      }).catch(() => {
+        router.push("/dashboard");
+      });
     }
   };
 
@@ -868,13 +873,7 @@ export function CXDNavbar() {
         onClose={() => setShowSettingsModal(false)}
       />
 
-      {/* Template Picker Modal */}
-      {showTemplatesModal && (
-        <TemplatePickerModal
-          open={showTemplatesModal}
-          onClose={() => setShowTemplatesModal(false)}
-        />
-      )}
+      {/* Template Picker Modal — hidden until templates are production-ready */}
 
       {/* Share Settings Modal */}
       <ShareSettingsModal

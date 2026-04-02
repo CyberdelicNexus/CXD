@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useCXDStore } from "@/store/cxd-store";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
@@ -343,8 +343,12 @@ export default function CXDPage() {
           setViewMode("canvas");
         }
         setIsRestoring(false);
-        supabase.auth.getUser().then(({ data: { user } }) => {
-          if (!user) window.location.href = "/sign-in";
+        supabase.auth.getUser().then(({ data: { user }, error }) => {
+          // Only redirect on definitive auth failures, not transient errors
+          // (e.g. lock contention, network hiccups, token refresh timing).
+          // Transient failures return error + null user; a real expired session
+          // will be caught on the next DB interaction or page navigation.
+          if (!user && !error) window.location.href = "/sign-in";
         });
         return;
       }
@@ -445,9 +449,20 @@ export default function CXDPage() {
     return () => clearTimeout(timeout);
   }, [isRestoring]);
 
-  // Auto-trigger onboarding tour when switching to a tab whose tour hasn't been completed
+  // Track previous viewMode so we can detect wizard→canvas transitions
+  const prevViewModeRef = useRef(viewMode);
+  useEffect(() => {
+    prevViewModeRef.current = viewMode;
+  }, [viewMode]);
+
+  // Auto-trigger onboarding tour when switching to a tab whose tour hasn't been completed.
+  // Skip when transitioning from framing (wizard) — the tour should only start when the
+  // user explicitly switches between canvas sub-views or loads a project already in canvas mode.
   useEffect(() => {
     if (isRestoring || viewMode !== "canvas") return;
+    // Don't auto-trigger tour right after completing framing
+    if (prevViewModeRef.current === "wizard") return;
+
     const state = useCXDStore.getState();
     let tourIdForView: 'canvas' | 'map' | 'plan' | null = null;
     if (canvasViewMode === "canvas") tourIdForView = "canvas";

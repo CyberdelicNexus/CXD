@@ -16,7 +16,6 @@ import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2 } from '@
 import { YjsZustandBridge, BridgeCallbacks } from '@/lib/yjs/y-zustand-bridge';
 import { LocalPersistence } from '@/lib/yjs/indexeddb-persistence';
 import { SupabasePersistence } from '@/lib/yjs/supabase-persistence';
-import { saveProject } from '@/lib/supabase-projects';
 import type { CXDProject } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 
@@ -164,15 +163,13 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       // with Zustand. Store actions can safely use CRDT operations from here.
       setYDoc(newDoc);
 
-      // Immediately write project_data so the fallback column stays fresh after
-      // Yjs hydration. If the user navigates away quickly and yjs_state somehow
-      // fails to save, project_data will still have the correct canvas state.
-      const freshProject = useCXDStore.getState().getCurrentProject();
-      if (freshProject) {
-        saveProject(freshProject).catch((err) =>
-          console.warn('[YjsProject] Failed to update project_data after Yjs load:', err)
-        );
-      }
+      // NOTE: We intentionally do NOT call saveProject() here.
+      // The project_data JSON column in the DB may be staler than the yjs_state
+      // binary we just loaded. Writing project_data back immediately would
+      // overwrite the DB with stale data, causing the project to "revert" on
+      // next load if yjs_state is missing. The SupabasePersistence layer handles
+      // saving yjs_state on every Y.Doc change, and useProjectSync will save
+      // project_data naturally as the user makes edits.
 
       // Mark as ready after successful hydration
       setIsReady(true);

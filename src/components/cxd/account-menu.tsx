@@ -227,15 +227,7 @@ export function AccountMenu({
           Settings
         </DropdownMenuItem>
 
-        {onOpenTemplates && (
-          <DropdownMenuItem
-            onClick={onOpenTemplates}
-            className="hover:bg-white/5 cursor-pointer text-white/80 hover:text-white px-4 py-2.5"
-          >
-            <LayoutTemplate className="w-4 h-4 mr-3" />
-            Templates
-          </DropdownMenuItem>
-        )}
+        {/* Templates menu item — hidden until templates are production-ready */}
 
         {isFree && (
           <DropdownMenuItem

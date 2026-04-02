@@ -250,25 +250,7 @@ export default function DashboardNavbar() {
                 );
               })}
 
-              {/* Templates - active link */}
-              {(() => {
-                const isTemplatesActive = pathname === '/dashboard/templates';
-                return (
-                  <Link href="/dashboard/templates">
-                    <div className={`relative flex items-center px-4 py-2 group rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 overflow-hidden cursor-pointer
-                      ${isTemplatesActive
-                        ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
-                        : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
-                      }`}
-                    >
-                      <Target className={`w-4 h-4 mr-2 transition-colors ${isTemplatesActive ? 'text-violet-200' : 'text-white/60 group-hover:text-violet-200'}`} />
-                      <span className="text-xs font-medium">Templates</span>
-                      <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                      <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    </div>
-                  </Link>
-                );
-              })()}
+              {/* Templates nav link — hidden until templates are production-ready */}
 
               {/* Locked Links */}
               {[
