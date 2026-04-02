@@ -19,6 +19,7 @@
 
 import * as Y from 'yjs';
 import { createClient } from '@/supabase/client';
+import { createSnapshot } from './snapshot-service';
 
 const SAVE_DEBOUNCE_MS = 2000;
 const MAX_RETRIES = 3;
@@ -75,6 +76,9 @@ export class SupabasePersistence {
       if (error || !data?.yjs_state) {
         return false;
       }
+
+      // Safety net: snapshot the existing DB state before we load it
+      createSnapshot(this.projectId, 'Pre-load backup').catch(() => {});
 
       // yjs_state is stored as a base64-encoded binary
       const binary = Uint8Array.from(atob(data.yjs_state), (c) => c.charCodeAt(0));

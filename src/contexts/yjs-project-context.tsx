@@ -8,7 +8,8 @@
  * Sets up the YjsZustandBridge to keep Zustand in sync with Y.Doc state.
  */
 
-import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from 'react';
+import { createSnapshot } from '@/lib/yjs/snapshot-service';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { useCXDStore } from '@/store/cxd-store';
@@ -57,10 +58,23 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
   const localPersistenceRef = useRef<LocalPersistence | null>(null);
   const supabasePersistenceRef = useRef<SupabasePersistence | null>(null);
   const currentProjectIdRef = useRef<string | null>(null);
+  const snapshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastSnapshotTimeRef = useRef<number>(0);
 
   const currentProjectId = useCXDStore((s) => s.currentProjectId);
   const getCurrentProject = useCXDStore((s) => s.getCurrentProject);
   const setYDoc = useCXDStore((s) => s.setYDoc);
+
+  const createAutoSnapshot = useCallback(async (label: string, minIntervalMs = 300000) => {
+    const now = Date.now();
+    if (now - lastSnapshotTimeRef.current < minIntervalMs) return;
+    const pid = currentProjectIdRef.current;
+    if (!pid) return;
+    lastSnapshotTimeRef.current = now;
+    createSnapshot(pid, label).catch((err) =>
+      console.warn('[YjsProject] Auto-snapshot failed:', err)
+    );
+  }, []);
 
   useEffect(() => {
     // Skip if Yjs is disabled
@@ -109,6 +123,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         supabasePersistenceRef.current?.flush();
+        createAutoSnapshot('Tab close');
       }
     };
     const handleBeforeUnload = () => {
@@ -173,6 +188,11 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
 
       // Mark as ready after successful hydration
       setIsReady(true);
+
+      // Start auto-snapshot timer (every 30 minutes)
+      snapshotIntervalRef.current = setInterval(() => {
+        createAutoSnapshot('Auto-save');
+      }, 30 * 60 * 1000);
     }).catch((err) => {
       console.error('[YjsProject] Failed to load persisted state:', err);
       if (bridgeRef.current !== bridge) return;
@@ -200,7 +220,18 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
   }, [currentProjectId]);
 
   function cleanup() {
+    // Clear auto-snapshot timer
+    if (snapshotIntervalRef.current) {
+      clearInterval(snapshotIntervalRef.current);
+      snapshotIntervalRef.current = null;
+    }
+
     if (supabasePersistenceRef.current) {
+      // Snapshot before destroying (project switch)
+      const pid = currentProjectIdRef.current;
+      if (pid && isReady) {
+        createSnapshot(pid, 'Project switch').catch(() => {});
+      }
       // destroy() is async: it flushes the final save before marking destroyed.
       // Fire-and-forget is intentional here — we cannot await in a React cleanup.
       supabasePersistenceRef.current.destroy();
