@@ -13,6 +13,7 @@ import {
   Clock,
   CreditCard,
   LayoutTemplate,
+  History,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -37,6 +38,7 @@ interface AccountMenuProps {
   onLogout?: () => void;
   onOpenSettings?: () => void;
   onOpenTemplates?: () => void;
+  onOpenVersionHistory?: () => void;
   // Subscription data passed from parent
   plan?: PlanId;
   isTrialing?: boolean;
@@ -49,6 +51,7 @@ export function AccountMenu({
   onLogout,
   onOpenSettings,
   onOpenTemplates,
+  onOpenVersionHistory,
   plan = 'free',
   isTrialing = false,
   trialDaysRemaining = null,
@@ -228,6 +231,16 @@ export function AccountMenu({
         </DropdownMenuItem>
 
         {/* Templates menu item — hidden until templates are production-ready */}
+
+        {onOpenVersionHistory && (
+          <DropdownMenuItem
+            onClick={onOpenVersionHistory}
+            className="hover:bg-white/5 cursor-pointer text-white/80 hover:text-white px-4 py-2.5"
+          >
+            <History className="w-4 h-4 mr-3" />
+            Version History
+          </DropdownMenuItem>
+        )}
 
         {isFree && (
           <DropdownMenuItem

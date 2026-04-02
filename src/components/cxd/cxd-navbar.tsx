@@ -63,6 +63,7 @@ import { UpgradeModal } from "@/components/modals/upgrade-modal";
 import { SettingsModal } from "@/components/modals/settings-modal";
 import { TemplatePickerModal } from './template-picker-modal';
 import { ShareSettingsModal } from './share/share-settings-modal';
+import { VersionHistoryPanel } from './version-history-panel';
 import { Lock } from "lucide-react";
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
@@ -135,6 +136,7 @@ export function CXDNavbar() {
     boardPath,
     navigateToBoardPath,
   } = useCXDStore();
+  const yDoc = useCXDStore((s) => s.yDoc);
   const { toast } = useToast();
   const project = getCurrentProject();
 
@@ -227,6 +229,7 @@ export function CXDNavbar() {
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
   const { collaborators, isConnected, currentUser, followingCollaboratorId, setFollowingCollaboratorId } = useCollaborationContext();
   const { role: canvasRole } = useCanvasPermissions(project?.id || null);
 
@@ -842,6 +845,7 @@ export function CXDNavbar() {
             onLogout={handleLogout}
             onOpenSettings={() => setShowSettingsModal(true)}
             onOpenTemplates={() => setShowTemplatesModal(true)}
+            onOpenVersionHistory={() => setShowVersionHistory(true)}
             plan={plan.id as any}
             isTrialing={isTrialing}
             trialDaysRemaining={trialDaysRemaining}
@@ -874,6 +878,16 @@ export function CXDNavbar() {
       />
 
       {/* Template Picker Modal — hidden until templates are production-ready */}
+
+      {/* Version History Panel */}
+      {showVersionHistory && project && (
+        <VersionHistoryPanel
+          open={showVersionHistory}
+          onClose={() => setShowVersionHistory(false)}
+          projectId={project.id}
+          yDoc={yDoc}
+        />
+      )}
 
       {/* Share Settings Modal */}
       <ShareSettingsModal
