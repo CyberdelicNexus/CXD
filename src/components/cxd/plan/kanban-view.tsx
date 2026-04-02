@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,7 @@ import {
   Archive,
   Milestone,
   X,
+  Plus,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -41,6 +42,7 @@ interface KanbanViewProps {
   onTaskStatusChange: (taskId: string, status: TaskStatus) => void;
   onTaskNavigate: (taskId: string) => void;
   onTaskUpdate?: (taskId: string, updates: Partial<TaskProjection>) => void;
+  onQuickAddTask?: (title: string, status?: TaskStatus) => void;
 }
 
 type GroupByMode = 'status' | 'priority' | 'assignee' | 'hypercubeFace';
@@ -99,6 +101,7 @@ export function KanbanView({
   onTaskStatusChange,
   onTaskNavigate,
   onTaskUpdate,
+  onQuickAddTask,
 }: KanbanViewProps) {
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
@@ -383,6 +386,13 @@ export function KanbanView({
                   {columnTasks.length === 0 && (
                     <div className="text-center text-sm text-muted-foreground py-8">No tasks</div>
                   )}
+                  {/* Quick add task */}
+                  {onQuickAddTask && (
+                    <QuickAddButton
+                      onAdd={(title) => onQuickAddTask(title, column.id as TaskStatus)}
+                      placeholder={`Add to ${column.label}...`}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -647,5 +657,52 @@ function TaskCard({ task, version, isDragging, onClick, onNavigate, onDragStart,
         )}
       </div>
     </Card>
+  );
+}
+
+function QuickAddButton({ onAdd, placeholder }: { onAdd: (title: string) => void; placeholder: string }) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isAdding) inputRef.current?.focus();
+  }, [isAdding]);
+
+  const handleSubmit = () => {
+    if (text.trim()) {
+      onAdd(text.trim());
+      setText('');
+      setIsAdding(false);
+    }
+  };
+
+  if (!isAdding) {
+    return (
+      <button
+        onClick={() => setIsAdding(true)}
+        className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/5 rounded-lg transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Add task
+      </button>
+    );
+  }
+
+  return (
+    <div className="px-1">
+      <input
+        ref={inputRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+          if (e.key === 'Escape') { setIsAdding(false); setText(''); }
+        }}
+        onBlur={() => { if (!text.trim()) setIsAdding(false); }}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 text-xs bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+      />
+    </div>
   );
 }

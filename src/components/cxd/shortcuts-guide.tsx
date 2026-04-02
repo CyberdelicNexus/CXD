@@ -49,28 +49,38 @@ const SHORTCUTS: ShortcutItem[] = [
   {
     category: "Editing",
     shortcuts: [
-      { keys: ["Ctrl/Cmd", "Z"], description: "Undo" },
-      { keys: ["Ctrl/Cmd", "Shift", "Z"], description: "Redo" },
-      { keys: ["Ctrl/Cmd", "C"], description: "Copy selected" },
-      { keys: ["Ctrl/Cmd", "X"], description: "Cut selected" },
-      { keys: ["Ctrl/Cmd", "V"], description: "Paste at cursor" },
-      { keys: ["Ctrl/Cmd", "D"], description: "Duplicate selected" },
-      { keys: ["Delete"], description: "Delete selected" },
+      { keys: ["Ctrl/Cmd", "+", "Z"], description: "Undo" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "Z"], description: "Redo" },
+      { keys: ["Ctrl/Cmd", "+", "Y"], description: "Redo (alt)" },
+      { keys: ["Ctrl/Cmd", "+", "C"], description: "Copy selected" },
+      { keys: ["Ctrl/Cmd", "+", "X"], description: "Cut selected" },
+      { keys: ["Ctrl/Cmd", "+", "V"], description: "Paste at cursor" },
+      { keys: ["Ctrl/Cmd", "+", "D"], description: "Duplicate selected" },
+      { keys: ["Delete / Backspace"], description: "Delete selected" },
     ],
   },
   {
-    category: "Selection",
+    category: "Selection & Grouping",
     shortcuts: [
-      { keys: ["Click"], description: "Select element" },
-      { keys: ["Shift", "+", "Click"], description: "Add to selection" },
-      { keys: ["Drag"], description: "Marquee select" },
+      { keys: ["Click"], description: "Select element (or entire group)" },
+      { keys: ["Shift", "+", "Click"], description: "Add/remove from selection" },
+      { keys: ["Ctrl/Cmd", "+", "Click"], description: "Select individual in group" },
+      { keys: ["Drag"], description: "Marquee select (elements & lines)" },
+      { keys: ["Alt", "+", "Drag"], description: "Duplicate element by dragging" },
+    ],
+  },
+  {
+    category: "Connections",
+    shortcuts: [
+      { keys: ["Ctrl/Cmd", "+", "L"], description: "Connect selected elements" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "O"], description: "Auto-organize selected" },
     ],
   },
   {
     category: "Canvas",
     shortcuts: [
       { keys: ["Drag Image"], description: "Drop images onto canvas" },
-      { keys: ["Double Click Board"], description: "Enter board" },
+      { keys: ["Double Click"], description: "Enter board / edit element" },
     ],
   },
 ];

@@ -16,7 +16,7 @@ interface CanvasToolkitProps {
   onPlaceElement: (
     type: CanvasElementType,
     position: { x: number; y: number },
-    options?: { shapeType?: ShapeType; linkMode?: LinkMode; cardType?: "note" | "task" | "document" },
+    options?: { shapeType?: ShapeType; linkMode?: LinkMode; cardType?: "note" | "task" | "document"; width?: number; height?: number },
   ) => void;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   canvasPosition: { x: number; y: number };
@@ -195,40 +195,105 @@ export function CanvasToolkit({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [setActiveTool]);
 
-  // Handle click placement when tool is active (except for line which uses drag)
+  // Drag-to-create state: track mousedown start position for drawing size
+  const [shapeCreationDrag, setShapeCreationDrag] = useState<{
+    startX: number; startY: number; currentX: number; currentY: number; tool: CanvasElementType;
+  } | null>(null);
+  const shapeCreationDragRef = useRef(shapeCreationDrag);
+  shapeCreationDragRef.current = shapeCreationDrag;
+
+  // Active tool ref so mousemove/mouseup listeners always see latest value
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
+
+  // Minimum drag distance (in canvas px) to count as a drag vs a click
+  const MIN_DRAG_DISTANCE = 10;
+
+  // Handle click-and-drag placement when tool is active (except for line which uses drag)
   useEffect(() => {
     if (!activeTool || activeTool === "line" || !canvasRef.current) return;
 
-    const handleCanvasClick = (e: MouseEvent) => {
+    const isCanvasBackground = (target: HTMLElement) =>
+      target.classList.contains("canvas-background") ||
+      target.classList.contains("dot-grid") ||
+      target === canvasRef.current;
+
+    const toCanvasCoords = (clientX: number, clientY: number) => {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - canvasPosition.x - canvasOriginOffset.x) / canvasZoom,
+        y: (clientY - rect.top - canvasPosition.y - canvasOriginOffset.y) / canvasZoom,
+      };
+    };
+
+    const getOptions = () => {
+      const tool = activeToolRef.current;
+      return tool === "shape"
+        ? { shapeType: selectedShapeType }
+        : tool === "link"
+          ? { linkMode: selectedLinkMode }
+          : tool === "freeform"
+            ? { cardType: selectedCardType }
+            : undefined;
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
       const target = e.target as HTMLElement;
-      // Only place on background or dot-grid, not on elements
-      if (
-        target.classList.contains("canvas-background") ||
-        target.classList.contains("dot-grid") ||
-        target === canvasRef.current
-      ) {
-        const rect = canvasRef.current!.getBoundingClientRect();
-        // Account for canvas origin offset (used in hypercube view where content is centered)
-        const x = (e.clientX - rect.left - canvasPosition.x - canvasOriginOffset.x) / canvasZoom;
-        const y = (e.clientY - rect.top - canvasPosition.y - canvasOriginOffset.y) / canvasZoom;
+      if (!isCanvasBackground(target)) return;
 
-        const options = activeTool === "shape"
-          ? { shapeType: selectedShapeType }
-          : activeTool === "link"
-            ? { linkMode: selectedLinkMode }
-            : activeTool === "freeform"
-              ? { cardType: selectedCardType }
-              : undefined;
+      const { x, y } = toCanvasCoords(e.clientX, e.clientY);
+      setShapeCreationDrag({
+        startX: x, startY: y, currentX: x, currentY: y,
+        tool: activeToolRef.current!,
+      });
+      e.preventDefault();
+    };
 
-        onPlaceElement(activeTool, { x, y }, options);
-        setActiveTool(null);
-        setShowCardTypeMenu(false);
+    const handleMouseMove = (e: MouseEvent) => {
+      const drag = shapeCreationDragRef.current;
+      if (!drag) return;
+      const { x, y } = toCanvasCoords(e.clientX, e.clientY);
+      setShapeCreationDrag({ ...drag, currentX: x, currentY: y });
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      const drag = shapeCreationDragRef.current;
+      if (!drag) return;
+
+      const { x, y } = toCanvasCoords(e.clientX, e.clientY);
+      const dx = Math.abs(x - drag.startX);
+      const dy = Math.abs(y - drag.startY);
+
+      const options = getOptions();
+
+      if (dx >= MIN_DRAG_DISTANCE || dy >= MIN_DRAG_DISTANCE) {
+        // Drag: create with custom size — position at top-left of drawn rectangle
+        const left = Math.min(drag.startX, x);
+        const top = Math.min(drag.startY, y);
+        const width = Math.max(dx, 20);
+        const height = Math.max(dy, 20);
+        // Place at center of the drawn rectangle (handlePlaceElement offsets by half size)
+        onPlaceElement(drag.tool, { x: left + width / 2, y: top + height / 2 }, { ...options, width, height });
+      } else {
+        // Click: use default size, place centered on click
+        onPlaceElement(drag.tool, { x: drag.startX, y: drag.startY }, options);
       }
+
+      setShapeCreationDrag(null);
+      setActiveTool(null);
+      setShowCardTypeMenu(false);
     };
 
     const canvas = canvasRef.current;
-    canvas.addEventListener("click", handleCanvasClick);
-    return () => canvas.removeEventListener("click", handleCanvasClick);
+    canvas.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
   }, [
     activeTool,
     canvasRef,
@@ -561,10 +626,36 @@ export function CanvasToolkit({
         </div>
       </div>
 
+      {/* Drag-to-create preview rectangle */}
+      {shapeCreationDrag && canvasRef.current && (() => {
+        const drag = shapeCreationDrag;
+        const rect = canvasRef.current!.getBoundingClientRect();
+        const left = Math.min(drag.startX, drag.currentX);
+        const top = Math.min(drag.startY, drag.currentY);
+        const w = Math.abs(drag.currentX - drag.startX);
+        const h = Math.abs(drag.currentY - drag.startY);
+        // Convert canvas coords back to screen coords for the overlay
+        const screenLeft = left * canvasZoom + canvasPosition.x + canvasOriginOffset.x + rect.left;
+        const screenTop = top * canvasZoom + canvasPosition.y + canvasOriginOffset.y + rect.top;
+        const screenW = w * canvasZoom;
+        const screenH = h * canvasZoom;
+        return (
+          <div
+            className="fixed pointer-events-none z-50 border-2 border-dashed border-primary/70 bg-primary/10 rounded"
+            style={{
+              left: screenLeft,
+              top: screenTop,
+              width: screenW,
+              height: screenH,
+            }}
+          />
+        );
+      })()}
+
       {/* Active Tool Indicator */}
       {activeTool && (
         <div className="fixed top-44 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded-full bg-primary/90 text-primary-foreground text-xs font-medium shadow-lg animate-in fade-in slide-in-from-top-2 duration-200">
-          {activeTool === "line" ? "Click and drag to draw line" : `Click on canvas to place ${activeTool === "shape"
+          {activeTool === "line" ? "Click and drag to draw line" : `Click or drag on canvas to place ${activeTool === "shape"
             ? SHAPE_PALETTE.find((s) => s.type === selectedShapeType)?.label
             : activeTool === "link"
               ? LINK_MODES.find((m) => m.mode === selectedLinkMode)?.label

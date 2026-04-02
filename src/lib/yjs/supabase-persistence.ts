@@ -34,7 +34,8 @@ export class SupabasePersistence {
   private destroyed = false;
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private updateHandler: (update: Uint8Array, origin: unknown) => void;
-  private isSaving = false;
+  /** Tracks the currently running save promise so destroy() can await it. */
+  private activeSavePromise: Promise<void> | null = null;
   private consecutiveFailures = 0;
   private onPersistenceError?: (error: string) => void;
   /**
@@ -101,9 +102,18 @@ export class SupabasePersistence {
    *   3. Update lastLoadedState cache on success
    */
   async save(retryAttempt = 0): Promise<void> {
-    if (this.destroyed || this.isSaving) return;
+    if (this.destroyed) return;
+    // If a save is already running, don't stack another — the caller
+    // can await activeSavePromise directly if they need to chain.
+    if (this.activeSavePromise) return;
 
-    this.isSaving = true;
+    this.activeSavePromise = this._executeSave(retryAttempt).finally(() => {
+      this.activeSavePromise = null;
+    });
+    await this.activeSavePromise;
+  }
+
+  private async _executeSave(retryAttempt = 0): Promise<void> {
     try {
       const supabase = createClient();
 
@@ -146,9 +156,7 @@ export class SupabasePersistence {
           this.recordFailure(`Permission denied: ${error.message}`);
         } else {
           console.error('[SupabasePersistence] Failed to save Y.Doc state:', error);
-          this.isSaving = false;
           this.scheduleRetry(retryAttempt);
-          return;
         }
       } else {
         // Success — reset failure counter and update cache for next save
@@ -160,15 +168,12 @@ export class SupabasePersistence {
 
       if (isNetworkError) {
         console.warn(`[SupabasePersistence] Network error on save (attempt ${retryAttempt + 1}):`, err);
-        this.isSaving = false;
         this.scheduleRetry(retryAttempt);
         return;
       }
 
       console.error('[SupabasePersistence] Save error:', err);
       this.recordFailure(String(err));
-    } finally {
-      this.isSaving = false;
     }
   }
 
@@ -225,7 +230,13 @@ export class SupabasePersistence {
 
   /**
    * Clean up listeners and flush pending saves.
-   * Awaits the final save BEFORE marking destroyed so save() is not skipped.
+   *
+   * Guarantees ALL changes are written:
+   * 1. Cancel the pending debounce (prevents a double-save race).
+   * 2. If a save is already in-flight, wait for it to finish — it may not
+   *    have captured the very latest state (it encoded at the moment it started).
+   * 3. Do one final save to capture any changes made since the last save began.
+   * 4. Only then mark as destroyed.
    */
   async destroy(): Promise<void> {
     // Cancel pending debounce
@@ -237,8 +248,14 @@ export class SupabasePersistence {
     // Detach update listener before the final save to avoid re-scheduling
     this.doc.off('update', this.updateHandler);
 
-    // Perform the final save while destroyed is still false
-    await this.save();
+    // Wait for any in-flight save to finish so we know exactly what was committed
+    if (this.activeSavePromise) {
+      await this.activeSavePromise;
+    }
+
+    // Always do a final save — even if a save just finished, the Y.Doc may have
+    // received changes between the moment that save encoded the state and now.
+    await this._executeSave(0);
 
     // Only now mark as destroyed
     this.destroyed = true;

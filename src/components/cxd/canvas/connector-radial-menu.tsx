@@ -244,7 +244,7 @@ export function ConnectorRadialMenu({
         {/* Top arm — color */}
         <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5">
           {colorExpanded && (
-            <div className="flex gap-1.5 bg-[rgba(15,12,25,0.95)] rounded-full px-2.5 py-2 border border-[rgba(255,255,255,0.1)] backdrop-blur-sm shadow-lg">
+            <div className="flex items-center gap-1.5 bg-[rgba(15,12,25,0.95)] rounded-full px-2.5 py-2 border border-[rgba(255,255,255,0.1)] backdrop-blur-sm shadow-lg">
               {GRADIENT_ORDER.map((name) => {
                 const c = SWATCH_COLORS[name];
                 const isActive = currentGrad === name;
@@ -263,6 +263,26 @@ export function ConnectorRadialMenu({
                   />
                 );
               })}
+              {/* Divider */}
+              <div className="w-px h-4 bg-white/15 mx-0.5 flex-shrink-0" />
+              {/* Flip gradient direction */}
+              <button
+                title="Flip gradient direction"
+                className="w-5 h-5 rounded-full flex items-center justify-center transition-all hover:scale-115 focus:outline-none flex-shrink-0"
+                style={{
+                  background: edge.style?.gradientReversed
+                    ? `radial-gradient(circle at 35% 30%, ${gradColor.mid}55, ${gradColor.mid}22)`
+                    : 'rgba(255,255,255,0.07)',
+                  border: `1px solid ${edge.style?.gradientReversed ? gradColor.mid + '88' : 'rgba(255,255,255,0.18)'}`,
+                }}
+                onClick={(e) => { e.stopPropagation(); onUpdateEdge(edge.id, { gradientReversed: !edge.style?.gradientReversed }); }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                  <path d="M1 4h8M7 2l2 2-2 2" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M11 8H3M5 6l-2 2 2 2" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
             </div>
           )}
           <button

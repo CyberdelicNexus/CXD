@@ -4,13 +4,14 @@ import { encodedRedirect } from "@/utils/utils";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createClient } from "../../supabase/server";
+import { createClient, createSessionClient } from "../../supabase/server";
 
 export const signUpAction = async (formData: FormData) => {
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
   const fullName = formData.get("full_name")?.toString() || '';
   const promo = formData.get("promo")?.toString();
+  const redirectTo = formData.get("redirectTo")?.toString();
   const supabase = await createClient();
   const origin = headers().get("origin");
 
@@ -26,7 +27,7 @@ export const signUpAction = async (formData: FormData) => {
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
+      emailRedirectTo: `${origin}/auth/callback${redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : ''}`,
       data: {
         full_name: fullName,
         email: email,
@@ -64,7 +65,9 @@ export const signUpAction = async (formData: FormData) => {
 export const signInAction = async (formData: FormData) => {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
-  const supabase = await createClient();
+  const redirectTo = formData.get("redirectTo") as string | null;
+  const rememberMe = formData.get("rememberMe") === "on";
+  const supabase = rememberMe ? await createClient() : await createSessionClient();
 
   const { error } = await supabase.auth.signInWithPassword({
     email,
@@ -72,10 +75,32 @@ export const signInAction = async (formData: FormData) => {
   });
 
   if (error) {
+    const params = redirectTo ? `?redirectTo=${encodeURIComponent(redirectTo)}` : "";
+    return encodedRedirect("error", `/sign-in${params}`, error.message);
+  }
+
+  return redirect(redirectTo || "/dashboard");
+};
+
+export const signInWithGoogleAction = async (formData: FormData) => {
+  const supabase = await createClient();
+  const origin = headers().get("origin");
+  const redirectTo = formData.get("redirectTo") as string | null;
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${origin}/auth/callback${redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : ""}`,
+    },
+  });
+
+  if (error) {
     return encodedRedirect("error", "/sign-in", error.message);
   }
 
-  return redirect("/dashboard");
+  if (data.url) {
+    return redirect(data.url);
+  }
 };
 
 export const forgotPasswordAction = async (formData: FormData) => {

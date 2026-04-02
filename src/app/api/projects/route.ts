@@ -45,31 +45,27 @@ export async function GET() {
 
     const supabaseAdmin = getSupabaseAdmin();
 
-    // Fetch owned projects
-    const { data: ownedData, error: ownedError } = await supabaseAdmin
-      .from('cxd_projects')
-      .select('*')
-      .eq('owner_id', user.id)
-      .order('updated_at', { ascending: false });
+    // Fetch owned projects and collaborator IDs in parallel
+    const [
+      { data: ownedData, error: ownedError },
+      { data: collabData, error: collabError },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('cxd_projects')
+        .select('*')
+        .eq('owner_id', user.id)
+        .order('updated_at', { ascending: false }),
+      supabaseAdmin
+        .from('canvas_collaborators')
+        .select('canvas_id')
+        .eq('user_id', user.id),
+    ]);
 
-    if (ownedError) {
-      console.error('Error fetching owned projects:', ownedError);
-    }
+    if (ownedError) console.error('Error fetching owned projects:', ownedError);
+    if (collabError) console.error('Error fetching collaborator records:', collabError);
 
-    // Fetch projects where user is a collaborator
-    const { data: collabData, error: collabError } = await supabaseAdmin
-      .from('canvas_collaborators')
-      .select('canvas_id')
-      .eq('user_id', user.id);
-
-    if (collabError) {
-      console.error('Error fetching collaborator records:', collabError);
-    }
-
-    // Get the canvas IDs where user is a collaborator
+    // Fetch collaborated projects only if the user has any (depends on collabData)
     const collabCanvasIds = (collabData || []).map((c: { canvas_id: string }) => c.canvas_id);
-
-    // Fetch collaborated projects (excluding ones the user owns to avoid duplicates)
     let collaboratedProjects: any[] = [];
     if (collabCanvasIds.length > 0) {
       const { data: collabProjects, error: collabProjectsError } = await supabaseAdmin

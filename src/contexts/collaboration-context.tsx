@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, ReactNode, useCallback } from 'react';
+import { createContext, useContext, ReactNode, useCallback, useState } from 'react';
 import { useCollaboration, CollaboratorPresence, CanvasUpdate } from '@/hooks/use-collaboration';
 import { useCXDStore } from '@/store/cxd-store';
 import { useYjsSync } from '@/hooks/use-yjs-sync';
@@ -11,10 +11,13 @@ interface CollaborationContextValue {
   collaborators: CollaboratorPresence[];
   isConnected: boolean;
   currentUser: { id: string; email: string; name?: string; avatarUrl?: string } | null;
-  updateCursor: (x: number, y: number) => void;
+  updateCursor: (x: number, y: number, zoom?: number, boardId?: string | null) => void;
   clearCursor: () => void;
   updateSelection: (elementIds: string[]) => void;
   broadcastUpdate: (update: Omit<CanvasUpdate, 'timestamp' | 'userId'>) => void;
+  // Live-follow (Figma-style)
+  followingCollaboratorId: string | null;
+  setFollowingCollaboratorId: (id: string | null) => void;
   // Canvas element sync functions
   syncAddElement: (element: CanvasElement) => void;
   syncUpdateElement: (elementId: string, updates: Partial<CanvasElement>) => void;
@@ -45,7 +48,11 @@ interface CollaborationProviderProps {
 }
 
 export function CollaborationProvider({ children, onRemoteUpdate }: CollaborationProviderProps) {
-  const project = useCXDStore(state => state.getCurrentProject());
+  // Use currentProjectId directly — avoids waiting for projects array to load from DB.
+  // getCurrentProject() returns null when projects haven't been fetched yet even if
+  // currentProjectId is already in Zustand (persisted to localStorage). Using the ID
+  // directly lets the collaboration channel subscribe immediately on mount.
+  const canvasId = useCXDStore(state => state.currentProjectId);
 
   // Canvas element functions
   const addCanvasElement = useCXDStore(state => state.addCanvasElement);
@@ -78,6 +85,8 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
   const updateExperienceFlowNarrative = useCXDStore(state => state.updateExperienceFlowNarrative);
   const updateExperienceFlowIntent = useCXDStore(state => state.updateExperienceFlowIntent);
 
+  const [followingCollaboratorId, setFollowingCollaboratorId] = useState<string | null>(null);
+
   const {
     collaborators,
     isConnected,
@@ -86,53 +95,43 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
     clearCursor,
     updateSelection,
     broadcastUpdate,
-  } = useCollaboration(project?.id || null, { onRemoteUpdate });
+  } = useCollaboration(canvasId, { onRemoteUpdate });
 
   // Wire Yjs CRDT sync provider (creates a dedicated Supabase channel for binary sync)
-  useYjsSync(project?.id || null, currentUser?.id || null);
+  useYjsSync(canvasId, currentUser?.id || null);
 
   // Canvas element sync wrapper functions
-  // In CRDT mode, the store action mutates Y.Doc which auto-broadcasts — no LWW broadcast needed
+  // Always broadcast via LWW channel as a reliable fallback — Yjs handles CRDT merging,
+  // but if a Yjs update is silently dropped (rate limit, timing), LWW ensures the peer
+  // still receives the change. The receiver deduplicates via existence checks.
   const syncAddElement = useCallback((element: CanvasElement) => {
     addCanvasElement(element);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'element_add', element });
-    }
+    broadcastUpdate({ type: 'element_add', element });
   }, [addCanvasElement, broadcastUpdate]);
 
   const syncUpdateElement = useCallback((elementId: string, updates: Partial<CanvasElement>) => {
     updateCanvasElement(elementId, updates);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'element_update', elementId, changes: updates });
-    }
+    broadcastUpdate({ type: 'element_update', elementId, changes: updates });
   }, [updateCanvasElement, broadcastUpdate]);
 
   const syncRemoveElement = useCallback((elementId: string) => {
     removeCanvasElement(elementId);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'element_delete', elementId });
-    }
+    broadcastUpdate({ type: 'element_delete', elementId });
   }, [removeCanvasElement, broadcastUpdate]);
 
   const syncAddEdge = useCallback((edge: CanvasEdge) => {
     addCanvasEdge(edge);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'edge_add', edge });
-    }
+    broadcastUpdate({ type: 'edge_add', edge });
   }, [addCanvasEdge, broadcastUpdate]);
 
   const syncUpdateEdge = useCallback((edgeId: string, changes: Partial<CanvasEdge>) => {
     updateCanvasEdge(edgeId, changes);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
-    }
+    broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
   }, [updateCanvasEdge, broadcastUpdate]);
 
   const syncRemoveEdge = useCallback((edgeId: string) => {
     removeCanvasEdge(edgeId);
-    if (!useCXDStore.getState().yDoc) {
-      broadcastUpdate({ type: 'edge_delete', edgeId });
-    }
+    broadcastUpdate({ type: 'edge_delete', edgeId });
   }, [removeCanvasEdge, broadcastUpdate]);
 
   // CXD Field sync wrapper functions
@@ -216,6 +215,8 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
         clearCursor,
         updateSelection,
         broadcastUpdate,
+        followingCollaboratorId,
+        setFollowingCollaboratorId,
         syncAddElement,
         syncUpdateElement,
         syncRemoveElement,
@@ -253,6 +254,8 @@ export function useCollaborationContext() {
       clearCursor: () => {},
       updateSelection: () => {},
       broadcastUpdate: () => {},
+      followingCollaboratorId: null,
+      setFollowingCollaboratorId: () => {},
       syncAddElement: () => {},
       syncUpdateElement: () => {},
       syncRemoveElement: () => {},

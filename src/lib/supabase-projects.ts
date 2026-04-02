@@ -18,26 +18,24 @@ export interface DbCXDProject {
 export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
   const supabase = createClient();
 
-  // Fetch owned projects
-  const { data: ownedData, error: ownedError } = await supabase
-    .from('cxd_projects')
-    .select('*')
-    .eq('owner_id', userId)
-    .order('updated_at', { ascending: false });
+  // Fetch owned projects and collaborator IDs in parallel
+  const [
+    { data: ownedData, error: ownedError },
+    { data: collabData, error: collabError },
+  ] = await Promise.all([
+    supabase
+      .from('cxd_projects')
+      .select('*')
+      .eq('owner_id', userId)
+      .order('updated_at', { ascending: false }),
+    supabase
+      .from('canvas_collaborators')
+      .select('canvas_id')
+      .eq('user_id', userId),
+  ]);
 
-  if (ownedError) {
-    console.error('Error fetching owned projects:', ownedError);
-  }
-
-  // Fetch projects where user is a collaborator
-  const { data: collabData, error: collabError } = await supabase
-    .from('canvas_collaborators')
-    .select('canvas_id')
-    .eq('user_id', userId);
-
-  if (collabError) {
-    console.error('Error fetching collaborator records:', collabError);
-  }
+  if (ownedError) console.error('Error fetching owned projects:', ownedError);
+  if (collabError) console.error('Error fetching collaborator records:', collabError);
 
   // Get the canvas IDs where user is a collaborator
   const collabCanvasIds = (collabData || []).map(c => c.canvas_id);

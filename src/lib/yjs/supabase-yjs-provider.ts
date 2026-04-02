@@ -42,6 +42,9 @@ export class SupabaseYjsProvider {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private synced = false;
   private destroyed = false;
+  // Tracks peers we've already responded to with our own sync1, to prevent
+  // infinite ping-pong loops while still enabling bilateral full-state sync.
+  private sentSync1ToPeers = new Set<string>();
 
   // Track update handler for cleanup
   private updateHandler: (update: Uint8Array, origin: unknown) => void;
@@ -171,6 +174,15 @@ export class SupabaseYjsProvider {
               });
             } else if (response.byteLength > MAX_BROADCAST_BYTES) {
               console.warn('[YjsProvider] sync2 too large to broadcast (' + response.byteLength + ' bytes). Peer should load from DB (yjs_state column).');
+            }
+
+            // Bilateral sync: also send our own sync1 so the peer can respond with
+            // any data WE might be missing. Only do this once per peer to prevent
+            // an infinite loop (one exchange per peer per session is sufficient).
+            if (!this.sentSync1ToPeers.has(msg.sender)) {
+              this.sentSync1ToPeers.add(msg.sender);
+              console.log('[YjsProvider] Sending sync1 back to', msg.sender, 'for bilateral sync');
+              this.sendSyncStep1();
             }
           } catch (err) {
             console.error('[YjsProvider] Failed to process sync1, re-requesting sync:', err);
@@ -305,5 +317,6 @@ export class SupabaseYjsProvider {
     }
 
     this.pendingUpdates = [];
+    this.sentSync1ToPeers.clear();
   }
 }

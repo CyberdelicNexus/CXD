@@ -156,6 +156,46 @@ const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; 
   active: { icon: <Zap className="w-4 h-4" />, color: "from-yellow-950 to-yellow-400", colorRaw: "234, 179, 8" },
 };
 
+/**
+ * Hook to prevent cursor-jump in controlled inputs.
+ * Keeps a local copy of the value so React never resets the cursor
+ * when the store round-trips the value back during editing.
+ * While the input is "active" (between first change and blur), external
+ * syncs are fully suppressed — only local state drives the input value.
+ */
+function useLocalInput(externalValue: string, onChange: (v: string) => void) {
+  const [value, setValue] = useState(externalValue);
+  const lastSent = useRef(externalValue);
+  // When true, the user is actively editing — suppress ALL external syncs
+  const isActive = useRef(false);
+
+  // Sync from external only when not actively editing
+  if (!isActive.current && externalValue !== lastSent.current) {
+    lastSent.current = externalValue;
+    setValue(externalValue);
+  }
+
+  const handleChange = useCallback(
+    (v: string) => {
+      isActive.current = true;
+      setValue(v);
+      lastSent.current = v;
+      onChange(v);
+    },
+    [onChange],
+  );
+
+  // Call this on blur to re-enable external syncs
+  const handleBlur = useCallback(() => {
+    isActive.current = false;
+    // Sync to latest external value in case it changed while we were editing
+    // (e.g. collaboration). We don't call setValue here — the next render
+    // cycle will pick it up via the sync check above.
+  }, []);
+
+  return [value, handleChange, handleBlur] as const;
+}
+
 interface CanvasElementRendererProps {
   element: CanvasElement;
   onUpdate: (updates: Partial<CanvasElement>) => void;
@@ -192,6 +232,8 @@ interface CanvasElementRendererProps {
   snapToGrid?: boolean;
   /** Optional data-tour-id attribute for onboarding tour targeting */
   tourId?: string;
+  /** Show hover outline for group individual select (when Ctrl is held) */
+  showGroupHover?: boolean;
 }
 
 export function CanvasElementRenderer({
@@ -222,6 +264,7 @@ export function CanvasElementRenderer({
   isReadOnly = false,
   snapToGrid = false,
   tourId,
+  showGroupHover,
 }: CanvasElementRendererProps) {
   // Stabilize onUpdate via ref so that effects and sub-component callbacks
   // that depend on onUpdate don't re-fire just because the parent re-rendered
@@ -500,6 +543,8 @@ export function CanvasElementRenderer({
 
   // Z-index management helpers - bring to front/send to back relative to all elements
   const handleBringForward = useCallback(() => {
+    // Containers cannot be reordered — they always stay at the back
+    if (element.type === 'container') return;
     const allElements = getCanvasElements();
     const maxZIndex = allElements.reduce(
       (max, el) => Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0),
@@ -507,23 +552,32 @@ export function CanvasElementRenderer({
     );
     // Only update if not already at max
     if ((element.zIndex || 0) < maxZIndex) {
-      pushCanvasHistory(); // Save state before z-index change
+      pushCanvasHistory();
       onUpdate({ zIndex: maxZIndex + 1 });
     }
-  }, [element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
+  }, [element.type, element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
 
   const handleSendBackward = useCallback(() => {
+    // Containers cannot be reordered — they always stay at the back
+    if (element.type === 'container') return;
     const allElements = getCanvasElements();
-    const minZIndex = allElements.reduce(
-      (min, el) => Math.min(min, Number.isFinite(el.zIndex) ? el.zIndex : 0),
-      0
+    // Non-container elements cannot go below the highest container z-index
+    const maxContainerZ = allElements.reduce(
+      (max, el) => el.type === 'container' ? Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0) : max,
+      -Infinity
     );
-    // Only update if not already at min
-    if ((element.zIndex || 0) > minZIndex) {
-      pushCanvasHistory(); // Save state before z-index change
-      onUpdate({ zIndex: minZIndex - 1 });
+    const minNonContainerZ = allElements.reduce(
+      (min, el) => el.type !== 'container' ? Math.min(min, Number.isFinite(el.zIndex) ? el.zIndex : 0) : min,
+      Infinity
+    );
+    const targetZ = minNonContainerZ - 1;
+    // Don't go below containers
+    const safeZ = Math.max(targetZ, maxContainerZ + 1);
+    if ((element.zIndex || 0) > safeZ) {
+      pushCanvasHistory();
+      onUpdate({ zIndex: safeZ });
     }
-  }, [element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
+  }, [element.type, element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
 
   // Handle drag from element body (not just the handle)
   const handleBodyMouseDown = useCallback(
@@ -648,9 +702,7 @@ export function CanvasElementRenderer({
     }
   };
 
-  // Don't render connectors as regular elements
-  if (element.type === "connector") return null;
-
+  // Determine if this is a resizable note card (needed before hooks below)
   const freeformCardType =
     element.type === "freeform"
       ? getFreeformCardType(element as FreeformElement)
@@ -659,6 +711,31 @@ export function CanvasElementRenderer({
     element.type === "freeform" &&
     freeformCardType === "note" &&
     !(element as FreeformElement).isDocument;
+
+  // For note cards: observe actual DOM height via ResizeObserver and sync to
+  // element.height so the group reflow system always sees the real rendered size
+  // (including when the editor is open and taller than the compact view).
+  const lastObservedHeight = useRef(element.height);
+  useEffect(() => {
+    if (!isResizableNoteCard) return;
+    const el = elementRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const h = Math.ceil(entry.contentRect.height);
+      const next = Math.max(300, h);
+      if (Math.abs(next - lastObservedHeight.current) > 3) {
+        lastObservedHeight.current = next;
+        onUpdate({ height: next });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isResizableNoteCard]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Don't render connectors as regular elements
+  if (element.type === "connector") return null;
 
   return (
     <div
@@ -672,6 +749,8 @@ export function CanvasElementRenderer({
         isDragging && (element as FreeformElement).isDocument && "cursor-grabbing",
         // Locked state indicator
         element.locked && "opacity-60 cursor-not-allowed",
+        // Ctrl+hover on grouped elements: show individual selection hint
+        showGroupHover && "hover:ring-2 hover:ring-violet-400/50 hover:shadow-[0_0_12px_rgba(139,92,246,0.25)] cursor-pointer",
         // Highlight effect (from hypercube navigation) — soft 4s fade glow with 1s delay
         isHighlighted &&
         "ring-2 ring-purple-400/70 shadow-[0_0_24px_rgba(167,139,250,0.35)] animate-[highlightGlow_4s_cubic-bezier(0.4,0,0.2,1)_1s_forwards]",
@@ -746,19 +825,17 @@ export function CanvasElementRenderer({
           element.type === "container" && (element as ContainerElement).collapsed
             ? 28
             : element.type === "freeform"
-            ? isResizableNoteCard
-              ? "auto"
-              : "auto"
+            ? "auto"
             : element.height,
         minHeight:
           element.type === "freeform"
             ? (element as FreeformElement).isDocument
               ? "100px"
-              : isResizableNoteCard
-                ? "300px"
-                : "300px"
+              : "300px"
             : undefined,
-        zIndex: Number.isFinite(element.zIndex) ? element.zIndex : 0,
+        zIndex: isSelected
+          ? 2000000000  // Selected element always on top so toolbar/menus aren't hidden by other elements
+          : Number.isFinite(element.zIndex) ? element.zIndex : 0,
         transform: element.rotation
           ? `rotate(${element.rotation}deg)`
           : undefined,
@@ -791,18 +868,28 @@ export function CanvasElementRenderer({
                 ? (element as ContainerElement).collapsed ?? false
                 : false
             }
+            isFreeform={element.type === 'freeform'}
+            isImage={element.type === 'image'}
             onStartConnector={onStartConnector}
             onEndConnector={onEndConnector ?? (() => {})}
           />
         )}
       {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
       {isSelected && !isDragging && element.type !== "line" && !isReadOnly && !isMultiSelected && (
+        /* Counter-rotation wrapper: un-rotates around element center so menu stays fixed above */
+        <div
+          className="absolute inset-0 pointer-events-none z-50"
+          style={{
+            transform: element.rotation ? `rotate(${-element.rotation}deg)` : undefined,
+          }}
+        >
         <div
           className={cn(
-            "absolute -top-10 left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl",
-            "bg-white/10 backdrop-blur-3xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)] z-50 top-[-57px]",
+            "absolute left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl pointer-events-auto",
+            "bg-white/10 backdrop-blur-3xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
           )}
           style={{
+            top: -57,
             transform: `translateX(-50%) scale(${1 / canvasZoom})`,
             transformOrigin: 'center bottom',
           }}
@@ -1450,27 +1537,31 @@ export function CanvasElementRenderer({
                 <div className="w-px h-4 bg-border/50 mx-0.5" />
               </>
             )}
-          {/* Universal actions */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleBringForward();
-            }}
-            className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-            title="Bring Forward"
-          >
-            <ArrowUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleSendBackward();
-            }}
-            className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-            title="Send Backward"
-          >
-            <ArrowDown className="w-4 h-4" />
-          </button>
+          {/* Universal actions — z-order controls hidden for containers (they always stay at back) */}
+          {element.type !== 'container' && (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleBringForward();
+                }}
+                className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Bring Forward"
+              >
+                <ArrowUp className="w-4 h-4" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSendBackward();
+                }}
+                className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Send Backward"
+              >
+                <ArrowDown className="w-4 h-4" />
+              </button>
+            </>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1549,6 +1640,7 @@ export function CanvasElementRenderer({
           >
             <Trash2 className="w-4 h-4" />
           </button>
+        </div>
         </div>
       )}
       {/* Hypercube tag indicators */}
@@ -1668,6 +1760,20 @@ export function CanvasElementRenderer({
               </>
             )}
           </>
+        )}
+      {/* Rotation handle — line + dot below element, for shapes and images */}
+      {isSelected &&
+        !isDragging &&
+        !isEditing &&
+        !isReadOnly &&
+        !element.locked &&
+        (element.type === "shape" || element.type === "image") && (
+          <RotationHandle
+            element={element}
+            onUpdate={onUpdate}
+            canvasZoom={canvasZoom}
+            onResizeStart={pushCanvasHistory}
+          />
         )}
       {/* Text font-size resize handle - shown when text selected and not editing */}
       {isSelected && !isEditing && element.type === "text" && !isReadOnly && (
@@ -1910,6 +2016,11 @@ function ResizeHandle({
         if (element.type === "experienceBlock") {
           (updates as any).manuallyResized = true;
         }
+        // For containers, update the user-set minimum size floor
+        if (element.type === "container") {
+          (updates as any).minWidth = newWidth;
+          (updates as any).minHeight = newHeight;
+        }
         onUpdate(updates);
       };
 
@@ -1942,6 +2053,96 @@ function ResizeHandle({
       style={positionStyles[position]}
       onMouseDown={handleMouseDown}
     />
+  );
+}
+
+// Rotation handle — line + dot below the element, drag to rotate
+function RotationHandle({
+  element,
+  onUpdate,
+  canvasZoom,
+  onResizeStart,
+}: {
+  element: CanvasElement;
+  onUpdate: (updates: Partial<CanvasElement>) => void;
+  canvasZoom: number;
+  onResizeStart?: () => void;
+}) {
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      onResizeStart?.();
+
+      // Get the element's screen-space center from its DOM node
+      const elNode = (e.target as HTMLElement).closest('[data-element-id]') as HTMLElement | null;
+      if (!elNode) return;
+      const elRect = elNode.getBoundingClientRect();
+      const screenCenterX = elRect.left + elRect.width / 2;
+      const screenCenterY = elRect.top + elRect.height / 2;
+
+      // Compute the initial angle of the mouse relative to center at drag start
+      const startAngle = Math.atan2(
+        e.clientY - screenCenterY,
+        e.clientX - screenCenterX,
+      ) * (180 / Math.PI);
+      const startRotation = element.rotation || 0;
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        // Compute current angle from element center to mouse
+        const currentAngle = Math.atan2(
+          moveEvent.clientY - screenCenterY,
+          moveEvent.clientX - screenCenterX,
+        ) * (180 / Math.PI);
+
+        // Rotation = starting rotation + delta from where the drag began
+        let rotation = startRotation + (currentAngle - startAngle);
+
+        // Snap to 15° increments when Shift is held
+        if (moveEvent.shiftKey) {
+          rotation = Math.round(rotation / 15) * 15;
+        }
+
+        onUpdate({ rotation });
+      };
+
+      const handleMouseUp = () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [element, onUpdate, onResizeStart],
+  );
+
+  const handleScale = 1 / canvasZoom;
+  const stemLength = 30;
+  const dotSize = 10;
+
+  return (
+    <div
+      className="absolute left-1/2 pointer-events-none"
+      style={{
+        bottom: -(stemLength + dotSize / 2 + 4),
+        transform: `translateX(-50%) scale(${handleScale})`,
+        transformOrigin: "top center",
+      }}
+    >
+      {/* Stem line */}
+      <div
+        className="mx-auto bg-primary/60"
+        style={{ width: 1.5, height: stemLength }}
+      />
+      {/* Dot handle */}
+      <div
+        className="mx-auto rounded-full bg-primary border-2 border-background cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+        style={{ width: dotSize, height: dotSize }}
+        onMouseDown={handleMouseDown}
+        title="Drag to rotate (Shift for 15° snaps)"
+      />
+    </div>
   );
 }
 
@@ -2098,7 +2299,7 @@ function ShapeTypePicker({
 
   return (
     <div
-      className="absolute top-full mt-2 left-1/2 -translate-x-1/2 p-2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[180px]"
+      className="absolute top-full mt-2 left-1/2 -translate-x-1/2 p-2 rounded-lg bg-card backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[180px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2147,7 +2348,7 @@ function ShapeTextStylePicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[200px] p-3 pointer-events-auto"
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[200px] p-3 pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2328,7 +2529,7 @@ function ShapeColorPicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto w-[220px] p-3"
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto w-[220px] p-3"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2537,7 +2738,7 @@ function ContainerStylePicker({
 
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
+      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2742,7 +2943,7 @@ function TextColorPicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[180px] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[180px] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2871,7 +3072,7 @@ function GradientPicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[260px] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[260px] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2919,7 +3120,7 @@ function HypercubeTagPicker({
 }) {
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[220px] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[220px] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2982,7 +3183,7 @@ function EmojiPicker({
 }) {
   return (
     <div
-      className="absolute right-0 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-50 grid grid-cols-4 gap-1 w-[148px] left-[-5px] top-[-175px] bottom-[45px]"
+      className="absolute right-0 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-50 grid grid-cols-4 gap-1 w-[148px] left-[-5px] top-[-175px] bottom-[45px]"
       onClick={(e) => e.stopPropagation()}
     >
       {COMMON_EMOJIS.map((emoji) => (
@@ -3109,7 +3310,7 @@ function BoardIconPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl z-50 grid grid-cols-4 gap-1 w-[165px] h-[96px]"
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-4 gap-1 w-[165px] h-[96px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3144,7 +3345,7 @@ function BoardColorPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px] h-[156px]"
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px] h-[156px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3319,6 +3520,24 @@ function FreeformCard({
   const legacyLines = (element.content || "").split("\n");
   const noteTitle = element.noteTitle ?? (legacyLines[0] || "Untitled Note");
   const noteBody = element.noteBody ?? legacyLines.slice(1).join("\n");
+
+  // Local input hooks to prevent cursor-jump on controlled inputs
+  const [localNoteTitle, setLocalNoteTitle] = useLocalInput(
+    noteTitle,
+    (v) => {
+      const safeTitle = v.trim() || "Untitled Note";
+      const combined = noteBody.trim().length > 0 ? `${safeTitle}\n${noteBody}` : safeTitle;
+      onUpdate({ noteTitle: safeTitle, noteBody, content: combined });
+    },
+  );
+  const [localTaskContent, setLocalTaskContent] = useLocalInput(
+    element.content || "",
+    (v) => onUpdate({ content: v }),
+  );
+  const [localTaskDescription, setLocalTaskDescription] = useLocalInput(
+    element.taskMetadata?.description || "",
+    (v) => onUpdate({ taskMetadata: { ...element.taskMetadata, description: v } }),
+  );
   const renderedNoteBody = useMemo(
     () => DOMPurify.sanitize(
       noteBody
@@ -3522,7 +3741,7 @@ function FreeformCard({
             value.substring(0, lineStartPos) +
             "\n" +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             textarea.setSelectionRange(lineStartPos + 1, lineStartPos + 1);
           }, 0);
@@ -3534,7 +3753,7 @@ function FreeformCard({
             indent +
             "- " +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             const newPos = selectionEnd + indent.length + 3;
             textarea.setSelectionRange(newPos, newPos);
@@ -3548,7 +3767,7 @@ function FreeformCard({
             value.substring(0, lineStartPos) +
             "\n" +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             textarea.setSelectionRange(lineStartPos + 1, lineStartPos + 1);
           }, 0);
@@ -3560,7 +3779,7 @@ function FreeformCard({
             indent +
             "[ ] " +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             const newPos = selectionEnd + indent.length + 5;
             textarea.setSelectionRange(newPos, newPos);
@@ -3572,7 +3791,7 @@ function FreeformCard({
           value.substring(0, selectionEnd) +
           "\n" +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(selectionEnd + 1, selectionEnd + 1);
         }, 0);
@@ -3588,7 +3807,7 @@ function FreeformCard({
           value.substring(0, lineStartPos) +
           "- " +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos + 2, lineStartPos + 2);
         }, 0);
@@ -3600,7 +3819,7 @@ function FreeformCard({
           value.substring(0, lineStartPos) +
           "[ ] " +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos + 4, lineStartPos + 4);
         }, 0);
@@ -3612,7 +3831,7 @@ function FreeformCard({
           value.substring(0, lineStartPos) +
           "[x] " +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos + 4, lineStartPos + 4);
         }, 0);
@@ -3629,7 +3848,7 @@ function FreeformCard({
         // Remove the list marker
         const newValue =
           value.substring(0, lineStartPos) + value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos, lineStartPos);
         }, 0);
@@ -3641,7 +3860,7 @@ function FreeformCard({
         // Remove the todo marker
         const newValue =
           value.substring(0, lineStartPos) + value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos, lineStartPos);
         }, 0);
@@ -3649,14 +3868,12 @@ function FreeformCard({
     }
   };
 
+  // adjustNoteHeight is now a lightweight no-op fallback.
+  // The ResizeObserver on elementRef (in CanvasElementRenderer) handles
+  // syncing element.height with actual DOM size for note cards.
   const adjustNoteHeight = useCallback(() => {
-    if (!isNote || !noteContentRef.current) return;
-    const measured = Math.ceil(noteContentRef.current.scrollHeight + 24);
-    const nextHeight = Math.max(300, element.height || 300, measured);
-    if (nextHeight !== element.height) {
-      onUpdate({ height: nextHeight });
-    }
-  }, [element.height, isNote, onUpdate]);
+    // no-op — ResizeObserver handles height syncing
+  }, []);
 
   const ensureNoteEditorFocus = useCallback(() => {
     if (!isNote) return;
@@ -3751,11 +3968,6 @@ function FreeformCard({
       applyNoteCommand("underline");
     }
   }, [isNote, applyNoteCommand]);
-
-  useEffect(() => {
-    if (!isNote) return;
-    adjustNoteHeight();
-  }, [isNote, noteTitle, noteBody, isEditing, adjustNoteHeight]);
 
   // Render content with markdown-like formatting
   const renderContent = (content: string) => {
@@ -3937,9 +4149,9 @@ function FreeformCard({
             <div className="text-4xl mb-1">{element.emoji || '📄'}</div>
             <div className="w-full px-1">
               <textarea
-                value={noteTitle}
+                value={localNoteTitle}
                 onChange={(e) => {
-                  onUpdate({ noteTitle: e.target.value });
+                  setLocalNoteTitle(e.target.value);
                   // Auto-resize height
                   e.target.style.height = 'auto';
                   e.target.style.height = e.target.scrollHeight + 'px';
@@ -4007,8 +4219,8 @@ function FreeformCard({
               </div>
               <Input
                 autoFocus={noteEditingField === "title"}
-                value={noteTitle}
-                onChange={(e) => syncNoteFields(e.target.value, noteBody)}
+                value={localNoteTitle}
+                onChange={(e) => setLocalNoteTitle(e.target.value)}
                 onBlur={handleNoteFieldBlur}
                 onFocus={() => setNoteEditingField("title")}
                 className="h-9 border-0 bg-transparent p-0 text-lg font-semibold focus-visible:ring-0"
@@ -4017,7 +4229,7 @@ function FreeformCard({
               />
               <div className="h-px bg-white/10" />
               <div
-                className="w-full flex-1 min-h-[160px]"
+                className="w-full flex-1 min-h-0"
                 onMouseDown={(e) => e.stopPropagation()}
                 data-no-drag
               >
@@ -4038,8 +4250,8 @@ function FreeformCard({
               <Textarea
                 ref={textareaRef}
                 autoFocus
-                value={element.content}
-                onChange={(e) => onUpdate({ content: e.target.value })}
+                value={localTaskContent}
+                onChange={(e) => setLocalTaskContent(e.target.value)}
                 onBlur={handleBlur}
                 onKeyDown={handleTitleKeyDown}
                 onFocus={(e) => {
@@ -4067,14 +4279,9 @@ function FreeformCard({
               {/* Description Input */}
               <Textarea
                 ref={descriptionRef}
-                value={element.taskMetadata?.description || ""}
+                value={localTaskDescription}
                 onChange={(e) => {
-                  onUpdate({
-                    taskMetadata: {
-                      ...element.taskMetadata,
-                      description: e.target.value,
-                    },
-                  });
+                  setLocalTaskDescription(e.target.value);
                   // Auto-expand textarea
                   e.target.style.height = "auto";
                   e.target.style.height = e.target.scrollHeight + "px";
@@ -4551,7 +4758,7 @@ function FreeformCard({
               )}
 
               {showTaskPriorityMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-card/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[100] min-w-[120px]">
+                <div className="absolute top-full left-0 mt-1 bg-card backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[100] min-w-[120px]">
                   {[
                     { value: 'urgent', label: 'Urgent', color: 'bg-red-500/20 text-red-400' },
                     { value: 'high', label: 'High', color: 'bg-orange-500/20 text-orange-400' },
@@ -5446,7 +5653,7 @@ function ImageCard({
       {/* Edit toolbar - shown when selected */}
       {isSelected && !isCropping && !isReadOnly && (
         <div
-          className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10"
+          className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -5474,7 +5681,7 @@ function ImageCard({
       {/* Edit panel */}
       {isEditMode && isSelected && !isCropping && !isReadOnly && (
         <div
-          className="absolute -bottom-24 left-1/2 -translate-x-1/2 flex flex-col gap-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10 min-w-[200px]"
+          className="absolute -bottom-24 left-1/2 -translate-x-1/2 flex flex-col gap-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10 min-w-[200px]"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -5529,7 +5736,7 @@ function ImageCard({
       {/* Crop controls */}
       {isCropping && (
         <div
-          className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/95 backdrop-blur border border-cyan-500/50 shadow-lg z-10"
+          className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card backdrop-blur border border-cyan-500/50 shadow-lg z-10"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -5567,6 +5774,11 @@ function ShapeCard({
   isSelected?: boolean;
   onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void;
 }) {
+  const [localContent, setLocalContent] = useLocalInput(
+    element.content || "",
+    (v) => onUpdate({ content: v }),
+  );
+
   const bgColor = element.style?.bgColor || "hsl(var(--primary) / 0.3)";
   const borderColor = element.style?.borderColor || "hsl(var(--primary))";
   const borderWidth = element.style?.borderWidth || 2;
@@ -5833,6 +6045,7 @@ function ShapeCard({
     textAlign: shapeTextAlign,
     wordBreak: 'break-word',
     overflowWrap: 'break-word',
+    whiteSpace: 'pre-wrap',
     lineHeight: 1.3,
   };
 
@@ -5868,34 +6081,39 @@ function ShapeCard({
       >
         {isEditing ? (
           <textarea
-            autoFocus
-            value={element.content || ""}
-            onChange={(e) => onUpdate({ content: e.target.value })}
+            ref={(el) => {
+              if (el) {
+                el.focus();
+                // Auto-size to content
+                el.style.height = 'auto';
+                el.style.height = `${Math.min(el.scrollHeight, el.parentElement?.clientHeight || 9999)}px`;
+              }
+            }}
+            value={localContent}
+            onChange={(e) => {
+              setLocalContent(e.target.value);
+              // Re-size on content change
+              const target = e.target;
+              target.style.height = 'auto';
+              target.style.height = `${Math.min(target.scrollHeight, target.parentElement?.clientHeight || 9999)}px`;
+            }}
             onBlur={onBlur}
             className="w-full bg-transparent border-0 focus:outline-none resize-none"
             style={{
               ...baseTextStyle,
               ...textColorStyle,
               maxHeight: '100%',
-              height: 'auto',
-              minHeight: '1.3em',
             }}
             placeholder="Text..."
             data-no-drag
-            rows={1}
-            onInput={(e) => {
-              // Auto-resize textarea to fit content
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = `${target.scrollHeight}px`;
-            }}
           />
         ) : (
           <span
+            key={isGradientText ? textColor : 'solid'}
             style={{
               ...baseTextStyle,
               ...textColorStyle,
-              display: 'block',
+              display: isGradientText ? 'inline-block' : 'block',
               maxWidth: '100%',
               maxHeight: '100%',
               overflow: 'hidden',
@@ -6016,6 +6234,11 @@ function ContainerCard({
       ).length,
   );
 
+  const [localLabel, setLocalLabel] = useLocalInput(
+    element.label ?? "",
+    (v) => onUpdate({ label: v }),
+  );
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const dotButtonRef = useRef<HTMLButtonElement>(null);
@@ -6119,8 +6342,8 @@ function ContainerCard({
         {isEditing ? (
           <input
             autoFocus
-            value={element.label ?? ''}
-            onChange={(e) => onUpdate({ label: e.target.value })}
+            value={localLabel}
+            onChange={(e) => setLocalLabel(e.target.value)}
             onBlur={onBlur}
             placeholder="Name"
             className="flex-1 min-w-0 bg-transparent border-0 p-0 focus:outline-none"
@@ -6229,6 +6452,11 @@ function TextCard({
   const containerRef = useRef<HTMLDivElement>(null);
   const [originalContent, setOriginalContent] = useState("");
 
+  const [localContent, setLocalContent, onLocalBlur] = useLocalInput(
+    element.content || "",
+    (v) => onUpdate({ content: v }),
+  );
+
   const fontSize = element.style?.fontSize || 16;
   const fontWeight = element.style?.fontWeight || "normal";
   const fontFamily = element.style?.fontFamily || "inherit";
@@ -6268,7 +6496,10 @@ function TextCard({
     };
   }, [isEditing, onBlur]);
 
-  // Auto-grow textarea height while editing
+  // Auto-grow textarea height while editing — uses refs to avoid re-render cascades
+  const elementHeightRef = useRef(element.height);
+  elementHeightRef.current = element.height;
+
   const autoGrowTextarea = useCallback(() => {
     if (textareaRef.current) {
       const textarea = textareaRef.current;
@@ -6280,13 +6511,13 @@ function TextCard({
 
       // Update element height to match (plus padding)
       const totalHeight = newHeight + 16;
-      if (Math.abs(element.height - totalHeight) > 2) {
+      if (Math.abs(elementHeightRef.current - totalHeight) > 2) {
         onUpdate({ height: totalHeight });
       }
     }
-  }, [element.height, onUpdate]);
+  }, [onUpdate]);
 
-  // Auto-grow on mount (enter edit mode) and content change
+  // Auto-grow on mount (enter edit mode)
   useEffect(() => {
     if (isEditing) {
       // Small delay to ensure textarea is rendered
@@ -6303,28 +6534,20 @@ function TextCard({
         });
       }
     }
-  }, [isEditing, autoGrowTextarea]);
+  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-size height based on content (width controlled by wrapWidth or auto)
+  // Auto-size: only adjust HEIGHT to fit content, never change width
+  // Width is controlled by the user via resize handles
   useEffect(() => {
     if (!isEditing && measureRef.current && element.content) {
       const measured = measureRef.current.getBoundingClientRect();
 
-      // Width: use wrapWidth if set, otherwise auto-size to content
-      const newWidth = wrapWidth
-        ? wrapWidth
-        : Math.max(60, Math.ceil(measured.width) + 16);
-
-      // Height: always auto-size to fit wrapped content
+      // Height: auto-size to fit wrapped content within current width
       const newHeight = Math.max(30, Math.ceil(measured.height) + 16);
 
-      // Only update if size changed significantly (avoid glitching)
-      // Use larger threshold to prevent micro-adjustments that cause visual jumps
-      if (
-        Math.abs(element.width - newWidth) > 8 ||
-        Math.abs(element.height - newHeight) > 8
-      ) {
-        onUpdate({ width: newWidth, height: newHeight });
+      // Only update height if changed significantly
+      if (Math.abs(element.height - newHeight) > 8) {
+        onUpdate({ height: newHeight });
       }
     }
   }, [
@@ -6332,8 +6555,7 @@ function TextCard({
     wrapWidth,
     isEditing,
     onUpdate,
-    // NOTE: fontSize, fontWeight, fontFamily intentionally excluded —
-    // style changes should NOT reset the bounding box; text reflows
+    element.width, // Re-measure height when width changes (text reflows)
     // within existing bounds via CSS.
   ]);
 
@@ -6356,7 +6578,7 @@ function TextCard({
 
   // Handle content change with auto-grow
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onUpdate({ content: e.target.value });
+    setLocalContent(e.target.value);
     // Auto-grow after content update
     if (typeof window !== "undefined") {
       window.requestAnimationFrame(autoGrowTextarea);
@@ -6414,8 +6636,9 @@ function TextCard({
       {isEditing ? (
         <textarea
           ref={textareaRef}
-          value={element.content}
+          value={localContent}
           onChange={handleContentChange}
+          onBlur={onLocalBlur}
           onKeyDown={handleKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
@@ -7330,6 +7553,34 @@ function ExperienceBlockCard({
     updateTraitMapping,
   } = useCXDStore();
 
+  // Local input hooks for all intention editor fields to prevent cursor-jump
+  const [liProjectName, setLiProjectName] = useLocalInput(
+    project?.intentionCore?.projectName || "", updateIntentionProjectName);
+  const [liMainConcept, setLiMainConcept] = useLocalInput(
+    project?.intentionCore?.mainConcept || "", updateIntentionMainConcept);
+  const [liCoreMessage, setLiCoreMessage] = useLocalInput(
+    project?.intentionCore?.coreMessage || "", updateIntentionCoreMessage);
+  const [liInsights, setLiInsights] = useLocalInput(
+    project?.desiredChange?.insights || "", updateDesiredInsights);
+  const [liFeelings, setLiFeelings] = useLocalInput(
+    project?.desiredChange?.feelings || "", updateDesiredFeelings);
+  const [liStates, setLiStates] = useLocalInput(
+    project?.desiredChange?.states || "", updateDesiredStates);
+  const [liKnowledge, setLiKnowledge] = useLocalInput(
+    project?.desiredChange?.knowledge || "", updateDesiredKnowledge);
+  const [liAudienceNeeds, setLiAudienceNeeds] = useLocalInput(
+    project?.humanContext?.audienceNeeds || "", updateHumanAudienceNeeds);
+  const [liAudienceDesires, setLiAudienceDesires] = useLocalInput(
+    project?.humanContext?.audienceDesires || "", updateHumanAudienceDesires);
+  const [liUserRole, setLiUserRole] = useLocalInput(
+    project?.humanContext?.userRole || "", updateHumanUserRole);
+  const [liWorld, setLiWorld] = useLocalInput(
+    project?.contextAndMeaning?.world || "", updateContextWorld);
+  const [liStory, setLiStory] = useLocalInput(
+    project?.contextAndMeaning?.story || "", updateContextStory);
+  const [liMagic, setLiMagic] = useLocalInput(
+    project?.contextAndMeaning?.magic || "", updateContextMagic);
+
   // Auto-size the element height to fit inline content (must be before conditional returns)
   const contentRef = useRef<HTMLDivElement>(null);
   const lastAutoHeightRef = useRef<number>(0);
@@ -7463,8 +7714,8 @@ function ExperienceBlockCard({
                 <Input
                   id="projectName"
                   placeholder="Enter project name..."
-                  value={project.intentionCore?.projectName || ""}
-                  onChange={(e) => updateIntentionProjectName(e.target.value)}
+                  value={liProjectName}
+                  onChange={(e) => setLiProjectName(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white"
                   data-no-drag
                 />
@@ -7479,8 +7730,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="mainConcept"
                   placeholder="What is the central idea or concept?"
-                  value={project.intentionCore?.mainConcept || ""}
-                  onChange={(e) => updateIntentionMainConcept(e.target.value)}
+                  value={liMainConcept}
+                  onChange={(e) => setLiMainConcept(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -7495,8 +7746,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="coreMessage"
                   placeholder="What is the core message or takeaway?"
-                  value={project.intentionCore?.coreMessage || ""}
-                  onChange={(e) => updateIntentionCoreMessage(e.target.value)}
+                  value={liCoreMessage}
+                  onChange={(e) => setLiCoreMessage(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -7516,8 +7767,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="insights"
                   placeholder="What insights should users gain?"
-                  value={project.desiredChange?.insights || ""}
-                  onChange={(e) => updateDesiredInsights(e.target.value)}
+                  value={liInsights}
+                  onChange={(e) => setLiInsights(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -7532,8 +7783,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="feelings"
                   placeholder="What feelings should they experience?"
-                  value={project.desiredChange?.feelings || ""}
-                  onChange={(e) => updateDesiredFeelings(e.target.value)}
+                  value={liFeelings}
+                  onChange={(e) => setLiFeelings(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -7548,8 +7799,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="states"
                   placeholder="What states should emerge?"
-                  value={project.desiredChange?.states || ""}
-                  onChange={(e) => updateDesiredStates(e.target.value)}
+                  value={liStates}
+                  onChange={(e) => setLiStates(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -7564,8 +7815,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="knowledge"
                   placeholder="What knowledge should they acquire?"
-                  value={project.desiredChange?.knowledge || ""}
-                  onChange={(e) => updateDesiredKnowledge(e.target.value)}
+                  value={liKnowledge}
+                  onChange={(e) => setLiKnowledge(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -7585,8 +7836,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="audienceNeeds"
                   placeholder="What are the audience's needs?"
-                  value={project.humanContext?.audienceNeeds || ""}
-                  onChange={(e) => updateHumanAudienceNeeds(e.target.value)}
+                  value={liAudienceNeeds}
+                  onChange={(e) => setLiAudienceNeeds(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -7601,8 +7852,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="audienceDesires"
                   placeholder="What do they desire?"
-                  value={project.humanContext?.audienceDesires || ""}
-                  onChange={(e) => updateHumanAudienceDesires(e.target.value)}
+                  value={liAudienceDesires}
+                  onChange={(e) => setLiAudienceDesires(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -7617,8 +7868,8 @@ function ExperienceBlockCard({
                 <Input
                   id="userRole"
                   placeholder="What role does the user play?"
-                  value={project.humanContext?.userRole || ""}
-                  onChange={(e) => updateHumanUserRole(e.target.value)}
+                  value={liUserRole}
+                  onChange={(e) => setLiUserRole(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white"
                   data-no-drag
                 />
@@ -7638,8 +7889,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="world"
                   placeholder="Describe the world..."
-                  value={project.contextAndMeaning?.world || ""}
-                  onChange={(e) => updateContextWorld(e.target.value)}
+                  value={liWorld}
+                  onChange={(e) => setLiWorld(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -7654,8 +7905,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="story"
                   placeholder="What is the narrative?"
-                  value={project.contextAndMeaning?.story || ""}
-                  onChange={(e) => updateContextStory(e.target.value)}
+                  value={liStory}
+                  onChange={(e) => setLiStory(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -7670,8 +7921,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="magic"
                   placeholder="How does the magic work?"
-                  value={project.contextAndMeaning?.magic || ""}
-                  onChange={(e) => updateContextMagic(e.target.value)}
+                  value={liMagic}
+                  onChange={(e) => setLiMagic(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />

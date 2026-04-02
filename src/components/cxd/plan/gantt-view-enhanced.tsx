@@ -58,6 +58,7 @@ interface GanttViewProps {
   onTaskDelete?: (taskId: string) => void;
   detailPanelOpen?: boolean;
   onVersionClick?: (versionId: string) => void;
+  onQuickAddTask?: (title: string) => void;
 }
 
 type ZoomLevel = 'day' | 'week' | 'month';
@@ -123,7 +124,7 @@ const readLocalStorageJson = <T,>(key: string, fallback: T): T => {
   }
 };
 
-export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNavigate, onTaskUpdate, onTaskDelete, detailPanelOpen, onVersionClick }: GanttViewProps) {
+export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNavigate, onTaskUpdate, onTaskDelete, detailPanelOpen, onVersionClick, onQuickAddTask }: GanttViewProps) {
   // Get OKRs from store for version progress calculation
   const allOKRs = useCXDStore((state) => state.getCurrentProject()?.okrs || []);
   const updateVersion = useCXDStore((state) => state.updateVersion);
@@ -2189,6 +2190,12 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
               })}
             </div>
 
+            {onQuickAddTask && (
+              <div className="px-4 py-1">
+                <GanttQuickAddButton onAdd={onQuickAddTask} placeholder="Add task..." />
+              </div>
+            )}
+
             {flattenedTasks.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                 <Calendar className="w-12 h-12 mb-4 opacity-50" />
@@ -2861,6 +2868,53 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function GanttQuickAddButton({ onAdd, placeholder }: { onAdd: (title: string) => void; placeholder: string }) {
+  const [isAdding, setIsAdding] = React.useState(false);
+  const [text, setText] = React.useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (isAdding) inputRef.current?.focus();
+  }, [isAdding]);
+
+  const handleSubmit = () => {
+    if (text.trim()) {
+      onAdd(text.trim());
+      setText('');
+      setIsAdding(false);
+    }
+  };
+
+  if (!isAdding) {
+    return (
+      <button
+        onClick={() => setIsAdding(true)}
+        className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground/60 hover:text-muted-foreground hover:bg-white/5 rounded-lg transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Add task
+      </button>
+    );
+  }
+
+  return (
+    <div className="px-1">
+      <input
+        ref={inputRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+          if (e.key === 'Escape') { setIsAdding(false); setText(''); }
+        }}
+        onBlur={() => { if (!text.trim()) setIsAdding(false); }}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 text-xs bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:border-primary/50"
+      />
     </div>
   );
 }

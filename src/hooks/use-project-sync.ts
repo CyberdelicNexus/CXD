@@ -46,15 +46,14 @@ export function clearLocalBackup() {
 
 // Immediately save current project - call before navigation
 export async function flushPendingSave(): Promise<boolean> {
+  // Re-read the LATEST state from the store (Yjs bridge may have updated it)
+  // Small delay to let any pending RAF bridge flushes complete
+  await new Promise(resolve => requestAnimationFrame(resolve));
+
   const { projects, currentProjectId } = useCXDStore.getState();
   const currentProject = projects.find(p => p.id === currentProjectId);
 
   if (!currentProject) return true;
-
-  // Note: Yjs binary state (yjs_state column) is flushed by YjsProjectContext's
-  // cleanup, which calls supabasePersist.destroy() on unmount. We don't block here
-  // because creating a new SupabasePersistence instance would double-save and delay
-  // this function by one extra DB round-trip. The context cleanup handles it.
 
   const projectHash = JSON.stringify(currentProject);
   if (projectHash === lastSavedHash) return true;
@@ -67,8 +66,8 @@ export async function flushPendingSave(): Promise<boolean> {
     await pendingSavePromise;
   }
 
-  // Then save to database (JSON project_data for backward compat)
-  console.log('[Sync] Flushing pending save...');
+  // Then save to database (JSON project_data)
+  console.log('[Sync] Flushing pending save before navigation...');
   const success = await saveProject(currentProject);
   if (success) {
     lastSavedHash = projectHash;
@@ -110,7 +109,19 @@ export function useProjectSync() {
 
   // Save function with deduplication and backup
   const performSave = useCallback(async (project: CXDProject) => {
-    if (isSavingRef.current) return;
+    // If already saving, wait for it then re-check if save still needed
+    if (isSavingRef.current) {
+      if (pendingSavePromise) {
+        await pendingSavePromise;
+      }
+      // Re-read current state after waiting — it may have been saved
+      const freshProject = useCXDStore.getState().projects.find(p => p.id === project.id);
+      if (!freshProject) return;
+      const freshHash = JSON.stringify(freshProject);
+      if (freshHash === lastSavedHash) return;
+      // Fall through to save the fresh state
+      project = freshProject;
+    }
 
     const projectHash = JSON.stringify(project);
     if (projectHash === lastSavedHash) return;
@@ -191,14 +202,14 @@ export function useProjectSync() {
     const projectHash = JSON.stringify(currentProject);
     if (projectHash === lastSavedHash) return;
 
-    // Debounce save - 1 second delay after last change
+    // Debounce save - 300ms delay after last change (reduced from 1s to minimize data loss window)
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
 
     debounceRef.current = setTimeout(() => {
       performSave(currentProject);
-    }, 1000);
+    }, 300);
 
     return () => {
       if (debounceRef.current) {
@@ -209,7 +220,7 @@ export function useProjectSync() {
 
   // Save on page unload with synchronous backup
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       const currentProject = projects.find(p => p.id === currentProjectId);
       if (!currentProject) return;
 
@@ -223,6 +234,10 @@ export function useProjectSync() {
 
       // Synchronous save (localStorage backup + async save attempt)
       syncSaveOnUnload(currentProject);
+
+      // Warn user about unsaved changes (browser shows generic message)
+      e.preventDefault();
+      e.returnValue = '';
     };
 
     // Handle visibility change (tab switch, minimize) - save immediately

@@ -286,9 +286,9 @@ export function NoteRichTextEditor({
 
   return (
     <div ref={editorWrapRef} className="relative w-full overflow-visible">
-      <div className="flex items-start overflow-visible">
+      <div className="relative overflow-visible">
         {isSelected && (
-          <div className="sticky top-20 z-20 mr-[30px] -ml-[55px] flex flex-col gap-1 rounded-lg border border-white/15 bg-black/5 p-1.5 shadow-xl">
+          <div className="absolute right-full z-20 mr-6 flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]" style={{ top: -105 }}>
             {editorButtons.map((button) => (
               <button
                 key={button.title}
@@ -337,7 +337,7 @@ export function NoteRichTextEditor({
             </button>
 
             {menu === "style" && (
-              <div className="absolute left-full top ml-2 min-w-[150px] -translate-y-1/2 rounded-lg border border-white/15 bg-[#1a1a2e] p-2 shadow-xl">
+              <div className="absolute left-full top ml-2 min-w-[150px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
                 {[
                   { value: "heading", label: "Heading" },
                   { value: "subheading", label: "Subheading" },
@@ -361,7 +361,7 @@ export function NoteRichTextEditor({
             )}
 
             {menu === "textColor" && (
-              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-lg border border-white/15 bg-[#1a1a2e] p-2.5 shadow-xl">
+              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
                 <div className="grid grid-cols-3 place-items-center gap-1.5">
                   {TEXT_COLORS.map((color) => (
                     <button
@@ -392,7 +392,7 @@ export function NoteRichTextEditor({
             )}
 
             {menu === "highlight" && (
-              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-lg border border-white/15 bg-[#1a1a2e] p-2.5 shadow-xl">
+              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
                 <div className="grid grid-cols-3 place-items-center gap-1.5">
                   {HIGHLIGHT_COLORS.map((color) => (
                     <button
@@ -436,7 +436,7 @@ export function NoteRichTextEditor({
       {showLinkPopup && linkPopupPosition && (
         <div
           ref={popupRef}
-          className="fixed z-[999] w-[260px] rounded-lg border border-white/15 bg-[#1a1a2e] p-2.5 shadow-xl"
+          className="fixed z-[999] w-[260px] rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
           style={{ left: linkPopupPosition.left - 130, top: linkPopupPosition.top }}
           onMouseDown={(e) => e.stopPropagation()}
         >

@@ -243,6 +243,10 @@ export interface ContainerElement extends CanvasElementBase {
   collapsed?: boolean;
   tintColor?: 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
   style?: ElementStyle;
+  /** User-set minimum width — updated when user manually resizes the container */
+  minWidth?: number;
+  /** User-set minimum height — updated when user manually resizes the container */
+  minHeight?: number;
 }
 
 // Connector element for linking nodes

@@ -16,6 +16,7 @@ type SearchParams = {
   message?: string;
   plan?: string;
   promo?: string;
+  redirectTo?: string;
 };
 
 export default async function Signup(props: {
@@ -136,6 +137,9 @@ export default async function Signup(props: {
 
                 <div className="space-y-4">
                   {/* Promo Code / Beta Access Info */}
+                  {searchParams.redirectTo && (
+                    <input type="hidden" name="redirectTo" value={searchParams.redirectTo} />
+                  )}
                   {(searchParams.plan === 'beta' || searchParams.promo === 'beta') && (
                     <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center gap-3 mb-2 animate-in fade-in slide-in-from-top-2 duration-500">
                       <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center shrink-0">

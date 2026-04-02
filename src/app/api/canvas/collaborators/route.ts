@@ -80,12 +80,13 @@ export async function GET(request: Request) {
       );
     }
 
-    // Get user details for each collaborator
-    const userIds = collaborators?.map(c => c.user_id) || [];
+    // Get user details for each collaborator PLUS the owner
+    const collaboratorUserIds = collaborators?.map(c => c.user_id) || [];
+    const allUserIds = Array.from(new Set([canvas.owner_id, ...collaboratorUserIds]));
     const { data: users } = await supabaseAdmin
       .from('users')
       .select('id, email, name, avatar_url')
-      .in('id', userIds);
+      .in('id', allUserIds);
 
     // Merge user data with collaborator data
     const collaboratorsWithUsers = collaborators?.map(collab => {
@@ -100,6 +101,21 @@ export async function GET(request: Request) {
         avatarUrl: userData?.avatar_url,
       };
     }) || [];
+
+    // Always include the owner at the top of the list, even if they're not in canvas_collaborators
+    const ownerAlreadyInList = collaboratorsWithUsers.some(c => c.userId === canvas.owner_id);
+    if (!ownerAlreadyInList) {
+      const ownerData = users?.find(u => u.id === canvas.owner_id);
+      collaboratorsWithUsers.unshift({
+        id: `owner-${canvas.owner_id}`,
+        userId: canvas.owner_id,
+        role: 'owner',
+        addedAt: new Date().toISOString(),
+        email: ownerData?.email || 'Unknown',
+        name: ownerData?.name || ownerData?.email?.split('@')[0] || 'Unknown',
+        avatarUrl: ownerData?.avatar_url,
+      });
+    }
 
     return NextResponse.json({
       collaborators: collaboratorsWithUsers,

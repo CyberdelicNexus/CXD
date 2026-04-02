@@ -1,15 +1,17 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { CanvasElement } from "@/types/canvas-elements";
+import { CanvasElement, PRESET_COLORS } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  AlignHorizontalJustifyStart,
-  AlignHorizontalJustifyCenter,
-  AlignHorizontalJustifyEnd,
+  AlignStartVertical,
+  AlignCenterVertical,
+  AlignEndVertical,
+  AlignHorizontalSpaceAround,
+  AlignVerticalSpaceAround,
   Group,
   Ungroup,
   Copy,
@@ -18,7 +20,26 @@ import {
   Unlock,
   ArrowUp,
   ArrowDown,
+  Palette,
 } from "lucide-react";
+
+// Container tint definitions (mirrored from canvas-element.tsx)
+const CONTAINER_TINTS = {
+  violet:  { mid: '#7C3AED', light: '#C4B5FD' },
+  ocean:   { mid: '#2563EB', light: '#67E8F9' },
+  emerald: { mid: '#059669', light: '#6EE7B7' },
+  sunset:  { mid: '#EA580C', light: '#FDE68A' },
+  rose:    { mid: '#DB2777', light: '#FBCFE8' },
+  glacier: { mid: '#475569', light: '#E2E8F0' },
+} as const;
+const TINT_ORDER = ['violet', 'ocean', 'emerald', 'sunset', 'rose', 'glacier'] as const;
+
+// Shape solid colors
+const SHAPE_SOLID_COLORS = [
+  '#7C3AED', '#2563EB', '#059669', '#EA580C', '#DB2777',
+  '#475569', '#22D3EE', '#F59E0B', '#EF4444', '#8B5CF6',
+  '#10B981', '#F97316',
+];
 
 interface MultiSelectionBoxProps {
   selectedElements: CanvasElement[];
@@ -67,6 +88,10 @@ export function MultiSelectionBox({
     const gridSize = useMinorGrid ? MINOR_GRID_SIZE : GRID_SIZE;
     return Math.round(value / gridSize) * gridSize;
   }, [snapToGrid]);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  // Cycling alignment modes: each click cycles to the next mode
+  const [hAlignMode, setHAlignMode] = useState<0 | 1 | 2>(0); // 0=left, 1=center, 2=right
+  const [vAlignMode, setVAlignMode] = useState<0 | 1 | 2>(0); // 0=top, 1=middle, 2=bottom
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState<{
@@ -93,8 +118,8 @@ export function MultiSelectionBox({
     };
   }, []);
 
-  // Calculate bounding box with padding to separate group handles from element handles
-  const GROUP_PADDING = 16; // px of padding between elements and group outline
+  // Calculate bounding box with padding to separate group handles from element connector anchors
+  const GROUP_PADDING = 30; // px of padding between elements and group outline
   const bounds = calculateBounds(selectedElements);
   if (!bounds) return null;
 
@@ -159,6 +184,50 @@ export function MultiSelectionBox({
     });
     onUpdateElements(updates);
   }, [selectedElements, maxY, onUpdateElements]);
+
+  // Distribute evenly: place elements sequentially with a fixed 20px gap
+  const DISTRIBUTE_GAP = 20;
+
+  const distributeH = useCallback(() => {
+    if (selectedElements.length < 2) return;
+    const sorted = [...selectedElements].sort((a, b) => a.x - b.x);
+    const updates = new Map<string, Partial<CanvasElement>>();
+    let currentX = sorted[0].x;
+    sorted.forEach((el, i) => {
+      updates.set(el.id, { x: currentX });
+      currentX += el.width + DISTRIBUTE_GAP;
+    });
+    onUpdateElements(updates);
+  }, [selectedElements, onUpdateElements]);
+
+  const distributeV = useCallback(() => {
+    if (selectedElements.length < 2) return;
+    const sorted = [...selectedElements].sort((a, b) => a.y - b.y);
+    const updates = new Map<string, Partial<CanvasElement>>();
+    let currentY = sorted[0].y;
+    sorted.forEach((el, i) => {
+      updates.set(el.id, { y: currentY });
+      currentY += el.height + DISTRIBUTE_GAP;
+    });
+    onUpdateElements(updates);
+  }, [selectedElements, onUpdateElements]);
+
+  // Cycling alignment handlers
+  const cycleHAlign = useCallback(() => {
+    const mode = hAlignMode;
+    if (mode === 0) alignLeft();
+    else if (mode === 1) alignCenterH();
+    else alignRight();
+    setHAlignMode(((mode + 1) % 3) as 0 | 1 | 2);
+  }, [hAlignMode, alignLeft, alignCenterH, alignRight]);
+
+  const cycleVAlign = useCallback(() => {
+    const mode = vAlignMode;
+    if (mode === 0) alignTop();
+    else if (mode === 1) alignMiddle();
+    else alignBottom();
+    setVAlignMode(((mode + 1) % 3) as 0 | 1 | 2);
+  }, [vAlignMode, alignTop, alignMiddle, alignBottom]);
 
   // Handle resize start
   const handleResizeStart = useCallback(
@@ -308,7 +377,7 @@ export function MultiSelectionBox({
           top: minY,
           width,
           height,
-          border: "1.5px dashed hsl(var(--primary) / 0.5)",
+          border: `${Math.max(1.5, 1.5 / canvasZoom)}px dashed hsl(var(--primary) / 0.5)`,
           borderRadius: 8,
           background: "transparent",
         }}
@@ -323,15 +392,15 @@ export function MultiSelectionBox({
         {!allLocked && (
           <>
             {/* Corner handles */}
-            <ResizeHandle position="nw" onResizeStart={handleResizeStart} />
-            <ResizeHandle position="ne" onResizeStart={handleResizeStart} />
-            <ResizeHandle position="sw" onResizeStart={handleResizeStart} />
-            <ResizeHandle position="se" onResizeStart={handleResizeStart} />
+            <ResizeHandle position="nw" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
+            <ResizeHandle position="ne" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
+            <ResizeHandle position="sw" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
+            <ResizeHandle position="se" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
             {/* Edge handles */}
-            <ResizeHandle position="n" onResizeStart={handleResizeStart} />
-            <ResizeHandle position="s" onResizeStart={handleResizeStart} />
-            <ResizeHandle position="e" onResizeStart={handleResizeStart} />
-            <ResizeHandle position="w" onResizeStart={handleResizeStart} />
+            <ResizeHandle position="n" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
+            <ResizeHandle position="s" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
+            <ResizeHandle position="e" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
+            <ResizeHandle position="w" onResizeStart={handleResizeStart} canvasZoom={canvasZoom} />
           </>
         )}
       </div>
@@ -348,39 +417,153 @@ export function MultiSelectionBox({
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Alignment tools */}
+        {/* Alignment & Distribution tools */}
         <div className="flex items-center gap-0.5 pr-2 border-r border-border/50">
-          <ToolButton icon={<AlignLeft className="w-4 h-4" />} title="Align Left" onClick={alignLeft} />
-          <ToolButton icon={<AlignCenter className="w-4 h-4" />} title="Align Center" onClick={alignCenterH} />
-          <ToolButton icon={<AlignRight className="w-4 h-4" />} title="Align Right" onClick={alignRight} />
-          <div className="w-px h-4 bg-border/30 mx-1" />
-          <ToolButton icon={<AlignHorizontalJustifyStart className="w-4 h-4 rotate-90" />} title="Align Top" onClick={alignTop} />
-          <ToolButton icon={<AlignHorizontalJustifyCenter className="w-4 h-4 rotate-90" />} title="Align Middle" onClick={alignMiddle} />
-          <ToolButton icon={<AlignHorizontalJustifyEnd className="w-4 h-4 rotate-90" />} title="Align Bottom" onClick={alignBottom} />
+          {/* Horizontal align — cycles: Left → Center → Right */}
+          <ToolButton
+            icon={hAlignMode === 0 ? <AlignLeft className="w-4 h-4" /> : hAlignMode === 1 ? <AlignCenter className="w-4 h-4" /> : <AlignRight className="w-4 h-4" />}
+            title={hAlignMode === 0 ? "Align Left (click to cycle)" : hAlignMode === 1 ? "Align Center (click to cycle)" : "Align Right (click to cycle)"}
+            onClick={cycleHAlign}
+          />
+          {/* Vertical align — cycles: Top → Middle → Bottom */}
+          <ToolButton
+            icon={vAlignMode === 0 ? <AlignStartVertical className="w-4 h-4" /> : vAlignMode === 1 ? <AlignCenterVertical className="w-4 h-4" /> : <AlignEndVertical className="w-4 h-4" />}
+            title={vAlignMode === 0 ? "Align Top (click to cycle)" : vAlignMode === 1 ? "Align Middle (click to cycle)" : "Align Bottom (click to cycle)"}
+            onClick={cycleVAlign}
+          />
+          {selectedElements.length >= 2 && (
+            <>
+              <div className="w-px h-4 bg-border/30 mx-0.5" />
+              {/* Distribute horizontal spacing evenly */}
+              <ToolButton
+                icon={<AlignHorizontalSpaceAround className="w-4 h-4" />}
+                title="Distribute Horizontal Spacing"
+                onClick={distributeH}
+              />
+              {/* Distribute vertical spacing evenly */}
+              <ToolButton
+                icon={<AlignVerticalSpaceAround className="w-4 h-4" />}
+                title="Distribute Vertical Spacing"
+                onClick={distributeV}
+              />
+            </>
+          )}
         </div>
+
+        {/* Color picker — shown when all selected elements share the same type */}
+        {(() => {
+          const firstType = selectedElements[0]?.type;
+          const allSameType = firstType && selectedElements.every((el) => el.type === firstType);
+          if (!allSameType) return null;
+
+          const applyColor = (color: string) => {
+            const updates = new Map<string, Partial<CanvasElement>>();
+            selectedElements.forEach((el) => {
+              if (firstType === 'container') {
+                updates.set(el.id, { tintColor: color } as Partial<CanvasElement>);
+              } else {
+                updates.set(el.id, { style: { ...((el as any).style || {}), bgColor: color } });
+              }
+            });
+            onUpdateElements(updates);
+          };
+
+          return (
+            <div className="relative flex items-center gap-0.5 px-2 border-r border-border/50">
+              <ToolButton
+                icon={<Palette className="w-4 h-4" />}
+                title="Color"
+                onClick={() => setShowColorPicker(!showColorPicker)}
+                className={showColorPicker ? "bg-primary/20 text-primary" : ""}
+              />
+              {showColorPicker && (
+                <div
+                  className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 p-3 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-[1001] pointer-events-auto"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {firstType === 'container' ? (
+                    /* Container tint swatches */
+                    <div className="flex gap-3 px-1">
+                      {TINT_ORDER.map((name) => {
+                        const c = CONTAINER_TINTS[name];
+                        return (
+                          <button
+                            key={name}
+                            title={name.charAt(0).toUpperCase() + name.slice(1)}
+                            onClick={() => { applyColor(name); setShowColorPicker(false); }}
+                            className="hover:scale-125 transition-transform"
+                            style={{
+                              width: 26, height: 26, borderRadius: '50%',
+                              background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.mid})`,
+                              border: '2px solid rgba(255,255,255,0.2)',
+                              cursor: 'pointer',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  ) : firstType === 'shape' ? (
+                    /* Shape solid color swatches */
+                    <div className="flex flex-wrap gap-2 w-[190px]">
+                      {SHAPE_SOLID_COLORS.map((color) => (
+                        <button
+                          key={color}
+                          onClick={() => { applyColor(color); setShowColorPicker(false); }}
+                          className="w-7 h-7 rounded-md border-2 border-transparent hover:border-white/50 hover:scale-110 transition-transform"
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    /* Freeform / ExperienceBlock gradient swatches */
+                    <div className="grid grid-cols-3 gap-2 w-[220px]">
+                      {(PRESET_COLORS as readonly string[]).filter((c) => c !== 'transparent').map((color, i) => (
+                        <button
+                          key={i}
+                          onClick={() => { applyColor(color); setShowColorPicker(false); }}
+                          className="h-10 rounded-md border-2 border-border/50 hover:border-white/50 hover:scale-105 transition-all"
+                          style={{ background: color }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Group/Ungroup */}
         <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
           {allSameGroup && hasGroup ? (
-            <ToolButton
-              icon={<Ungroup className="w-4 h-4" />}
+            <button
+              onClick={(e) => { e.stopPropagation(); onUngroup(); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/20 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-all"
               title="Ungroup"
-              onClick={onUngroup}
-            />
+            >
+              <Ungroup className="w-3.5 h-3.5" />
+              Ungroup
+            </button>
           ) : (
-            <ToolButton
-              icon={<Group className="w-4 h-4" />}
+            <button
+              onClick={(e) => { e.stopPropagation(); onCreateGroup(); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white shadow-[0_0_10px_rgba(139,92,246,0.3)] hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] transition-all"
               title="Create Group"
-              onClick={onCreateGroup}
-            />
+            >
+              <Group className="w-3.5 h-3.5" />
+              Group
+            </button>
           )}
         </div>
 
-        {/* Z-index controls */}
-        <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
-          <ToolButton icon={<ArrowUp className="w-4 h-4" />} title="Bring Forward" onClick={onBringForward} />
-          <ToolButton icon={<ArrowDown className="w-4 h-4" />} title="Send Backward" onClick={onSendBackward} />
-        </div>
+        {/* Z-index controls — hidden when only containers are selected (containers always stay at back) */}
+        {selectedElements.some((el) => el.type !== 'container') && (
+          <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
+            <ToolButton icon={<ArrowUp className="w-4 h-4" />} title="Bring Forward" onClick={onBringForward} />
+            <ToolButton icon={<ArrowDown className="w-4 h-4" />} title="Send Backward" onClick={onSendBackward} />
+          </div>
+        )}
 
         {/* Lock/Unlock */}
         <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
@@ -435,29 +618,40 @@ function calculateBounds(elements: CanvasElement[]): {
   return { minX, minY, maxX, maxY };
 }
 
-// Resize handle component
+// Resize handle component — constant screen size regardless of zoom
 function ResizeHandle({
   position,
   onResizeStart,
+  canvasZoom,
 }: {
   position: string;
   onResizeStart: (e: React.MouseEvent, handle: string) => void;
+  canvasZoom: number;
 }) {
+  // Handle stays 14px on screen at any zoom level
+  const screenSize = 14;
+  const size = screenSize / canvasZoom;
+  const offset = -(size / 2);
+
   const positionStyles: Record<string, React.CSSProperties> = {
-    nw: { top: -5, left: -5, cursor: "nwse-resize" },
-    ne: { top: -5, right: -5, cursor: "nesw-resize" },
-    sw: { bottom: -5, left: -5, cursor: "nesw-resize" },
-    se: { bottom: -5, right: -5, cursor: "nwse-resize" },
-    n: { top: -5, left: "50%", transform: "translateX(-50%)", cursor: "ns-resize" },
-    s: { bottom: -5, left: "50%", transform: "translateX(-50%)", cursor: "ns-resize" },
-    e: { top: "50%", right: -5, transform: "translateY(-50%)", cursor: "ew-resize" },
-    w: { top: "50%", left: -5, transform: "translateY(-50%)", cursor: "ew-resize" },
+    nw: { top: offset, left: offset, cursor: "nwse-resize" },
+    ne: { top: offset, right: offset, cursor: "nesw-resize" },
+    sw: { bottom: offset, left: offset, cursor: "nesw-resize" },
+    se: { bottom: offset, right: offset, cursor: "nwse-resize" },
+    n: { top: offset, left: "50%", transform: "translateX(-50%)", cursor: "ns-resize" },
+    s: { bottom: offset, left: "50%", transform: "translateX(-50%)", cursor: "ns-resize" },
+    e: { top: "50%", right: offset, transform: "translateY(-50%)", cursor: "ew-resize" },
+    w: { top: "50%", left: offset, transform: "translateY(-50%)", cursor: "ew-resize" },
   };
 
   return (
     <div
-      className="resize-handle absolute w-3 h-3 bg-primary border-2 border-background rounded-sm pointer-events-auto z-10"
-      style={positionStyles[position]}
+      className="resize-handle absolute bg-primary border-2 border-background rounded-sm pointer-events-auto z-10"
+      style={{
+        width: size,
+        height: size,
+        ...positionStyles[position],
+      }}
       onMouseDown={(e) => {
         e.stopPropagation();
         onResizeStart(e, position);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { REALITY_PLANES, RealityPlaneCode } from "@/types/cxd-schema";
 import { Switch } from "@/components/ui/switch";
@@ -8,6 +8,49 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+function useLocalInput(externalValue: string, onChange: (v: string) => void) {
+  const [value, setValue] = useState(externalValue);
+  const lastSent = useRef(externalValue);
+  const isActive = useRef(false);
+  if (!isActive.current && externalValue !== lastSent.current) {
+    lastSent.current = externalValue;
+    setValue(externalValue);
+  }
+  const handleChange = useCallback(
+    (v: string) => {
+      isActive.current = true;
+      setValue(v);
+      lastSent.current = v;
+      onChange(v);
+    },
+    [onChange],
+  );
+  const handleBlur = useCallback(() => { isActive.current = false; }, []);
+  return [value, handleChange, handleBlur] as const;
+}
+
+function PlaneInterfaceTextarea({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  const [localVal, setLocalVal, onBlur] = useLocalInput(value, onChange);
+  return (
+    <Textarea
+      value={localVal}
+      onChange={(e) => setLocalVal(e.target.value)}
+      onBlur={onBlur}
+      placeholder={placeholder}
+      className="min-h-[60px] text-sm bg-background/50 resize-none"
+      rows={2}
+    />
+  );
+}
 
 interface RealityPlanesEditorProps {
   className?: string;
@@ -191,14 +234,10 @@ export function RealityPlanesEditor({
                 <Label className="text-xs text-muted-foreground mb-1 block">
                   Interface / Modality
                 </Label>
-                <Textarea
+                <PlaneInterfaceTextarea
                   value={plane.interfaceModality}
-                  onChange={(e) =>
-                    updateRealityPlaneInterface(plane.code, e.target.value)
-                  }
+                  onChange={(v) => updateRealityPlaneInterface(plane.code, v)}
                   placeholder={`How will ${plane.code} be delivered?`}
-                  className="min-h-[60px] text-sm bg-background/50 resize-none"
-                  rows={2}
                 />
               </div>
             )}

@@ -12,6 +12,8 @@ interface FloatingPortProps {
   isShape?: boolean;             // shapes have + icons at midpoints and resize handles at corners
   isContainer?: boolean;         // containers: corner dead zones only (no midpoints)
   isCollapsed?: boolean;         // collapsed containers: hide port entirely
+  isFreeform?: boolean;          // freeform/note cards: corner dead zones to avoid resize handle conflict
+  isImage?: boolean;             // images: corner dead zones to avoid resize handle conflict
   onStartConnector: (
     elementId: string,
     anchor: 'top' | 'right' | 'bottom' | 'left',
@@ -42,6 +44,8 @@ export function FloatingPort({
   isShape = false,
   isContainer = false,
   isCollapsed = false,
+  isFreeform = false,
+  isImage = false,
   onStartConnector,
   onEndConnector,
 }: FloatingPortProps) {
@@ -131,8 +135,20 @@ export function FloatingPort({
       if (inCorner) return null;
     }
 
+    // For freeform/note cards: corner dead zones to avoid resize handle conflict
+    if (isFreeform) {
+      const inCorner = offset < 14 || offset > 86;
+      if (inCorner) return null;
+    }
+
+    // For images: corner dead zones to avoid resize handle conflict
+    if (isImage) {
+      const inCorner = offset < 14 || offset > 86;
+      if (inCorner) return null;
+    }
+
     return { visible: true, side, offset };
-  }, [elementRef, isShape, isContainer, isCollapsed]);
+  }, [elementRef, isShape, isContainer, isCollapsed, isFreeform, isImage]);
 
   useEffect(() => {
     const el = elementRef.current;

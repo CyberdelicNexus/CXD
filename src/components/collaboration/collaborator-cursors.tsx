@@ -1,12 +1,15 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { CollaboratorPresence } from '@/hooks/use-collaboration';
+
+const CURSOR_STALE_MS = 8000; // 8s — accounts for network latency + 50ms throttle
 
 interface CollaboratorCursorsProps {
   collaborators: CollaboratorPresence[];
   canvasOffset: { x: number; y: number };
   zoom: number;
+  currentBoardId?: string | null;
 }
 
 // Cursor SVG component
@@ -35,15 +38,17 @@ const CollaboratorCursor = memo(function CollaboratorCursor({
   collaborator,
   canvasOffset,
   zoom,
+  now,
 }: {
   collaborator: CollaboratorPresence;
   canvasOffset: { x: number; y: number };
   zoom: number;
+  now: number;
 }) {
   const { cursor, name, color, avatarUrl } = collaborator;
 
-  // Don't render if no cursor or cursor is stale (> 5 seconds)
-  if (!cursor || Date.now() - cursor.timestamp > 5000) {
+  // Don't render if no cursor or cursor is stale
+  if (!cursor || now - cursor.timestamp > CURSOR_STALE_MS) {
     return null;
   }
 
@@ -56,7 +61,7 @@ const CollaboratorCursor = memo(function CollaboratorCursor({
       className="pointer-events-none absolute"
       style={{
         transform: `translate(${screenX}px, ${screenY}px)`,
-        transition: 'transform 100ms linear',
+        transition: 'transform 80ms linear',
         zIndex: 9999,
       }}
     >
@@ -83,26 +88,44 @@ export const CollaboratorCursors = memo(function CollaboratorCursors({
   collaborators,
   canvasOffset,
   zoom,
+  currentBoardId,
 }: CollaboratorCursorsProps) {
-  // Filter collaborators with active cursors
-  const activeCursors = useMemo(() => {
-    return collaborators.filter(
-      (c) => c.cursor && Date.now() - c.cursor.timestamp < 5000
-    );
-  }, [collaborators]);
+  // Tick every second so stale cursors expire properly.
+  // useMemo would capture Date.now() at computation time and never update
+  // until `collaborators` changes — causing cursors to stay visible forever.
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (collaborators.length === 0) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [collaborators.length]);
+
+  const activeCursors = collaborators.filter((c) => {
+    if (!c.cursor || now - c.cursor.timestamp >= CURSOR_STALE_MS) return false;
+    // Only show cursor if collaborator is in the same board context
+    // (null/undefined both mean "main canvas" — treat as equal)
+    const cursorBoard = c.cursor.boardId ?? null;
+    const myBoard = currentBoardId ?? null;
+    return cursorBoard === myBoard;
+  });
 
   if (activeCursors.length === 0) {
     return null;
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+    // Use fixed positioning so this overlay escapes the parent canvas container's
+    // overflow-hidden, allowing cursor name labels to render at canvas edges
+    // without being clipped. top-16 matches the canvas container's top offset.
+    <div className="pointer-events-none fixed inset-0 top-16 overflow-visible" style={{ zIndex: 9998 }}>
       {activeCursors.map((collaborator) => (
         <CollaboratorCursor
           key={collaborator.id}
           collaborator={collaborator}
           canvasOffset={canvasOffset}
           zoom={zoom}
+          now={now}
         />
       ))}
     </div>

@@ -3,6 +3,47 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ModelId } from '@/lib/ai-credit-config';
 
+// Module-level cache — shared across all hook instances.
+// Prevents N simultaneous DB reads when multiple components mount at once.
+const CACHE_TTL = 30_000; // 30 seconds
+let _cachedCredits: AICreditsInfo | null = null;
+let _cacheTime = 0;
+let _inFlight: Promise<AICreditsInfo | null> | null = null;
+
+function _invalidateCache() {
+  _cachedCredits = null;
+  _cacheTime = 0;
+}
+
+async function _fetchCreditsShared(): Promise<AICreditsInfo | null> {
+  const now = Date.now();
+  if (_cachedCredits && now - _cacheTime < CACHE_TTL) return _cachedCredits;
+  if (_inFlight) return _inFlight;
+
+  _inFlight = fetch('/api/ai/credits')
+    .then((res) => {
+      if (!res.ok) throw new Error('Failed to fetch credits');
+      return res.json();
+    })
+    .then((data) => {
+      const d: AICreditsData = data.credits;
+      const total = d.monthlyAllowance + d.addonCredits;
+      _cachedCredits = {
+        remaining: total - d.usedThisPeriod,
+        total,
+        used: d.usedThisPeriod,
+        periodEnd: d.periodEnd ? new Date(d.periodEnd) : null,
+        selectedModel: (d.selectedModel as ModelId) || 'gemini-2.0-flash',
+      };
+      _cacheTime = Date.now();
+      return _cachedCredits;
+    })
+    .catch(() => null)
+    .finally(() => { _inFlight = null; });
+
+  return _inFlight;
+}
+
 export interface AICreditsData {
   userId: string;
   monthlyAllowance: number;
@@ -44,22 +85,8 @@ export function useAICredits() {
   const fetchCredits = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await fetch('/api/ai/credits');
-      if (!res.ok) throw new Error('Failed to fetch credits');
-
-      const data = await res.json();
-      const creditsData: AICreditsData = data.credits;
-
-      const total = creditsData.monthlyAllowance + creditsData.addonCredits;
-      const remaining = total - creditsData.usedThisPeriod;
-
-      setCredits({
-        remaining,
-        total,
-        used: creditsData.usedThisPeriod,
-        periodEnd: creditsData.periodEnd ? new Date(creditsData.periodEnd) : null,
-        selectedModel: (creditsData.selectedModel as ModelId) || 'gemini-2.0-flash',
-      });
+      const result = await _fetchCreditsShared();
+      setCredits(result);
     } catch (error) {
       console.error('Error fetching AI credits:', error);
       setCredits(null);
@@ -78,7 +105,7 @@ export function useAICredits() {
 
       if (!res.ok) throw new Error('Failed to update model');
 
-      // Refetch to get updated data
+      _invalidateCache();
       await fetchCredits();
 
       // Notify all components using this hook to refetch
@@ -127,7 +154,7 @@ export function useAICredits() {
         throw new Error('Failed to consume credits');
       }
 
-      // Refetch to update balance
+      _invalidateCache();
       await fetchCredits();
 
       return {

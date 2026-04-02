@@ -78,7 +78,7 @@ function InvitePageContent() {
 
   const handleSignIn = () => {
     // Redirect to login with return URL
-    router.push(`/login?returnTo=/invite?token=${token}`);
+    router.push(`/sign-in?redirectTo=${encodeURIComponent(`/invite?token=${token}`)}`);
   };
 
   const handleSignUp = () => {
@@ -89,12 +89,12 @@ function InvitePageContent() {
     if (state.invitedEmail) {
       params.set('email', state.invitedEmail);
     }
-    router.push(`/signup?${params.toString()}`);
+    router.push(`/sign-up?${params.toString()}`);
   };
 
   const handleGoToCanvas = () => {
     if (state.canvasId) {
-      router.push(`/canvas?id=${state.canvasId}`);
+      router.push(`/cxd?id=${state.canvasId}`);
     }
   };
 

@@ -233,9 +233,9 @@ interface CXDState {
   updateCanvasElement: (elementId: string, updates: Partial<CanvasElement>) => void;
   removeCanvasElement: (elementId: string) => void;
   /** Write positions directly to Zustand without touching Yjs (used during drag for instant visual feedback). */
-  updateElementsPositionLocal: (updates: Array<{ id: string; x: number; y: number }>) => void;
+  updateElementsPositionLocal: (updates: Array<{ id: string; x: number; y: number; start?: { x: number; y: number }; end?: { x: number; y: number }; bend?: { x: number; y: number } }>) => void;
   /** Commit final drag positions to Yjs in a single transaction (one broadcast to peers). */
-  commitDragPositionsToYjs: (updates: Array<{ id: string; x: number; y: number }>) => void;
+  commitDragPositionsToYjs: (updates: Array<{ id: string; x: number; y: number; start?: { x: number; y: number }; end?: { x: number; y: number }; bend?: { x: number; y: number } }>) => void;
   getCanvasElements: () => CanvasElement[];
   getAllInboxItems: () => CanvasElement[]; // Get all inbox items across all boards
   duplicateCanvasElement: (elementId: string) => void;
@@ -1617,7 +1617,13 @@ export const useCXDStore = create<CXDState>()(
                 ...p.canvasLayout,
                 elements: (p.canvasLayout?.elements || []).map((el) => {
                   const upd = idSet.get(el.id);
-                  return upd ? { ...el, x: upd.x, y: upd.y } : el;
+                  if (!upd) return el;
+                  const patched: any = { ...el, x: upd.x, y: upd.y };
+                  // LineElements also need start/end/bend updated
+                  if (upd.start) patched.start = upd.start;
+                  if (upd.end) patched.end = upd.end;
+                  if (upd.bend) patched.bend = upd.bend;
+                  return patched;
                 }),
               },
             };

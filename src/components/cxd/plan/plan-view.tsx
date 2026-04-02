@@ -3,7 +3,7 @@
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { KanbanView } from './kanban-view';
 import { TableView } from './table-view';
 import { CalendarView } from './calendar-view';
@@ -219,6 +219,29 @@ export function PlanView() {
     setIsAddTaskOpen(false);
   };
 
+  const handleQuickAddTask = useCallback((title: string, status: TaskStatus = 'not_started') => {
+    if (!title.trim() || !project) return;
+    const newElement = {
+      id: uuidv4(),
+      type: 'freeform' as const,
+      cardType: 'task' as const,
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 100,
+      zIndex: Date.now(),
+      content: title,
+      emoji: '\u{1F4CC}',
+      inInbox: true,
+      taskMetadata: {
+        isActionable: true,
+        status,
+        priority: 'medium' as const,
+      },
+    };
+    syncAddElement(newElement as any);
+  }, [project, syncAddElement]);
+
   const handleDeleteTask = (taskId: string) => {
     syncRemoveElement(taskId);
     if (selectedTaskId === taskId) {
@@ -400,6 +423,7 @@ export function PlanView() {
               onTaskStatusChange={updateTaskStatus}
               onTaskNavigate={navigateToTask}
               onTaskUpdate={updateTaskMetadata}
+              onQuickAddTask={handleQuickAddTask}
             />
           )}
           {activeView === 'table' && (
@@ -408,6 +432,7 @@ export function PlanView() {
               onTaskClick={setSelectedTaskId}
               onTaskNavigate={navigateToTask}
               onTaskUpdate={updateTaskMetadata}
+              onQuickAddTask={handleQuickAddTask}
             />
           )}
           {activeView === 'timeline' && (
@@ -426,6 +451,7 @@ export function PlanView() {
                 setSelectedVersionId(versionId);
                 setSelectedTaskId(null);
               }}
+              onQuickAddTask={handleQuickAddTask}
             />
           )}
           {activeView === 'calendar' && (

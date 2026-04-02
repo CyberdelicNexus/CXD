@@ -7,9 +7,13 @@ import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 export default async function Dashboard() {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const result = await Promise.race([
+    supabase.auth.getUser(),
+    new Promise<{ data: { user: null } }>((resolve) =>
+      setTimeout(() => resolve({ data: { user: null } }), 3000)
+    ),
+  ]);
+  const user = result.data.user;
 
   if (!user) {
     return redirect("/sign-in");
