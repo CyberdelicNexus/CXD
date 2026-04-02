@@ -94,8 +94,18 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden bg-zinc-900/95 backdrop-blur-xl border-white/10 shadow-2xl p-0 flex flex-col">
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      if (!isOpen) {
+        onClose();
+        // Radix Dialog sometimes leaves pointer-events: none on body after close,
+        // which freezes canvas interaction. Reset it explicitly.
+        setTimeout(() => { document.body.style.pointerEvents = ''; }, 0);
+      }
+    }}>
+      <DialogContent
+        className="max-w-lg max-h-[80vh] overflow-hidden bg-zinc-900/95 backdrop-blur-xl border-white/10 shadow-2xl p-0 flex flex-col"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
         {/* Header */}
         <DialogHeader className="px-5 pt-5 pb-4 border-b border-white/10 flex-shrink-0">
           <div className="flex items-center justify-between">
