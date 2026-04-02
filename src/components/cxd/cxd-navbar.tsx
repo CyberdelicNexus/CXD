@@ -879,8 +879,8 @@ export function CXDNavbar() {
 
       {/* Template Picker Modal — hidden until templates are production-ready */}
 
-      {/* Version History Panel */}
-      {showVersionHistory && project && (
+      {/* Version History Modal */}
+      {project && (
         <VersionHistoryPanel
           open={showVersionHistory}
           onClose={() => setShowVersionHistory(false)}
