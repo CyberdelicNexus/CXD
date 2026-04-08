@@ -8,6 +8,8 @@ import { CXDProject } from '@/types/cxd-schema';
 // Global state for sync status - accessible from other components
 let pendingSavePromise: Promise<boolean> | null = null;
 let lastSavedHash: string | null = null;
+let consecutiveSaveFailures = 0;
+const MAX_SILENT_FAILURES = 2;
 
 // Backup to localStorage for disaster recovery
 const BACKUP_KEY = 'cxd_project_backup';
@@ -136,13 +138,26 @@ export function useProjectSync() {
       const success = await pendingSavePromise;
       if (success) {
         lastSavedHash = projectHash;
+        consecutiveSaveFailures = 0;
         clearLocalBackup(); // Clear backup on successful save
         console.log('[Sync] Project saved successfully');
       } else {
-        console.warn('[Sync] Project save failed, localStorage backup retained');
+        consecutiveSaveFailures++;
+        console.warn(`[Sync] Project save failed (${consecutiveSaveFailures} consecutive), localStorage backup retained`);
+        if (consecutiveSaveFailures > MAX_SILENT_FAILURES && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cxd-save-error', {
+            detail: { failures: consecutiveSaveFailures, message: 'Changes may not be saved. Check your connection.' },
+          }));
+        }
       }
     } catch (error) {
+      consecutiveSaveFailures++;
       console.error('[Sync] Error saving project:', error);
+      if (consecutiveSaveFailures > MAX_SILENT_FAILURES && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cxd-save-error', {
+          detail: { failures: consecutiveSaveFailures, message: 'Save error. Your changes are backed up locally.' },
+        }));
+      }
     } finally {
       isSavingRef.current = false;
       pendingSavePromise = null;

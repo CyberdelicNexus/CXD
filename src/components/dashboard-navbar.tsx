@@ -165,6 +165,16 @@ export default function DashboardNavbar() {
   }
 
   const handleSignOut = async () => {
+    try {
+      // Flush pending Y.js binary state and JSON project_data before signing out
+      const [{ flushPendingSave }, { flushYjsPersistence }] = await Promise.all([
+        import('@/hooks/use-project-sync'),
+        import('@/contexts/yjs-project-context'),
+      ]);
+      await Promise.all([flushPendingSave(), flushYjsPersistence()]);
+    } catch (e) {
+      console.warn('[SignOut] Failed to flush pending saves:', e);
+    }
     await supabase.auth.signOut()
     router.push('/')
   }

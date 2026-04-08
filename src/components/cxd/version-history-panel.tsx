@@ -88,6 +88,16 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
     if (!yDoc) return;
     setRestoringId(snapshotId);
     const success = await restoreSnapshot(snapshotId, yDoc);
+    if (success) {
+      // Flush Y.js persistence immediately so restored state reaches DB
+      // before user navigates away (bypasses the 2-second debounce)
+      try {
+        const { flushYjsPersistence } = await import('@/contexts/yjs-project-context');
+        await flushYjsPersistence();
+      } catch (e) {
+        console.warn('[VersionHistory] Failed to flush after restore:', e);
+      }
+    }
     setRestoringId(null);
     setConfirmRestoreId(null);
     if (success) {

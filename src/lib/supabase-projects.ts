@@ -142,6 +142,20 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
     return false;
   }
 
+  // Guard: prevent overwriting a populated project with empty/default state.
+  // This protects against auto-save firing before DB fetch hydrates the store.
+  // Only skip if project has been updated before (not a brand new project) AND is now empty.
+  const elements = project.canvasLayout?.elements;
+  const hasContent = (elements && elements.length > 0) || !!(
+    project.intentionCore?.projectName ||
+    project.intentionCore?.mainConcept ||
+    project.intentionCore?.coreMessage
+  );
+  if (!hasContent && project.updatedAt && project.updatedAt !== project.createdAt) {
+    console.warn('[saveProject] Skipping save - previously populated project now appears empty, preventing overwrite. Project:', project.id);
+    return false;
+  }
+
   console.log('[saveProject] Saving project:', project.id, 'Owner:', project.ownerId);
 
   const supabase = createClient();

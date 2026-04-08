@@ -212,12 +212,12 @@ export class SupabasePersistence {
    * Cancel any pending debounce and save immediately.
    * Call this on visibilitychange (tab hidden) and beforeunload.
    */
-  flush(): void {
+  flush(): Promise<void> {
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
       this.saveTimeout = null;
     }
-    this.save();
+    return this.save();
   }
 
   /**

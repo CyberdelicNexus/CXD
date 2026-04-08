@@ -180,6 +180,19 @@ export function CXDNavbar() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [blockedFeature, setBlockedFeature] = useState<'plan-view' | 'tasks' | 'premium-ai' | 'templates' | 'collaboration' | 'canvases'>('plan-view');
   const [userEmail, setUserEmail] = useState<string | undefined>();
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Listen for save errors from the sync system
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setSaveError(detail?.message || 'Save failed');
+      // Auto-dismiss after 8 seconds
+      setTimeout(() => setSaveError(null), 8000);
+    };
+    window.addEventListener('cxd-save-error', handler);
+    return () => window.removeEventListener('cxd-save-error', handler);
+  }, []);
 
   // Fetch user email
   useEffect(() => {
@@ -191,8 +204,18 @@ export function CXDNavbar() {
     fetchUser();
   }, []);
 
-  // Handle logout
+  // Handle logout - flush all pending saves before signing out
   const handleLogout = async () => {
+    try {
+      // Flush pending Y.js binary state (2s debounce) and JSON project_data (300ms debounce)
+      const [{ flushPendingSave }, { flushYjsPersistence }] = await Promise.all([
+        import('@/hooks/use-project-sync'),
+        import('@/contexts/yjs-project-context'),
+      ]);
+      await Promise.all([flushPendingSave(), flushYjsPersistence()]);
+    } catch (e) {
+      console.warn('[Logout] Failed to flush pending saves:', e);
+    }
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push('/');
@@ -334,6 +357,17 @@ export function CXDNavbar() {
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-30" />
       <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-20" />
       <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+
+      {/* Save error banner */}
+      {saveError && (
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-[100] px-4 py-2 rounded-lg bg-red-500/90 backdrop-blur-sm text-white text-sm font-medium shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          {saveError}
+          <button onClick={() => setSaveError(null)} className="ml-2 text-white/70 hover:text-white">
+            &times;
+          </button>
+        </div>
+      )}
 
       <div className="h-full px-6 lg:px-8 xl:px-10 2xl:px-12 flex items-center justify-between relative z-10">
         {/* Left section */}

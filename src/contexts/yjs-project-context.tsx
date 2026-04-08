@@ -43,6 +43,22 @@ const USE_YJS_CRDT = typeof window !== 'undefined'
   ? (process.env.NEXT_PUBLIC_USE_YJS_CRDT ?? 'true') === 'true'
   : false;
 
+// ─── Global Y.js Persistence Flush ──────────────────────────────────────────
+// Module-level ref so logout handlers can flush Y.js binary state to DB
+// before signing out, preventing data loss from the 2-second debounce window.
+
+let _activeSupabasePersistence: SupabasePersistence | null = null;
+
+/**
+ * Flush any pending Y.js binary state to Supabase.
+ * Call before logout/navigation to prevent data loss.
+ */
+export async function flushYjsPersistence(): Promise<void> {
+  if (_activeSupabasePersistence) {
+    await _activeSupabasePersistence.flush();
+  }
+}
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 interface YjsProjectProviderProps {
@@ -118,6 +134,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       onError: (msg) => console.warn('[YjsProject] Persistence warning:', msg),
     });
     supabasePersistenceRef.current = supabasePersist;
+    _activeSupabasePersistence = supabasePersist;
 
     // Flush Yjs state immediately when the tab is hidden or the page is unloading
     const handleVisibilityChange = () => {
@@ -235,6 +252,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       // destroy() is async: it flushes the final save before marking destroyed.
       // Fire-and-forget is intentional here — we cannot await in a React cleanup.
       supabasePersistenceRef.current.destroy();
+      _activeSupabasePersistence = null;
       supabasePersistenceRef.current = null;
     }
     if (localPersistenceRef.current) {
