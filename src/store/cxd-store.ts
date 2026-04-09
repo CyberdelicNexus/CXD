@@ -432,6 +432,9 @@ export const useCXDStore = create<CXDState>()(
           projects: [...state.projects, project],
           currentProjectId: id,
           viewMode: initialElements?.length ? 'canvas' : 'wizard',
+          activeBoardId: null,
+          currentBoardId: null,
+          boardPath: [],
         }));
         // Insert new project into database (async)
         insertProject(project).catch(err => console.error('Failed to insert new project:', err));
@@ -446,6 +449,10 @@ export const useCXDStore = create<CXDState>()(
             // Always open existing projects in canvas view
             // Only new projects (via createProject) open in wizard
             viewMode: 'canvas',
+            // Always open at root canvas level, not inside a stale board
+            activeBoardId: null,
+            currentBoardId: null,
+            boardPath: [],
           });
         }
       },

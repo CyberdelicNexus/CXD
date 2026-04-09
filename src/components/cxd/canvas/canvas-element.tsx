@@ -4980,6 +4980,7 @@ function FreeformCard({
                       value={noteBody}
                       textColor={textColor}
                       isSelected
+                      isFocusMode
                       onChange={(nextHtml) => syncNoteFields(noteTitle, nextHtml)}
                       onBlurCard={() => { }}
                       onFocusBody={() => setNoteEditingField("body")}

@@ -3146,7 +3146,13 @@ export function CXDCanvas() {
     autoOrganizeSelected,
   ]);
 
-  // Smooth zoom with scroll wheel (Ctrl+scroll) or pan (regular scroll)
+  // Keep zoomSensitivity in a ref so the wheel handler never needs to be recreated.
+  // This prevents a race condition where re-attaching the listener finds containerRef null.
+  const zoomSensitivityRef = useRef(zoomSensitivity);
+  useEffect(() => { zoomSensitivityRef.current = zoomSensitivity; }, [zoomSensitivity]);
+
+  // Smooth zoom with scroll wheel (Ctrl+scroll) or pan (regular scroll).
+  // Stable handler — reads all dynamic values from refs/store, never recreated.
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       // If target is within an element that should prevent canvas wheeling (like sidebar panels), skip
@@ -3237,7 +3243,8 @@ export function CXDCanvas() {
           }
         } else {
           // Mouse wheel - use continuous zoom with user's sensitivity setting
-          const delta = -normalizedDelta * zoomSensitivity;
+          const sens = zoomSensitivityRef.current;
+          const delta = -normalizedDelta * sens;
 
           const newZoom = Math.min(
             MAX_ZOOM,
@@ -3280,16 +3287,18 @@ export function CXDCanvas() {
         }
       }
     },
-    [setCanvasZoom, setCanvasPosition, zoomSensitivity],
+    // Stable deps only — zoomSensitivity read from ref, zoom/position from store
+    [setCanvasZoom, setCanvasPosition],
   );
 
-  // Attach wheel event with passive: false
+  // Attach wheel event ONCE with passive: false.
+  // handleWheel is now stable (no zoomSensitivity dep), so this runs once on mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const container = containerRef.current;
-    if (container) {
-      container.addEventListener("wheel", handleWheel, { passive: false });
-      return () => container.removeEventListener("wheel", handleWheel);
-    }
+    if (!container) return;
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
 
   // Spacebar + Ctrl detection
@@ -4436,6 +4445,7 @@ export function CXDCanvas() {
         onLineToolComplete={() => setActiveTool(null)}
         containerRef={containerRef}
         onOperationStart={pushCanvasHistory}
+        isPanMode={isSpacePressed || isPanning}
       />
       {/* Per-edge SVGs — each at computed z-index above its connected elements */}
       {(() => {
@@ -4551,8 +4561,22 @@ export function CXDCanvas() {
                 stroke="transparent"
                 strokeWidth={12}
                 fill="none"
-                style={{ pointerEvents: "auto", cursor: "pointer" }}
+                style={{ pointerEvents: "auto", cursor: isSpacePressed ? "grab" : "pointer" }}
+                onMouseDown={(e) => {
+                  // Middle mouse or spacebar: pan instead of interacting with edge
+                  if (e.button === 1 || isSpacePressed) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setIsPanning(true);
+                    setPanStart({
+                      x: e.clientX - canvasPosition.x,
+                      y: e.clientY - canvasPosition.y,
+                    });
+                  }
+                }}
                 onClick={(e) => {
+                  // Don't select edge during pan mode
+                  if (isSpacePressed) return;
                   e.stopPropagation();
                   setSelectedEdgeId(edge.id);
                   setSelectedElementId(null);
@@ -4661,8 +4685,20 @@ export function CXDCanvas() {
                 stroke={grad.light}
                 strokeWidth={0.8}
                 strokeOpacity={0.5}
-                style={{ pointerEvents: "auto", cursor: "pointer" }}
+                style={{ pointerEvents: "auto", cursor: isSpacePressed ? "grab" : "pointer" }}
+                onMouseDown={(e) => {
+                  if (e.button === 1 || isSpacePressed) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setIsPanning(true);
+                    setPanStart({
+                      x: e.clientX - canvasPosition.x,
+                      y: e.clientY - canvasPosition.y,
+                    });
+                  }
+                }}
                 onClick={(e) => {
+                  if (isSpacePressed) return;
                   e.stopPropagation();
                   setSelectedEdgeId(edge.id);
                   setSelectedElementId(null);
@@ -4978,6 +5014,12 @@ export function CXDCanvas() {
                   zIndex: 1000,
                 }}
                 onMouseDown={(e) => {
+                  if (e.button === 1 || isSpacePressed) {
+                    e.stopPropagation(); e.preventDefault();
+                    setIsPanning(true);
+                    setPanStart({ x: e.clientX - canvasPosition.x, y: e.clientY - canvasPosition.y });
+                    return;
+                  }
                   e.stopPropagation();
                   e.preventDefault();
                   const handleMouseMove = (moveEvent: MouseEvent) => {
@@ -5012,6 +5054,12 @@ export function CXDCanvas() {
                   zIndex: 1000,
                 }}
                 onMouseDown={(e) => {
+                  if (e.button === 1 || isSpacePressed) {
+                    e.stopPropagation(); e.preventDefault();
+                    setIsPanning(true);
+                    setPanStart({ x: e.clientX - canvasPosition.x, y: e.clientY - canvasPosition.y });
+                    return;
+                  }
                   e.stopPropagation();
                   e.preventDefault();
                   const handleMouseMove = (moveEvent: MouseEvent) => {

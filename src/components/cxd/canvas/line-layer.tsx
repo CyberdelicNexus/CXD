@@ -50,6 +50,7 @@ interface LineLayerProps {
   onLineToolComplete: () => void;
   containerRef: React.RefObject<HTMLDivElement>;
   onOperationStart?: () => void; // Called before starting drag operations for undo support
+  isPanMode?: boolean; // When true (spacebar held or middle-mouse), line interactions are disabled for panning
 }
 
 export function LineLayer({
@@ -67,6 +68,7 @@ export function LineLayer({
   onLineToolComplete,
   containerRef,
   onOperationStart,
+  isPanMode = false,
 }: LineLayerProps) {
   // State machine
   const [mode, setMode] = useState<LineMode>("idle");
@@ -483,6 +485,9 @@ export function LineLayer({
   // Start dragging a handle
   const startHandleDrag = useCallback(
     (e: React.PointerEvent, lineId: string, handle: HandleType) => {
+      // In pan mode, don't interact with line handles — let canvas handle panning
+      if (isPanMode || e.button === 1) return;
+
       e.stopPropagation();
       e.preventDefault();
 
@@ -507,12 +512,15 @@ export function LineLayer({
         target.setPointerCapture(e.pointerId);
       }
     },
-    [lines, screenToWorld, onOperationStart, onSelectLine],
+    [lines, screenToWorld, onOperationStart, onSelectLine, isPanMode],
   );
 
   // Start dragging the whole line (via stroke)
   const startLineDrag = useCallback(
     (e: React.PointerEvent, lineId: string) => {
+      // In pan mode, don't interact with lines — let canvas handle panning
+      if (isPanMode || e.button === 1) return;
+
       e.stopPropagation();
       e.preventDefault();
 
@@ -549,7 +557,7 @@ export function LineLayer({
         target.setPointerCapture(e.pointerId);
       }
     },
-    [lines, screenToWorld, onSelectLine, onOperationStart, selectedLineIds],
+    [lines, screenToWorld, onSelectLine, onOperationStart, selectedLineIds, isPanMode],
   );
 
   // Get stroke dash array from kind

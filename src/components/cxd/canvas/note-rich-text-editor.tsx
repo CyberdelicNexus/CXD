@@ -29,6 +29,7 @@ interface NoteRichTextEditorProps {
   value: string;
   textColor: string;
   isSelected: boolean;
+  isFocusMode?: boolean;
   onChange: (nextHtml: string) => void;
   onBlurCard: () => void;
   onFocusBody: () => void;
@@ -63,6 +64,7 @@ export function NoteRichTextEditor({
   value,
   textColor,
   isSelected,
+  isFocusMode = false,
   onChange,
   onBlurCard,
   onFocusBody,
@@ -288,7 +290,12 @@ export function NoteRichTextEditor({
     <div ref={editorWrapRef} className="relative w-full overflow-visible">
       <div className="relative overflow-visible">
         {isSelected && (
-          <div className="absolute right-full z-20 mr-6 flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]" style={{ top: -105 }}>
+          <div className={cn(
+            "absolute z-20 flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+            isFocusMode
+              ? "right-full mr-3 top-0"
+              : "right-full mr-6"
+          )} style={isFocusMode ? undefined : { top: -105 }}>
             {editorButtons.map((button) => (
               <button
                 key={button.title}

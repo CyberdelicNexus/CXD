@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 import { TextShimmer } from '@/components/ui/text-shimmer';
@@ -293,64 +293,15 @@ export function LandingPage() {
                 <ArrowRight className="w-4 h-4" />
               </button>
             </a>
-            <a href="#demo">
-              <button className="btn-secondary flex items-center gap-2">
-                <Play className="w-4 h-4" />
-                Watch Demo
-              </button>
-            </a>
           </div>
 
-          {/* Social Proof - Designers with hover animation */}
-          <div className="mt-16 flex flex-col items-center gap-4">
-            <div className="flex items-center -space-x-3">
-              {/* Designer avatars - replace src with actual photos */}
-              {[
-                { initials: 'JM', bg: 'bg-violet-600' },
-                { initials: 'AR', bg: 'bg-indigo-600' },
-                { initials: 'SK', bg: 'bg-purple-600' },
-                { initials: 'LC', bg: 'bg-violet-500' },
-                { initials: 'DP', bg: 'bg-indigo-500' },
-              ].map((designer, i) => (
-                <div
-                  key={i}
-                  className={`w-10 h-10 rounded-full ${designer.bg} flex items-center justify-center text-sm font-medium text-white border-2 border-black ring-1 ring-white/10 transition-all duration-300 ease-out hover:-translate-y-2 hover:scale-110 hover:z-10 cursor-pointer`}
-                  style={{ transitionDelay: `${i * 50}ms` }}
-                >
-                  {designer.initials}
-                </div>
-              ))}
-            </div>
-            <p className="text-white/50 text-sm">
-              Trusted by <span className="text-white/70 font-medium">experience designers</span> worldwide
-            </p>
-          </div>
         </div>
       </section>
 
-      {/* Demo/Screenshot Section */}
+      {/* Gallery Carousel Section */}
       <section id="demo" className="relative py-20 px-4">
         <div className="max-w-7xl mx-auto">
-          <div className="glass-card-glow rounded-2xl overflow-hidden">
-            {/* Window header */}
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
-              <div className="flex gap-2">
-                <div className="w-3 h-3 rounded-full bg-white/20" />
-                <div className="w-3 h-3 rounded-full bg-white/20" />
-                <div className="w-3 h-3 rounded-full bg-white/20" />
-              </div>
-              <span className="text-sm text-white/40 ml-4">CXD Canvas</span>
-            </div>
-
-            {/* Canvas preview - object-contain to show full image */}
-            <div className="bg-gradient-to-br from-black/50 to-black/80 relative overflow-hidden">
-              <img
-                src="/images/canvas-screenshot.png"
-                alt="CXD Canvas - Experience Design Tool"
-                className="w-full h-auto object-contain"
-              />
-            </div>
-          </div>
+          <ScreenshotCarousel />
         </div>
       </section>
 
@@ -587,7 +538,7 @@ export function LandingPage() {
                   <InfinityIcon className="w-5 h-5 text-cyan-400" />
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-4xl font-bold">$199</span>
+                  <span className="text-4xl font-bold">$333</span>
                   <span className="text-white/40">/once</span>
                 </div>
               </div>
@@ -700,6 +651,112 @@ export function LandingPage() {
           </p>
         </div>
       </footer>
+    </div>
+  );
+}
+
+// ─── Screenshot Gallery Carousel ────────────────────────────────────────────
+
+const CAROUSEL_IMAGES = [
+  { src: '/images/Screenshot/0_canvas-screeshot.png', alt: 'CXD Canvas View' },
+  { src: '/images/Screenshot/1_canvas-screeshot.png', alt: 'CXD Design Tools' },
+  { src: '/images/Screenshot/2_canvas-screeshot.png', alt: 'CXD Experience Flow' },
+  { src: '/images/Screenshot/3_canvas-screeshot.png', alt: 'CXD Hypercube Map' },
+  { src: '/images/Screenshot/4_canvas-screeshot.png', alt: 'CXD Plan View' },
+  { src: '/images/Screenshot/5_canvas-screeshot.png', alt: 'CXD Collaboration' },
+  { src: '/images/Screenshot/6_canvas-screeshot.png', alt: 'CXD Canvas Overview' },
+];
+
+function ScreenshotCarousel() {
+  const [current, setCurrent] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const total = CAROUSEL_IMAGES.length;
+
+  const goTo = useCallback((idx: number) => {
+    setCurrent(((idx % total) + total) % total);
+  }, [total]);
+
+  const next = useCallback(() => goTo(current + 1), [current, goTo]);
+  const prev = useCallback(() => goTo(current - 1), [current, goTo]);
+
+  // Auto-play
+  useEffect(() => {
+    if (isHovered) return;
+    timerRef.current = setInterval(() => {
+      setCurrent((c) => (c + 1) % total);
+    }, 4000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [isHovered, total]);
+
+  return (
+    <div
+      className="glass-card-glow rounded-2xl overflow-hidden group"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Window header */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
+        <div className="flex gap-2">
+          <div className="w-3 h-3 rounded-full bg-white/20" />
+          <div className="w-3 h-3 rounded-full bg-white/20" />
+          <div className="w-3 h-3 rounded-full bg-white/20" />
+        </div>
+        <span className="text-sm text-white/40 ml-4">CXD Canvas</span>
+        <span className="text-sm text-white/20 ml-auto">{current + 1} / {total}</span>
+      </div>
+
+      {/* Carousel viewport */}
+      <div className="relative bg-gradient-to-br from-black/50 to-black/80 overflow-hidden">
+        <div
+          className="flex transition-transform duration-700 ease-in-out"
+          style={{ transform: `translateX(-${current * 100}%)` }}
+        >
+          {CAROUSEL_IMAGES.map((img, i) => (
+            <div key={i} className="w-full flex-shrink-0">
+              <img
+                src={img.src}
+                alt={img.alt}
+                className="w-full h-auto object-contain"
+                loading={i === 0 ? 'eager' : 'lazy'}
+                draggable={false}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Nav arrows */}
+        <button
+          onClick={prev}
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+          aria-label="Previous screenshot"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button
+          onClick={next}
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+          aria-label="Next screenshot"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      {/* Dot indicators */}
+      <div className="flex items-center justify-center gap-2 py-3 bg-black/30">
+        {CAROUSEL_IMAGES.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => goTo(i)}
+            className={`transition-all duration-300 rounded-full ${
+              i === current
+                ? 'w-6 h-2 bg-purple-400'
+                : 'w-2 h-2 bg-white/20 hover:bg-white/40'
+            }`}
+            aria-label={`Go to screenshot ${i + 1}`}
+          />
+        ))}
+      </div>
     </div>
   );
 }

@@ -115,21 +115,16 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
 
   return createPortal(
     <>
-      {/* Backdrop — click to close */}
+      {/* Modal overlay — click outside to close */}
       <div
-        className="fixed inset-0 z-[9998] bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div
-        className="fixed z-[9999] inset-0 flex items-center justify-center pointer-events-none"
+        className="fixed z-[9999] inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm"
         aria-modal="true"
         role="dialog"
         aria-label="Version History"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <div
-          className="pointer-events-auto flex flex-col w-full max-w-lg max-h-[80vh] bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+          className="relative flex flex-col w-full max-w-lg max-h-[80vh] bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
