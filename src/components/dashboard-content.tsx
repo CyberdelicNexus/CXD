@@ -727,8 +727,8 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                         className="relative aspect-square rounded-xl bg-gradient-to-br from-violet-900/60 via-purple-800/50 to-indigo-900/60 hover:from-violet-800/70 hover:via-purple-700/60 hover:to-indigo-800/70 transition-all cursor-pointer group border border-violet-500/20 hover:border-violet-400/40 overflow-hidden shadow-lg hover:shadow-violet-500/20"
                         onClick={() => handleOpenProject(project.id)}
                       >
-                        {/* Cover Image - using img tag to support any external URL */}
-                        {coverImage && (
+                        {/* Cover Image */}
+                        {coverImage && coverImage.startsWith('http') && (
                           <div className="absolute inset-0">
                             <Image
                               src={coverImage}
@@ -736,6 +736,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                               fill
                               className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
                               unoptimized
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
                           </div>
                         )}

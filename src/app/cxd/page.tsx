@@ -492,7 +492,7 @@ export default function CXDPage() {
   // Skip when transitioning from framing (wizard) — the tour should only start when the
   // user explicitly switches between canvas sub-views or loads a project already in canvas mode.
   useEffect(() => {
-    if (isRestoring || viewMode !== "canvas") return;
+    if (isRestoring || !minLoadTimePassed || viewMode !== "canvas") return;
     // Don't auto-trigger tour right after completing framing
     if (prevViewModeRef.current === "wizard") return;
 

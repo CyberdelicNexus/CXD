@@ -42,6 +42,8 @@ export function TourOverlay() {
 
   // Track how long we've been polling for a missing/zero-size target
   const missingTargetCountRef = useRef(0);
+  // Guard against rapid consecutive skips (prevents infinite loop when many steps are missing)
+  const consecutiveSkipsRef = useRef(0);
 
   // Execute preAction before measuring
   const preActionExecutedRef = useRef<string | null>(null);
@@ -77,6 +79,7 @@ export function TourOverlay() {
       const rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         missingTargetCountRef.current = 0;
+        consecutiveSkipsRef.current = 0;
         setTargetRect({
           top: rect.top,
           left: rect.left,
@@ -88,6 +91,12 @@ export function TourOverlay() {
         missingTargetCountRef.current++;
         if (!currentStep.waitForTarget && missingTargetCountRef.current > 4) {
           missingTargetCountRef.current = 0;
+          consecutiveSkipsRef.current++;
+          // If too many consecutive steps are missing, end the tour instead of looping
+          if (consecutiveSkipsRef.current >= steps.length) {
+            skipTour();
+            return;
+          }
           nextTourStep();
         }
         // If waitForTarget, keep polling — element might appear later
@@ -97,6 +106,11 @@ export function TourOverlay() {
       missingTargetCountRef.current++;
       if (!currentStep.waitForTarget && missingTargetCountRef.current > 4) {
         missingTargetCountRef.current = 0;
+        consecutiveSkipsRef.current++;
+        if (consecutiveSkipsRef.current >= steps.length) {
+          skipTour();
+          return;
+        }
         nextTourStep();
       }
       // If waitForTarget, keep polling with null rect (shows wait message)
