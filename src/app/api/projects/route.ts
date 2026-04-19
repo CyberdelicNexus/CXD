@@ -20,9 +20,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const isListing = searchParams.get('listing') === 'true';
 
-    // For listing mode, we still fetch project_data but only extract coverImage from it
-    // server-side (avoids PostgREST key aliasing issues with ->> operator).
-    const selectFields = '*';
+    // For listing mode, use PostgREST column aliasing to extract only coverImage
+    // from the JSONB column, avoiding fetching the full 1-5MB project_data.
+    const selectFields = isListing
+      ? 'id, owner_id, name, description, share_token, created_at, updated_at, coverImage:project_data->>coverImage'
+      : '*';
 
     // Check for required environment variable
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -98,7 +100,6 @@ export async function GET(request: Request) {
       if (isListing) {
         // Listing mode: extract only the fields the dashboard cards need.
         // _listingOnly flag prevents accidental overwrites by useProjectSync.
-        const projectData = row.project_data || {};
         return {
           id: row.id,
           ownerId: row.owner_id,
@@ -107,7 +108,7 @@ export async function GET(request: Request) {
           shareToken: row.share_token || undefined,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
-          coverImage: projectData.coverImage || undefined,
+          coverImage: row.coverImage || undefined,
           _listingOnly: true,
         };
       }
