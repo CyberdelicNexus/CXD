@@ -341,9 +341,20 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     // incomplete data and triggering "Maximum update depth exceeded" errors.
     const project = projects.find(p => p.id === projectId);
     if (project && (project as any)._listingOnly) {
-      const fullProject = await fetchProjectById(projectId);
+      // Try client-side fetch first (works for owned projects)
+      let fullProject = await fetchProjectById(projectId);
+      if (!fullProject) {
+        // Fallback: fetch via API route (uses admin client, works for collaborators)
+        try {
+          const res = await fetch(`/api/projects?listing=false`);
+          if (res.ok) {
+            const data = await res.json();
+            fullProject = data.projects?.find((p: any) => p.id === projectId) || null;
+          }
+        } catch {}
+      }
       if (fullProject) {
-        const updated = projects.map(p => p.id === projectId ? fullProject : p);
+        const updated = projects.map(p => p.id === projectId ? fullProject! : p);
         setProjects(updated);
       }
     }

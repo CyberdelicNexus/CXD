@@ -20,11 +20,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const isListing = searchParams.get('listing') === 'true';
 
-    // For listing mode, select only the columns the dashboard needs.
-    // coverImage lives inside project_data JSONB, so we extract it with the arrow operator.
-    const selectFields = isListing
-      ? 'id, owner_id, name, description, share_token, created_at, updated_at, project_data->>coverImage'
-      : '*';
+    // For listing mode, we still fetch project_data but only extract coverImage from it
+    // server-side (avoids PostgREST key aliasing issues with ->> operator).
+    const selectFields = '*';
 
     // Check for required environment variable
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -98,9 +96,9 @@ export async function GET(request: Request) {
     // Transform to CXDProject format
     const projects = allProjects.map((row: any) => {
       if (isListing) {
-        // Listing mode: no project_data spread, just top-level columns.
-        // coverImage was extracted via project_data->coverImage.
+        // Listing mode: extract only the fields the dashboard cards need.
         // _listingOnly flag prevents accidental overwrites by useProjectSync.
+        const projectData = row.project_data || {};
         return {
           id: row.id,
           ownerId: row.owner_id,
@@ -109,7 +107,7 @@ export async function GET(request: Request) {
           shareToken: row.share_token || undefined,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
-          coverImage: row.coverImage || undefined,
+          coverImage: projectData.coverImage || undefined,
           _listingOnly: true,
         };
       }

@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useCXDStore, type ViewMode } from "@/store/cxd-store";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
-import { LoadingScreen } from "@/components/cxd/loading-screen";
 import { useProjectSync, getLocalBackup, clearLocalBackup } from "@/hooks/use-project-sync";
 import { fetchUserProjects, saveProject } from "@/lib/supabase-projects";
 import { createClient } from "../../../supabase/client";
@@ -18,10 +17,18 @@ import type { CanvasUpdate } from "@/hooks/use-collaboration";
 // Skeleton loader shown while dynamic components are loading their JS chunks
 function ViewSkeleton() {
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 border-3 border-purple-500/30 border-t-purple-400 rounded-full animate-spin" />
-        <span className="text-sm text-purple-300/70 animate-pulse">Loading view...</span>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black">
+      <div className="flex flex-col items-center gap-6">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/images/Tesseract-1K.gif" alt="Loading" width={160} height={160} className="object-contain" />
+        <div className="flex flex-col items-center gap-2">
+          <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-purple-500 to-purple-600">
+            Loading Canvas
+          </h2>
+          <p className="text-sm text-purple-300/70">
+            Preparing your experience design workspace
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -518,7 +525,7 @@ export default function CXDPage() {
         {!isRestoring && minLoadTimePassed && <CXDNavbar />}
         <main className={!isRestoring && minLoadTimePassed ? "pt-20" : ""}>
           {isRestoring || !minLoadTimePassed ? (
-            <LoadingScreen />
+            <ViewSkeleton />
           ) : (
             <div
               key={shouldAnimate ? viewKey : undefined}
