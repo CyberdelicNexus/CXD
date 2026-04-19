@@ -84,15 +84,13 @@ export async function flushPendingSave(): Promise<boolean> {
   return success;
 }
 
-// Check if there are unsaved changes
+// Check if there are unsaved changes (lightweight check)
 export function hasUnsavedChanges(): boolean {
   const { projects, currentProjectId } = useCXDStore.getState();
   const currentProject = projects.find(p => p.id === currentProjectId);
-
   if (!currentProject) return false;
-
-  const projectHash = JSON.stringify(currentProject);
-  return projectHash !== lastSavedHash;
+  // Check if updatedAt changed since last save (set by store on every mutation)
+  return currentProject.updatedAt !== lastSavedHash;
 }
 
 // Synchronous save for beforeunload - uses localStorage as reliable backup
@@ -117,22 +115,16 @@ export function useProjectSync() {
     // Never save listing-only stubs
     if ((project as any)._listingOnly) return;
 
-    // If already saving, wait for it then re-check if save still needed
+    // If already saving, wait for it then save fresh state
     if (isSavingRef.current) {
       if (pendingSavePromise) {
         await pendingSavePromise;
       }
-      // Re-read current state after waiting — it may have been saved
+      // Re-read current state after waiting
       const freshProject = useCXDStore.getState().projects.find(p => p.id === project.id);
       if (!freshProject) return;
-      const freshHash = JSON.stringify(freshProject);
-      if (freshHash === lastSavedHash) return;
-      // Fall through to save the fresh state
       project = freshProject;
     }
-
-    const projectHash = JSON.stringify(project);
-    if (projectHash === lastSavedHash) return;
 
     isSavingRef.current = true;
 
@@ -143,7 +135,7 @@ export function useProjectSync() {
       pendingSavePromise = saveProject(project);
       const success = await pendingSavePromise;
       if (success) {
-        lastSavedHash = projectHash;
+        lastSavedHash = project.updatedAt;
         consecutiveSaveFailures = 0;
         clearLocalBackup(); // Clear backup on successful save
         console.log('[Sync] Project saved successfully');
@@ -214,27 +206,33 @@ export function useProjectSync() {
     }
   }, [projects, setProjects]);
 
-  // Auto-save effect with debounce
+  // Auto-save effect with debounce.
+  // Uses a lightweight fingerprint instead of JSON.stringify to avoid
+  // blocking the main thread for 30-100ms on every change.
+  const lastFingerprintRef = useRef<string | null>(null);
   useEffect(() => {
     const currentProject = projects.find(p => p.id === currentProjectId);
     if (!currentProject) return;
 
     // Never auto-save listing-only project stubs (missing project_data).
-    // They would overwrite the full data in the database.
     if ((currentProject as any)._listingOnly) return;
 
-    // Skip if nothing changed
-    const projectHash = JSON.stringify(currentProject);
-    if (projectHash === lastSavedHash) return;
+    // Lightweight fingerprint: updatedAt + element/edge counts + name
+    // Catches all meaningful changes without expensive full serialization.
+    const elementCount = currentProject.canvasLayout?.elements?.length ?? 0;
+    const edgeCount = currentProject.canvasLayout?.edges?.length ?? 0;
+    const fingerprint = `${currentProject.updatedAt}|${elementCount}|${edgeCount}|${currentProject.name}`;
+    if (fingerprint === lastFingerprintRef.current) return;
+    lastFingerprintRef.current = fingerprint;
 
-    // Debounce save - 300ms delay after last change (reduced from 1s to minimize data loss window)
+    // Debounce save - 2s delay to batch rapid changes
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
 
     debounceRef.current = setTimeout(() => {
       performSave(currentProject);
-    }, 300);
+    }, 2000);
 
     return () => {
       if (debounceRef.current) {

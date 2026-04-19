@@ -334,32 +334,35 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     router.push('/cxd');
   };
 
-  const handleOpenProject = async (projectId: string) => {
+  const handleOpenProject = (projectId: string) => {
     setNavigatingTo(projectId);
-    // If the project is a listing-only stub (missing full data), fetch the full
-    // project before navigating. This prevents the canvas from rendering with
-    // incomplete data and triggering "Maximum update depth exceeded" errors.
     const project = projects.find(p => p.id === projectId);
     if (project && (project as any)._listingOnly) {
-      // Try client-side fetch first (works for owned projects)
-      let fullProject = await fetchProjectById(projectId);
-      if (!fullProject) {
-        // Fallback: fetch via API route (uses admin client, works for collaborators)
-        try {
-          const res = await fetch(`/api/projects?listing=false`);
-          if (res.ok) {
-            const data = await res.json();
-            fullProject = data.projects?.find((p: any) => p.id === projectId) || null;
-          }
-        } catch {}
-      }
-      if (fullProject) {
-        const updated = projects.map(p => p.id === projectId ? fullProject! : p);
-        setProjects(updated);
-      }
+      // Fetch full project data, then navigate once ready.
+      // This prevents the canvas from rendering with incomplete data.
+      fetchProjectById(projectId).then(async (fullProject) => {
+        if (!fullProject) {
+          // Fallback: fetch via API route (admin client, works for collaborators)
+          try {
+            const res = await fetch(`/api/projects`);
+            if (res.ok) {
+              const data = await res.json();
+              fullProject = data.projects?.find((p: any) => p.id === projectId) || null;
+            }
+          } catch {}
+        }
+        if (fullProject) {
+          const updated = useCXDStore.getState().projects.map(p => p.id === projectId ? fullProject! : p);
+          setProjects(updated);
+        }
+        loadProject(projectId);
+        router.push("/cxd");
+      });
+    } else {
+      // Full data already in store, navigate immediately
+      loadProject(projectId);
+      router.push("/cxd");
     }
-    loadProject(projectId);
-    router.push("/cxd");
   };
 
   const formatDate = (dateString: string) => {
