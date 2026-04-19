@@ -38,13 +38,18 @@ export async function GET(request: Request) {
 
     // If history=true, return archived sessions
     if (history === "true") {
+      const limit = 50;
+      const offsetParam = searchParams.get("offset");
+      const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10) || 0) : 0;
+
       let query = supabase
         .from("ai_chat_threads")
         .select("id, title, face_key, face_label, face_hue, is_active, is_archived, created_at, updated_at, messages")
         .eq("project_id", projectId)
         .eq("user_id", user.id)
         .eq("is_archived", true)
-        .order("updated_at", { ascending: false });
+        .order("updated_at", { ascending: false })
+        .range(offset, offset + limit - 1);
 
       // Filter by face unless allFaces=true
       if (allFaces !== "true" && faceKey) {
@@ -64,7 +69,12 @@ export async function GET(request: Request) {
 
       // Return sessions with message count (avoid sending full messages in list)
       const sessions = (data || []).map((t) => {
-        const msgs = typeof t.messages === "string" ? JSON.parse(t.messages) : t.messages;
+        let msgs;
+        try {
+          msgs = typeof t.messages === "string" ? JSON.parse(t.messages) : t.messages;
+        } catch {
+          msgs = [];
+        }
         return {
           id: t.id,
           title: t.title || generateTitle(msgs),

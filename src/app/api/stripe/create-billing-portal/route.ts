@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create billing portal session
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
     const session = await stripe.billingPortal.sessions.create({
       customer: subscription.stripe_customer_id,
       return_url: `${appUrl}/dashboard`,

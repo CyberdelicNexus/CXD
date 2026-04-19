@@ -26,7 +26,8 @@ async function _fetchCreditsShared(): Promise<AICreditsInfo | null> {
       return res.json();
     })
     .then((data) => {
-      const d: AICreditsData = data.credits;
+      const d: AICreditsData = data?.credits;
+      if (!d) return null;
       const total = d.monthlyAllowance + d.addonCredits;
       _cachedCredits = {
         remaining: total - d.usedThisPeriod,

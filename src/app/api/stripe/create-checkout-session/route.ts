@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create checkout session
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       line_items: [

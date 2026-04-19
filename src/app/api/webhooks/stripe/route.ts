@@ -10,12 +10,6 @@ import SubscriptionConfirmed from '../../../../../emails/subscription-confirmed'
 import SubscriptionCancelled from '../../../../../emails/subscription-cancelled';
 import CreditPurchaseReceipt from '../../../../../emails/credit-purchase-receipt';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-01-27.acacia',
-});
-
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-
 // Admin client for querying user data
 function getSupabaseAdmin() {
   return createAdminClient(
@@ -42,6 +36,14 @@ async function getUserInfo(userId: string): Promise<{ email: string; name: strin
 }
 
 export async function POST(req: Request) {
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!stripeKey || !webhookSecret) {
+    console.error('Missing Stripe environment variables');
+    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+  }
+  const stripe = new Stripe(stripeKey, { apiVersion: '2025-01-27.acacia', timeout: 10000 });
+
   const body = await req.text();
   const headersList = await headers();
   const signature = headersList.get('stripe-signature')!;
@@ -56,6 +58,7 @@ export async function POST(req: Request) {
   }
 
   const supabase = await createClient();
+  const eventId = event.id;
 
   try {
     switch (event.type) {
@@ -68,7 +71,18 @@ export async function POST(req: Request) {
         const subscriptionId = session.subscription as string;
 
         if (!subscriptionId && session.mode === 'payment') {
-          // Lifetime purchase
+          // Lifetime purchase - check if already processed (idempotency)
+          const { data: existingSub } = await supabase
+            .from('subscriptions')
+            .select('plan_id')
+            .eq('user_id', userId)
+            .single();
+
+          if (existingSub?.plan_id === 'lifetime') {
+            console.log('Lifetime subscription already active for user:', userId);
+            return NextResponse.json({ received: true });
+          }
+
           const { data: lifetimeCount } = await supabase
             .from('subscriptions')
             .select('founding_member_number')
@@ -80,7 +94,7 @@ export async function POST(req: Request) {
           const nextFoundingNumber = (lifetimeCount?.founding_member_number || 0) + 1;
 
           if (nextFoundingNumber <= 250) {
-            await supabase
+            const { error: lifetimeUpdateError } = await supabase
               .from('subscriptions')
               .update({
                 plan_id: 'lifetime',
@@ -89,6 +103,11 @@ export async function POST(req: Request) {
                 status: 'active',
               })
               .eq('user_id', userId);
+
+            if (lifetimeUpdateError) {
+              console.error('Failed to update subscription to lifetime:', lifetimeUpdateError);
+              return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            }
 
             // Send lifetime confirmation email
             try {
@@ -106,11 +125,14 @@ export async function POST(req: Request) {
                   })
                 );
 
-                await sendEmail({
-                  to: userInfo.email,
-                  subject: `Welcome, Founding Member #${nextFoundingNumber}!`,
-                  html: emailHtml,
-                });
+                await Promise.race([
+                  sendEmail({
+                    to: userInfo.email,
+                    subject: `Welcome, Founding Member #${nextFoundingNumber}!`,
+                    html: emailHtml,
+                  }),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
+                ]);
               }
             } catch (emailError) {
               console.error('Failed to send lifetime confirmation email:', emailError);
@@ -120,7 +142,7 @@ export async function POST(req: Request) {
           // Pro subscription - get trial dates from Stripe
           const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-          await supabase
+          const { error: proUpdateError } = await supabase
             .from('subscriptions')
             .update({
               plan_id: 'pro',
@@ -138,13 +160,23 @@ export async function POST(req: Request) {
             })
             .eq('user_id', userId);
 
+          if (proUpdateError) {
+            console.error('Failed to update subscription to pro:', proUpdateError);
+            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+          }
+
           // Add pro monthly credits
-          await supabase
+          const { error: proCreditsError } = await supabase
             .from('ai_credits')
             .update({
               monthly_allowance: 100,
             })
             .eq('user_id', userId);
+
+          if (proCreditsError) {
+            console.error('Failed to update pro monthly credits:', proCreditsError);
+            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+          }
 
           // Send Pro confirmation email
           try {
@@ -164,11 +196,14 @@ export async function POST(req: Request) {
                 })
               );
 
-              await sendEmail({
-                to: userInfo.email,
-                subject: 'Your CXD Canvas Pro plan is confirmed!',
-                html: emailHtml,
-              });
+              await Promise.race([
+                sendEmail({
+                  to: userInfo.email,
+                  subject: 'Your CXD Canvas Pro plan is confirmed!',
+                  html: emailHtml,
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
+              ]);
             }
           } catch (emailError) {
             console.error('Failed to send Pro confirmation email:', emailError);
@@ -179,14 +214,19 @@ export async function POST(req: Request) {
 
       case 'customer.subscription.deleted': {
         const subscription = event.data.object as Stripe.Subscription;
-        const { data: subscriptionRecord } = await supabase
+        const { data: subscriptionRecord, error: subRecordError } = await supabase
           .from('subscriptions')
           .select('user_id')
           .eq('stripe_customer_id', subscription.customer as string)
           .single();
 
+        if (subRecordError) {
+          console.error('Failed to find subscription record:', subRecordError);
+          return NextResponse.json({ error: 'Database error' }, { status: 500 });
+        }
+
         if (subscriptionRecord) {
-          await supabase
+          const { error: cancelUpdateError } = await supabase
             .from('subscriptions')
             .update({
               plan_id: 'free',
@@ -196,13 +236,23 @@ export async function POST(req: Request) {
             })
             .eq('user_id', subscriptionRecord.user_id);
 
+          if (cancelUpdateError) {
+            console.error('Failed to update subscription to canceled:', cancelUpdateError);
+            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+          }
+
           // Reset monthly allowance to free tier
-          await supabase
+          const { error: resetCreditsError } = await supabase
             .from('ai_credits')
             .update({
               monthly_allowance: 0,
             })
             .eq('user_id', subscriptionRecord.user_id);
+
+          if (resetCreditsError) {
+            console.error('Failed to reset monthly credits:', resetCreditsError);
+            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+          }
 
           // Send cancellation email
           try {
@@ -219,11 +269,14 @@ export async function POST(req: Request) {
                 })
               );
 
-              await sendEmail({
-                to: userInfo.email,
-                subject: 'Your CXD Canvas subscription has been cancelled',
-                html: emailHtml,
-              });
+              await Promise.race([
+                sendEmail({
+                  to: userInfo.email,
+                  subject: 'Your CXD Canvas subscription has been cancelled',
+                  html: emailHtml,
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
+              ]);
             }
           } catch (emailError) {
             console.error('Failed to send cancellation email:', emailError);
@@ -239,32 +292,60 @@ export async function POST(req: Request) {
         const packId = paymentIntent.metadata?.packId;
 
         if (userId && creditAmount) {
+          // Idempotency check - prevent duplicate credit additions on webhook retry
+          const { data: existingTx } = await supabase
+            .from('ai_credit_transactions')
+            .select('id')
+            .eq('stripe_event_id', eventId)
+            .maybeSingle();
+
+          if (existingTx) {
+            console.log('Credit event already processed:', eventId);
+            return NextResponse.json({ received: true });
+          }
+
           // Add addon credits to ai_credits table
-          const { data: credits } = await supabase
+          const { data: credits, error: creditsSelectError } = await supabase
             .from('ai_credits')
             .select('addon_credits')
             .eq('user_id', userId)
             .single();
 
+          if (creditsSelectError) {
+            console.error('Failed to fetch ai_credits:', creditsSelectError);
+            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+          }
+
           if (credits) {
             const newBalance = (credits.addon_credits || 0) + parseInt(creditAmount, 10);
 
-            await supabase
+            const { error: addonUpdateError } = await supabase
               .from('ai_credits')
               .update({
                 addon_credits: newBalance,
               })
               .eq('user_id', userId);
 
-            // Log transaction
-            await supabase
+            if (addonUpdateError) {
+              console.error('Failed to update addon credits:', addonUpdateError);
+              return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            }
+
+            // Log transaction (stripe_event_id enables idempotency - requires column in ai_credit_transactions table)
+            const { error: transactionError } = await supabase
               .from('ai_credit_transactions')
               .insert({
                 user_id: userId,
                 amount: parseInt(creditAmount, 10),
                 balance_after: newBalance,
                 reason: 'addon_purchase',
+                stripe_event_id: eventId,
               });
+
+            if (transactionError) {
+              console.error('Failed to log credit transaction:', transactionError);
+              return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            }
 
             // Send credit purchase receipt email
             try {
@@ -289,11 +370,14 @@ export async function POST(req: Request) {
                   })
                 );
 
-                await sendEmail({
-                  to: userInfo.email,
-                  subject: `Receipt: ${parseInt(creditAmount, 10)} AI credits added`,
-                  html: emailHtml,
-                });
+                await Promise.race([
+                  sendEmail({
+                    to: userInfo.email,
+                    subject: `Receipt: ${parseInt(creditAmount, 10)} AI credits added`,
+                    html: emailHtml,
+                  }),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
+                ]);
               }
             } catch (emailError) {
               console.error('Failed to send credit purchase receipt:', emailError);

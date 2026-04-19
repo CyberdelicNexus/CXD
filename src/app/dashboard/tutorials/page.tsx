@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -234,10 +235,12 @@ export default function TutorialsPage() {
                 }}
               >
                 {tutorial.thumbnailUrl && (
-                  <img
+                  <Image
                     src={tutorial.thumbnailUrl}
                     alt={tutorial.title}
+                    fill
                     className="absolute inset-0 w-full h-full object-cover"
+                    unoptimized
                   />
                 )}
                 <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors flex items-center justify-center">

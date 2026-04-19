@@ -847,7 +847,7 @@ export function CXDNavbar() {
                             }}
                           >
                             {c.avatarUrl ? (
-                              <img src={c.avatarUrl} alt={c.name} className="w-full h-full rounded-full object-cover" />
+                              <Image src={c.avatarUrl} alt={c.name} width={36} height={36} className="w-full h-full rounded-full object-cover" unoptimized />
                             ) : (
                               initials
                             )}

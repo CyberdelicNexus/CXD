@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     const baseUrl =
       process.env.NEXT_PUBLIC_APP_URL || "https://canvas.cyberdelic.design";
 
+    const idempotencyKey = `credit_checkout_${user.id}_${pack.id}_${Math.floor(Date.now() / 60000)}`;
     const session = await getStripe().checkout.sessions.create({
       customer: customerId,
       mode: "payment",
@@ -74,6 +75,8 @@ export async function POST(request: Request) {
       },
       success_url: `${baseUrl}/cxd?credits_topup=success&pack=${pack.id}`,
       cancel_url: `${baseUrl}/cxd?credits_topup=canceled`,
+    }, {
+      idempotencyKey,
     });
 
     return NextResponse.json({ url: session.url });

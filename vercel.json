@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "src/app/api/ai/**/*.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "src/app/api/webhooks/**/*.ts": {
+      "maxDuration": 30
+    }
+  }
+}

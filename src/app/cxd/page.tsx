@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-import { useCXDStore } from "@/store/cxd-store";
+import { useCXDStore, type ViewMode } from "@/store/cxd-store";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
 import { LoadingScreen } from "@/components/cxd/loading-screen";
 import { useProjectSync, getLocalBackup, clearLocalBackup } from "@/hooks/use-project-sync";
@@ -69,7 +69,7 @@ export default function CXDPage() {
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
         window.innerWidth < 768;
       if (isMobile) {
-        window.location.href = '/mobile-notice';
+        router.replace('/mobile-notice');
       }
     };
     checkMobile();
@@ -127,11 +127,15 @@ export default function CXDPage() {
 
   // Wait for Zustand to hydrate from localStorage
   useEffect(() => {
-    // Small delay to ensure persist middleware has hydrated
-    const timer = setTimeout(() => {
+    // Use Zustand persist middleware's hydration API instead of arbitrary timeout
+    if (useCXDStore.persist.hasHydrated()) {
       setHasHydrated(true);
-    }, 50); // Reduced from 100ms to 50ms for faster loading
-    return () => clearTimeout(timer);
+    } else {
+      const unsubscribe = useCXDStore.persist.onFinishHydration(() => {
+        setHasHydrated(true);
+      });
+      return () => { unsubscribe(); };
+    }
   }, []);
 
   // Add transition effect when switching views
@@ -140,6 +144,20 @@ export default function CXDPage() {
     const timer = setTimeout(() => setIsTransitioning(false), 300);
     return () => clearTimeout(timer);
   }, [viewMode, canvasViewMode]);
+
+  // Sync view mode to URL search params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const currentView = params.get('view');
+    if (viewMode && viewMode !== 'canvas' && currentView !== viewMode) {
+      params.set('view', viewMode);
+      window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+    } else if (viewMode === 'canvas' && currentView) {
+      params.delete('view');
+      const newUrl = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [viewMode]);
 
   // Load and cache user profile for comments
   useEffect(() => {
@@ -342,14 +360,17 @@ export default function CXDPage() {
         if (viewMode === "home" && currentProjectId) {
           setViewMode("canvas");
         }
+
+        // Show canvas immediately
         setIsRestoring(false);
+
+        // Verify auth in background; expired sessions redirect on next interaction
         supabase.auth.getUser().then(({ data: { user }, error }) => {
-          // Only redirect on definitive auth failures, not transient errors
-          // (e.g. lock contention, network hiccups, token refresh timing).
-          // Transient failures return error + null user; a real expired session
-          // will be caught on the next DB interaction or page navigation.
-          if (!user && !error) window.location.href = "/sign-in";
+          if (!user && !error) {
+            router.replace("/sign-in");
+          }
         });
+
         return;
       }
 
@@ -359,8 +380,7 @@ export default function CXDPage() {
         } = await supabase.auth.getUser();
 
         if (!user) {
-          // Middleware should handle redirect, use window.location for full page navigation
-          window.location.href = "/sign-in";
+          router.replace("/sign-in");
           return;
         }
 
@@ -410,6 +430,13 @@ export default function CXDPage() {
         if (viewMode === "home" && currentProjectId) {
           setViewMode("canvas");
         }
+
+        // Restore view mode from URL param if present
+        const urlParams = new URLSearchParams(window.location.search);
+        const viewParam = urlParams.get('view');
+        if (viewParam && ['wizard', 'canvas', 'focus'].includes(viewParam)) {
+          setViewMode(viewParam as ViewMode);
+        }
       } catch (err) {
         console.error('[CXD] Error restoring project state:', err);
       } finally {
@@ -432,8 +459,7 @@ export default function CXDPage() {
     // Wait for Zustand to hydrate before checking currentProjectId
     if (!isRestoring && hasHydrated && !currentProjectId) {
       console.log('[CXD] No project selected, redirecting to dashboard');
-      // Use window.location for full page navigation to avoid RSC fetch issues
-      window.location.href = "/dashboard";
+      router.replace("/dashboard");
     }
   }, [isRestoring, hasHydrated, currentProjectId, router]);
 

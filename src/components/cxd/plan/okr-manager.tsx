@@ -29,9 +29,11 @@ interface OKRManagerProps {
 }
 
 const OKR_STATUSES: OKRStatus[] = ['on_track', 'at_risk', 'behind', 'complete'];
+// Stable empty array — prevents new [] reference every call when okrs is undefined
+const EMPTY_OKRS: OKR[] = [];
 
 export function OKRManager({ versionId }: OKRManagerProps) {
-  const allOKRs = useCXDStore((state) => state.getCurrentProject()?.okrs || []);
+  const allOKRs = useCXDStore((state) => state.getCurrentProject()?.okrs ?? EMPTY_OKRS);
   const addOKR = useCXDStore((state) => state.addOKR);
   const updateOKR = useCXDStore((state) => state.updateOKR);
 

@@ -47,7 +47,7 @@ import {
 import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, remapTemplateIds, type TemplateDefinition, type TemplateCategory } from "@/lib/templates";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { useRouter } from "next/navigation";
-import { fetchUserProjects, ensureUserProfile, saveProject } from "@/lib/supabase-projects";
+import { fetchUserProjects, fetchProjectById, ensureUserProfile, saveProject, updateProjectMetadata } from "@/lib/supabase-projects";
 import { createNotification } from "@/lib/notifications";
 import { getLocalBackup, clearLocalBackup, flushPendingSave } from "@/hooks/use-project-sync";
 import {
@@ -82,8 +82,10 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [bugSteps, setBugSteps] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [inviteProject, setInviteProject] = useState<{ id: string; name: string } | null>(null);
   const [renameProject, setRenameProject] = useState<{ id: string; name: string } | null>(null);
@@ -131,6 +133,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const handleSupportSubmit = async () => {
     if (!supportMessage.trim()) return;
     setIsSubmitting(true);
+    setFormError(null);
 
     try {
       // Get browser info
@@ -146,6 +149,11 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
         }),
       });
 
+      if (!response.ok) {
+        setFormError('Failed to submit support request. Please try again or email contact@cyberdelic.design');
+        return;
+      }
+
       const data = await response.json();
 
       if (data.success) {
@@ -159,7 +167,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       }
     } catch (error) {
       console.error('Support submission error:', error);
-      alert('Failed to submit support request. Please try again or email contact@cyberdelic.design');
+      setFormError('Failed to submit support request. Please try again or email contact@cyberdelic.design');
     } finally {
       setIsSubmitting(false);
     }
@@ -169,6 +177,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const handleBugSubmit = async () => {
     if (!bugDescription.trim()) return;
     setIsSubmitting(true);
+    setFormError(null);
 
     try {
       // Get browser info
@@ -185,6 +194,11 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
         }),
       });
 
+      if (!response.ok) {
+        setFormError('Failed to submit bug report. Please try again or email contact@cyberdelic.design');
+        return;
+      }
+
       const data = await response.json();
 
       if (data.success) {
@@ -198,7 +212,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       }
     } catch (error) {
       console.error('Bug report submission error:', error);
-      alert('Failed to submit bug report. Please try again or email contact@cyberdelic.design');
+      setFormError('Failed to submit bug report. Please try again or email contact@cyberdelic.design');
     } finally {
       setIsSubmitting(false);
     }
@@ -221,7 +235,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       // Now fetch projects and profile in parallel
       const [userProjects, profile] = await Promise.all([
         // Fetch projects via API route (uses admin client to bypass RLS)
-        fetch('/api/projects')
+        fetch('/api/projects?listing=true')
           .then(r => r.json())
           .then(d => d.projects as any[] ?? [])
           .catch(async () => {
@@ -320,8 +334,19 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     router.push('/cxd');
   };
 
-  const handleOpenProject = (projectId: string) => {
+  const handleOpenProject = async (projectId: string) => {
     setNavigatingTo(projectId);
+    // If the project is a listing-only stub (missing full data), fetch the full
+    // project before navigating. This prevents the canvas from rendering with
+    // incomplete data and triggering "Maximum update depth exceeded" errors.
+    const project = projects.find(p => p.id === projectId);
+    if (project && (project as any)._listingOnly) {
+      const fullProject = await fetchProjectById(projectId);
+      if (fullProject) {
+        const updated = projects.map(p => p.id === projectId ? fullProject : p);
+        setProjects(updated);
+      }
+    }
     loadProject(projectId);
     router.push("/cxd");
   };
@@ -446,19 +471,13 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     try {
       const imageUrl = await uploadProfileImage(userId, file, `canvas-cover-${projectId}`);
       if (imageUrl) {
-        const project = projects.find(p => p.id === projectId);
-        if (project) {
-          const updatedProject = {
-            ...project,
-            coverImage: imageUrl,
-            updatedAt: new Date().toISOString()
-          };
-          const updatedProjects = projects.map(p =>
-            p.id === projectId ? updatedProject : p
-          );
-          setProjects(updatedProjects);
-          await saveProject(updatedProject);
-        }
+        const updatedProjects = projects.map(p =>
+          p.id === projectId
+            ? { ...p, coverImage: imageUrl, updatedAt: new Date().toISOString() }
+            : p
+        );
+        setProjects(updatedProjects);
+        await updateProjectMetadata(projectId, { coverImage: imageUrl });
       }
     } catch (error) {
       console.error("Error uploading canvas cover:", error);
@@ -578,7 +597,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 </label>
                 <div className="mt-3">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-white">{userName}</h2>
+                    <h2 className="text-xl font-bold text-white truncate max-w-[200px]">{userName}</h2>
                     <Badge className={`text-xs ${planBadge.color}`}>
                       {planBadge.label}
                     </Badge>
@@ -700,10 +719,12 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                         {/* Cover Image - using img tag to support any external URL */}
                         {coverImage && (
                           <div className="absolute inset-0">
-                            <img
+                            <Image
                               src={coverImage}
                               alt={project.name}
+                              fill
                               className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
+                              unoptimized
                             />
                           </div>
                         )}
@@ -947,12 +968,16 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       {/* Support Dialog */}
       <Dialog open={isSupportOpen} onOpenChange={(open) => {
         setIsSupportOpen(open);
+        if (open) {
+          setFormError(null);
+        }
         if (!open) {
           // Reset form state when dialog closes
           setTimeout(() => {
             setSupportMessage('');
             setSubmitSuccess(false);
             setIsSubmitting(false);
+            setFormError(null);
           }, 150);
         }
       }}>
@@ -985,6 +1010,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   value={supportMessage}
                   onChange={(e) => setSupportMessage(e.target.value)}
                   className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[120px] focus:border-violet-500/50"
+                  maxLength={10000}
                 />
               </div>
 
@@ -1005,6 +1031,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   </>
                 )}
               </Button>
+              {formError && (
+                <p className="text-sm text-red-400 mt-2">{formError}</p>
+              )}
             </div>
           )}
         </DialogContent>
@@ -1013,6 +1042,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       {/* Bug Report Dialog */}
       <Dialog open={isBugReportOpen} onOpenChange={(open) => {
         setIsBugReportOpen(open);
+        if (open) {
+          setFormError(null);
+        }
         if (!open) {
           // Reset form state when dialog closes
           setTimeout(() => {
@@ -1020,6 +1052,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             setBugSteps('');
             setSubmitSuccess(false);
             setIsSubmitting(false);
+            setFormError(null);
           }, 150);
         }
       }}>
@@ -1052,6 +1085,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   value={bugDescription}
                   onChange={(e) => setBugDescription(e.target.value)}
                   className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[80px] focus:border-rose-500/50"
+                  maxLength={10000}
                 />
               </div>
 
@@ -1063,6 +1097,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   value={bugSteps}
                   onChange={(e) => setBugSteps(e.target.value)}
                   className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[80px] focus:border-rose-500/50"
+                  maxLength={5000}
                 />
               </div>
 
@@ -1083,6 +1118,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   </>
                 )}
               </Button>
+              {formError && (
+                <p className="text-sm text-red-400 mt-2">{formError}</p>
+              )}
             </div>
           )}
         </DialogContent>
@@ -1103,17 +1141,30 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             </Button>
             <Button
               variant="destructive"
+              disabled={isDeleting}
               onClick={async () => {
                 if (projectToDelete) {
-                  const proj = projects.find((p) => p.id === projectToDelete);
-                  deleteProject(projectToDelete);
-                  await createNotification(userId, "PROJECT_DELETED", `Project "${proj?.name}" deleted`, { projectId: projectToDelete });
-                  setDeleteConfirmOpen(false);
-                  setProjectToDelete(null);
+                  setIsDeleting(true);
+                  try {
+                    const proj = projects.find((p) => p.id === projectToDelete);
+                    deleteProject(projectToDelete);
+                    await createNotification(userId, "PROJECT_DELETED", `Project "${proj?.name}" deleted`, { projectId: projectToDelete });
+                    setDeleteConfirmOpen(false);
+                    setProjectToDelete(null);
+                  } finally {
+                    setIsDeleting(false);
+                  }
                 }
               }}
             >
-              Delete
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
             </Button>
           </div>
         </DialogContent>
@@ -1142,8 +1193,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                         : p
                     );
                     setProjects(updatedProjects);
-                    const updatedProject = updatedProjects.find((p) => p.id === renameProject.id);
-                    if (updatedProject) saveProject(updatedProject);
+                    updateProjectMetadata(renameProject.id, { name: newRenameValue.trim() });
                     setRenameProject(null);
                     setNewRenameValue("");
                   }
@@ -1166,8 +1216,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                         : p
                     );
                     setProjects(updatedProjects);
-                    const updatedProject = updatedProjects.find((p) => p.id === renameProject.id);
-                    if (updatedProject) saveProject(updatedProject);
+                    updateProjectMetadata(renameProject.id, { name: newRenameValue.trim() });
                     setRenameProject(null);
                     setNewRenameValue("");
                   }
@@ -1246,19 +1295,13 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 <Button
                   onClick={async () => {
                     if (coverImageUrl.trim() && coverImageProject) {
-                      const project = projects.find(p => p.id === coverImageProject.id);
-                      if (project) {
-                        const updatedProject = {
-                          ...project,
-                          coverImage: coverImageUrl.trim(),
-                          updatedAt: new Date().toISOString()
-                        };
-                        const updatedProjects = projects.map(p =>
-                          p.id === coverImageProject.id ? updatedProject : p
-                        );
-                        setProjects(updatedProjects);
-                        await saveProject(updatedProject);
-                      }
+                      const updatedProjects = projects.map(p =>
+                        p.id === coverImageProject.id
+                          ? { ...p, coverImage: coverImageUrl.trim(), updatedAt: new Date().toISOString() }
+                          : p
+                      );
+                      setProjects(updatedProjects);
+                      await updateProjectMetadata(coverImageProject.id, { coverImage: coverImageUrl.trim() });
                       setCoverImageProject(null);
                       setCoverImageUrl("");
                     }
@@ -1297,9 +1340,11 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       <footer className="relative z-10 py-8 px-4 border-t border-white/10 mt-12">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <img
+            <Image
               src="/images/CL Logo NL.png"
               alt="Cyberdelic Labs"
+              width={32}
+              height={32}
               className="w-8 h-8 rounded-lg opacity-70"
             />
             <span className="text-white/50 text-sm">Cyberdelic Labs</span>

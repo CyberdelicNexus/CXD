@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useCallback } from "react";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
 import type { CommentThread } from "@/types/comment-types";
@@ -125,10 +126,13 @@ export function CommentPin({
         title={isResolved ? "Resolved comment" : `Comment #${index + 1}`}
       >
         {thread.root.authorAvatar ? (
-          <img
+          <Image
             src={thread.root.authorAvatar}
             alt={thread.root.authorName}
+            width={24}
+            height={24}
             className="w-full h-full rounded-full object-cover"
+            unoptimized
           />
         ) : (
           thread.root.authorName.charAt(0).toUpperCase()

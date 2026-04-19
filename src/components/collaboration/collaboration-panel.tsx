@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import Image from 'next/image';
 import { X, UserPlus, Mail, Trash2, Copy, Check, Loader2, Crown, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,6 +63,10 @@ export function CollaborationPanel({
       try {
         // Fetch collaborators
         const collabResponse = await fetch(`/api/canvas/collaborators?canvasId=${canvasId}`);
+        if (!collabResponse.ok) {
+          console.error('Failed to fetch collaborators:', collabResponse.status);
+          return;
+        }
         const collabData = await collabResponse.json();
         if (collabData.collaborators) {
           setCollaborators(collabData.collaborators);
@@ -70,6 +75,10 @@ export function CollaborationPanel({
         // Fetch invitations (only for owners)
         if (isOwner) {
           const inviteResponse = await fetch(`/api/canvas/invite?canvasId=${canvasId}`);
+          if (!inviteResponse.ok) {
+            console.error('Failed to fetch invitations:', inviteResponse.status);
+            return;
+          }
           const inviteData = await inviteResponse.json();
           if (inviteData.invitations) {
             setInvitations(inviteData.invitations);
@@ -110,6 +119,11 @@ export function CollaborationPanel({
         body: JSON.stringify({ canvasId, email: inviteEmail.trim() }),
       });
 
+      if (!response.ok) {
+        setInviteError(`Failed to send invitation (${response.status})`);
+        return;
+      }
+
       const data = await response.json();
 
       if (data.error) {
@@ -119,9 +133,11 @@ export function CollaborationPanel({
         setInviteEmail('');
         // Refresh invitations
         const inviteResponse = await fetch(`/api/canvas/invite?canvasId=${canvasId}`);
-        const inviteData = await inviteResponse.json();
-        if (inviteData.invitations) {
-          setInvitations(inviteData.invitations);
+        if (inviteResponse.ok) {
+          const inviteData = await inviteResponse.json();
+          if (inviteData.invitations) {
+            setInvitations(inviteData.invitations);
+          }
         }
       }
     } catch (error) {
@@ -235,6 +251,7 @@ export function CollaborationPanel({
                         onChange={(e) => setInviteEmail(e.target.value)}
                         className="flex-1 border-white/10 bg-white/5 text-white placeholder:text-white/40"
                         disabled={isInviting}
+                        maxLength={320}
                       />
                       <Button
                         type="submit"
@@ -322,10 +339,13 @@ export function CollaborationPanel({
                               }}
                             >
                               {collaborator.avatarUrl ? (
-                                <img
+                                <Image
                                   src={collaborator.avatarUrl}
                                   alt={collaborator.name}
+                                  width={32}
+                                  height={32}
                                   className="h-full w-full rounded-full object-cover"
+                                  unoptimized
                                 />
                               ) : (
                                 collaborator.name

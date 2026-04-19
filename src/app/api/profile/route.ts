@@ -60,8 +60,18 @@ export async function PUT(request: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    if (name !== undefined) updates.name = name;
-    if (profile_picture !== undefined) updates.profile_picture = profile_picture;
+    if (name !== undefined) {
+      if (typeof name !== 'string' || name.length > 255) {
+        return NextResponse.json({ error: 'Name must be under 255 characters' }, { status: 400 });
+      }
+      updates.name = name.trim();
+    }
+    if (profile_picture !== undefined) {
+      if (typeof profile_picture !== 'string' || profile_picture.length > 2048) {
+        return NextResponse.json({ error: 'Invalid profile picture URL' }, { status: 400 });
+      }
+      updates.profile_picture = profile_picture;
+    }
 
     // Update user profile
     const { data: profile, error: updateError } = await supabase

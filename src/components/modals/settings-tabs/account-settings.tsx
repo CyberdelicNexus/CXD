@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Image from "next/image";
 import { User, Mail, Crown, Calendar, ExternalLink, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSubscription } from "@/hooks/use-subscription";
@@ -179,10 +180,13 @@ export function AccountSettings() {
                 <label className="text-sm font-medium text-foreground">Profile Picture</label>
                 <div className="flex items-center gap-3">
                   {profilePicture ? (
-                    <img
+                    <Image
                       src={profilePicture}
                       alt="Profile"
+                      width={48}
+                      height={48}
                       className="w-12 h-12 rounded-full object-cover border-2 border-border"
+                      unoptimized
                     />
                   ) : (
                     <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-lg">

@@ -115,7 +115,7 @@ export function useCollaboration(
             if (data?.profile_picture) {
               avatarUrl = data.profile_picture;
             }
-          } catch {}
+          } catch (err) { console.error('Failed to fetch profile picture:', err); }
           setCurrentUser({
             id: user.id,
             email: user.email || '',

@@ -288,9 +288,10 @@ export function AIChatPanel({
   const onSubmit = useCallback(
     (e?: React.FormEvent) => {
       if (e) e.preventDefault();
+      if (isStreaming) return;
       handleSubmit(e);
     },
-    [handleSubmit],
+    [handleSubmit, isStreaming],
   );
 
   const handleNewSession = useCallback(async () => {

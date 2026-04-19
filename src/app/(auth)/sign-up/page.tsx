@@ -10,6 +10,8 @@ import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { ArrowRight, CheckCircle, Mail, Shield } from "lucide-react";
 import Image from "next/image";
 
+export const metadata = { title: 'Sign Up' };
+
 type SearchParams = {
   success?: string;
   error?: string;

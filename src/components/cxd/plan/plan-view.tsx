@@ -3,7 +3,7 @@
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 
 import dynamic from 'next/dynamic';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { KanbanView } from './kanban-view';
 import { TableView } from './table-view';
 import { CalendarView } from './calendar-view';
@@ -139,20 +139,9 @@ export function PlanView() {
 
   const selectedTask = selectedTaskId ? getTaskById(selectedTaskId) : undefined;
   const selectedVersion = selectedVersionId ? versions.find(v => v.id === selectedVersionId) : undefined;
-  const activeTasks = tasks.filter(task => !task.isArchived);
-  const archivedTasks = tasks.filter(task => task.isArchived);
+  const activeTasks = useMemo(() => tasks.filter(task => !task.isArchived), [tasks]);
+  const archivedTasks = useMemo(() => tasks.filter(task => task.isArchived), [tasks]);
   const visibleCount = activeView === 'archive' ? archivedTasks.length : activeTasks.length;
-
-  // Debug logging for task visibility
-  console.log('[PlanView] Active view:', activeView);
-  console.log('[PlanView] Total tasks:', tasks.length);
-  console.log('[PlanView] Active tasks (not archived):', activeTasks.length);
-  console.log('[PlanView] Archived tasks:', archivedTasks.length);
-  if (activeView === 'versions') {
-    console.log('[PlanView] Versions - selected version:', selectedVersionId);
-    const tasksForVersion = activeTasks.filter(t => t.taskMetadata?.versionId === selectedVersionId);
-    console.log('[PlanView] Versions - tasks for selected version:', tasksForVersion.length);
-  }
 
   // Dynamic background based on canvas background
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
@@ -164,8 +153,6 @@ export function PlanView() {
     if (!newTaskText.trim() || !project) return;
 
     const yDoc = useCXDStore.getState().yDoc;
-    console.log('[PlanView] Creating task - Y.js CRDT enabled:', !!yDoc);
-
     // Create a new freeform element with task checkbox syntax
     // Tasks go to the Task Inbox instead of random canvas positions
     const taskContent = `${newTaskText}${newTaskDescription.trim() ? `\n${newTaskDescription.trim()}` : ''}`;
@@ -196,16 +183,7 @@ export function PlanView() {
       },
     };
 
-    console.log('[PlanView] Adding task element:', newElement);
     syncAddElement(newElement as any);
-
-    // Log store state after add (with small delay to allow Y.js sync)
-    setTimeout(() => {
-      const currentProject = useCXDStore.getState().getCurrentProject();
-      const elements = currentProject?.canvasLayout?.elements || [];
-      console.log('[PlanView] After add - total elements:', elements.length);
-      console.log('[PlanView] After add - task found:', elements.some(el => el.id === newElement.id));
-    }, 100);
 
     setNewTaskText('');
     setNewTaskDescription('');

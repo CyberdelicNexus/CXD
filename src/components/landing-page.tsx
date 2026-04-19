@@ -94,6 +94,31 @@ export function LandingPage() {
 
   return (
     <div className="min-h-screen bg-black text-white overflow-x-hidden">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'SoftwareApplication',
+            name: 'CXD Canvas',
+            applicationCategory: 'DesignApplication',
+            operatingSystem: 'Web',
+            url: 'https://canvas.cyberdelic.design',
+            description: 'Design meaningful experiences with an AI-powered hyperreality canvas.',
+            offers: {
+              '@type': 'Offer',
+              price: '0',
+              priceCurrency: 'USD',
+              description: 'Free tier available',
+            },
+            creator: {
+              '@type': 'Organization',
+              name: 'Cyberdelic',
+              url: 'https://canvas.cyberdelic.design',
+            },
+          }),
+        }}
+      />
       {/* Interactive Shimmer Grid Background */}
       <ShimmerGrid
         dotSize={1.5}
@@ -714,11 +739,13 @@ function ScreenshotCarousel() {
         >
           {CAROUSEL_IMAGES.map((img, i) => (
             <div key={i} className="w-full flex-shrink-0">
-              <img
+              <Image
                 src={img.src}
                 alt={img.alt}
+                width={1200}
+                height={675}
                 className="w-full h-auto object-contain"
-                loading={i === 0 ? 'eager' : 'lazy'}
+                priority={i === 0}
                 draggable={false}
               />
             </div>

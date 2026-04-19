@@ -131,14 +131,22 @@ export async function POST(request: Request) {
     // 7. Record the request
     recordRequest(user.id, "analysis");
 
-    // 8. Generate full response (non-streaming for analysis)
-    const result = await generateText({
-      model,
-      system: systemPrompt,
-      prompt: userPrompt,
-      maxOutputTokens: analysisType === "erd" ? 8192 : modelConfig.maxTokens,
-      ...(modelConfig.isReasoning ? {} : { temperature: 0.5 }),
-    });
+    // 8. Generate full response (non-streaming for analysis, 120s timeout)
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), 120000);
+    let result;
+    try {
+      result = await generateText({
+        model,
+        system: systemPrompt,
+        prompt: userPrompt,
+        maxOutputTokens: analysisType === "erd" ? 8192 : modelConfig.maxTokens,
+        ...(modelConfig.isReasoning ? {} : { temperature: 0.5 }),
+        abortSignal: abortController.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     return NextResponse.json({
       content: result.text,

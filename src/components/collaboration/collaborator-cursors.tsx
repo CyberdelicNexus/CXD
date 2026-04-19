@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState, useEffect } from 'react';
+import Image from 'next/image';
 import { CollaboratorPresence } from '@/hooks/use-collaboration';
 
 const CURSOR_STALE_MS = 8000; // 8s — accounts for network latency + 50ms throttle
@@ -71,10 +72,13 @@ const CollaboratorCursor = memo(function CollaboratorCursor({
         style={{ backgroundColor: color }}
       >
         {avatarUrl ? (
-          <img
+          <Image
             src={avatarUrl}
             alt={name}
+            width={16}
+            height={16}
             className="h-4 w-4 rounded-full"
+            unoptimized
           />
         ) : null}
         <span>{name}</span>

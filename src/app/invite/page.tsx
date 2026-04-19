@@ -33,11 +33,17 @@ function InvitePageContent() {
     async function acceptInvite() {
       try {
         const response = await fetch(`/api/canvas/invite/accept?token=${token}`);
+        if (!response.ok) {
+          setState({ status: 'error', message: 'Failed to process invitation. Please try again.' });
+          return;
+        }
         const data = await response.json();
 
         if (data.requiresAuth) {
           // Store token for after auth
-          sessionStorage.setItem('pendingInviteToken', token!);
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('pendingInviteToken', token!);
+          }
           setState({
             status: 'requiresAuth',
             canvasName: data.canvasName,
@@ -94,7 +100,7 @@ function InvitePageContent() {
 
   const handleGoToCanvas = () => {
     if (state.canvasId) {
-      router.push(`/cxd?id=${state.canvasId}`);
+      router.replace(`/cxd?id=${state.canvasId}`);
     }
   };
 

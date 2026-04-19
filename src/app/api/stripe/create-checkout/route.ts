@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
 import { stripe, PLANS } from '@/lib/stripe';
 import { createClient } from '@/supabase/server';
 
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
     // Determine if this is a subscription or one-time payment
     const isLifetime = planType === 'lifetime';
 
-    const sessionConfig: any = {
+    const sessionConfig: Stripe.Checkout.SessionCreateParams = {
       customer: customerId,
       success_url: `${baseUrl}/canvas?checkout=success`,
       cancel_url: `${baseUrl}/pricing?checkout=canceled`,
@@ -90,7 +91,10 @@ export async function POST(request: Request) {
       };
     }
 
-    const session = await stripe.checkout.sessions.create(sessionConfig);
+    const idempotencyKey = `checkout_${user.id}_${priceId}_${Math.floor(Date.now() / 60000)}`;
+    const session = await stripe.checkout.sessions.create(sessionConfig, {
+      idempotencyKey,
+    });
 
     return NextResponse.json({ url: session.url });
   } catch (error) {

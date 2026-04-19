@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Image from "next/image";
 import { CanvasElement, FreeformElement } from "@/types/canvas-elements";
 import { X, ExternalLink, MapPin, FileText, Image as ImageIcon, Video, Link2, Box, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -70,10 +71,13 @@ export function QuickViewModal({
         return (
           <div className="flex flex-col items-center gap-4">
             {src ? (
-              <img
+              <Image
                 src={src}
                 alt={alt}
+                width={800}
+                height={600}
                 className="max-w-full max-h-[60vh] rounded-lg border border-border/50"
+                unoptimized
                 onError={(e) => {
                   (e.target as HTMLImageElement).style.display = "none";
                 }}

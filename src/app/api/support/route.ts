@@ -38,6 +38,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // Validate input lengths
+    if (typeof title !== 'string' || title.length > 500) {
+      return NextResponse.json({ error: 'Title must be under 500 characters' }, { status: 400 });
+    }
+    if (typeof description !== 'string' || description.length > 10000) {
+      return NextResponse.json({ error: 'Description must be under 10,000 characters' }, { status: 400 });
+    }
+
     // Get user profile info
     const { data: userProfile } = await supabase
       .from('users')
@@ -88,18 +96,39 @@ export async function POST(request: Request) {
     );
 
     // Send to admin
-    await sendEmail({
-      to: 'contact@cyberdelic.design',
-      subject: `${subjectPrefix}: ${title}`,
-      html: adminEmailHtml,
-    });
+    let adminEmailSent = false;
+    try {
+      await Promise.race([
+        sendEmail({
+          to: 'contact@cyberdelic.design',
+          subject: `${subjectPrefix}: ${title}`,
+          html: adminEmailHtml,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
+      ]);
+      adminEmailSent = true;
+    } catch (emailErr) {
+      console.error('Failed to send admin notification email:', emailErr);
+    }
 
-    // Send confirmation to user
-    await sendEmail({
-      to: reporterEmail,
-      subject: `We received your ${subjectPrefix.toLowerCase()}`,
-      html: confirmationEmailHtml,
-    });
+    if (!adminEmailSent) {
+      return NextResponse.json({ error: 'Failed to submit support request. Please try again.' }, { status: 500 });
+    }
+
+    // Send confirmation to user - best effort
+    try {
+      await Promise.race([
+        sendEmail({
+          to: reporterEmail,
+          subject: `We received your ${subjectPrefix.toLowerCase()}`,
+          html: confirmationEmailHtml,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
+      ]);
+    } catch (emailErr) {
+      console.error('Failed to send user confirmation email:', emailErr);
+      // Don't fail the request for user confirmation
+    }
 
     return NextResponse.json({ success: true, message: `${subjectPrefix} submitted successfully` });
   } catch (error) {

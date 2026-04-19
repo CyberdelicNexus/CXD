@@ -16,6 +16,7 @@ export function getStripe(): Stripe {
     stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: '2025-01-27.acacia',
       typescript: true,
+      timeout: 10000,
     });
   }
   return stripeInstance;

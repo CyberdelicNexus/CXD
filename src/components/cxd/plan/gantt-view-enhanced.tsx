@@ -124,9 +124,15 @@ const readLocalStorageJson = <T,>(key: string, fallback: T): T => {
   }
 };
 
+// Stable empty array — prevents Zustand selector from returning a new [] reference
+// on every call when okrs is undefined, which would cause infinite re-renders.
+const EMPTY_OKRS: import('@/types/version-types').OKR[] = [];
+
 export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNavigate, onTaskUpdate, onTaskDelete, detailPanelOpen, onVersionClick, onQuickAddTask }: GanttViewProps) {
   // Get OKRs from store for version progress calculation
-  const allOKRs = useCXDStore((state) => state.getCurrentProject()?.okrs || []);
+  // NOTE: using ?? with a module-level constant avoids returning a new [] on every call
+  // when okrs is undefined, which would cause Zustand to see "changed" every render.
+  const allOKRs = useCXDStore((state) => state.getCurrentProject()?.okrs ?? EMPTY_OKRS);
   const updateVersion = useCXDStore((state) => state.updateVersion);
 
   // Persisted settings (localStorage)
@@ -399,10 +405,6 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     const rootTasks: TaskHierarchy[] = [];
     const taskIndexMap = new Map<string, number>(tasks.map((task, idx) => [task.id, idx]));
 
-    console.log('[GanttView] Received tasks:', tasks.length);
-    console.log('[GanttView] Active filters:', filters);
-    console.log('[GanttView] Search query:', searchQuery);
-
     // Filter by search query
     let filteredTasks = tasks;
 
@@ -431,7 +433,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
       );
     }
 
-    console.log('[GanttView] After filters - remaining tasks:', filteredTasks.length);
+
     if (filteredTasks.length === 0 && tasks.length > 0) {
       console.warn('[GanttView] All tasks filtered out! Check active filters.');
     }
@@ -737,7 +739,10 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
   // layout gives us the exact pixel coordinates the browser computed. The SVG connector
   // overlay shares the same positioning context (the 'relative' container), so these
   // pixel values map 1:1 to SVG coordinate space.
-  useLayoutEffect(() => {
+  // NOTE: useEffect (not useLayoutEffect) is intentional — calling setPivotVersion
+  // inside useLayoutEffect causes synchronous nested re-renders that exceed React's
+  // update depth limit (error #300) when tasks change rapidly (e.g. Yjs load).
+  useEffect(() => {
     if (!timelineRef.current || !timelineContentRef.current) return;
 
     const taskBars = timelineRef.current.querySelectorAll('.task-bar') as NodeListOf<HTMLElement>;
@@ -918,7 +923,6 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     });
 
     if (updates.length > 0) {
-      console.log('[Gantt] Dependency constraints enforced:', updates.length, 'tasks adjusted');
     }
   }, [tasks, onTaskUpdate]);
 
@@ -1068,7 +1072,6 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
   const handleDragMove = (e: React.MouseEvent<HTMLDivElement>) => {
     // Handle version dragging
     if (versionDragState && timelineRef.current && updateVersion) {
-      console.log('[Version Drag] Moving version:', versionDragState.versionId, versionDragState.edge);
       const contentWidth = timelineRef.current.scrollWidth;
       const totalDuration = endDate.getTime() - startDate.getTime();
       const deltaX = e.clientX - versionDragState.startX;
@@ -1077,7 +1080,6 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
       // Snap to day boundaries
       const daysMoved = Math.round((deltaX * msPerPixel) / (24 * 60 * 60 * 1000));
       if (daysMoved === 0) return;
-      console.log('[Version Drag] Days moved:', daysMoved);
 
       if (versionDragState.edge === 'move') {
         let newStartDate = new Date(versionDragState.initialStartDate);
@@ -1473,7 +1475,6 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
               const depKey = `${targetTaskId}-${sourceTaskId}`;
               setNewlyCreatedDependency(depKey);
               setTimeout(() => setNewlyCreatedDependency(null), 2000);
-              console.log('[Dependency] Created:', sourceTaskId, '→', targetTaskId);
             }
           }
         }
@@ -1502,7 +1503,6 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     const dependencies = (task.dependencies || []).filter(dep => dep.taskId !== depTaskId);
     onTaskUpdate(taskId, { dependencies });
     setHoveredDependency(null); // Clear hover state immediately
-    console.log('[Dependency] Deleted:', depTaskId, '→', taskId);
   };
 
   // Handle timeline hover for tasks without dates
@@ -1676,7 +1676,6 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
   }, [versions, updateVersion]);
 
   const handleVersionDragStart = (versionId: string, edge: 'start' | 'end' | 'move', e: React.MouseEvent) => {
-    console.log('[Version Drag] Starting drag:', versionId, edge);
     e.stopPropagation();
     e.preventDefault();
     beginVersionDrag(versionId, edge, e.clientX);

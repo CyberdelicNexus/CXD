@@ -5,15 +5,23 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient, createSessionClient } from "../../supabase/server";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export const signUpAction = async (formData: FormData) => {
+  const headersList = headers();
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rateCheck = checkRateLimit(ip, 'sign-up');
+  if (!rateCheck.allowed) {
+    return encodedRedirect("error", "/sign-up", "Too many attempts. Please try again later.");
+  }
+
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
   const fullName = formData.get("full_name")?.toString() || '';
   const promo = formData.get("promo")?.toString();
   const redirectTo = formData.get("redirectTo")?.toString();
   const supabase = await createClient();
-  const origin = headers().get("origin");
+  const origin = headersList.get("origin");
 
   if (!email || !password) {
     return encodedRedirect(
@@ -63,6 +71,13 @@ export const signUpAction = async (formData: FormData) => {
 };
 
 export const signInAction = async (formData: FormData) => {
+  const headersList = headers();
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rateCheck = checkRateLimit(ip, 'sign-in');
+  if (!rateCheck.allowed) {
+    return encodedRedirect("error", "/sign-in", "Too many attempts. Please try again later.");
+  }
+
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
   const redirectTo = formData.get("redirectTo") as string | null;
@@ -104,9 +119,16 @@ export const signInWithGoogleAction = async (formData: FormData) => {
 };
 
 export const forgotPasswordAction = async (formData: FormData) => {
+  const headersList = headers();
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rateCheck = checkRateLimit(ip, 'forgot-password');
+  if (!rateCheck.allowed) {
+    return encodedRedirect("error", "/forgot-password", "Too many attempts. Please try again later.");
+  }
+
   const email = formData.get("email")?.toString();
   const supabase = await createClient();
-  const origin = headers().get("origin");
+  const origin = headersList.get("origin");
   const callbackUrl = formData.get("callbackUrl")?.toString();
 
   if (!email) {

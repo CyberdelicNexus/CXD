@@ -476,6 +476,8 @@ export const useCXDStore = create<CXDState>()(
         const { projects, currentProjectId } = get();
         const project = projects.find((p) => p.id === currentProjectId) || null;
         if (project) {
+          // Skip migrations for listing-only stubs (no full data yet)
+          if ((project as any)._listingOnly) return project;
           // Migration: ensure engagementDistribution exists on all stages
           const stageKeys = ['preparation', 'induction', 'journey', 'peak', 'integration'] as const;
           for (const key of stageKeys) {

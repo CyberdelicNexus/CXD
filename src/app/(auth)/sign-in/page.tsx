@@ -8,6 +8,8 @@ import Link from "next/link";
 import { LogIn } from "lucide-react";
 import Image from "next/image";
 
+export const metadata = { title: 'Sign In' };
+
 interface LoginProps {
   searchParams: Promise<Message & { redirectTo?: string }>;
 }

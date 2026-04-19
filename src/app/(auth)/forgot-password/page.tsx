@@ -8,6 +8,8 @@ import { UrlProvider } from "@/components/url-provider";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { Mail } from "lucide-react";
 
+export const metadata = { title: 'Reset Password' };
+
 export default async function ForgotPassword(props: {
   searchParams: Promise<Message>;
 }) {

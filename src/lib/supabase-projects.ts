@@ -130,6 +130,12 @@ export async function insertProject(project: CXDProject): Promise<boolean> {
 }
 
 export async function saveProject(project: CXDProject): Promise<boolean> {
+  // Never save listing-only stubs — they lack project_data and would overwrite full data
+  if ((project as any)._listingOnly) {
+    console.warn('[saveProject] Skipping save - listing-only project stub:', project.id);
+    return false;
+  }
+
   // Skip saving if ownerId is not a valid UUID (e.g., 'local-user')
   if (!project.ownerId || project.ownerId === 'local-user' || !isValidUUID(project.ownerId)) {
     console.warn('[saveProject] Skipping save - invalid ownerId:', project.ownerId);
@@ -240,6 +246,68 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
 function isValidUUID(str: string): boolean {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   return uuidRegex.test(str);
+}
+
+/**
+ * Update only top-level metadata columns (name, description, share_token) without
+ * touching project_data. Safe to call with listing-only project stubs.
+ * Also patches the corresponding fields inside the existing project_data JSONB
+ * so the two stay in sync.
+ */
+export async function updateProjectMetadata(
+  projectId: string,
+  updates: { name?: string; description?: string; coverImage?: string }
+): Promise<boolean> {
+  if (!projectId || !isValidUUID(projectId)) return false;
+
+  const supabase = createClient();
+
+  // Build the column-level update
+  const dbUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (updates.name !== undefined) dbUpdate.name = updates.name;
+  if (updates.description !== undefined) dbUpdate.description = updates.description;
+
+  // For coverImage, patch it inside project_data JSONB without replacing the whole object
+  // Use Supabase's jsonb concatenation: project_data || '{"coverImage":"..."}'
+  // We do this as a raw RPC or a two-step read-update. For simplicity, read first.
+  if (updates.coverImage !== undefined) {
+    // Read current project_data, patch coverImage, write back
+    const { data: existing } = await supabase
+      .from('cxd_projects')
+      .select('project_data')
+      .eq('id', projectId)
+      .single();
+
+    if (existing) {
+      const patchedData = { ...(existing.project_data || {}), coverImage: updates.coverImage };
+      if (updates.name !== undefined) patchedData.name = updates.name;
+      dbUpdate.project_data = patchedData;
+    }
+  } else if (updates.name !== undefined) {
+    // Patch name inside project_data too so they stay in sync
+    const { data: existing } = await supabase
+      .from('cxd_projects')
+      .select('project_data')
+      .eq('id', projectId)
+      .single();
+
+    if (existing) {
+      const patchedData = { ...(existing.project_data || {}), name: updates.name };
+      if (updates.description !== undefined) patchedData.description = updates.description;
+      dbUpdate.project_data = patchedData;
+    }
+  }
+
+  const { error } = await supabase
+    .from('cxd_projects')
+    .update(dbUpdate)
+    .eq('id', projectId);
+
+  if (error) {
+    console.error('[updateProjectMetadata] Error:', error);
+    return false;
+  }
+  return true;
 }
 
 export async function deleteProjectFromDb(projectId: string): Promise<boolean> {

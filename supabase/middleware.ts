@@ -31,7 +31,11 @@ export const updateSession = async (request: NextRequest) => {
                   headers: request.headers,
                 },
               });
-              response.cookies.set(name, value, options);
+              response.cookies.set(name, value, {
+                ...options,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+              });
             });
           },
         },
@@ -60,11 +64,12 @@ export const updateSession = async (request: NextRequest) => {
       return NextResponse.redirect(new URL("/sign-in", request.url));
     }
 
-    // Redirect authenticated users from auth pages to dashboard (not root - it has landing page)
+    // Redirect authenticated users from auth pages and landing page to dashboard
     if (user && !error) {
-      const isAuthPage = request.nextUrl.pathname === "/sign-in" || 
-                         request.nextUrl.pathname === "/sign-up";
-      if (isAuthPage) {
+      const isAuthOrLanding = request.nextUrl.pathname === "/" ||
+                              request.nextUrl.pathname === "/sign-in" ||
+                              request.nextUrl.pathname === "/sign-up";
+      if (isAuthOrLanding) {
         return NextResponse.redirect(new URL("/dashboard", request.url));
       }
     }

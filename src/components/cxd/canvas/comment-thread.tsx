@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import Image from "next/image";
 import { X, Check, RotateCcw, Trash2, SmilePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
@@ -187,7 +188,7 @@ export function CommentThreadPanel({
             <div className="flex items-center gap-2 mb-1">
               <div className="w-5 h-5 rounded-full bg-purple-600 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 overflow-hidden">
                 {thread.root.authorAvatar ? (
-                  <img src={thread.root.authorAvatar} alt={thread.root.authorName} className="w-full h-full rounded-full object-cover" />
+                  <Image src={thread.root.authorAvatar} alt={thread.root.authorName} width={20} height={20} className="w-full h-full rounded-full object-cover" unoptimized />
                 ) : (
                   thread.root.authorName.charAt(0).toUpperCase()
                 )}

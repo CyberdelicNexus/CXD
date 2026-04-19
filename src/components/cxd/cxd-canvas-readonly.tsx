@@ -34,11 +34,11 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
   const [currentBoardId, setCurrentBoardId] = useState<string | null>(null);
 
   // Get canvas elements and edges from project
-  const canvasElements = useMemo(() => project.canvasLayout?.elements || [], [project.canvasLayout?.elements]);
-  const canvasEdges = useMemo(() => project.canvasLayout?.edges || [], [project.canvasLayout?.edges]);
+  const canvasElements = useMemo(() => project?.canvasLayout?.elements || [], [project?.canvasLayout?.elements]);
+  const canvasEdges = useMemo(() => project?.canvasLayout?.edges || [], [project?.canvasLayout?.edges]);
 
   // Canvas background from project
-  const canvasBackground = project.canvasBackground || DEFAULT_CANVAS_BG;
+  const canvasBackground = project?.canvasBackground || DEFAULT_CANVAS_BG;
 
   // Filter elements for current board (normalize undefined/null/empty string)
   const visibleElements = useMemo(() => {

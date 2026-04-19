@@ -1363,7 +1363,6 @@ export function CXDCanvas() {
             ) {
               // Valid target node found
               if (hoverTargetNodeId !== nodeId) {
-                console.log("[CONNECTOR] Hover target node:", nodeId);
                 setHoverTargetNodeId(nodeId);
                 setHoverTargetPort({ nodeId, port: "auto" });
               }
@@ -1375,7 +1374,6 @@ export function CXDCanvas() {
         }
 
         if (!foundNode && hoverTargetNodeId) {
-          console.log("[CONNECTOR] Left target node");
           setHoverTargetNodeId(null);
           setHoverTargetPort(null);
         }
@@ -1522,7 +1520,6 @@ export function CXDCanvas() {
               arrowStyle: 'end' as const,
             },
           };
-          console.log("[CONNECTOR] Creating edge:", newEdge);
           syncAddEdge(newEdge);
           gradientCounterRef.current += 1;
 
@@ -2242,20 +2239,6 @@ export function CXDCanvas() {
       // Inbox items can be created on different boards/surfaces but should be placeable anywhere
       const allElements = project?.canvasLayout?.elements || [];
       const element = allElements.find(el => el.id === elementId);
-      console.log('[CXDCanvas] Placing inbox item on canvas:', {
-        elementId,
-        x,
-        y,
-        allElementsCount: allElements.length,
-        element: element ? {
-          type: element.type,
-          cardType: (element as any).cardType,
-          emoji: (element as any).emoji,
-          inInbox: element.inInbox,
-          boardId: element.boardId,
-          surface: element.surface,
-        } : 'NOT FOUND'
-      });
       pushCanvasHistory();
       updateCanvasElement(elementId, {
         x,
@@ -2381,7 +2364,6 @@ export function CXDCanvas() {
   // Handle connector creation start
   const handleStartConnector = useCallback(
     (elementId: string, anchor: "top" | "right" | "bottom" | "left", anchorOffset?: number) => {
-      console.log("[CONNECTOR] Starting connector from:", elementId, anchor);
       setIsConnecting(true);
       setConnectingFrom({ elementId, anchor });
       connectingAnchorOffsetRef.current = anchorOffset ?? 0.5;
@@ -2396,13 +2378,6 @@ export function CXDCanvas() {
   // Handle connector creation end (on element)
   const handleEndConnector = useCallback(
     (toElementId: string, toAnchor: "top" | "right" | "bottom" | "left") => {
-      console.log(
-        "[CONNECTOR] End connector called:",
-        toElementId,
-        toAnchor,
-        "connectingFrom:",
-        connectingFrom,
-      );
       if (connectingFrom && connectingFrom.elementId !== toElementId) {
         // Calculate midpoint for default bend position
         const fromEl = canvasElements.find(
@@ -2440,7 +2415,6 @@ export function CXDCanvas() {
             arrowStyle: 'end' as const,
           },
         };
-        console.log("[CONNECTOR] Creating edge:", newEdge);
         syncAddEdge(newEdge);
         gradientCounterRef.current += 1;
         // Auto-open radial menu with color arm expanded
@@ -3152,9 +3126,9 @@ export function CXDCanvas() {
   useEffect(() => { zoomSensitivityRef.current = zoomSensitivity; }, [zoomSensitivity]);
 
   // Smooth zoom with scroll wheel (Ctrl+scroll) or pan (regular scroll).
-  // Stable handler — reads all dynamic values from refs/store, never recreated.
-  const handleWheel = useCallback(
-    (e: WheelEvent) => {
+  // Zero-dep stable handler — reads ALL dynamic values from refs/store at call time.
+  // Never recreated, so the wheel listener is never detached/reattached.
+  const handleWheel = useCallback((e: WheelEvent) => {
       // If target is within an element that should prevent canvas wheeling (like sidebar panels), skip
       const target = e.target as HTMLElement;
       if (target.closest('[data-prevent-canvas-wheel="true"]')) {
@@ -3234,8 +3208,8 @@ export function CXDCanvas() {
               const newPosX = Math.round((mouseX - (mouseX - currentPos.x) * zoomRatio) * 100) / 100;
               const newPosY = Math.round((mouseY - (mouseY - currentPos.y) * zoomRatio) * 100) / 100;
 
-              setCanvasZoom(newZoom);
-              setCanvasPosition({ x: newPosX, y: newPosY });
+              storeState.setCanvasZoom(newZoom);
+              storeState.setCanvasPosition({ x: newPosX, y: newPosY });
             }
 
             // Reset accumulator
@@ -3261,8 +3235,8 @@ export function CXDCanvas() {
             const newPosX = Math.round((mouseX - (mouseX - currentPos.x) * zoomRatio) * 100) / 100;
             const newPosY = Math.round((mouseY - (mouseY - currentPos.y) * zoomRatio) * 100) / 100;
 
-            setCanvasZoom(newZoom);
-            setCanvasPosition({ x: newPosX, y: newPosY });
+            storeState.setCanvasZoom(newZoom);
+            storeState.setCanvasPosition({ x: newPosX, y: newPosY });
           }
         }
       } else {
@@ -3274,26 +3248,23 @@ export function CXDCanvas() {
 
         if (e.shiftKey) {
           // Horizontal pan
-          setCanvasPosition({
+          storeState.setCanvasPosition({
             x: currentPos.x - e.deltaY * panSpeed,
             y: currentPos.y
           });
         } else {
           // Vertical pan (or both if deltaX exists)
-          setCanvasPosition({
+          storeState.setCanvasPosition({
             x: currentPos.x - (e.deltaX || 0) * panSpeed,
             y: currentPos.y - e.deltaY * panSpeed
           });
         }
       }
-    },
-    // Stable deps only — zoomSensitivity read from ref, zoom/position from store
-    [setCanvasZoom, setCanvasPosition],
-  );
-
-  // Attach wheel event ONCE with passive: false.
-  // handleWheel is now stable (no zoomSensitivity dep), so this runs once on mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Attach wheel event ONCE on mount with passive: false.
+  // handleWheel has [] deps so it's truly stable — listener never swaps.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -4857,6 +4828,11 @@ export function CXDCanvas() {
                         setConnectorDropPicker(null);
                         return;
                       }
+                      // Propagate hypercubeTags from source element to new child
+                      const fromEl = canvasElements.find(e => e.id === fromElementId);
+                      if (fromEl?.hypercubeTags?.length) {
+                        newEl = { ...newEl, hypercubeTags: [...fromEl.hypercubeTags] } as CanvasElement;
+                      }
                       syncAddElement(newEl);
                       const gradientName = GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName;
                       gradientCounterRef.current += 1;
@@ -5322,7 +5298,7 @@ export function CXDCanvas() {
                   newElement = { ...baseElement, type: 'board', title: 'Board', icon: '📋', childBoardId: uuidv4() };
                   break;
                 default:
-                  newElement = { ...baseElement, type: 'freeform', content: '' };
+                  newElement = { ...baseElement, type: 'freeform', content: '', width: 300, height: 300 };
               }
 
               syncAddElement(newElement);

@@ -19,10 +19,7 @@ export function UrlProvider({ children }: UrlProviderProps) {
     // Store the URL for use in the form
     setCurrentUrl(baseUrl);
     
-    // If we're using a proxy like ngrok, log for debugging
-    if (isProxy) {
-      console.log('Using proxy URL for redirects:', baseUrl);
-    }
+    // If we're using a proxy like ngrok, no special handling needed
   }, []);
 
   // Clone children and add the currentUrl as a hidden input

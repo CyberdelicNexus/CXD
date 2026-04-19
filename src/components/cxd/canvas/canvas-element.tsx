@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import NextImage from "next/image";
 import { createPortal } from "react-dom";
 import {
   CanvasElement,
@@ -1851,18 +1852,9 @@ function ConnectionAnchor({
       }}
       onMouseDown={(e) => {
         e.stopPropagation();
-        console.log(
-          "[PORT] Mouse down on port:",
-          elementId,
-          position,
-          "isConnecting:",
-          isConnecting,
-        );
         if (isConnecting && onEndConnector) {
-          console.log("[PORT] Ending connector at:", elementId, position);
           onEndConnector(elementId, position);
         } else {
-          console.log("[PORT] Starting connector from:", elementId, position);
           onStartConnector(elementId, position);
         }
       }}
@@ -1870,11 +1862,6 @@ function ConnectionAnchor({
         // Allow mouseup on anchor to complete connection
         if (isConnecting && onEndConnector) {
           e.stopPropagation();
-          console.log(
-            "[PORT] Mouse up on port (completing):",
-            elementId,
-            position,
-          );
           onEndConnector(elementId, position);
         }
       }}
@@ -3590,7 +3577,7 @@ function FreeformCard({
     if (!noteBodyRef.current) return;
     const active = document.activeElement;
     if (active !== noteBodyRef.current) {
-      noteBodyRef.current.innerHTML = noteBody || "";
+      noteBodyRef.current.innerHTML = DOMPurify.sanitize(noteBody || "", { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] });
     }
   }, [isNote, noteBody, noteEditingField]);
 
@@ -3678,7 +3665,7 @@ function FreeformCard({
       // Convert to document
       // Calculate word count from noteBody
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = noteBody;
+      tempDiv.innerHTML = DOMPurify.sanitize(noteBody || "", { USE_PROFILES: { html: true } });
       const textContent = tempDiv.textContent || tempDiv.innerText || '';
       const wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
 
@@ -5548,14 +5535,15 @@ function ImageCard({
           />
         ) : (
           <div
-            className="w-full h-full"
+            className="w-full h-full relative"
             style={{
               clipPath: `inset(${crop.y}% ${100 - crop.x - crop.width}% ${100 - crop.y - crop.height}% ${crop.x}%)`,
             }}
           >
-            <img
+            <NextImage
               src={element.src}
               alt={element.alt || ""}
+              fill
               className="w-full h-full object-contain"
               style={{
                 objectFit: "contain",
@@ -5564,6 +5552,7 @@ function ImageCard({
               onError={() => setHasImage(false)}
               draggable={false}
               onDragStart={(e) => e.preventDefault()}
+              unoptimized
             />
           </div>
         )}
@@ -7031,13 +7020,15 @@ function LinkCard({
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>
-            <div className="flex-1 min-h-0 bg-gradient-to-br from-muted/30 to-muted/10">
-              <img
+            <div className="flex-1 min-h-0 bg-gradient-to-br from-muted/30 to-muted/10 relative">
+              <NextImage
                 src={element.url}
-                alt={element.fileName}
-                className="w-full h-full object-contain"
+                alt={element.fileName || ""}
+                fill
+                className="object-contain"
                 draggable={false}
                 onDragStart={(e) => e.preventDefault()}
+                unoptimized
               />
             </div>
           </div>
@@ -7185,12 +7176,14 @@ function LinkCard({
         {/* Large thumbnail area - top priority */}
         <div className="flex-1 min-h-0 bg-gradient-to-br from-muted/30 to-muted/10 relative overflow-hidden">
           {element.thumbnail ? (
-            <img
+            <NextImage
               src={element.thumbnail}
               alt=""
-              className="w-full h-full object-cover"
+              fill
+              className="object-cover"
               draggable={false}
               onDragStart={(e) => e.preventDefault()}
+              unoptimized
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
@@ -7233,11 +7226,14 @@ function LinkCard({
           {/* Domain with favicon */}
           <div className="flex items-center gap-1.5 pt-0.5">
             {element.favicon && (
-              <img
+              <NextImage
                 src={element.favicon}
                 alt=""
+                width={16}
+                height={16}
                 className="w-4 h-4"
                 draggable={false}
+                unoptimized
               />
             )}
             <span className="text-xs text-muted-foreground/80 truncate">
@@ -7270,11 +7266,14 @@ function LinkCard({
       {/* Header bar for dragging in embed mode */}
       <div className="px-3 py-2 bg-card/80 border-b border-border/50 flex items-center gap-2 flex-shrink-0">
         {element.favicon && (
-          <img
+          <NextImage
             src={element.favicon}
             alt=""
+            width={16}
+            height={16}
             className="w-4 h-4"
             draggable={false}
+            unoptimized
           />
         )}
         <span className="text-xs text-muted-foreground truncate flex-1">

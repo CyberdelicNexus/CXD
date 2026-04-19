@@ -14,6 +14,10 @@ function getSupabaseAdmin() {
 // GET - Accept invitation with token
 export async function GET(request: Request) {
   try {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    }
+
     const { searchParams } = new URL(request.url);
     const token = searchParams.get('token');
 
@@ -53,10 +57,13 @@ export async function GET(request: Request) {
 
     if (new Date(invitation.expires_at) < new Date()) {
       // Mark as expired
-      await supabaseAdmin
+      const { error: updateError } = await supabaseAdmin
         .from('canvas_invitations')
         .update({ status: 'expired' })
         .eq('id', invitation.id);
+      if (updateError) {
+        console.error('Failed to expire invitation:', updateError);
+      }
 
       return NextResponse.json(
         { error: 'This invitation has expired' },
@@ -101,7 +108,7 @@ export async function GET(request: Request) {
 
     if (existingCollab) {
       // Already a collaborator, just mark invitation as accepted
-      await supabaseAdmin
+      const { error: alreadyAcceptedError } = await supabaseAdmin
         .from('canvas_invitations')
         .update({
           status: 'accepted',
@@ -109,6 +116,9 @@ export async function GET(request: Request) {
           accepted_by: user.id,
         })
         .eq('id', invitation.id);
+      if (alreadyAcceptedError) {
+        console.error('Failed to mark invitation as accepted:', alreadyAcceptedError);
+      }
 
       return NextResponse.json({
         success: true,
@@ -135,15 +145,18 @@ export async function GET(request: Request) {
       });
 
     if (collabError) {
-      console.error('Error creating collaborator:', collabError);
-      return NextResponse.json(
-        { error: 'Failed to accept invitation' },
-        { status: 500 }
-      );
+      // If duplicate (already collaborator), that's fine - continue to update invitation
+      if (!collabError.message?.includes('duplicate')) {
+        console.error('Error creating collaborator:', collabError);
+        return NextResponse.json(
+          { error: 'Failed to add collaborator' },
+          { status: 500 }
+        );
+      }
     }
 
     // Mark invitation as accepted
-    await supabaseAdmin
+    const { error: acceptUpdateError } = await supabaseAdmin
       .from('canvas_invitations')
       .update({
         status: 'accepted',
@@ -151,6 +164,19 @@ export async function GET(request: Request) {
         accepted_by: user.id,
       })
       .eq('id', invitation.id);
+    if (acceptUpdateError) {
+      console.error('Failed to update invitation status:', acceptUpdateError);
+      // Rollback collaborator if invitation update failed
+      await supabaseAdmin
+        .from('canvas_collaborators')
+        .delete()
+        .eq('canvas_id', invitation.canvas_id)
+        .eq('user_id', user.id);
+      return NextResponse.json(
+        { error: 'Failed to accept invitation' },
+        { status: 500 }
+      );
+    }
 
     // Get the new collaborator's name for the notification
     const { data: newCollabProfile } = await supabaseAdmin
@@ -163,7 +189,7 @@ export async function GET(request: Request) {
 
     // Notify the canvas owner that someone accepted their invitation
     if (canvas?.owner_id) {
-      await supabaseAdmin
+      const { error: notifError } = await supabaseAdmin
         .from('notifications')
         .insert({
           user_id: canvas.owner_id,
@@ -179,6 +205,9 @@ export async function GET(request: Request) {
             collaboratorEmail: user.email,
           },
         });
+      if (notifError) {
+        console.error('Failed to send acceptance notification:', notifError);
+      }
     }
 
     return NextResponse.json({

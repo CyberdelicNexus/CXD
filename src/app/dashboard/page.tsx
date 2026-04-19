@@ -4,6 +4,8 @@ import { createClient } from "../../../supabase/server";
 import { DashboardContent } from "@/components/dashboard-content";
 import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 
+export const metadata = { title: 'Dashboard' };
+
 export default async function Dashboard() {
   const supabase = await createClient();
 

@@ -45,6 +45,13 @@ export function CreditTopUpModal({ isOpen, onClose }: CreditTopUpModalProps) {
         body: JSON.stringify({ packId: selectedPack.id }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        alert(errorData.error || "Failed to start checkout. Please try again.");
+        setIsLoading(false);
+        return;
+      }
+
       const data = await response.json();
 
       if (data.url) {

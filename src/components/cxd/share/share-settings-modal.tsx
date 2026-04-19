@@ -7,6 +7,7 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
+import Image from "next/image";
 import {
   Upload,
   Copy,
@@ -138,7 +139,7 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
               <input ref={coverInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload("cover", f); }} />
               {project.shareCoverImage ? (
                 <div className="relative w-full h-20 rounded-lg overflow-hidden border border-white/10 group cursor-pointer" onClick={() => coverInputRef.current?.click()}>
-                  <img src={project.shareCoverImage} alt="Cover" className="w-full h-full object-cover" />
+                  <Image src={project.shareCoverImage} alt="Cover" fill className="w-full h-full object-cover" unoptimized />
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[10px] text-white font-medium">Change</div>
                 </div>
               ) : (
@@ -154,7 +155,7 @@ export function ShareSettingsModal({ open, onClose }: ShareSettingsModalProps) {
               <input ref={thumbInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload("thumbnail", f); }} />
               {project.shareThumbnail ? (
                 <div className="relative w-28 h-20 rounded-lg overflow-hidden border border-white/10 group cursor-pointer" onClick={() => thumbInputRef.current?.click()}>
-                  <img src={project.shareThumbnail} alt="Thumb" className="w-full h-full object-cover" />
+                  <Image src={project.shareThumbnail} alt="Thumb" fill className="w-full h-full object-cover" unoptimized />
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[10px] text-white font-medium">Change</div>
                 </div>
               ) : (

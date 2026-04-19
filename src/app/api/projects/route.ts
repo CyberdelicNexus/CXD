@@ -14,8 +14,18 @@ function getSupabaseAdmin() {
 }
 
 // GET - Fetch user's projects (owned + collaborated)
-export async function GET() {
+// Supports ?listing=true to exclude heavy project_data column (dashboard only)
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const isListing = searchParams.get('listing') === 'true';
+
+    // For listing mode, select only the columns the dashboard needs.
+    // coverImage lives inside project_data JSONB, so we extract it with the arrow operator.
+    const selectFields = isListing
+      ? 'id, owner_id, name, description, share_token, created_at, updated_at, project_data->>coverImage'
+      : '*';
+
     // Check for required environment variable
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       console.error('SUPABASE_SERVICE_ROLE_KEY is not configured');
@@ -52,7 +62,7 @@ export async function GET() {
     ] = await Promise.all([
       supabaseAdmin
         .from('cxd_projects')
-        .select('*')
+        .select(selectFields)
         .eq('owner_id', user.id)
         .order('updated_at', { ascending: false }),
       supabaseAdmin
@@ -70,7 +80,7 @@ export async function GET() {
     if (collabCanvasIds.length > 0) {
       const { data: collabProjects, error: collabProjectsError } = await supabaseAdmin
         .from('cxd_projects')
-        .select('*')
+        .select(selectFields)
         .in('id', collabCanvasIds)
         .neq('owner_id', user.id)
         .order('updated_at', { ascending: false });
@@ -87,6 +97,22 @@ export async function GET() {
 
     // Transform to CXDProject format
     const projects = allProjects.map((row: any) => {
+      if (isListing) {
+        // Listing mode: no project_data spread, just top-level columns.
+        // coverImage was extracted via project_data->coverImage.
+        // _listingOnly flag prevents accidental overwrites by useProjectSync.
+        return {
+          id: row.id,
+          ownerId: row.owner_id,
+          name: row.name,
+          description: row.description,
+          shareToken: row.share_token || undefined,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          coverImage: row.coverImage || undefined,
+          _listingOnly: true,
+        };
+      }
       const projectData = row.project_data || {};
       return {
         ...projectData,

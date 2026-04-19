@@ -62,13 +62,7 @@ export function TourOverlay() {
     }
     const el = document.querySelector(`[data-tour-id="${currentStep.targetId}"]`);
     if (el) {
-      // Debug: log what we found and where it is
       const r = el.getBoundingClientRect();
-      console.log(`[Tour] Step ${tourStep}/${steps.length} "${currentStep.title}" target="${currentStep.targetId}" rect:`, {
-        top: Math.round(r.top), left: Math.round(r.left),
-        width: Math.round(r.width), height: Math.round(r.height),
-        tagName: el.tagName, id: (el as HTMLElement).id,
-      });
       // Scroll element into view if it's outside the viewport (skip for
       // canvas elements that are positioned via CSS transforms)
       const isOffscreen =
@@ -452,7 +446,6 @@ export function TourOverlay() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[Tour] NEXT clicked, advancing from step', tourStep);
                   nextTourStep();
                 }}
                 style={{

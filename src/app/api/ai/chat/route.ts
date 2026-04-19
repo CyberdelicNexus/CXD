@@ -102,7 +102,7 @@ export async function POST(request: Request) {
           userApiKey = decryptAPIKey(keyData.encrypted_key);
           console.log(`[BYOK] Using user's ${byokProvider} API key`);
         } catch (error) {
-          console.error('[BYOK Decryption Error]', error);
+          console.error(`[BYOK Decryption Error] user=${user.id} provider=${byokProvider}`, error);
           // Fall back to default key if decryption fails
           userApiKey = undefined;
         }
@@ -154,14 +154,15 @@ export async function POST(request: Request) {
     try {
       // Extract latest user message for semantic search
       const latestMessage = rawMessages
-        .filter((m: any) => m.role === 'user')
+        .filter((m: { role: string }) => m.role === 'user')
         .pop();
 
       if (latestMessage) {
-        const messageText = latestMessage.parts
-          ?.filter((p: any) => p.type === 'text')
-          .map((p: any) => p.text)
-          .join(' ') || latestMessage.content || '';
+        const msg = latestMessage as { parts?: { type: string; text?: string }[]; content?: string };
+        const messageText = msg.parts
+          ?.filter((p) => p.type === 'text')
+          .map((p) => p.text)
+          .join(' ') || msg.content || '';
 
         const searchQuery = buildSearchQuery(messageText, {
           projectName: projectContext.projectName,
@@ -214,12 +215,16 @@ export async function POST(request: Request) {
     // 9. Convert UIMessages to ModelMessages for streamText
     const modelMessages = await convertToModelMessages(rawMessages as any);
 
-    // 10. Stream the response
+    // 10. Stream the response (60s timeout)
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), 60000);
     const result = streamText({
       model,
       system: systemPrompt,
       messages: modelMessages,
       temperature: 0.7,
+      abortSignal: abortController.signal,
+      onFinish: () => clearTimeout(timeoutId),
     });
 
     return result.toTextStreamResponse({

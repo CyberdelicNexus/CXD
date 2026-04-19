@@ -34,6 +34,7 @@ import {
   Eye,
   MapPin,
 } from "lucide-react";
+import NextImage from "next/image";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { DiagnosticPanelRedesign } from "./diagnostic-panel-redesign";
 import { AIChatPanel } from "./ai-chat-panel";
@@ -287,14 +288,6 @@ function getElementPreview(
       );
       const elementCount = boardElements.length;
 
-      console.log("[Hypercube Board Count]", {
-        elementId: element.id,
-        boardId,
-        totalProjectElements: allElements.length,
-        elementCount,
-        boardTitle: name,
-        elementTypes: boardElements.map((el: any) => el.type),
-      });
 
       return {
         ...base,
@@ -763,10 +756,6 @@ export function Hypercube3D({
         setCubeRotation({ x: targetRotation.x, y: targetRotation.y });
         setIsAnimating(false);
         animationRef.current = null;
-        console.log(
-          "[Hypercube] Animation complete - Cube transform:",
-          targetRotation,
-        );
       }
     };
 
@@ -785,8 +774,6 @@ export function Hypercube3D({
     const face = CUBE_FACES[index];
     if (!face) return;
 
-    console.log("[Hypercube] Selecting face:", index, face.shortLabel);
-
     // Set focused face and clear core/general chat
     setFocusedFaceIndex(index);
     setIsCoreSelected(false);
@@ -794,7 +781,6 @@ export function Hypercube3D({
 
     // Rotate cube to bring selected face to FRONT
     const targetRot = getRotationForFace(index);
-    console.log("[Hypercube] Target rotation:", targetRot);
 
     setTargetRotation(targetRot);
     setIsAnimating(true);
@@ -809,7 +795,6 @@ export function Hypercube3D({
     setIsGeneralChatActive(false);
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
-    console.log("[Hypercube] Core selected - showing core panel");
   }, []);
 
   const returnToDefault = useCallback(() => {
@@ -1010,12 +995,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(currentX, newY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Left -> Y:",
-      newY,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const rotateRight = useCallback(() => {
@@ -1029,12 +1008,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(currentX, newY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Right -> Y:",
-      newY,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const rotateUp = useCallback(() => {
@@ -1048,12 +1021,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(newX, currentY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Up -> X:",
-      newX,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const rotateDown = useCallback(() => {
@@ -1067,12 +1034,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(newX, currentY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Down -> X:",
-      newX,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const handleMouseDown = useCallback(
@@ -1359,17 +1320,6 @@ export function Hypercube3D({
     return frontIndex;
   }, [cubeRotation.x, cubeRotation.y]);
 
-  // Log when activeFaceId changes
-  useEffect(() => {
-    if (focusedFaceIndex !== null) {
-      console.log(
-        "[Hypercube] activeFaceId:",
-        CUBE_FACES[focusedFaceIndex]?.id,
-        "index:",
-        focusedFaceIndex,
-      );
-    }
-  }, [focusedFaceIndex]);
 
   const focusedFace =
     focusedFaceIndex !== null ? CUBE_FACES[focusedFaceIndex] : null;
@@ -1844,9 +1794,11 @@ export function Hypercube3D({
               }}
             />
             <div className="relative z-10 flex items-center justify-center">
-              <img
+              <NextImage
                 src="/images/egg-of-life.png"
                 alt="AI"
+                width={32}
+                height={32}
                 className={cn(
                   "w-8 h-8 object-contain transition-all duration-300",
                   isGeneralChatActive ? "opacity-100" : "opacity-85",

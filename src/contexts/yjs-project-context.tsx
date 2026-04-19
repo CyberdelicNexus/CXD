@@ -111,6 +111,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     const project = getCurrentProject();
     if (!project) return;
 
+
     // Create new Y.Doc
     const newDoc = createProjectYDoc();
     const newAwareness = new Awareness(newDoc);

@@ -65,10 +65,12 @@ export function ShareLandingPage({
         <div className="w-full relative">
           {coverImage ? (
             <div className="relative w-full h-[200px] md:h-[260px] overflow-hidden">
-              <img
+              <Image
                 src={coverImage}
                 alt="Cover"
+                fill
                 className="w-full h-full object-cover"
+                unoptimized
               />
               {/* Gradient fade from cover into content */}
               <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black" />
@@ -95,8 +97,8 @@ export function ShareLandingPage({
             {/* Left column — thumbnail */}
             <div className="max-w-[280px] mx-auto lg:max-w-none lg:mx-0">
               {thumbnail ? (
-                <div className="w-full aspect-square rounded-2xl overflow-hidden border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
-                  <img src={thumbnail} alt="Preview" className="w-full h-full object-cover" />
+                <div className="w-full aspect-square rounded-2xl overflow-hidden border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.5)] relative">
+                  <Image src={thumbnail} alt="Preview" fill className="w-full h-full object-cover" unoptimized />
                 </div>
               ) : (
                 <div className="w-full aspect-square rounded-2xl border border-white/10 bg-gradient-to-br from-violet-950/50 to-purple-900/30 flex items-center justify-center">
@@ -114,7 +116,7 @@ export function ShareLandingPage({
               {/* Author */}
               <div className="flex items-center gap-3 justify-center lg:justify-start">
                 {ownerAvatar ? (
-                  <img src={ownerAvatar} alt={ownerName} className="w-10 h-10 rounded-full object-cover border-2 border-violet-500/30" />
+                  <Image src={ownerAvatar} alt={ownerName} width={40} height={40} className="w-10 h-10 rounded-full object-cover border-2 border-violet-500/30" unoptimized />
                 ) : (
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-sm font-bold text-white shadow-[0_0_15px_rgba(139,92,246,0.3)]">
                     {initials}

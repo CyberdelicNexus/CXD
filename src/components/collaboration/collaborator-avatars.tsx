@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import Image from 'next/image';
 import { CollaboratorPresence, generateUserColor } from '@/hooks/use-collaboration';
 
 interface CollaboratorAvatarsProps {
@@ -37,10 +38,13 @@ const Avatar = memo(function Avatar({
       title={`${name} (${email})`}
     >
       {avatarUrl ? (
-        <img
+        <Image
           src={avatarUrl}
           alt={name}
+          width={size}
+          height={size}
           className="h-full w-full rounded-full object-cover"
+          unoptimized
         />
       ) : (
         initials

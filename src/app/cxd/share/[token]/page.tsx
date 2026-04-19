@@ -6,7 +6,11 @@ import { CXDProject } from '@/types/cxd-schema';
 import { fetchProjectByShareToken } from '@/lib/supabase-projects';
 import { CXDCanvasReadOnly } from '@/components/cxd/cxd-canvas-readonly';
 import { ShareLandingPage } from '@/components/cxd/share/share-landing-page';
-import { ShareFramingPresentation } from '@/components/cxd/share/share-framing-presentation';
+import dynamic from 'next/dynamic';
+const ShareFramingPresentation = dynamic(
+  () => import('@/components/cxd/share/share-framing-presentation').then(m => m.ShareFramingPresentation),
+  { ssr: false }
+);
 import { createClient } from '@/supabase/client';
 import {
   Lock,
@@ -112,17 +116,21 @@ export default function SharePage({ params }: { params: { token: string } }) {
         }
 
         // Get current user's name for notification
-        const { data: userProfile } = await supabase
+        const { data: userProfile, error: profileError } = await supabase
           .from('users')
           .select('name, email')
           .eq('id', user.id)
           .single();
 
+        if (profileError) {
+          console.error('Error fetching user profile:', profileError);
+        }
+
         const userName = userProfile?.name || userProfile?.email?.split('@')[0] || 'Someone';
 
         // Notify the project owner
         if (currentProject.ownerId) {
-          await supabase
+          const { error: notifError } = await supabase
             .from('notifications')
             .insert({
               user_id: currentProject.ownerId,
@@ -137,6 +145,9 @@ export default function SharePage({ params }: { params: { token: string } }) {
                 collaboratorName: userName,
               },
             });
+          if (notifError) {
+            console.error('Error sending notification to project owner:', notifError);
+          }
         }
 
         // Redirect to CXD dashboard

@@ -57,6 +57,9 @@ export async function flushPendingSave(): Promise<boolean> {
 
   if (!currentProject) return true;
 
+  // Never flush a listing-only stub — it would overwrite full project_data
+  if ((currentProject as any)._listingOnly) return true;
+
   const projectHash = JSON.stringify(currentProject);
   if (projectHash === lastSavedHash) return true;
 
@@ -111,6 +114,9 @@ export function useProjectSync() {
 
   // Save function with deduplication and backup
   const performSave = useCallback(async (project: CXDProject) => {
+    // Never save listing-only stubs
+    if ((project as any)._listingOnly) return;
+
     // If already saving, wait for it then re-check if save still needed
     if (isSavingRef.current) {
       if (pendingSavePromise) {
@@ -212,6 +218,10 @@ export function useProjectSync() {
   useEffect(() => {
     const currentProject = projects.find(p => p.id === currentProjectId);
     if (!currentProject) return;
+
+    // Never auto-save listing-only project stubs (missing project_data).
+    // They would overwrite the full data in the database.
+    if ((currentProject as any)._listingOnly) return;
 
     // Skip if nothing changed
     const projectHash = JSON.stringify(currentProject);

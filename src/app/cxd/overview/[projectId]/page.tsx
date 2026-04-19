@@ -3,7 +3,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCXDStore } from '@/store/cxd-store';
-import { ShareFramingPresentation } from '@/components/cxd/share/share-framing-presentation';
+import dynamic from 'next/dynamic';
+const ShareFramingPresentation = dynamic(
+  () => import('@/components/cxd/share/share-framing-presentation').then(m => m.ShareFramingPresentation),
+  { ssr: false }
+);
 import { Loader2, ArrowLeft, LogIn } from 'lucide-react';
 
 export default function ProjectOverviewPage({ params }: { params: { projectId: string } }) {
