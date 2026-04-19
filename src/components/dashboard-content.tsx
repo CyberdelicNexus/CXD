@@ -43,6 +43,7 @@ import {
   Check,
   Loader2,
   LayoutTemplate,
+  Newspaper,
 } from "lucide-react";
 import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, remapTemplateIds, type TemplateDefinition, type TemplateCategory } from "@/lib/templates";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
@@ -762,7 +763,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
                             <div className="opacity-40 group-hover:opacity-60 transition-opacity">
                               <Image
-                                src="/images/hypercube-logo.webp"
+                                src="/images/CXD Logo 2.png"
                                 alt="Hypercube"
                                 width={100}
                                 height={100}
@@ -964,6 +965,14 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 >
                   <PlayCircle className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
                   <span className="text-xs">Tutorials</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-pink-950/30 hover:to-pink-900/40 border border-pink-500/10 hover:border-pink-500/30 text-white transition-all group"
+                  onClick={() => router.push("/changelog")}
+                >
+                  <Newspaper className="w-5 h-5 text-pink-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-xs">Changelog</span>
                 </Button>
               </div>
             </div>
@@ -1368,7 +1377,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
           <div className="flex items-center gap-2">
 
             <Image
-              src="/images/hypercube-logo.webp"
+              src="/images/CXD Logo 2.png"
               alt="CXD"
               width={28}
               height={28}

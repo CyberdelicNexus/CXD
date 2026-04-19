@@ -102,7 +102,7 @@ export function ShareLandingPage({
                 </div>
               ) : (
                 <div className="w-full aspect-square rounded-2xl border border-white/10 bg-gradient-to-br from-violet-950/50 to-purple-900/30 flex items-center justify-center">
-                  <Image src="/images/hypercube-logo.webp" alt="CXD" width={80} height={80} className="opacity-30" />
+                  <Image src="/images/CXD Logo 2.png" alt="CXD" width={80} height={80} className="opacity-30" />
                 </div>
               )}
             </div>
@@ -166,7 +166,7 @@ export function ShareLandingPage({
         {/* Footer — CXD Branding */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 py-10 relative z-10">
           <Image
-            src="/images/hypercube-logo.webp"
+            src="/images/CXD Logo 2.png"
             alt="CXD"
             width={28}
             height={28}

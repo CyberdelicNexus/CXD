@@ -1795,7 +1795,7 @@ export function Hypercube3D({
             />
             <div className="relative z-10 flex items-center justify-center">
               <NextImage
-                src="/images/egg-of-life.png"
+                src="/images/CXD Logo 2.png"
                 alt="AI"
                 width={32}
                 height={32}

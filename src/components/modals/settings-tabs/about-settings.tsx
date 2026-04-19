@@ -27,7 +27,7 @@ export function AboutSettings() {
             <p className="text-sm text-muted-foreground mt-0.5">Experience Design Platform</p>
             <div className="flex items-center gap-2 mt-2">
               <span className="px-2 py-0.5 text-xs font-medium bg-purple-500/20 text-purple-400 rounded border border-purple-500/30">
-                v1.0.0
+                v1.2.0
               </span>
               <span className="text-xs text-muted-foreground">Built with Next.js 14</span>
             </div>

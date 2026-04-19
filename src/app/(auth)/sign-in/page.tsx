@@ -46,7 +46,7 @@ export default async function SignInPage({ searchParams }: LoginProps) {
         {/* Logo */}
         <Link href="/" className="mb-8 group">
           <Image
-            src="/images/hypercube-logo.webp"
+            src="/images/CXD Logo 2.png"
             alt="CXD"
             width={48}
             height={48}

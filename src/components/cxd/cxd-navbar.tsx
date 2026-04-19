@@ -422,7 +422,7 @@ export function CXDNavbar() {
           ) : (
             <NextLink href="/dashboard" className="flex items-center gap-2 transition-all duration-300">
               <Image
-                src="/images/hypercube-logo.webp"
+                src="/images/CXD Logo 2.png"
                 alt="CXD"
                 width={28}
                 height={28}

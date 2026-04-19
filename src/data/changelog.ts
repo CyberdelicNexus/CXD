@@ -10,9 +10,112 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.2.0',
+    date: 'April 19, 2026',
+    isLatest: true,
+    changes: [
+      {
+        category: 'feature',
+        description: 'Production-ready security hardening — rate limiting on auth endpoints, CSP headers, input validation, and cookie security',
+      },
+      {
+        category: 'feature',
+        description: 'SEO overhaul — Open Graph and Twitter Card tags, dynamic social previews for shared canvases, robots.txt, sitemap, JSON-LD structured data',
+      },
+      {
+        category: 'feature',
+        description: 'Error boundaries on all routes — graceful error recovery with retry buttons instead of white screens',
+      },
+      {
+        category: 'feature',
+        description: 'Environment validation at startup — clear error messages when required config is missing',
+      },
+      {
+        category: 'feature',
+        description: 'PWA manifest — app is now installable on mobile devices',
+      },
+      {
+        category: 'feature',
+        description: 'Vercel Speed Insights integration for performance monitoring',
+      },
+      {
+        category: 'feature',
+        description: 'Connector tag inheritance — elements spawned from connector drop menu now inherit parent hypercube tags',
+      },
+      {
+        category: 'improvement',
+        description: 'Dashboard loads significantly faster — lightweight project listing query excludes heavy canvas data',
+      },
+      {
+        category: 'improvement',
+        description: 'Canvas auto-save optimized — lightweight change detection replaces expensive full-project serialization',
+      },
+      {
+        category: 'improvement',
+        description: 'All images now use Next.js Image component for automatic optimization and lazy loading',
+      },
+      {
+        category: 'improvement',
+        description: 'Landing page is now statically generated for faster load times and better SEO',
+      },
+      {
+        category: 'improvement',
+        description: 'Unified loading screen with tesseract animation across all canvas loading states',
+      },
+      {
+        category: 'improvement',
+        description: 'Per-page metadata with unique titles and descriptions for every route',
+      },
+      {
+        category: 'improvement',
+        description: 'Stripe webhook hardened with idempotency checks to prevent duplicate credit additions',
+      },
+      {
+        category: 'improvement',
+        description: 'Request timeouts on all external calls — Stripe 10s, emails 5s, AI chat 60s',
+      },
+      {
+        category: 'improvement',
+        description: 'Mobile dialog overflow fix — dialogs no longer exceed viewport on small screens',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed canvas zoom freeze — wheel event handler now uses zero-dependency pattern that never detaches',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed XSS vulnerability in canvas note innerHTML assignments',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed Stripe checkout redirecting to localhost instead of production domain',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed right-click note cards spawning at incorrect 200x150 size instead of standard 300x300',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed tour overlay crash when target elements are missing during dynamic component loading',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed collaborator projects failing to open due to RLS permissions on direct fetch',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed browser back button causing full page reloads instead of SPA navigation',
+      },
+      {
+        category: 'bugfix',
+        description: 'Removed ~50 debug console.log statements from production client code',
+      },
+    ],
+  },
+  {
     version: '1.1.0',
     date: 'February 18, 2026',
-    isLatest: true,
+    isLatest: false,
     changes: [
       {
         category: 'feature',

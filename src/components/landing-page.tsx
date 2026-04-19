@@ -143,7 +143,7 @@ export function LandingPage() {
           {/* Logo */}
           <a href="/" className="flex items-center gap-2 group px-2 py-1.5 rounded-full transition-all duration-300 hover:bg-white/5 pr-4">
             <Image
-              src="/images/hypercube-logo.webp"
+              src="/images/CXD Logo 2.png"
               alt="CXD"
               width={28}
               height={28}
@@ -308,7 +308,7 @@ export function LandingPage() {
             <a href="/sign-up">
               <button className="btn-primary-glow flex items-center gap-2 text-base">
                 <Image
-                  src="/images/hypercube-logo.webp"
+                  src="/images/CXD Logo 2.png"
                   alt=""
                   width={18}
                   height={18}
@@ -631,7 +631,7 @@ export function LandingPage() {
           <a href="/sign-up">
             <button className="btn-primary-glow text-lg px-8 py-4 flex items-center gap-3 mx-auto">
               <Image
-                src="/images/hypercube-logo.webp"
+                src="/images/CXD Logo 2.png"
                 alt=""
                 width={20}
                 height={20}
@@ -662,7 +662,7 @@ export function LandingPage() {
 
           <div className="flex items-center gap-2">
             <Image
-              src="/images/hypercube-logo.webp"
+              src="/images/CXD Logo 2.png"
               alt="CXD"
               width={20}
               height={20}
