@@ -15,7 +15,7 @@ export default function MobileNoticePage() {
         {/* Logo */}
         <div className="mb-8">
           <Image
-            src="/images/hypercube-logo.webp"
+            src="/images/CXD Logo 2.png"
             alt="CXD"
             width={80}
             height={80}

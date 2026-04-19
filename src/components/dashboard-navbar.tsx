@@ -223,7 +223,7 @@ export default function DashboardNavbar() {
           <div className="flex items-center gap-6">
             <Link href="/dashboard" className="flex items-center gap-2 group px-3 py-2 rounded-full transition-all duration-300 hover:bg-white/5 pr-4">
               <Image
-                src="/images/hypercube-logo.webp"
+                src="/images/CXD Logo 2.png"
                 alt="CXD"
                 width={28}
                 height={28}
