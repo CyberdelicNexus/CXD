@@ -769,18 +769,20 @@ export function CanvasElementRenderer({
         element.type === "freeform" &&
         !(element as FreeformElement).isDocument &&
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
+        // Documents: no selection ring or outline
+        element.type === "freeform" &&
+        (element as FreeformElement).isDocument &&
+        "ring-0 outline-none shadow-none",
         element.type === "freeform" &&
         freeformCardType === "note" &&
         "card--note-resizable",
-        // Selection ring for boards only when drop target
-        isSelected &&
-        !isHighlighted &&
+        // Boards: no rectangular border/ring — the hexagon glow handles feedback
         element.type === "board" &&
-        isDropTarget &&
-        "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
-        // Glow when connector is hovering this element
+        "ring-0 outline-none",
+        // Glow when connector is hovering this element (not boards — they use hex glow)
         isHoverTarget &&
         !isHighlighted &&
+        element.type !== "board" &&
         "ring-2 ring-green-400 shadow-[0_0_30px_rgba(74,222,128,0.6)]",
         // Subtle glow for text when editing
         isEditing &&
@@ -871,6 +873,7 @@ export function CanvasElementRenderer({
             }
             isFreeform={element.type === 'freeform'}
             isImage={element.type === 'image'}
+            isBoard={element.type === 'board'}
             onStartConnector={onStartConnector}
             onEndConnector={onEndConnector ?? (() => {})}
           />
@@ -4131,7 +4134,7 @@ function FreeformCard({
           // Document icon view (compact - no padding/margin)
           <div
             className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105"
-            onDoubleClick={() => setIsNoteFocusMode(true)}
+            onDoubleClick={(e) => { e.stopPropagation(); setIsNoteFocusMode(true); }}
           >
             <div className="text-4xl mb-1">{element.emoji || '📄'}</div>
             <div className="w-full px-1">
@@ -4169,9 +4172,6 @@ function FreeformCard({
                   minHeight: "0.875rem"
                 }}
               />
-            </div>
-            <div className="text-[9px] text-white/50 mt-0.5">
-              {element.wordCount || 0} words
             </div>
           </div>
         ) : isEditing ? (
@@ -4899,6 +4899,7 @@ function FreeformCard({
               if (e.target === e.currentTarget) {
                 setShowFocusNoteColorPicker(false);
                 setIsNoteFocusMode(false);
+                onBlur();
               }
             }}
           >
@@ -4916,6 +4917,7 @@ function FreeformCard({
                 onClick={() => {
                   setShowFocusNoteColorPicker(false);
                   setIsNoteFocusMode(false);
+                  onBlur();
                 }}
                 title="Close focus mode"
               >
@@ -7362,28 +7364,28 @@ function BoardCard({
   const selectedIcon = BOARD_ICONS.find((i) => i.id === iconId);
   const IconComponent = selectedIcon?.Icon || LayoutGrid;
 
-  // Count elements in this board
-  const project = (window as any).__currentProject;
-  const allElements = project?.canvasLayout?.elements || [];
-  const boardElements = allElements.filter(
-    (el: any) =>
-      el.boardId === element.childBoardId &&
-      el.type !== "line" &&
-      el.type !== "connector",
-  );
-  const elementCount = boardElements.length;
+  // Count elements in this board using Zustand store
+  const allElements = useCXDStore((state) => state.getCurrentProject()?.canvasLayout?.elements || []);
+  const elementCount = useMemo(() => {
+    return allElements.filter(
+      (el) =>
+        el.boardId === element.childBoardId &&
+        el.type !== "line" &&
+        el.type !== "connector",
+    ).length;
+  }, [allElements, element.childBoardId]);
 
   return (
     <div
       className={cn(
         "flex items-center justify-center transition-all relative",
-        isDropTarget && "scale-105 w-fit h-fit",
+        isDropTarget && "scale-105",
       )}
     >
       {/* Hexagon badge container with 3D effect */}
       <div className="relative flex flex-col items-center gap-3 justify-center w-fit h-fit gap-y-[3.5px]">
         {/* Hexagon icon container */}
-        <div className="relative w-32 h-32 flex items-center justify-center">
+        <div className="relative w-32 h-32 flex items-center justify-center" data-port-bounds>
           {/* Drop target glow - SVG hexagon outline */}
           {isDropTarget && (
             <svg

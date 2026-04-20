@@ -781,7 +781,8 @@ export function CXDCanvas() {
   const calculateAlignmentGuides = useCallback((
     draggingEl: CanvasElement,
     newX: number,
-    newY: number
+    newY: number,
+    excludeIds?: Set<string>,
   ): { horizontal: number[]; vertical: number[]; snapX?: number; snapY?: number } => {
     if (!showAlignmentGuides) return { horizontal: [], vertical: [] };
 
@@ -795,10 +796,11 @@ export function CXDCanvas() {
     const draggingRight = newX + draggingEl.width;
     const draggingBottom = newY + draggingEl.height;
 
-    // Check against all other elements (not the dragging one)
+    // Check against all other elements (skip dragging, selected, and explicitly excluded)
     canvasElements.forEach((el) => {
       if (el.id === draggingEl.id) return;
-      if (selectedElementIds.has(el.id)) return; // Skip other selected elements in multi-select
+      if (selectedElementIds.has(el.id)) return;
+      if (excludeIds?.has(el.id)) return;
 
       const elCenterX = el.x + el.width / 2;
       const elCenterY = el.y + el.height / 2;
@@ -1055,6 +1057,43 @@ export function CXDCanvas() {
         const deltaX = (e.clientX - dragElementStart.x) / canvasZoom;
         const deltaY = (e.clientY - dragElementStart.y) / canvasZoom;
 
+        // Detect drop target board/container BEFORE alignment so we can exclude them
+        let currentBoardTargetId: string | null = null;
+        let currentContainerTargetId: string | null = null;
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const mouseCanvasX = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
+          const mouseCanvasY = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
+
+          const boardTarget = canvasElements.find(
+            (el) =>
+              el.type === "board" &&
+              !selectedElementIds.has(el.id) &&
+              el.id !== draggingElement &&
+              mouseCanvasX >= el.x && mouseCanvasX <= el.x + el.width &&
+              mouseCanvasY >= el.y && mouseCanvasY <= el.y + el.height,
+          );
+          currentBoardTargetId = boardTarget?.id || null;
+
+          const containerTarget = canvasElements.find(
+            (el) =>
+              el.type === "container" &&
+              !(el as ContainerElement).collapsed &&
+              !selectedElementIds.has(el.id) &&
+              el.id !== draggingElement &&
+              mouseCanvasX >= el.x && mouseCanvasX <= el.x + el.width &&
+              mouseCanvasY >= el.y && mouseCanvasY <= el.y + el.height,
+          );
+          currentContainerTargetId = containerTarget?.id || null;
+        }
+        setDropTargetBoardId(currentBoardTargetId);
+        setDropTargetContainerId(currentContainerTargetId);
+
+        // Build exclusion set for alignment guides (don't snap to drop targets)
+        const alignExclude = new Set<string>();
+        if (currentBoardTargetId) alignExclude.add(currentBoardTargetId);
+        if (currentContainerTargetId) alignExclude.add(currentContainerTargetId);
+
         // If multiple items are selected, move them all
         if (
           selectedElementIds.size > 1 &&
@@ -1083,7 +1122,7 @@ export function CXDCanvas() {
             }
 
             // Calculate alignment guides for primary element
-            const guides = calculateAlignmentGuides(primaryElement, newPrimaryX, newPrimaryY);
+            const guides = calculateAlignmentGuides(primaryElement, newPrimaryX, newPrimaryY, alignExclude);
             setAlignmentGuides({ horizontal: guides.horizontal, vertical: guides.vertical });
 
             // Apply alignment snap
@@ -1180,39 +1219,6 @@ export function CXDCanvas() {
               });
             }
           });
-
-          // Check for drop target board and container
-          if (containerRef.current) {
-            const rect = containerRef.current.getBoundingClientRect();
-            const mouseCanvasX =
-              (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-            const mouseCanvasY =
-              (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
-
-            const boardTarget = canvasElements.find(
-              (el) =>
-                el.type === "board" &&
-                !selectedElementIds.has(el.id) &&
-                mouseCanvasX >= el.x &&
-                mouseCanvasX <= el.x + el.width &&
-                mouseCanvasY >= el.y &&
-                mouseCanvasY <= el.y + el.height,
-            );
-            setDropTargetBoardId(boardTarget?.id || null);
-
-            // Check for container hover (only non-container elements can be dropped into containers)
-            const containerTarget = canvasElements.find(
-              (el) =>
-                el.type === "container" &&
-                !(el as ContainerElement).collapsed &&
-                !selectedElementIds.has(el.id) &&
-                mouseCanvasX >= el.x &&
-                mouseCanvasX <= el.x + el.width &&
-                mouseCanvasY >= el.y &&
-                mouseCanvasY <= el.y + el.height,
-            );
-            setDropTargetContainerId(containerTarget?.id || null);
-          }
         } else {
           const element = canvasElements.find(
             (el) => el.id === draggingElement,
@@ -1230,8 +1236,8 @@ export function CXDCanvas() {
               newY = snapToGridValue(newY, e.shiftKey);
             }
 
-            // Calculate and apply alignment guides
-            const guides = calculateAlignmentGuides(element, newX, newY);
+            // Calculate and apply alignment guides (excluding drop targets)
+            const guides = calculateAlignmentGuides(element, newX, newY, alignExclude);
             setAlignmentGuides({ horizontal: guides.horizontal, vertical: guides.vertical });
 
             // Apply alignment snap (takes priority over grid snap)
@@ -1297,40 +1303,6 @@ export function CXDCanvas() {
             }
           }
 
-          // Check for drop target board and container (for single element drag)
-          if (containerRef.current) {
-            const rect = containerRef.current.getBoundingClientRect();
-            const mouseCanvasX =
-              (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
-            const mouseCanvasY =
-              (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
-
-            const boardTarget = canvasElements.find(
-              (el) =>
-                el.type === "board" &&
-                el.id !== draggingElement &&
-                mouseCanvasX >= el.x &&
-                mouseCanvasX <= el.x + el.width &&
-                mouseCanvasY >= el.y &&
-                mouseCanvasY <= el.y + el.height,
-            );
-            setDropTargetBoardId(boardTarget?.id || null);
-
-            // Check for container hover (only non-container elements)
-            if (element && element.type !== "container") {
-              const containerTarget = canvasElements.find(
-                (el) =>
-                  el.type === "container" &&
-                  !(el as ContainerElement).collapsed &&
-                  el.id !== draggingElement &&
-                  mouseCanvasX >= el.x &&
-                  mouseCanvasX <= el.x + el.width &&
-                  mouseCanvasY >= el.y &&
-                  mouseCanvasY <= el.y + el.height,
-              );
-              setDropTargetContainerId(containerTarget?.id || null);
-            }
-          }
         }
         // NOTE: Do NOT update dragElementStart here. We use dragOriginalPositionsRef
         // (fixed at drag start) + absolute delta (currentMouse - dragElementStart) so

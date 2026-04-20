@@ -602,12 +602,19 @@ export const useCXDStore = create<CXDState>()(
       },
 
       restoreViewport: (canvasId: string) => {
-        // Always start at root position (default viewport)
-        // This ensures consistent starting point regardless of previous session
-        set({
-          canvasPosition: { x: CANVAS_DEFAULT_VIEWPORT.x, y: CANVAS_DEFAULT_VIEWPORT.y },
-          canvasZoom: CANVAS_DEFAULT_VIEWPORT.zoom,
-        });
+        const saved = get().viewportByCanvasId[canvasId];
+        if (saved) {
+          set({
+            canvasPosition: { x: saved.x, y: saved.y },
+            canvasZoom: saved.zoom,
+          });
+        } else {
+          // Fall back to default viewport for boards never visited
+          set({
+            canvasPosition: { x: CANVAS_DEFAULT_VIEWPORT.x, y: CANVAS_DEFAULT_VIEWPORT.y },
+            canvasZoom: CANVAS_DEFAULT_VIEWPORT.zoom,
+          });
+        }
       },
 
       resetHypercubeViewport: () => {

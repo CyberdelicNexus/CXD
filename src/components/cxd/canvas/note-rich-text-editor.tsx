@@ -81,6 +81,7 @@ export function NoteRichTextEditor({
   const linkInputRef = useRef<HTMLInputElement>(null);
   const linkButtonRef = useRef<HTMLButtonElement>(null);
   const updateTimer = useRef<number | null>(null);
+  const isFocusedRef = useRef(false);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -115,6 +116,7 @@ export function NoteRichTextEditor({
       onHeightChange();
     },
     onFocus: () => {
+      isFocusedRef.current = true;
       onFocusBody();
     },
     onSelectionUpdate: ({ editor: ed }) => {
@@ -136,6 +138,7 @@ export function NoteRichTextEditor({
       if (target && editorWrapRef.current?.contains(target)) {
         return;
       }
+      isFocusedRef.current = false;
       setMenu("none");
       setShowLinkPopup(false);
       onBlurCard();
@@ -144,6 +147,9 @@ export function NoteRichTextEditor({
 
   useEffect(() => {
     if (!editor) return;
+    // Don't sync external value while editor is focused — this prevents
+    // the cursor from jumping when the debounced onChange round-trips back.
+    if (isFocusedRef.current) return;
     const current = editor.getHTML();
     if (value !== current) {
       editor.commands.setContent(value || "<p></p>", { emitUpdate: false });

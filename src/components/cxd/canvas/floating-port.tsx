@@ -14,6 +14,7 @@ interface FloatingPortProps {
   isCollapsed?: boolean;         // collapsed containers: hide port entirely
   isFreeform?: boolean;          // freeform/note cards: corner dead zones to avoid resize handle conflict
   isImage?: boolean;             // images: corner dead zones to avoid resize handle conflict
+  isBoard?: boolean;             // boards: anchor to hexagon geometry, fixed midpoint positions
   onStartConnector: (
     elementId: string,
     anchor: 'top' | 'right' | 'bottom' | 'left',
@@ -46,6 +47,7 @@ export function FloatingPort({
   isCollapsed = false,
   isFreeform = false,
   isImage = false,
+  isBoard = false,
   onStartConnector,
   onEndConnector,
 }: FloatingPortProps) {
@@ -53,28 +55,42 @@ export function FloatingPort({
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragStarted = useRef(false);
 
-  // Compute port position from mouse event relative to element
-  const computePort = useCallback((e: MouseEvent): PortState | null => {
+  // Get the effective bounds element (hex for boards, outer element for everything else)
+  const getBoundsRect = useCallback(() => {
     const el = elementRef.current;
     if (!el) return null;
-    const rect = el.getBoundingClientRect();
+    if (isBoard) {
+      const boundsEl = el.querySelector('[data-port-bounds]') as HTMLElement | null;
+      if (boundsEl) return boundsEl.getBoundingClientRect();
+    }
+    return el.getBoundingClientRect();
+  }, [elementRef, isBoard]);
+
+  // Compute port position from mouse event relative to element
+  const computePort = useCallback((e: MouseEvent): PortState | null => {
+    const rect = getBoundsRect();
+    if (!rect) return null;
     const cx = e.clientX;
     const cy = e.clientY;
+
+    // For boards: use a larger proximity zone since cursor might be inside the outer
+    // element rect but far from the hex
+    const proximity = isBoard ? 24 : PROXIMITY_PX;
 
     const dLeft   = cx - rect.left;
     const dRight  = rect.right - cx;
     const dTop    = cy - rect.top;
     const dBottom = rect.bottom - cy;
 
-    // Must be within PROXIMITY_PX of the border (outside OR just inside)
-    const nearLeft   = dLeft   >= -PROXIMITY_PX && dLeft   <= PROXIMITY_PX;
-    const nearRight  = dRight  >= -PROXIMITY_PX && dRight  <= PROXIMITY_PX;
-    const nearTop    = dTop    >= -PROXIMITY_PX && dTop    <= PROXIMITY_PX;
-    const nearBottom = dBottom >= -PROXIMITY_PX && dBottom <= PROXIMITY_PX;
+    // Must be within proximity of the border (outside OR just inside)
+    const nearLeft   = dLeft   >= -proximity && dLeft   <= proximity;
+    const nearRight  = dRight  >= -proximity && dRight  <= proximity;
+    const nearTop    = dTop    >= -proximity && dTop    <= proximity;
+    const nearBottom = dBottom >= -proximity && dBottom <= proximity;
 
     // Must also be roughly within the element's span on the other axis
-    const withinH = cx >= rect.left - PROXIMITY_PX && cx <= rect.right + PROXIMITY_PX;
-    const withinV = cy >= rect.top - PROXIMITY_PX && cy <= rect.bottom + PROXIMITY_PX;
+    const withinH = cx >= rect.left - proximity && cx <= rect.right + proximity;
+    const withinV = cy >= rect.top - proximity && cy <= rect.bottom + proximity;
 
     if (!((nearLeft || nearRight || nearTop || nearBottom) && (withinH || withinV))) {
       return null;
@@ -120,6 +136,11 @@ export function FloatingPort({
       }
     }
 
+    // For boards: lock offset to 50% (midpoint) — connectors always attach at hex center edges
+    if (isBoard) {
+      offset = 50;
+    }
+
     // For shapes: exclude corner zones (resize handles) and midpoint zones (+ buttons)
     if (isShape) {
       const inCorner = offset < 14 || offset > 86;
@@ -148,7 +169,7 @@ export function FloatingPort({
     }
 
     return { visible: true, side, offset };
-  }, [elementRef, isShape, isContainer, isCollapsed, isFreeform, isImage]);
+  }, [getBoundsRect, isBoard, isShape, isContainer, isCollapsed, isFreeform, isImage]);
 
   useEffect(() => {
     const el = elementRef.current;
@@ -204,13 +225,37 @@ export function FloatingPort({
 
   if (!port.visible || isDragging) return null;
 
-  // Compute CSS position of orb centre on the element border
+  // Compute CSS position of orb centre on the element border.
+  // If a [data-port-bounds] child exists, offset the orb so it sits on that
+  // child's edges rather than the outer element's edges.
+  const el = elementRef.current;
+  const boundsChild = el?.querySelector('[data-port-bounds]') as HTMLElement | null;
+
   let orbStyle: React.CSSProperties = { position: 'absolute', transform: 'translate(-50%, -50%)' };
-  switch (port.side) {
-    case 'top':    orbStyle = { ...orbStyle, top: 0,      left: `${port.offset}%` }; break;
-    case 'bottom': orbStyle = { ...orbStyle, top: '100%', left: `${port.offset}%` }; break;
-    case 'left':   orbStyle = { ...orbStyle, left: 0,     top: `${port.offset}%`  }; break;
-    case 'right':  orbStyle = { ...orbStyle, left: '100%', top: `${port.offset}%` }; break;
+
+  if (boundsChild && el) {
+    // Position in px relative to the outer element, based on the inner bounds child
+    const outerRect = el.getBoundingClientRect();
+    const innerRect = boundsChild.getBoundingClientRect();
+    const ox = innerRect.left - outerRect.left;
+    const oy = innerRect.top - outerRect.top;
+    const iw = innerRect.width;
+    const ih = innerRect.height;
+    const pct = port.offset / 100;
+
+    switch (port.side) {
+      case 'top':    orbStyle = { ...orbStyle, top: oy,        left: ox + iw * pct }; break;
+      case 'bottom': orbStyle = { ...orbStyle, top: oy + ih,   left: ox + iw * pct }; break;
+      case 'left':   orbStyle = { ...orbStyle, left: ox,       top: oy + ih * pct  }; break;
+      case 'right':  orbStyle = { ...orbStyle, left: ox + iw,  top: oy + ih * pct  }; break;
+    }
+  } else {
+    switch (port.side) {
+      case 'top':    orbStyle = { ...orbStyle, top: 0,      left: `${port.offset}%` }; break;
+      case 'bottom': orbStyle = { ...orbStyle, top: '100%', left: `${port.offset}%` }; break;
+      case 'left':   orbStyle = { ...orbStyle, left: 0,     top: `${port.offset}%`  }; break;
+      case 'right':  orbStyle = { ...orbStyle, left: '100%', top: `${port.offset}%` }; break;
+    }
   }
 
   return (

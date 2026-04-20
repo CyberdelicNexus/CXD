@@ -458,11 +458,33 @@ export const SHAPE_TYPES: { type: ShapeType; label: string }[] = [
 
 // Helper function to get anchor position on an element
 // offset: 0-1 value where 0.5 is center (default)
+// Compute the hexagon's bounding rect within a board element.
+// The hex is 128x128, centered horizontally, vertically centered in the element.
+function getBoardHexBounds(element: CanvasElement) {
+  const HEX_SIZE = 128;
+  const cx = element.x + element.width / 2;
+  const cy = element.y + element.height / 2;
+  // At the hex midpoint (y=50%), the edges are at 6.7% and 93.3% of 128 = ±55px from center
+  const HEX_HALF_W = 55;
+  return { cx, cy, halfW: HEX_HALF_W, halfH: HEX_SIZE / 2 };
+}
+
 export function getAnchorPosition(
   element: CanvasElement,
   anchor: 'top' | 'right' | 'bottom' | 'left',
   offset: number = 0.5
 ): { x: number; y: number } {
+  // Board elements: anchor to the hexagon geometry, not the bounding box
+  if (element.type === 'board') {
+    const hex = getBoardHexBounds(element);
+    switch (anchor) {
+      case 'top':    return { x: hex.cx, y: hex.cy - hex.halfH };
+      case 'bottom': return { x: hex.cx, y: hex.cy + hex.halfH };
+      case 'left':   return { x: hex.cx - hex.halfW, y: hex.cy };
+      case 'right':  return { x: hex.cx + hex.halfW, y: hex.cy };
+    }
+  }
+
   const { x, y, width, height } = element;
   // Clamp offset to 0-1 range
   const clampedOffset = Math.max(0, Math.min(1, offset));
@@ -484,8 +506,13 @@ export function getClosestAnchors(
   fromElement: CanvasElement,
   toElement: CanvasElement
 ): { from: 'top' | 'right' | 'bottom' | 'left'; to: 'top' | 'right' | 'bottom' | 'left' } {
-  const fromCenter = { x: fromElement.x + fromElement.width / 2, y: fromElement.y + fromElement.height / 2 };
-  const toCenter = { x: toElement.x + toElement.width / 2, y: toElement.y + toElement.height / 2 };
+  // Use hex center for board elements
+  const fromCenter = fromElement.type === 'board'
+    ? { x: fromElement.x + fromElement.width / 2, y: fromElement.y + fromElement.height / 2 }
+    : { x: fromElement.x + fromElement.width / 2, y: fromElement.y + fromElement.height / 2 };
+  const toCenter = toElement.type === 'board'
+    ? { x: toElement.x + toElement.width / 2, y: toElement.y + toElement.height / 2 }
+    : { x: toElement.x + toElement.width / 2, y: toElement.y + toElement.height / 2 };
 
   const dx = toCenter.x - fromCenter.x;
   const dy = toCenter.y - fromCenter.y;
