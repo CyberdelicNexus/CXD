@@ -51,7 +51,10 @@ import {
   Map,
   ListTodo,
   ArrowRight,
+  Maximize2,
+  X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 
 const stepIcons: Record<string, React.ReactNode> = {
   "Intention Core": <Target className="w-5 h-5" />,
@@ -93,6 +96,71 @@ const WIZARD_PHASES = [
   { name: "Structure", steps: [6, 7, 8] },
   { name: "Transformation", steps: [9, 10] },
 ];
+
+// Textarea with vertical resize and expand-to-fullscreen button
+function ExpandableTextarea({
+  value,
+  onChange,
+  placeholder,
+  className,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  className?: string;
+  label?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <>
+      <div className="relative group/expand">
+        <Textarea
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn("resize-y", className)}
+        />
+        <button
+          type="button"
+          onClick={() => setIsExpanded(true)}
+          className="absolute top-2 right-2 rounded bg-black/40 p-1 text-white/50 opacity-0 group-hover/expand:opacity-100 hover:bg-black/60 hover:text-white/80 transition-all"
+          title="Expand editor"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {isExpanded && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setIsExpanded(false); }}
+        >
+          <div className="relative w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-white/15 bg-[#0c0a14] shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+              <span className="text-sm font-medium text-white/70">{label || "Edit"}</span>
+              <button
+                type="button"
+                onClick={() => setIsExpanded(false)}
+                className="rounded bg-black/40 p-1 text-white/70 hover:bg-black/60 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <Textarea
+              autoFocus
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={placeholder}
+              className="flex-1 min-h-[60vh] resize-none border-0 bg-transparent text-base leading-relaxed focus-visible:ring-0 p-5"
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 export function CXDWizard() {
   const {
@@ -221,11 +289,12 @@ export function CXDWizard() {
             <p className="text-xs text-muted-foreground">
               What is the big idea behind this experience?
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="Describe the central concept..."
               value={project.intentionCore?.mainConcept || ""}
-              onChange={(e) => updateIntentionMainConcept(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateIntentionMainConcept(v)}
+              label="Main Concept"
+              className="min-h-[100px] bg-input border-border focus:ring-2 focus:ring-primary/50"
             />
           </div>
           <div className="space-y-2">
@@ -234,11 +303,12 @@ export function CXDWizard() {
               What essential message should participants receive? This becomes
               the center of your canvas.
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="The core message participants will take away..."
               value={project.intentionCore?.coreMessage || ""}
-              onChange={(e) => updateIntentionCoreMessage(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateIntentionCoreMessage(v)}
+              label="Core Message"
+              className="min-h-[100px] bg-input border-border focus:ring-2 focus:ring-primary/50"
             />
           </div>
         </div>
@@ -254,11 +324,12 @@ export function CXDWizard() {
             <p className="text-xs text-muted-foreground">
               What insights should participants gain?
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="New understanding, perspectives, realizations..."
               value={project.desiredChange?.insights || ""}
-              onChange={(e) => updateDesiredInsights(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none text-sm focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateDesiredInsights(v)}
+              label="Insights"
+              className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
             />
           </div>
           <div className="space-y-2">
@@ -266,11 +337,12 @@ export function CXDWizard() {
             <p className="text-xs text-muted-foreground">
               What feelings should be evoked?
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="Emotional responses, sensations, affects..."
               value={project.desiredChange?.feelings || ""}
-              onChange={(e) => updateDesiredFeelings(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none text-sm focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateDesiredFeelings(v)}
+              label="Feelings"
+              className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
             />
           </div>
           <div className="space-y-2">
@@ -278,11 +350,12 @@ export function CXDWizard() {
             <p className="text-xs text-muted-foreground">
               What states should be induced?
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="Mental states, altered consciousness, flow..."
               value={project.desiredChange?.states || ""}
-              onChange={(e) => updateDesiredStates(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none text-sm focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateDesiredStates(v)}
+              label="States"
+              className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
             />
           </div>
           <div className="space-y-2">
@@ -290,11 +363,12 @@ export function CXDWizard() {
             <p className="text-xs text-muted-foreground">
               What knowledge should be imparted?
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="Information, skills, understanding..."
               value={project.desiredChange?.knowledge || ""}
-              onChange={(e) => updateDesiredKnowledge(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none text-sm focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateDesiredKnowledge(v)}
+              label="Knowledge"
+              className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
             />
           </div>
         </div>
@@ -310,11 +384,12 @@ export function CXDWizard() {
             <p className="text-xs text-muted-foreground">
               What needs does your audience have that this experience addresses?
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="Unmet needs, pain points, aspirations..."
               value={project.humanContext?.audienceNeeds || ""}
-              onChange={(e) => updateHumanAudienceNeeds(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateHumanAudienceNeeds(v)}
+              label="Audience Needs"
+              className="min-h-[100px] bg-input border-border focus:ring-2 focus:ring-primary/50"
             />
           </div>
           <div className="space-y-2">
@@ -322,11 +397,12 @@ export function CXDWizard() {
             <p className="text-xs text-muted-foreground">
               What desires drive your audience to seek this experience?
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="Motivations, wants, hopes..."
               value={project.humanContext?.audienceDesires || ""}
-              onChange={(e) => updateHumanAudienceDesires(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateHumanAudienceDesires(v)}
+              label="Audience Desires"
+              className="min-h-[100px] bg-input border-border focus:ring-2 focus:ring-primary/50"
             />
           </div>
           <div className="space-y-2">
@@ -335,11 +411,12 @@ export function CXDWizard() {
               What role will participants play? (Observer, protagonist,
               co-creator?)
             </p>
-            <Textarea
+            <ExpandableTextarea
               placeholder="Describe participant agency and involvement..."
               value={project.humanContext?.userRole || ""}
-              onChange={(e) => updateHumanUserRole(e.target.value)}
-              className="min-h-[100px] bg-input border-border resize-none focus:ring-2 focus:ring-primary/50"
+              onChange={(v) => updateHumanUserRole(v)}
+              label="User Role"
+              className="min-h-[100px] bg-input border-border focus:ring-2 focus:ring-primary/50"
             />
           </div>
         </div>
@@ -362,11 +439,12 @@ export function CXDWizard() {
       };
       return (
         <div className="space-y-4 w-full">
-          <Textarea
+          <ExpandableTextarea
             placeholder="Describe your vision..."
             value={getValue()}
-            onChange={(e) => handleChange(e.target.value)}
-            className="min-h-[200px] bg-input border-border resize-none focus:ring-2 focus:ring-primary/50 w-full"
+            onChange={(v) => handleChange(v)}
+            label={step.title}
+            className="min-h-[200px] bg-input border-border focus:ring-2 focus:ring-primary/50 w-full"
           />
           {step.subQuestions && (
             <div className="space-y-2 w-full">
@@ -558,13 +636,12 @@ export function CXDWizard() {
               <p className="text-xs text-muted-foreground">
                 {quadrant.description}
               </p>
-              <Textarea
+              <ExpandableTextarea
                 placeholder={stateExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} states...`}
                 value={project.stateMapping[quadrant.code]}
-                onChange={(e) =>
-                  updateStateMapping(quadrant.code, e.target.value)
-                }
-                className="min-h-[100px] bg-input border-border resize-none text-sm focus:ring-2 focus:ring-primary/50"
+                onChange={(v) => updateStateMapping(quadrant.code, v)}
+                label={`State Mapping — ${quadrant.label}`}
+                className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
               />
             </div>
           ))}
@@ -589,13 +666,12 @@ export function CXDWizard() {
               <p className="text-xs text-muted-foreground">
                 {quadrant.description}
               </p>
-              <Textarea
+              <ExpandableTextarea
                 placeholder={traitExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} traits...`}
                 value={project.traitMapping[quadrant.code]}
-                onChange={(e) =>
-                  updateTraitMapping(quadrant.code, e.target.value)
-                }
-                className="min-h-[100px] bg-input border-border resize-none text-sm focus:ring-2 focus:ring-primary/50"
+                onChange={(v) => updateTraitMapping(quadrant.code, v)}
+                label={`Trait Mapping — ${quadrant.label}`}
+                className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
               />
             </div>
           ))}
