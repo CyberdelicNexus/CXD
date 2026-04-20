@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image';
 
 export function LoadingScreen() {
   const [dots, setDots] = useState('');
@@ -17,16 +16,18 @@ export function LoadingScreen() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
       {/* Centered loading content */}
       <div className="relative z-10 flex flex-col items-center gap-6">
-        {/* Tesseract animation */}
-        <div className="w-40 h-40 relative">
-          <Image
-            src="/images/Tesseract-1K.gif"
-            alt="Loading"
-            width={160}
-            height={160}
+        {/* Loading animation */}
+        <div className="w-24 h-24 relative">
+          <video
+            src="/images/loading-animation.mp4"
+            width={96}
+            height={96}
+            autoPlay
+            muted
+            loop
+            playsInline
             className="object-contain"
-            unoptimized
-            priority
+            style={{ mixBlendMode: 'screen' }}
           />
         </div>
 
