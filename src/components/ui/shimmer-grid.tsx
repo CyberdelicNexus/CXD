@@ -26,38 +26,55 @@ export function ShimmerGrid({
   const targetPos = useRef({ x: -1000, y: -1000 });
   const currentPos = useRef({ x: -1000, y: -1000 });
   const animationRef = useRef<number>();
+  const isAnimating = useRef(false);
 
-  // Smooth cursor following animation
+  // Smooth cursor following animation — stops when idle
   const animate = useCallback(() => {
     const ease = (100 - smoothing) / 100 * 0.3 + 0.05;
 
-    currentPos.current.x += (targetPos.current.x - currentPos.current.x) * ease;
-    currentPos.current.y += (targetPos.current.y - currentPos.current.y) * ease;
+    const dx = targetPos.current.x - currentPos.current.x;
+    const dy = targetPos.current.y - currentPos.current.y;
+
+    currentPos.current.x += dx * ease;
+    currentPos.current.y += dy * ease;
 
     setMousePos({ x: currentPos.current.x, y: currentPos.current.y });
 
-    animationRef.current = requestAnimationFrame(animate);
+    // Stop animating when close enough to target (< 0.5px)
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+      animationRef.current = requestAnimationFrame(animate);
+    } else {
+      isAnimating.current = false;
+    }
   }, [smoothing]);
 
+  const startAnimation = useCallback(() => {
+    if (!isAnimating.current) {
+      isAnimating.current = true;
+      animationRef.current = requestAnimationFrame(animate);
+    }
+  }, [animate]);
+
   useEffect(() => {
-    animationRef.current = requestAnimationFrame(animate);
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [animate]);
+  }, []);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     targetPos.current = {
       x: e.clientX,
       y: e.clientY,
     };
-  }, []);
+    startAnimation();
+  }, [startAnimation]);
 
   const handleMouseLeave = useCallback(() => {
     targetPos.current = { x: -1000, y: -1000 };
-  }, []);
+    startAnimation();
+  }, [startAnimation]);
 
   useEffect(() => {
     // Listen on window instead of container for better tracking
