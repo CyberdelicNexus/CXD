@@ -13,10 +13,17 @@ const GanttViewEnhanced = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center h-64">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
-          <span className="text-white/40 text-sm">Loading timeline...</span>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+        <div className="flex flex-col items-center gap-6">
+          <video src="/images/loading-animation.mp4" width={96} height={96} autoPlay muted loop playsInline className="object-contain" style={{ mixBlendMode: 'screen' }} />
+          <div className="flex flex-col items-center gap-2">
+            <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-purple-500 to-purple-600">
+              Loading Plan View
+            </h2>
+            <p className="text-sm text-purple-300/70">
+              Preparing your project timeline
+            </p>
+          </div>
         </div>
       </div>
     ),
