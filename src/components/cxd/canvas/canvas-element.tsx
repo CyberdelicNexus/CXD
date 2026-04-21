@@ -8016,7 +8016,7 @@ function ExperienceBlockCard({
             return (
               <div className="space-y-4">
                 {PRESENCE_TYPES.map((presence) => {
-                  const val = project.presenceTypes[presence.code];
+                  const val = project.presenceTypes?.[presence.code];
                   const currentLevel = getClosestLevel(val);
                   const meta = PRESENCE_METADATA[presence.code];
 

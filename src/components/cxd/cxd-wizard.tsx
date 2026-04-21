@@ -53,8 +53,10 @@ import {
   ArrowRight,
   Maximize2,
   X,
+  Palette,
 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { NoteRichTextEditor } from "@/components/cxd/canvas/note-rich-text-editor";
 
 const stepIcons: Record<string, React.ReactNode> = {
   "Intention Core": <Target className="w-5 h-5" />,
@@ -97,7 +99,21 @@ const WIZARD_PHASES = [
   { name: "Transformation", steps: [9, 10] },
 ];
 
-// Textarea with vertical resize and expand-to-fullscreen button
+// Convert plain text to HTML paragraphs for the rich text editor
+function textToHtml(text: string): string {
+  if (!text) return "<p></p>";
+  return text.split("\n").map(line => `<p>${line || "<br>"}</p>`).join("");
+}
+
+// Convert HTML back to plain text
+function htmlToText(html: string): string {
+  if (!html) return "";
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return (div.textContent || div.innerText || "").trim();
+}
+
+// Textarea with vertical resize and expand-to-fullscreen rich editor
 function ExpandableTextarea({
   value,
   onChange,
@@ -112,6 +128,17 @@ function ExpandableTextarea({
   label?: string;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [richValue, setRichValue] = useState("");
+
+  const handleOpen = useCallback(() => {
+    setRichValue(textToHtml(value));
+    setIsExpanded(true);
+  }, [value]);
+
+  const handleRichChange = useCallback((html: string) => {
+    setRichValue(html);
+    onChange(htmlToText(html));
+  }, [onChange]);
 
   return (
     <>
@@ -124,7 +151,7 @@ function ExpandableTextarea({
         />
         <button
           type="button"
-          onClick={() => setIsExpanded(true)}
+          onClick={handleOpen}
           className="absolute top-2 right-2 rounded bg-black/40 p-1 text-white/50 opacity-0 group-hover/expand:opacity-100 hover:bg-black/60 hover:text-white/80 transition-all"
           title="Expand editor"
         >
@@ -133,27 +160,43 @@ function ExpandableTextarea({
       </div>
       {isExpanded && typeof document !== "undefined" && createPortal(
         <div
-          className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
+          className="fixed inset-0 z-[9999] bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-6"
           onMouseDown={(e) => { if (e.target === e.currentTarget) setIsExpanded(false); }}
         >
-          <div className="relative w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-white/15 bg-[#0c0a14] shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-              <span className="text-sm font-medium text-white/70">{label || "Edit"}</span>
-              <button
-                type="button"
-                onClick={() => setIsExpanded(false)}
-                className="rounded bg-black/40 p-1 text-white/70 hover:bg-black/60 hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
+          <div
+            className="relative w-full max-w-3xl max-h-[85vh] overflow-visible rounded-xl border border-white/15 p-5 shadow-2xl"
+            style={{
+              background: "linear-gradient(135deg, #1a0a2e 0%, #16082a 50%, #0d0618 100%)",
+              boxShadow: "0 16px 48px rgba(0,0,0,0.45)",
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white z-10"
+              onClick={() => setIsExpanded(false)}
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="max-h-[calc(85vh-2.5rem)] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:rgba(167,139,250,0.65)_rgba(255,255,255,0.08)]">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-lg font-semibold text-white/90 pr-8">{label || "Edit"}</h3>
+                <div className="h-px bg-white/10" />
+                <div className="min-h-[420px]">
+                  <NoteRichTextEditor
+                    value={richValue}
+                    textColor="#e2e0ea"
+                    isSelected
+                    isFocusMode
+                    onChange={handleRichChange}
+                    onBlurCard={() => {}}
+                    onFocusBody={() => {}}
+                    onHeightChange={() => {}}
+                  />
+                </div>
+              </div>
             </div>
-            <Textarea
-              autoFocus
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              placeholder={placeholder}
-              className="flex-1 min-h-[60vh] resize-none border-0 bg-transparent text-base leading-relaxed focus-visible:ring-0 p-5"
-            />
           </div>
         </div>,
         document.body,
