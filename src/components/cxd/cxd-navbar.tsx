@@ -104,11 +104,6 @@ const CANVAS_GRADIENTS = [
     preview: 'radial-gradient(circle at center, #48265b 0%, #18061b 100%)'
   },
   {
-    name: 'Midnight Purple',
-    value: 'radial-gradient(circle at center, #1c093dff 0%, #000000 100%)',
-    preview: 'radial-gradient(circle at center, #5c397d 0%, #1c093d 100%)'
-  },
-  {
     name: 'Galactic Blue',
     value: 'radial-gradient(circle at center, #000323ff 0%, #000000 100%)',
     preview: 'radial-gradient(circle at center, #303363 0%, #000323 100%)'
@@ -119,6 +114,133 @@ const CANVAS_GRADIENTS = [
     preview: 'radial-gradient(circle at center, #333333 0%, #000000 100%)'
   },
 ];
+
+// HSL ↔ Hex helpers for custom hue rotation
+function hslToHex(h: number, s: number, l: number): string {
+  const lN = l / 100;
+  const a = (s * Math.min(lN, 1 - lN)) / 100;
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const c = lN - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * c).toString(16).padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+// Build a canvas gradient at a given hue, keeping saturation/lightness stable
+const CUSTOM_HUE_S = 45;       // saturation for the gradient inner color (muted, refined)
+const CUSTOM_HUE_L = 12;       // lightness for the gradient inner color (dark)
+const CUSTOM_HUE_PREVIEW_L = 30; // brighter preview swatch
+
+type GradientStyle = 'radial' | 'linear';
+
+function buildCustomHueGradient(hue: number, style: GradientStyle = 'radial'): string {
+  const inner = hslToHex(hue, CUSTOM_HUE_S, CUSTOM_HUE_L);
+  const marker = `/* hue:${Math.round(hue)} style:${style} */`;
+  if (style === 'linear') return `linear-gradient(180deg, ${inner} 0%, #000000 100%) ${marker}`;
+  return `radial-gradient(circle at center, ${inner} 0%, #000000 100%) ${marker}`;
+}
+function buildCustomHuePreview(hue: number, style: GradientStyle = 'radial'): string {
+  const inner = hslToHex(hue, CUSTOM_HUE_S, CUSTOM_HUE_PREVIEW_L);
+  const outer = hslToHex(hue, CUSTOM_HUE_S, CUSTOM_HUE_L);
+  if (style === 'linear') return `linear-gradient(180deg, ${inner} 0%, ${outer} 100%)`;
+  return `radial-gradient(circle at center, ${inner} 0%, ${outer} 100%)`;
+}
+function extractCustomHue(bg: string | undefined): number | null {
+  if (!bg) return null;
+  const m = bg.match(/\/\*\s*hue:(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+function extractCustomStyle(bg: string | undefined): GradientStyle {
+  if (!bg) return 'radial';
+  const m = bg.match(/style:(radial|linear)/);
+  return (m?.[1] as GradientStyle) || 'radial';
+}
+
+// Hue rotary dial — drag the indicator around the conic ring to change hue (0–360°)
+function HueDial({
+  hue,
+  onChange,
+  svgRef,
+}: {
+  hue: number;
+  onChange: (hue: number) => void;
+  svgRef: React.RefObject<SVGSVGElement>;
+}) {
+  const SIZE = 120;
+  const CENTER = SIZE / 2;
+  const RING_R = 48;
+  const NODE_R = 9;
+
+  const angleRad = ((hue - 90) * Math.PI) / 180; // 0° hue = top
+  const nodeX = CENTER + RING_R * Math.cos(angleRad);
+  const nodeY = CENTER + RING_R * Math.sin(angleRad);
+
+  const eventToHue = (clientX: number, clientY: number): number => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return hue;
+    const dx = clientX - (rect.left + rect.width / 2);
+    const dy = clientY - (rect.top + rect.height / 2);
+    let deg = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+    if (deg < 0) deg += 360;
+    return deg % 360;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onChange(eventToHue(e.clientX, e.clientY));
+    const move = (mv: PointerEvent) => onChange(eventToHue(mv.clientX, mv.clientY));
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <svg
+      ref={svgRef}
+      width={SIZE}
+      height={SIZE}
+      viewBox={`0 0 ${SIZE} ${SIZE}`}
+      onPointerDown={handlePointerDown}
+      style={{ cursor: 'grab', touchAction: 'none' }}
+    >
+      <defs>
+        {/* Conic-like ring built via foreignObject for cross-browser conic-gradient */}
+      </defs>
+      {/* Use foreignObject to host a conic-gradient div (SVG has no native conic gradient) */}
+      <foreignObject x={CENTER - RING_R - 8} y={CENTER - RING_R - 8} width={(RING_R + 8) * 2} height={(RING_R + 8) * 2}>
+        <div
+          // @ts-expect-error xmlns prop on div for foreignObject
+          xmlns="http://www.w3.org/1999/xhtml"
+          style={{
+            width: '100%',
+            height: '100%',
+            borderRadius: '50%',
+            background: 'conic-gradient(from 0deg, hsl(0,55%,32%), hsl(60,55%,32%), hsl(120,55%,32%), hsl(180,55%,32%), hsl(240,55%,32%), hsl(300,55%,32%), hsl(360,55%,32%))',
+            mask: `radial-gradient(circle, transparent ${RING_R - 8}px, #000 ${RING_R - 8}px, #000 ${RING_R + 8}px, transparent ${RING_R + 8}px)`,
+            WebkitMask: `radial-gradient(circle, transparent ${RING_R - 8}px, #000 ${RING_R - 8}px, #000 ${RING_R + 8}px, transparent ${RING_R + 8}px)`,
+          }}
+        />
+      </foreignObject>
+      {/* Indicator node */}
+      <g style={{ pointerEvents: 'none' }}>
+        <circle cx={nodeX} cy={nodeY} r={NODE_R + 3} fill="rgba(0,0,0,0.5)" />
+        <circle
+          cx={nodeX}
+          cy={nodeY}
+          r={NODE_R}
+          fill={hslToHex(hue, 55, 32)}
+          stroke="white"
+          strokeWidth={2}
+        />
+      </g>
+    </svg>
+  );
+}
 
 export function CXDNavbar() {
   const router = useRouter();
@@ -225,6 +347,9 @@ export function CXDNavbar() {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showHueWheel, setShowHueWheel] = useState(false);
+  const customHue = extractCustomHue(project?.canvasBackground);
+  const hueWheelRef = useRef<SVGSVGElement>(null);
 
   // Initialize rename value when project loads
   useEffect(() => {
@@ -383,14 +508,16 @@ export function CXDNavbar() {
 
           {/* Color Picker with Gradient Outline - replaces logo */}
           {project && viewMode !== "home" ? (
-            <DropdownMenu open={showColorPicker} onOpenChange={setShowColorPicker}>
+            <DropdownMenu open={showColorPicker} onOpenChange={(o) => { setShowColorPicker(o); if (!o) setShowHueWheel(false); }}>
               <DropdownMenuTrigger asChild>
                 <div className="relative group cursor-pointer active:scale-95 transition-all p-[1px] rounded-full bg-gradient-to-r from-violet-500 via-purple-500 to-cyan-500">
                   <div className="flex items-center justify-center w-9 h-9 rounded-full bg-zinc-950 transition-all duration-300">
                     <div
                       className="w-5 h-5 rounded-full border border-white/10 shadow-inner"
                       style={{
-                        background: CANVAS_GRADIENTS.find(g => g.value === project.canvasBackground)?.preview || CANVAS_GRADIENTS[0].preview
+                        background: customHue !== null
+                          ? buildCustomHuePreview(customHue)
+                          : (CANVAS_GRADIENTS.find(g => g.value === project.canvasBackground)?.preview || CANVAS_GRADIENTS[0].preview)
                       }}
                     />
                   </div>
@@ -409,14 +536,86 @@ export function CXDNavbar() {
                       }}
                       title={gradient.name}
                     >
-                      {project.canvasBackground === gradient.value && (
+                      {customHue === null && project.canvasBackground === gradient.value && (
                         <div className="absolute inset-0 flex items-center justify-center bg-black/20">
                           <Check className="w-3 h-3 text-white" />
                         </div>
                       )}
                     </button>
                   ))}
+                  {/* Hue wheel — 6th option (dark center + thin rainbow ring) */}
+                  <button
+                    className="w-full aspect-square rounded-full hover:scale-110 transition-all relative overflow-hidden group"
+                    onClick={(e) => { e.stopPropagation(); setShowHueWheel(v => !v); }}
+                    title="Custom hue"
+                  >
+                    {/* Outer rainbow ring */}
+                    <div
+                      className="absolute inset-0 rounded-full opacity-90 group-hover:opacity-100 transition-opacity"
+                      style={{
+                        background: 'conic-gradient(from 0deg, hsl(0,55%,32%), hsl(60,55%,32%), hsl(120,55%,32%), hsl(180,55%,32%), hsl(240,55%,32%), hsl(300,55%,32%), hsl(360,55%,32%))',
+                      }}
+                    />
+                    {/* Dark inner disc — leaves a thin ring of color visible */}
+                    <div
+                      className="absolute inset-[3px] rounded-full shadow-inner"
+                      style={{
+                        background: customHue !== null
+                          ? buildCustomHuePreview(customHue)
+                          : 'radial-gradient(circle at 35% 30%, #2a1a3a 0%, #0a0612 70%, #000 100%)',
+                      }}
+                    />
+                    {/* Subtle inner highlight for glassy depth */}
+                    <div
+                      className="absolute inset-[3px] rounded-full pointer-events-none"
+                      style={{
+                        background: 'radial-gradient(circle at 35% 30%, rgba(255,255,255,0.18) 0%, transparent 50%)',
+                      }}
+                    />
+                    {customHue !== null && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Check className="w-3 h-3 text-white drop-shadow" />
+                      </div>
+                    )}
+                  </button>
                 </div>
+                {/* Hue rotation dial + style toggle */}
+                {showHueWheel && (() => {
+                  const activeHue = customHue ?? 270;
+                  const activeStyle = extractCustomStyle(project.canvasBackground);
+                  const styles: GradientStyle[] = ['radial', 'linear'];
+                  return (
+                  <div className="mt-3 pt-3 border-t border-white/10 flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-3">
+                      <HueDial
+                        hue={activeHue}
+                        onChange={(h) => updateCanvasBackground(buildCustomHueGradient(h, activeStyle))}
+                        svgRef={hueWheelRef}
+                      />
+                      <div className="flex flex-col gap-1.5">
+                        {styles.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => updateCanvasBackground(buildCustomHueGradient(activeHue, s))}
+                            title={s.charAt(0).toUpperCase() + s.slice(1)}
+                            className={cn(
+                              "w-6 h-6 rounded-md border transition-all",
+                              activeStyle === s
+                                ? "border-violet-400/80 ring-2 ring-violet-400/30"
+                                : "border-white/15 hover:border-white/40"
+                            )}
+                            style={{ background: buildCustomHuePreview(activeHue, s) }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-white/50 tracking-wider uppercase">
+                      Hue {Math.round(activeHue)}°
+                    </span>
+                  </div>
+                  );
+                })()}
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (

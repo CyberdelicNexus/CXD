@@ -234,20 +234,30 @@ export function FloatingPort({
   let orbStyle: React.CSSProperties = { position: 'absolute', transform: 'translate(-50%, -50%)' };
 
   if (boundsChild && el) {
-    // Position in px relative to the outer element, based on the inner bounds child
+    // Position in local CSS px relative to the outer element.
+    // getBoundingClientRect returns SCREEN px (post-zoom), so divide by canvasZoom
+    // to convert back to the element's local coordinate space.
     const outerRect = el.getBoundingClientRect();
     const innerRect = boundsChild.getBoundingClientRect();
-    const ox = innerRect.left - outerRect.left;
-    const oy = innerRect.top - outerRect.top;
-    const iw = innerRect.width;
-    const ih = innerRect.height;
+    const z = canvasZoom || 1;
+    const ox = (innerRect.left - outerRect.left) / z;
+    const oy = (innerRect.top - outerRect.top) / z;
+    const iw = innerRect.width / z;
+    const ih = innerRect.height / z;
     const pct = port.offset / 100;
 
+    // For hex-shaped boards: the polygon doesn't fill the bounding box at the
+    // left/right midpoints — it's inset by ~6.7% on each side (1 - sqrt(3)/2)/2.
+    // Top/bottom hex points DO reach the bounding box edges.
+    // Push the orb OUTWARD past the polygon edge so it sits just outside, not on top.
+    const HEX_INSET_X = isBoard ? iw * (1 - Math.sqrt(3) / 2) / 2 : 0;
+    const ORB_OUTSET = isBoard ? 8 : 0; // visible orb radius — sits just outside the shape
+
     switch (port.side) {
-      case 'top':    orbStyle = { ...orbStyle, top: oy,        left: ox + iw * pct }; break;
-      case 'bottom': orbStyle = { ...orbStyle, top: oy + ih,   left: ox + iw * pct }; break;
-      case 'left':   orbStyle = { ...orbStyle, left: ox,       top: oy + ih * pct  }; break;
-      case 'right':  orbStyle = { ...orbStyle, left: ox + iw,  top: oy + ih * pct  }; break;
+      case 'top':    orbStyle = { ...orbStyle, top: oy - ORB_OUTSET,                  left: ox + iw * pct }; break;
+      case 'bottom': orbStyle = { ...orbStyle, top: oy + ih + ORB_OUTSET,             left: ox + iw * pct }; break;
+      case 'left':   orbStyle = { ...orbStyle, left: ox + HEX_INSET_X - ORB_OUTSET,   top: oy + ih * pct  }; break;
+      case 'right':  orbStyle = { ...orbStyle, left: ox + iw - HEX_INSET_X + ORB_OUTSET, top: oy + ih * pct }; break;
     }
   } else {
     switch (port.side) {
@@ -260,7 +270,7 @@ export function FloatingPort({
 
   return (
     <div
-      style={{ ...orbStyle, width: 11, height: 11, zIndex: 9999, cursor: 'crosshair', pointerEvents: 'auto' }}
+      style={{ ...orbStyle, width: 22, height: 22, zIndex: 9999, cursor: 'crosshair', pointerEvents: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
     >

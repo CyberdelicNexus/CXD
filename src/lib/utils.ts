@@ -6,26 +6,31 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * Extracts the center color from a radial gradient CSS string.
- * For gradients like "radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)"
- * Returns the first color (center color).
- * For solid colors like "#000000", returns the color as-is.
+ * Extracts the center color from a gradient CSS string.
+ * Handles radial-gradient, linear-gradient, and solid colors.
+ * For radial: returns the inner stop. For linear: returns the first stop.
  */
 export function extractCenterColor(gradient: string): string {
-  if (!gradient) return '#1a0b2e'; // Default fallback
+  if (!gradient) return '#1a0b2e';
 
-  // If it's a solid color (starts with # or rgb)
-  if (gradient.startsWith('#') || gradient.startsWith('rgb')) {
-    return gradient;
+  // Strip any /* ... */ marker comments (used for custom hue metadata)
+  const cleaned = gradient.replace(/\/\*[^*]*\*\//g, '').trim();
+
+  // Solid color
+  if (cleaned.startsWith('#') || cleaned.startsWith('rgb')) {
+    const m = cleaned.match(/^(#[a-fA-F0-9]{6,8}|rgba?\([^)]+\))/);
+    return m ? m[1] : cleaned;
   }
 
-  // Extract color from radial-gradient
-  const match = gradient.match(/radial-gradient\([^,]+,\s*(#[a-fA-F0-9]{6,8}|rgba?\([^)]+\))/);
-  if (match && match[1]) {
-    return match[1];
-  }
+  // Radial gradient — first color stop after the position descriptor
+  const radialMatch = cleaned.match(/radial-gradient\([^,]+,\s*(#[a-fA-F0-9]{6,8}|rgba?\([^)]+\))/);
+  if (radialMatch && radialMatch[1]) return radialMatch[1];
 
-  return '#1a0b2e'; // Default fallback
+  // Linear gradient — first color stop, may follow an angle/direction or be the first arg
+  const linearMatch = cleaned.match(/linear-gradient\(\s*(?:[^,]+,\s*)?(#[a-fA-F0-9]{6,8}|rgba?\([^)]+\))/);
+  if (linearMatch && linearMatch[1]) return linearMatch[1];
+
+  return '#1a0b2e';
 }
 
 /**

@@ -7378,14 +7378,12 @@ function BoardCard({
   return (
     <div
       className={cn(
-        "flex items-center justify-center transition-all relative",
+        "relative w-full h-full transition-all",
         isDropTarget && "scale-105",
       )}
     >
-      {/* Hexagon badge container with 3D effect */}
-      <div className="relative flex flex-col items-center gap-3 justify-center w-fit h-fit gap-y-[3.5px]">
-        {/* Hexagon icon container */}
-        <div className="relative w-32 h-32 flex items-center justify-center" data-port-bounds>
+      {/* Hexagon — absolutely centered so its center matches element.height/2 */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 flex items-center justify-center" data-port-bounds>
           {/* Drop target glow - SVG hexagon outline */}
           {isDropTarget && (
             <svg
@@ -7445,8 +7443,11 @@ function BoardCard({
           </div>
         </div>
 
-        {/* Board name */}
-        <div className="flex flex-col items-center gap-1 w-full px-4">
+        {/* Board name + item count — absolutely positioned below the hex */}
+        <div
+          className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-1"
+          style={{ top: 'calc(50% + 72px)' }}
+        >
           {isEditingName ? (
             <Input
               autoFocus
@@ -7472,18 +7473,17 @@ function BoardCard({
                 e.stopPropagation();
                 setIsEditingName(true);
               }}
-              className="text-sm font-medium text-white hover:text-primary transition-colors max-w-full truncate px-2 py-1 rounded hover:bg-white/10"
+              className="text-sm font-medium text-white hover:text-primary transition-colors max-w-full truncate px-2 py-1 rounded hover:bg-white/10 whitespace-nowrap"
               data-no-drag
             >
               {element.title || "New Board"}
             </button>
           )}
           {/* Item count */}
-          <p className="text-xs text-purple-400 font-medium">
+          <p className="text-xs text-purple-400 font-medium whitespace-nowrap">
             {elementCount} {elementCount === 1 ? "Item" : "Items"}
           </p>
         </div>
-      </div>
     </div>
   );
 }

@@ -105,11 +105,17 @@ function textToHtml(text: string): string {
   return text.split("\n").map(line => `<p>${line || "<br>"}</p>`).join("");
 }
 
-// Convert HTML back to plain text
+// Convert HTML back to plain text, preserving line breaks between paragraphs
 function htmlToText(html: string): string {
   if (!html) return "";
+  // Replace closing </p> tags with newline before stripping HTML
+  const withBreaks = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>\s*<p>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<p>/gi, "");
   const div = document.createElement("div");
-  div.innerHTML = html;
+  div.innerHTML = withBreaks;
   return (div.textContent || div.innerText || "").trim();
 }
 
