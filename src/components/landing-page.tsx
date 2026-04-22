@@ -26,6 +26,13 @@ import Image from 'next/image';
 
 // ─── Feature Sections Data ──────────────────────────────────────────────────
 
+interface FeatureDetail {
+  title: string;
+  description: string;
+  video?: string;      // optional per-detail video; falls back to section.video
+  duration?: number;   // seconds to show this detail if no distinct video (default 6)
+}
+
 interface FeatureSection {
   id: string;
   icon: typeof Compass;
@@ -33,9 +40,9 @@ interface FeatureSection {
   headline: string;
   highlight: string;
   description: string;
-  video?: string; // optimized mp4 path
+  video?: string; // fallback/section-level video
   poster?: string; // screenshot fallback
-  details: { title: string; description: string }[];
+  details: FeatureDetail[];
 }
 
 const FEATURE_SECTIONS: FeatureSection[] = [
@@ -119,26 +126,73 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
   const videoRef = useRef<HTMLVideoElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
+  const [isInView, setIsInView] = useState(false);
+  // Combined state so idx and progress update atomically — prevents the new
+  // active bar from momentarily rendering at 100% before the timer resets.
+  const [cycle, setCycle] = useState({ idx: 0, progress: 0 });
+  const activeDetailIdx = cycle.idx;
+  const progress = cycle.progress;
 
-  // Play video when section is in view
+  const activeDetail = section.details[activeDetailIdx];
+  const activeVideoSrc = activeDetail?.video || section.video;
+  const activeDuration = activeDetail?.duration ?? 6; // seconds fallback
+  const totalDetails = section.details.length;
+
+  // Observe visibility so we only run the timer when the section is on-screen
   useEffect(() => {
-    if (!section.video || !videoRef.current) return;
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          videoRef.current?.play().catch(() => {});
-        } else {
-          videoRef.current?.pause();
-        }
-      },
+      ([entry]) => setIsInView(entry.isIntersecting),
       { threshold: 0.3 }
     );
     if (sectionRef.current) observer.observe(sectionRef.current);
     return () => observer.disconnect();
-  }, [section.video]);
+  }, []);
+
+  // Play/pause video when in view
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (isInView) {
+      videoRef.current.play().catch(() => {});
+    } else {
+      videoRef.current.pause();
+    }
+  }, [isInView, activeVideoSrc]);
+
+  // Cycle through details on a timer (6s default) while in view.
+  // idx + progress advance atomically to avoid transition jumps.
+  useEffect(() => {
+    if (!isInView) return;
+    const startedAt = performance.now();
+    let raf = 0;
+    const tick = () => {
+      const elapsed = (performance.now() - startedAt) / 1000;
+      const pct = elapsed / activeDuration;
+      if (pct >= 1) {
+        setCycle((prev) => ({ idx: (prev.idx + 1) % totalDetails, progress: 0 }));
+        return;
+      }
+      setCycle((prev) => ({ idx: prev.idx, progress: pct }));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isInView, activeDetailIdx, activeDuration, totalDetails]);
+
+  // Reset video progress when switching details
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [activeDetailIdx]);
+
+  const handleDetailClick = (i: number) => {
+    if (i === activeDetailIdx) return;
+    setCycle({ idx: i, progress: 0 });
+  };
 
   const mediaContent = (
-    <div className="lg:sticky lg:top-28 w-full lg:w-1/2">
+    <div className="lg:sticky lg:top-28 w-full lg:w-3/4">
       <motion.div
         initial={{ opacity: 0, x: isEven ? -40 : 40 }}
         whileInView={{ opacity: 1, x: 0 }}
@@ -153,25 +207,25 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
             <div className="w-2.5 h-2.5 rounded-full bg-white/15" />
             <div className="w-2.5 h-2.5 rounded-full bg-white/15" />
           </div>
-          <span className="text-xs text-white/30 ml-3">{section.label}</span>
+          <span className="text-xs text-white/30 ml-3">{section.label} · {activeDetail?.title}</span>
         </div>
 
         {/* Video or poster */}
         <div className="relative aspect-video bg-gradient-to-br from-purple-950/30 to-black">
-          {section.video ? (
+          {activeVideoSrc ? (
             <>
               {!isVideoLoaded && section.poster && (
                 <Image
                   src={section.poster}
                   alt={section.label}
                   fill
-                  sizes="(max-width: 768px) 100vw, 50vw"
+                  sizes="(max-width: 768px) 100vw, 75vw"
                   className="object-cover"
                 />
               )}
               <video
                 ref={videoRef}
-                src={section.video}
+                src={activeVideoSrc}
                 muted
                 loop
                 playsInline
@@ -186,10 +240,9 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
                 src={section.poster}
                 alt={section.label}
                 fill
-                sizes="(max-width: 768px) 100vw, 50vw"
+                sizes="(max-width: 768px) 100vw, 75vw"
                 className="object-cover"
               />
-              {/* "Demo coming soon" overlay */}
               <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                 <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 border border-white/10 backdrop-blur-sm">
                   <Play className="w-4 h-4 text-purple-400" />
@@ -204,43 +257,64 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
   );
 
   const textContent = (
-    <div className="w-full lg:w-1/2 space-y-8">
-      {/* Section label */}
+    <div className="w-full lg:w-1/4 space-y-6">
+      {/* Headline + description */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, margin: '-100px' }}
         transition={{ duration: 0.4 }}
       >
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-            <section.icon className="w-4 h-4 text-purple-400" />
-          </div>
-          <span className="text-sm font-medium text-purple-400">{section.label}</span>
-        </div>
-        <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
+        <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
           {section.headline}{' '}
           <span className="text-gradient-purple">{section.highlight}</span>
         </h2>
-        <p className="text-white/50 text-lg leading-relaxed max-w-lg">
+        <p className="text-white/50 text-base leading-relaxed">
           {section.description}
         </p>
       </motion.div>
 
-      {/* Detail cards */}
-      {section.details.map((detail, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-50px' }}
-          transition={{ duration: 0.4, delay: i * 0.1 }}
-          className="p-5 rounded-xl border border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04] transition-all"
-        >
-          <h3 className="text-base font-semibold mb-1.5">{detail.title}</h3>
-          <p className="text-sm text-white/40 leading-relaxed">{detail.description}</p>
-        </motion.div>
-      ))}
+      {/* Detail cards — clickable, with per-item progress bar */}
+      <div className="space-y-3">
+        {section.details.map((detail, i) => {
+          const isActive = i === activeDetailIdx;
+          return (
+            <motion.button
+              key={i}
+              type="button"
+              onClick={() => handleDetailClick(i)}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-50px' }}
+              transition={{ duration: 0.4, delay: i * 0.1 }}
+              className={`relative w-full overflow-hidden p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                isActive
+                  ? 'border-purple-400/50 bg-purple-500/5 shadow-[0_0_24px_rgba(168,85,247,0.08)]'
+                  : 'border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]'
+              }`}
+            >
+              <h3 className={`text-sm font-semibold mb-1 ${isActive ? 'text-white' : 'text-white/80'}`}>
+                {detail.title}
+              </h3>
+              <p className="text-xs text-white/40 leading-relaxed">{detail.description}</p>
+              {/* Progress bar (only on active) */}
+              <div className="absolute left-0 right-0 bottom-0 h-[2px] bg-white/5 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-400 to-violet-500"
+                  style={{
+                    width: isActive ? `${progress * 100}%` : '0%',
+                    // Smooth collapse when leaving active; minimal easing while filling
+                    // so the bar stays in sync with the timer.
+                    transition: isActive
+                      ? 'width 120ms linear'
+                      : 'width 500ms cubic-bezier(0.4, 0, 0.2, 1)',
+                  }}
+                />
+              </div>
+            </motion.button>
+          );
+        })}
+      </div>
     </div>
   );
 
@@ -249,11 +323,40 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
       ref={sectionRef}
       className="relative py-16 md:py-24 px-4"
     >
-      <div className="max-w-6xl mx-auto">
-        <div className={`flex flex-col lg:flex-row gap-10 lg:gap-16 items-start ${isEven ? '' : 'lg:flex-row-reverse'}`}>
+      <div className="max-w-7xl mx-auto">
+        {/* Centered section header — icon badge + label, defines each view */}
+        <motion.div
+          initial={{ opacity: 0, y: 30, scale: 0.92 }}
+          whileInView={{ opacity: 1, y: 0, scale: 1 }}
+          viewport={{ once: true, margin: '-120px' }}
+          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          className="flex flex-col items-center justify-center mb-12 md:mb-16"
+        >
+          <div className="relative">
+            {/* Glow ring */}
+            <div className="absolute inset-0 rounded-2xl bg-purple-500/30 blur-2xl scale-150" />
+            {/* Icon badge */}
+            <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500/30 to-violet-600/20 border border-purple-400/40 flex items-center justify-center shadow-[0_8px_32px_rgba(168,85,247,0.25)] backdrop-blur-sm">
+              <section.icon className="w-6 h-6 text-purple-200" />
+            </div>
+          </div>
+          <span className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-purple-300/80">
+            {section.label}
+          </span>
+          <div className="mt-3 h-px w-16 bg-gradient-to-r from-transparent via-purple-400/50 to-transparent" />
+        </motion.div>
+
+        {/* Content reveal wrapper */}
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-80px' }}
+          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
+          className={`flex flex-col lg:flex-row gap-10 lg:gap-12 items-start ${isEven ? '' : 'lg:flex-row-reverse'}`}
+        >
           {mediaContent}
           {textContent}
-        </div>
+        </motion.div>
       </div>
     </section>
   );
@@ -669,7 +772,14 @@ export function LandingPage() {
             transition={{ duration: 0.6 }}
           >
             <div className="mx-auto mb-8 w-24 h-24 md:w-32 md:h-32 relative">
-              <video src="/images/Tesseract-1K.mp4" width={128} height={128} className="object-contain" autoPlay muted loop playsInline />
+              <Image
+                src="/images/holographic-cube.webp"
+                alt="Holographic cube"
+                width={128}
+                height={128}
+                className="object-contain w-full h-full"
+                style={{ mixBlendMode: 'screen' }}
+              />
             </div>
 
             <h2 className="text-4xl md:text-6xl font-bold mb-6">

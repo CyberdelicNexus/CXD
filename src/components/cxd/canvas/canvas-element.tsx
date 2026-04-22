@@ -86,6 +86,7 @@ import {
   Lock,
   Unlock,
   X,
+  Check,
   Minus,
   Maximize2,
   Crop,
@@ -282,6 +283,7 @@ export function CanvasElementRenderer({
   const pushCanvasHistory = useCXDStore((state) => state.pushCanvasHistory);
 
   const [isEditing, setIsEditing] = useState(false);
+  const [isCroppingImage, setIsCroppingImage] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showLinkViewMenu, setShowLinkViewMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -633,6 +635,7 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isSelected={isSelected}
             isReadOnly={isReadOnly}
+            onCropModeChange={setIsCroppingImage}
           />
         );
       case "shape":
@@ -713,27 +716,41 @@ export function CanvasElementRenderer({
     freeformCardType === "note" &&
     !(element as FreeformElement).isDocument;
 
-  // For note cards: observe actual DOM height via ResizeObserver and sync to
-  // element.height so the group reflow system always sees the real rendered size
-  // (including when the editor is open and taller than the compact view).
+  // Any freeform card rendered with height:auto needs its element.height synced
+  // from the DOM so connectors and selection math target the real rendered bounds.
+  const isAutoHeightFreeform =
+    element.type === "freeform" &&
+    !(element as FreeformElement).isDocument;
+
+  // Observe actual DOM size via ResizeObserver and sync element.width/height so
+  // connectors, group reflow, and alignment guides target the real rendered bounds.
   const lastObservedHeight = useRef(element.height);
+  const lastObservedWidth = useRef(element.width);
   useEffect(() => {
-    if (!isResizableNoteCard) return;
+    if (!isAutoHeightFreeform) return;
     const el = elementRef.current;
     if (!el) return;
+    const minHeight = freeformCardType === "task" ? 0 : 300;
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
       const h = Math.ceil(entry.contentRect.height);
-      const next = Math.max(300, h);
-      if (Math.abs(next - lastObservedHeight.current) > 3) {
-        lastObservedHeight.current = next;
-        onUpdate({ height: next });
+      const w = Math.ceil(entry.contentRect.width);
+      const nextH = Math.max(minHeight, h);
+      const updates: { height?: number; width?: number } = {};
+      if (Math.abs(nextH - lastObservedHeight.current) > 3) {
+        lastObservedHeight.current = nextH;
+        updates.height = nextH;
       }
+      if (Math.abs(w - lastObservedWidth.current) > 3) {
+        lastObservedWidth.current = w;
+        updates.width = w;
+      }
+      if (Object.keys(updates).length) onUpdate(updates);
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [isResizableNoteCard]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAutoHeightFreeform, freeformCardType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Don't render connectors as regular elements
   if (element.type === "connector") return null;
@@ -855,6 +872,7 @@ export function CanvasElementRenderer({
     >
       {/* Connection port - floating dot that slides along the nearest edge following the cursor */}
       {onStartConnector &&
+        !isCroppingImage &&
         element.type !== "line" &&
         element.type !== "text" &&
         !(element.type === "freeform" && (element as FreeformElement).isDocument) && (
@@ -879,7 +897,7 @@ export function CanvasElementRenderer({
           />
         )}
       {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
-      {isSelected && !isDragging && element.type !== "line" && !isReadOnly && !isMultiSelected && (
+      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && (
         /* Counter-rotation wrapper: un-rotates around element center so menu stays fixed above */
         <div
           className="absolute inset-0 pointer-events-none z-50"
@@ -1667,9 +1685,10 @@ export function CanvasElementRenderer({
       )}
       {/* Element content */}
       {renderContent()}
-      {/* Resize handles - shown when selected (not for boards or line elements) */}
+      {/* Resize handles - shown when selected (not for boards, lines, or images in crop mode) */}
       {isSelected &&
         !isDragging &&
+        !isCroppingImage &&
         element.type !== "board" &&
         element.type !== "line" && (
           <>
@@ -1765,10 +1784,11 @@ export function CanvasElementRenderer({
             )}
           </>
         )}
-      {/* Rotation handle — line + dot below element, for shapes and images */}
+      {/* Rotation handle — for shapes (below) and images (right side, to clear edit pill) */}
       {isSelected &&
         !isDragging &&
         !isEditing &&
+        !isCroppingImage &&
         !isReadOnly &&
         !element.locked &&
         (element.type === "shape" || element.type === "image") && (
@@ -1777,6 +1797,7 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             canvasZoom={canvasZoom}
             onResizeStart={pushCanvasHistory}
+            side={element.type === "image" ? "right" : "bottom"}
           />
         )}
       {/* Text font-size resize handle - shown when text selected and not editing */}
@@ -2046,17 +2067,19 @@ function ResizeHandle({
   );
 }
 
-// Rotation handle — line + dot below the element, drag to rotate
+// Rotation handle — line + dot extending from the element, drag to rotate
 function RotationHandle({
   element,
   onUpdate,
   canvasZoom,
   onResizeStart,
+  side = "bottom",
 }: {
   element: CanvasElement;
   onUpdate: (updates: Partial<CanvasElement>) => void;
   canvasZoom: number;
   onResizeStart?: () => void;
+  side?: "bottom" | "right";
 }) {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -2110,6 +2133,32 @@ function RotationHandle({
   const handleScale = 1 / canvasZoom;
   const stemLength = 30;
   const dotSize = 10;
+
+  if (side === "right") {
+    return (
+      <div
+        className="absolute top-1/2 pointer-events-none flex items-center"
+        style={{
+          right: -(stemLength + dotSize / 2 + 4),
+          transform: `translateY(-50%) scale(${handleScale})`,
+          transformOrigin: "left center",
+        }}
+      >
+        {/* Stem line */}
+        <div
+          className="bg-primary/60"
+          style={{ width: stemLength, height: 1.5 }}
+        />
+        {/* Dot handle */}
+        <div
+          className="rounded-full bg-primary border-2 border-background cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+          style={{ width: dotSize, height: dotSize }}
+          onMouseDown={handleMouseDown}
+          title="Drag to rotate (Shift for 15° snaps)"
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -5020,16 +5069,22 @@ function ImageCard({
   onUpdate,
   isSelected,
   isReadOnly = false,
+  onCropModeChange,
 }: {
   element: ImageElement;
   onUpdate: (updates: Partial<ImageElement>) => void;
   isSelected: boolean;
   isReadOnly?: boolean;
+  onCropModeChange?: (cropping: boolean) => void;
 }) {
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
-  const [isEditMode, setIsEditMode] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
+
+  // Notify parent when crop mode changes so resize handles can hide
+  useEffect(() => {
+    onCropModeChange?.(isCropping);
+  }, [isCropping, onCropModeChange]);
   const [cropBox, setCropBox] = useState(
     element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 },
   );
@@ -5056,6 +5111,10 @@ function ImageCard({
   const compressAndUploadImage = async (file: File) => {
     setIsUploading(true);
     try {
+      // Animated formats (GIF, animated WebP) must be uploaded as-is —
+      // re-encoding through a <canvas> strips every frame but the first.
+      const isAnimated = file.type === "image/gif" || file.type === "image/webp";
+
       // Create image element to read dimensions
       const img = document.createElement("img");
       const objectUrl = URL.createObjectURL(file);
@@ -5066,37 +5125,49 @@ function ImageCard({
         img.src = objectUrl;
       });
 
-      // Compress if needed
-      const maxWidth = 1600;
       let width = img.width;
       let height = img.height;
+      let blob: Blob;
+      let ext: string;
+      let contentType: string;
 
-      if (width > maxWidth) {
-        height = (height * maxWidth) / width;
-        width = maxWidth;
+      if (isAnimated) {
+        // Upload the original file unchanged so animation is preserved
+        blob = file;
+        ext = file.type === "image/gif" ? "gif" : "webp";
+        contentType = file.type;
+        URL.revokeObjectURL(objectUrl);
+      } else {
+        // Compress non-animated images through a canvas
+        const maxWidth = 1600;
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        URL.revokeObjectURL(objectUrl);
+
+        blob = await new Promise<Blob>((resolve) => {
+          canvas.toBlob((b) => resolve(b!), "image/webp", 0.8);
+        });
+        ext = "webp";
+        contentType = "image/webp";
       }
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx?.drawImage(img, 0, 0, width, height);
-
-      URL.revokeObjectURL(objectUrl);
-
-      // Convert to blob with compression
-      const blob = await new Promise<Blob>((resolve) => {
-        canvas.toBlob((b) => resolve(b!), "image/webp", 0.8);
-      });
 
       // Upload to Supabase Storage
       const supabase = createClient();
-      const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.webp`;
+      const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;
 
       const { data, error } = await supabase.storage
         .from("canvas-uploads")
         .upload(fileName, blob, {
-          contentType: "image/webp",
+          contentType,
           cacheControl: "3600",
         });
 
@@ -5404,7 +5475,6 @@ function ImageCard({
       },
     });
     setIsCropping(false);
-    setIsEditMode(false);
   };
 
   const cancelCrop = () => {
@@ -5449,7 +5519,6 @@ function ImageCard({
       onUpdate({ imageEdits: undefined });
     }
     setCropBox({ x: 0, y: 0, width: 100, height: 100 });
-    setIsEditMode(false);
   };
 
   // Show upload UI when no image
@@ -5519,8 +5588,10 @@ function ImageCard({
       <div
         ref={imageContainerRef}
         className={cn(
-          "w-full h-full overflow-hidden rounded-lg transition-all relative",
-          isSelected ? "ring-0" : "", // Selection ring is handled by parent
+          "w-full h-full rounded-lg transition-all relative",
+          // Only clip image content, not the crop overlay handles
+          !isCropping && "overflow-hidden",
+          isSelected ? "ring-0" : "",
           isCropping && "ring-2 ring-cyan-400",
         )}
       >
@@ -5542,11 +5613,14 @@ function ImageCard({
               clipPath: `inset(${crop.y}% ${100 - crop.x - crop.width}% ${100 - crop.y - crop.height}% ${crop.x}%)`,
             }}
           >
-            <NextImage
+            {/* Plain <img> keeps the same DOM node across parent re-renders,
+                so animated GIFs / WebPs don't restart their loop on canvas
+                mouse-move / zoom / selection updates. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src={element.src}
               alt={element.alt || ""}
-              fill
-              className="w-full h-full object-contain"
+              className="absolute inset-0 w-full h-full object-contain"
               style={{
                 objectFit: "contain",
                 transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
@@ -5554,7 +5628,6 @@ function ImageCard({
               onError={() => setHasImage(false)}
               draggable={false}
               onDragStart={(e) => e.preventDefault()}
-              unoptimized
             />
           </div>
         )}
@@ -5642,107 +5715,86 @@ function ImageCard({
           </div>
         )}
       </div>
-      {/* Edit toolbar - shown when selected */}
+      {/* Image edit toolbar — single icon-only pill below the image.
+          Positioned at -bottom-16 to clear the rotation handle (~ -39px stem). */}
       {isSelected && !isCropping && !isReadOnly && (
         <div
-          className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10"
+          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
-            onClick={() => setIsEditMode(!isEditMode)}
-            className={cn(
-              "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-              isEditMode && "bg-primary/20 text-primary",
-            )}
-            title="Edit Image"
+            onClick={() => {
+              setIsCropping(true);
+              setCropBox(
+                element.imageEdits?.preCropBounds
+                  ? { x: 0, y: 0, width: 100, height: 100 }
+                  : crop,
+              );
+            }}
+            className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            title="Crop"
           >
             <Crop className="w-4 h-4" />
           </button>
+          <button
+            onClick={toggleFlipH}
+            className={cn(
+              "p-2 rounded-md transition-colors",
+              flipH
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
+            )}
+            title="Flip horizontal"
+          >
+            <FlipHorizontal className="w-4 h-4" />
+          </button>
+          <button
+            onClick={toggleFlipV}
+            className={cn(
+              "p-2 rounded-md transition-colors",
+              flipV
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
+            )}
+            title="Flip vertical"
+          >
+            <FlipVertical className="w-4 h-4" />
+          </button>
           {hasEdits && (
-            <button
-              onClick={resetImage}
-              className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-              title="Reset Image"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
+            <>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              <button
+                onClick={resetImage}
+                className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Reset image"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            </>
           )}
-        </div>
-      )}
-      {/* Edit panel */}
-      {isEditMode && isSelected && !isCropping && !isReadOnly && (
-        <div
-          className="absolute -bottom-24 left-1/2 -translate-x-1/2 flex flex-col gap-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10 min-w-[200px]"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="text-xs font-medium text-muted-foreground mb-1">
-            Image Edits
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setIsCropping(true);
-                // If element was already resized for crop, start fresh within current view
-                setCropBox(
-                  element.imageEdits?.preCropBounds
-                    ? { x: 0, y: 0, width: 100, height: 100 }
-                    : crop,
-                );
-              }}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-primary/10 hover:bg-primary/20 text-sm transition-colors"
-            >
-              <Crop className="w-3.5 h-3.5" />
-              Crop
-            </button>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={toggleFlipH}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
-                flipH
-                  ? "bg-primary/20 text-primary"
-                  : "bg-primary/10 hover:bg-primary/20",
-              )}
-            >
-              <FlipHorizontal className="w-3.5 h-3.5" />
-              Flip H
-            </button>
-            <button
-              onClick={toggleFlipV}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
-                flipV
-                  ? "bg-primary/20 text-primary"
-                  : "bg-primary/10 hover:bg-primary/20",
-              )}
-            >
-              <FlipVertical className="w-3.5 h-3.5" />
-              Flip V
-            </button>
-          </div>
         </div>
       )}
       {/* Crop controls */}
       {isCropping && (
         <div
-          className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card backdrop-blur border border-cyan-500/50 shadow-lg z-10"
+          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-cyan-500/50 shadow-lg z-10"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
             onClick={applyCrop}
-            className="px-3 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition-colors"
+            title="Apply crop"
+            className="p-2 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 transition-colors flex items-center justify-center"
           >
-            Apply Crop
+            <Check className="w-4 h-4" />
           </button>
           <button
             onClick={cancelCrop}
-            className="px-3 py-1 rounded bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground text-sm transition-colors"
+            title="Cancel"
+            className="p-2 rounded-md bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
           >
-            Cancel
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}

@@ -497,21 +497,69 @@ export default function CXDPage() {
 
     const state = useCXDStore.getState();
     let tourIdForView: 'canvas' | 'map' | 'plan' | null = null;
-    if (canvasViewMode === "canvas") tourIdForView = "canvas";
-    else if (canvasViewMode === "hexagon" || canvasViewMode === "hypercube") tourIdForView = "map";
-    else if (canvasViewMode === "plan") tourIdForView = "plan";
-
-    if (tourIdForView && !state.isTourCompleted(tourIdForView) && !state.tourActive) {
-      const timer = setTimeout(() => {
-        // Re-check in case tour was started or completed during the delay
-        const freshState = useCXDStore.getState();
-        if (!freshState.isTourCompleted(tourIdForView!) && !freshState.tourActive) {
-          freshState.startTour(tourIdForView!);
-        }
-      }, 1000);
-      return () => clearTimeout(timer);
+    let firstTargetId: string | null = null;
+    if (canvasViewMode === "canvas") {
+      tourIdForView = "canvas";
+      firstTargetId = "canvas-toolkit";
+    } else if (canvasViewMode === "hexagon" || canvasViewMode === "hypercube") {
+      tourIdForView = "map";
+      firstTargetId = "map-face-selector";
+    } else if (canvasViewMode === "plan") {
+      tourIdForView = "plan";
+      firstTargetId = "plan-roadmap-tab";
     }
-  }, [canvasViewMode, viewMode, isRestoring]);
+
+    if (!tourIdForView || state.isTourCompleted(tourIdForView) || state.tourActive) return;
+
+    // Wait until the view's first target element is actually rendered in the DOM.
+    // This avoids the tour firing while a view-specific LoadingScreen is still visible
+    // (e.g. map/plan dynamic imports).
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const MAX_WAIT_MS = 20000;
+    const startedAt = Date.now();
+
+    const tryStart = () => {
+      if (cancelled) return;
+      // Bail out if state changed while waiting
+      const freshState = useCXDStore.getState();
+      if (freshState.tourActive || freshState.isTourCompleted(tourIdForView!)) {
+        cleanup();
+        return;
+      }
+      if (firstTargetId && document.querySelector(`[data-tour-id="${firstTargetId}"]`)) {
+        // Small settle delay so the UI isn't mid-animation when the tooltip appears
+        timeoutId = setTimeout(() => {
+          if (cancelled) return;
+          const s = useCXDStore.getState();
+          if (!s.tourActive && !s.isTourCompleted(tourIdForView!)) {
+            s.startTour(tourIdForView!);
+          }
+          cleanup();
+        }, 400);
+      } else if (Date.now() - startedAt > MAX_WAIT_MS) {
+        // Give up if the view never finished loading within a reasonable window
+        cleanup();
+      }
+    };
+
+    const cleanup = () => {
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+      intervalId = null;
+      timeoutId = null;
+    };
+
+    // First check immediately, then poll every 250ms
+    tryStart();
+    intervalId = setInterval(tryStart, 250);
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [canvasViewMode, viewMode, isRestoring, minLoadTimePassed]);
 
   // Create a unique key for the current view to trigger transitions (only for wizard and plan)
   const viewKey = `${viewMode}-${canvasViewMode}`;

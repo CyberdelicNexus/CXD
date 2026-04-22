@@ -2478,14 +2478,19 @@ export function CXDCanvas() {
   // System clipboard paste handler (Ctrl/Cmd+V with actual clipboard data)
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
-      // Skip if user is editing text in an input/textarea/contenteditable
-      const target = e.target as HTMLElement;
-      const isEditing =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.contentEditable === 'true' ||
-        target.closest('[contenteditable="true"]');
-      if (isEditing) return;
+      // Skip if user is actively typing in any text editor (input, textarea,
+      // or contentEditable like TipTap). Check BOTH the event target and the
+      // currently-focused element (isContentEditable walks up the ancestors).
+      const isEditorElement = (el: Element | null | undefined): boolean => {
+        if (!el || !(el as HTMLElement).tagName) return false;
+        const h = el as HTMLElement;
+        if (h.tagName === 'INPUT' || h.tagName === 'TEXTAREA') return true;
+        if (h.isContentEditable) return true;
+        if (h.closest && h.closest('[contenteditable="true"]')) return true;
+        return false;
+      };
+      if (isEditorElement(e.target as Element)) return;
+      if (isEditorElement(document.activeElement)) return;
 
       // Skip if there are canvas elements in our internal clipboard (handled by keydown)
       if (clipboard.length > 0) return;
@@ -3785,6 +3790,10 @@ export function CXDCanvas() {
 
         // Upload the image
         try {
+          // Animated formats must be uploaded unchanged — canvas re-encoding
+          // collapses every frame but the first.
+          const isAnimated = file.type === "image/gif" || file.type === "image/webp";
+
           // Create image element to read dimensions
           const img = document.createElement("img");
           const objectUrl = URL.createObjectURL(file);
@@ -3795,37 +3804,47 @@ export function CXDCanvas() {
             img.src = objectUrl;
           });
 
-          // Compress if needed
-          const maxWidth = 1600;
           let width = img.width;
           let height = img.height;
+          let blob: Blob;
+          let ext: string;
+          let contentType: string;
 
-          if (width > maxWidth) {
-            height = (height * maxWidth) / width;
-            width = maxWidth;
+          if (isAnimated) {
+            blob = file;
+            ext = file.type === "image/gif" ? "gif" : "webp";
+            contentType = file.type;
+            URL.revokeObjectURL(objectUrl);
+          } else {
+            const maxWidth = 1600;
+            if (width > maxWidth) {
+              height = (height * maxWidth) / width;
+              width = maxWidth;
+            }
+
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            ctx?.drawImage(img, 0, 0, width, height);
+
+            URL.revokeObjectURL(objectUrl);
+
+            blob = await new Promise<Blob>((resolve) => {
+              canvas.toBlob((b) => resolve(b!), "image/webp", 0.8);
+            });
+            ext = "webp";
+            contentType = "image/webp";
           }
-
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          ctx?.drawImage(img, 0, 0, width, height);
-
-          URL.revokeObjectURL(objectUrl);
-
-          // Convert to blob
-          const blob = await new Promise<Blob>((resolve) => {
-            canvas.toBlob((b) => resolve(b!), "image/webp", 0.8);
-          });
 
           // Upload to Supabase Storage
           const supabase = (await import('../../../supabase/client')).createClient();
-          const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.webp`;
+          const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;
 
           const { data, error } = await supabase.storage
             .from("canvas-uploads")
             .upload(fileName, blob, {
-              contentType: "image/webp",
+              contentType,
               cacheControl: "3600",
             });
 
@@ -5464,6 +5483,28 @@ export function CXDCanvas() {
                 } as any);
                 setSelectedElementId(base.id);
                 setSelectedElementIds(new Set([base.id]));
+              } else if (choice === 'document') {
+                // Document: compact icon card with the pasted text as body
+                const base = makeElementBase('freeform', d.canvasX, d.canvasY);
+                const firstLine = (d.text.split('\n')[0] || 'Pasted Document').slice(0, 80);
+                // Convert plain text to <p> paragraphs so the rich editor renders it
+                const html = d.text.split('\n').map(l => `<p>${l || '<br>'}</p>`).join('');
+                syncAddElement({
+                  ...base,
+                  type: 'freeform',
+                  cardType: 'note',
+                  isDocument: true,
+                  noteTitle: firstLine,
+                  noteBody: html,
+                  content: `${firstLine}\n${d.text}`,
+                  emoji: '📄',
+                  style: {
+                    bgColor: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)',
+                    textColor: '#ffffff',
+                  },
+                } as any);
+                setSelectedElementId(base.id);
+                setSelectedElementIds(new Set([base.id]));
               } else {
                 // floating text
                 const base = makeElementBase('text', d.canvasX, d.canvasY);
@@ -5537,6 +5578,16 @@ function ClipboardPasteDialog({
                 <div>
                   <div className="text-sm font-medium">Note</div>
                   <div className="text-xs text-muted-foreground">Paste into a note card body</div>
+                </div>
+              </button>
+              <button
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:bg-primary/10 hover:border-primary/50 transition-colors text-left"
+                onClick={() => onConfirm('document')}
+              >
+                <span className="text-xl">📄</span>
+                <div>
+                  <div className="text-sm font-medium">Document</div>
+                  <div className="text-xs text-muted-foreground">Paste into a compact document card</div>
                 </div>
               </button>
               <button

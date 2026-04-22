@@ -2,7 +2,20 @@
 
 const path = require('path');
 
+// Use separate build directories for dev vs production so running `next build`
+// never overwrites the dev server's webpack chunks (and vice-versa). This was
+// the #1 cause of "Cannot find module './XXXX.js'" and 404s on HMR chunks
+// after switching between `npm run dev` and `npm run build`.
+const distDir = process.env.NODE_ENV === 'production' ? '.next' : '.next-dev';
+
 const nextConfig = {
+    distDir,
+    // Keep stale pages in memory longer during dev so rapid saves don't evict
+    // chunks the browser is still trying to fetch.
+    onDemandEntries: {
+        maxInactiveAge: 60 * 1000,
+        pagesBufferLength: 5,
+    },
     async headers() {
         return [
             {
