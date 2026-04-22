@@ -1942,18 +1942,60 @@ export function CXDCanvas() {
               ? [draggingElement]
               : [];
 
-        // Move elements into the target board
+        // Build the "occupied" list from elements already inside the target board
+        // so newly-dropped elements never overlap them or each other.
+        type Rect = { x: number; y: number; width: number; height: number };
+        const occupied: Rect[] = canvasElements
+          .filter((el) => el.boardId === targetChildBoardId && el.type !== "line" && el.type !== "connector")
+          .map((el) => ({
+            x: el.x,
+            y: el.y,
+            width: el.width || 200,
+            height: el.height || 200,
+          }));
+
+        const GRID_STEP_X = 260;
+        const GRID_STEP_Y = 220;
+        const MARGIN = 32;
+        const START_X = 80;
+        const START_Y = 80;
+        const MAX_COLS = 8;
+        const MAX_ROWS = 30;
+
+        const findEmptySlot = (width: number, height: number): { x: number; y: number } => {
+          const overlapsAny = (cx: number, cy: number) =>
+            occupied.some(
+              (p) =>
+                cx < p.x + p.width + MARGIN &&
+                cx + width + MARGIN > p.x &&
+                cy < p.y + p.height + MARGIN &&
+                cy + height + MARGIN > p.y,
+            );
+          for (let row = 0; row < MAX_ROWS; row++) {
+            for (let col = 0; col < MAX_COLS; col++) {
+              const cx = START_X + col * GRID_STEP_X;
+              const cy = START_Y + row * GRID_STEP_Y;
+              if (!overlapsAny(cx, cy)) return { x: cx, y: cy };
+            }
+          }
+          // Fallback: jittered random if grid is fully packed
+          return { x: START_X + Math.random() * 400, y: START_Y + Math.random() * 400 };
+        };
+
+        // Move elements into the target board, placing each in the next empty slot
         elementsToMove.forEach((id) => {
           const el = canvasElements.find((e) => e.id === id);
-          if (el && el.type !== "board") {
-            // Update boardId to move element into the board
-            updateCanvasElement(id, {
-              boardId: targetChildBoardId,
-              // Center items in the new board canvas
-              x: 100 + Math.random() * 200,
-              y: 100 + Math.random() * 200,
-            });
-          }
+          if (!el || el.type === "board") return;
+          const w = el.width || 200;
+          const h = el.height || 200;
+          const { x, y } = findEmptySlot(w, h);
+          // Reserve this slot so subsequent items in the same drop don't overlap it
+          occupied.push({ x, y, width: w, height: h });
+          updateCanvasElement(id, {
+            boardId: targetChildBoardId,
+            x,
+            y,
+          });
         });
 
         // Clear selection after move
