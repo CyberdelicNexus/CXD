@@ -10,6 +10,7 @@ import SubscriptionConfirmed from '../../../../../emails/subscription-confirmed'
 import SubscriptionCancelled from '../../../../../emails/subscription-cancelled';
 import CreditPurchaseReceipt from '../../../../../emails/credit-purchase-receipt';
 import TrialEndingSoon from '../../../../../emails/trial-ending-soon';
+import TrialConverted from '../../../../../emails/trial-converted';
 import { EMAIL_KINDS, sendKindOnce } from '@/lib/email-kinds';
 
 // Admin client for querying user data
@@ -211,6 +212,61 @@ export async function POST(req: Request) {
             console.error('Failed to send Pro confirmation email:', emailError);
           }
         }
+        break;
+      }
+
+      case 'invoice.paid': {
+        const invoice = event.data.object as Stripe.Invoice;
+
+        // Only act on subscription cycle invoices — ignore one-off invoices.
+        if (invoice.billing_reason !== 'subscription_cycle' && invoice.billing_reason !== 'subscription_create') {
+          break;
+        }
+
+        const subscriptionId = invoice.subscription as string | null;
+        if (!subscriptionId) break;
+
+        const { data: row } = await supabase
+          .from('subscriptions')
+          .select('user_id, status')
+          .eq('stripe_subscription_id', subscriptionId)
+          .single();
+
+        if (!row) break;
+
+        // Only send trial-converted for the FIRST paid invoice after trial.
+        // We detect this by checking Supabase's status — if it's still
+        // 'trialing' at the moment this webhook fires, this is the post-trial
+        // charge and we send the email. On subsequent monthly renewals the
+        // status will already be 'active' and we skip.
+        if (row.status !== 'trialing') break;
+
+        const userInfo = await getUserInfo(row.user_id);
+        if (!userInfo?.email) break;
+
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
+        const nextBillingDate = invoice.period_end
+          ? new Date(invoice.period_end * 1000).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })
+          : 'next month';
+
+        await sendKindOnce({
+          userId: row.user_id,
+          userEmail: userInfo.email,
+          kind: EMAIL_KINDS.TRIAL_CONVERTED,
+          subject: 'Welcome to CXD Canvas Pro',
+          template: TrialConverted({
+            userName: userInfo.name || 'there',
+            amountCharged: `$${(invoice.amount_paid / 100).toFixed(2)}`,
+            nextBillingDate,
+            dashboardUrl: `${baseUrl}/dashboard`,
+            receiptUrl: invoice.hosted_invoice_url || undefined,
+          }),
+          stripeEventId: event.id,
+        });
         break;
       }
 
