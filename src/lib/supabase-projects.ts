@@ -191,6 +191,18 @@ export async function saveProject(project: CXDProject): Promise<boolean> {
     console.log('[saveProject] User is a verified collaborator (found in canvas_collaborators table)');
   }
 
+  const access = await resolveCanvasAccess({
+    supabase,
+    canvasId: project.id,
+    viewerUserId: user.id,
+  });
+  if (!access.canEdit) {
+    console.warn(
+      `[saveProject] Refusing write: canvas ${project.id} is not editable for user ${user.id} (locked=${access.isLocked})`,
+    );
+    return false;
+  }
+
   // Store the complete project object in project_data
   // This ensures all fields including nested structures are persisted:
   // - intentionCore (projectName, mainConcept, coreMessage)
