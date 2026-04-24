@@ -9,6 +9,8 @@ import { getCreditPack } from '@/lib/credit-packs';
 import SubscriptionConfirmed from '../../../../../emails/subscription-confirmed';
 import SubscriptionCancelled from '../../../../../emails/subscription-cancelled';
 import CreditPurchaseReceipt from '../../../../../emails/credit-purchase-receipt';
+import TrialEndingSoon from '../../../../../emails/trial-ending-soon';
+import { EMAIL_KINDS, sendKindOnce } from '@/lib/email-kinds';
 
 // Admin client for querying user data
 function getSupabaseAdmin() {
@@ -209,6 +211,65 @@ export async function POST(req: Request) {
             console.error('Failed to send Pro confirmation email:', emailError);
           }
         }
+        break;
+      }
+
+      case 'customer.subscription.trial_will_end': {
+        const sub = event.data.object as Stripe.Subscription;
+        const customerId = sub.customer as string;
+
+        const { data: row } = await supabase
+          .from('subscriptions')
+          .select('user_id')
+          .eq('stripe_customer_id', customerId)
+          .single();
+
+        if (!row) break;
+
+        const userInfo = await getUserInfo(row.user_id);
+        if (!userInfo?.email) break;
+
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
+        const trialEndDate = sub.trial_end
+          ? new Date(sub.trial_end * 1000).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })
+          : 'soon';
+
+        // Best-effort card info from the default payment method.
+        let cardBrand: string | undefined;
+        let cardLast4: string | undefined;
+        try {
+          const pmId =
+            (sub.default_payment_method as string | null) ??
+            (typeof sub.default_payment_method === 'object'
+              ? (sub.default_payment_method as Stripe.PaymentMethod)?.id
+              : undefined);
+          if (pmId) {
+            const pm = await stripe.paymentMethods.retrieve(pmId);
+            cardBrand = pm.card?.brand ?? undefined;
+            cardLast4 = pm.card?.last4 ?? undefined;
+          }
+        } catch (err) {
+          console.warn('[webhook] Could not retrieve payment method for trial_will_end:', err);
+        }
+
+        await sendKindOnce({
+          userId: row.user_id,
+          userEmail: userInfo.email,
+          kind: EMAIL_KINDS.TRIAL_ENDING_SOON,
+          subject: `Your CXD Canvas Pro trial ends on ${trialEndDate}`,
+          template: TrialEndingSoon({
+            userName: userInfo.name || 'there',
+            trialEndDate,
+            cardBrand,
+            cardLast4,
+            manageBillingUrl: `${baseUrl}/dashboard/profile`,
+          }),
+          stripeEventId: event.id,
+        });
         break;
       }
 
