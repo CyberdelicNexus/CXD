@@ -11,6 +11,7 @@ import SubscriptionCancelled from '../../../../../emails/subscription-cancelled'
 import CreditPurchaseReceipt from '../../../../../emails/credit-purchase-receipt';
 import TrialEndingSoon from '../../../../../emails/trial-ending-soon';
 import TrialConverted from '../../../../../emails/trial-converted';
+import PaymentFailed from '../../../../../emails/payment-failed';
 import { EMAIL_KINDS, sendKindOnce } from '@/lib/email-kinds';
 
 // Admin client for querying user data
@@ -212,6 +213,72 @@ export async function POST(req: Request) {
             console.error('Failed to send Pro confirmation email:', emailError);
           }
         }
+        break;
+      }
+
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object as Stripe.Invoice;
+        const subscriptionId = invoice.subscription as string | null;
+        if (!subscriptionId) break;
+
+        const { data: row } = await supabase
+          .from('subscriptions')
+          .select('user_id')
+          .eq('stripe_subscription_id', subscriptionId)
+          .single();
+
+        if (!row) break;
+
+        // Mark as past_due so our cron scan can find the user at day 5.
+        await supabase
+          .from('subscriptions')
+          .update({ status: 'past_due' })
+          .eq('user_id', row.user_id);
+
+        const userInfo = await getUserInfo(row.user_id);
+        if (!userInfo?.email) break;
+
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
+
+        // Best-effort card + retry info.
+        let cardBrand: string | undefined;
+        let cardLast4: string | undefined;
+        try {
+          const sub = await stripe.subscriptions.retrieve(subscriptionId, {
+            expand: ['default_payment_method'],
+          });
+          const pm = sub.default_payment_method as Stripe.PaymentMethod | null;
+          if (pm && pm.card) {
+            cardBrand = pm.card.brand;
+            cardLast4 = pm.card.last4;
+          }
+        } catch (err) {
+          console.warn('[webhook] Could not fetch card for payment_failed:', err);
+        }
+
+        const nextRetryDate = invoice.next_payment_attempt
+          ? new Date(invoice.next_payment_attempt * 1000).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })
+          : undefined;
+
+        await sendKindOnce({
+          userId: row.user_id,
+          userEmail: userInfo.email,
+          kind: EMAIL_KINDS.PAYMENT_FAILED,
+          subject: 'We could not charge your card',
+          template: PaymentFailed({
+            userName: userInfo.name || 'there',
+            amountDue: `$${(invoice.amount_due / 100).toFixed(2)}`,
+            cardBrand,
+            cardLast4,
+            nextRetryDate,
+            updatePaymentUrl: `${baseUrl}/dashboard/profile`,
+          }),
+          stripeEventId: event.id,
+        });
         break;
       }
 
