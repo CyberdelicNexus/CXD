@@ -33,6 +33,7 @@ import {
 import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorCursors } from "@/components/collaboration";
 import { useCanvasSettings } from "@/hooks/use-canvas-settings";
+import { useCanvasPermissions } from "@/hooks/use-canvas-permissions";
 import { getGradient, GRADIENT_ORDER, type GradientName } from './canvas/connector-gradients';
 import { ConnectorRadialMenu } from './canvas/connector-radial-menu';
 import { CommentPin } from './canvas/comment-pin';
@@ -316,6 +317,8 @@ export function CXDCanvas() {
   } = useCXDStore();
 
   const project = getCurrentProject();
+  const { access: canvasAccess } = useCanvasPermissions(project?.id ?? null);
+  const canEdit = canvasAccess?.canEdit ?? true; // default permissive while loading
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
 
   // Comment threads for current board
@@ -350,34 +353,40 @@ export function CXDCanvas() {
   // In CRDT mode, the store action mutates Y.Doc which auto-broadcasts via SupabaseYjsProvider
   // In LWW mode, we explicitly broadcast the update
   const syncAddElement = useCallback((element: CanvasElement) => {
+    if (!canEdit) return;
     addCanvasElement(element);
     broadcastUpdate({ type: 'element_add', element });
-  }, [addCanvasElement, broadcastUpdate]);
+  }, [addCanvasElement, broadcastUpdate, canEdit]);
 
   const syncUpdateElement = useCallback((elementId: string, updates: Partial<CanvasElement>) => {
+    if (!canEdit) return;
     updateCanvasElement(elementId, updates);
     broadcastUpdate({ type: 'element_update', elementId, changes: updates });
-  }, [updateCanvasElement, broadcastUpdate]);
+  }, [updateCanvasElement, broadcastUpdate, canEdit]);
 
   const syncRemoveElement = useCallback((elementId: string) => {
+    if (!canEdit) return;
     removeCanvasElement(elementId);
     broadcastUpdate({ type: 'element_delete', elementId });
-  }, [removeCanvasElement, broadcastUpdate]);
+  }, [removeCanvasElement, broadcastUpdate, canEdit]);
 
   const syncAddEdge = useCallback((edge: CanvasEdge) => {
+    if (!canEdit) return;
     addCanvasEdge(edge);
     broadcastUpdate({ type: 'edge_add', edge });
-  }, [addCanvasEdge, broadcastUpdate]);
+  }, [addCanvasEdge, broadcastUpdate, canEdit]);
 
   const syncRemoveEdge = useCallback((edgeId: string) => {
+    if (!canEdit) return;
     removeCanvasEdge(edgeId);
     broadcastUpdate({ type: 'edge_delete', edgeId });
-  }, [removeCanvasEdge, broadcastUpdate]);
+  }, [removeCanvasEdge, broadcastUpdate, canEdit]);
 
   const syncUpdateEdge = useCallback((edgeId: string, changes: Partial<CanvasEdge>) => {
+    if (!canEdit) return;
     updateCanvasEdge(edgeId, changes);
     broadcastUpdate({ type: 'edge_update', edgeId, edgeChanges: changes });
-  }, [updateCanvasEdge, broadcastUpdate]);
+  }, [updateCanvasEdge, broadcastUpdate, canEdit]);
 
   const syncUpdateEdgeStyle = useCallback((edgeId: string, style: Partial<NonNullable<CanvasEdge['style']>>) => {
     const project = useCXDStore.getState().getCurrentProject();
@@ -1611,6 +1620,7 @@ export function CXDCanvas() {
         height?: number;
       },
     ) => {
+      if (!canEdit) return;
       const size = DEFAULT_ELEMENT_SIZES[type];
       const placedWidth = options?.width ?? size.width;
       const placedHeight = options?.height ?? size.height;
@@ -1770,12 +1780,14 @@ export function CXDCanvas() {
       createBoard,
       activeBoardId,
       activeSurface,
+      canEdit,
     ],
   );
 
   // Handle element drag start
   const handleElementDragStart = useCallback(
     (elementId: string, e: React.MouseEvent) => {
+      if (!canEdit) return;
       // Prevent drag on right-click (context menu)
       if (e.button === 2) {
         return;
@@ -1916,7 +1928,7 @@ export function CXDCanvas() {
       setDragElementStart({ x: e.clientX, y: e.clientY });
       setSelectedElementId(elementId);
     },
-    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition],
+    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition, canEdit],
   );
 
   // Handle element drag end
@@ -2520,6 +2532,7 @@ export function CXDCanvas() {
   // System clipboard paste handler (Ctrl/Cmd+V with actual clipboard data)
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
+      if (!canEdit) return;
       // Skip if user is actively typing in any text editor (input, textarea,
       // or contentEditable like TipTap). Check BOTH the event target and the
       // currently-focused element (isContentEditable walks up the ancestors).
@@ -2616,7 +2629,7 @@ export function CXDCanvas() {
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clipboard.length, lastMousePos, mouseToCanvasCoords, makeElementBase, pushCanvasHistory, syncAddElement]);
+  }, [clipboard.length, lastMousePos, mouseToCanvasCoords, makeElementBase, pushCanvasHistory, syncAddElement, canEdit]);
 
   // Global click handler to deselect text elements when clicking outside and close all menus
   useEffect(() => {
@@ -3011,6 +3024,7 @@ export function CXDCanvas() {
 
       // PASTE: Ctrl/Cmd + V
       if (isMod && e.key === "v" && clipboard.length > 0) {
+        if (!canEdit) return;
         e.preventDefault();
 
         // Calculate paste position
@@ -3063,6 +3077,7 @@ export function CXDCanvas() {
 
       // DUPLICATE: Ctrl/Cmd + D
       if (isMod && e.key === "d" && selectedElementIds.size > 0) {
+        if (!canEdit) return;
         e.preventDefault();
         pushCanvasHistory(); // Save state before duplicate
 
@@ -3148,6 +3163,7 @@ export function CXDCanvas() {
     setActiveTool,
     connectSelectedElements,
     autoOrganizeSelected,
+    canEdit,
   ]);
 
   // Keep zoomSensitivity in a ref so the wheel handler never needs to be recreated.
@@ -3808,6 +3824,7 @@ export function CXDCanvas() {
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
+      if (!canEdit) return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -3967,7 +3984,7 @@ export function CXDCanvas() {
         }
       }
     },
-    [canvasPosition, canvasZoom, activeBoardId, activeSurface, syncAddElement, syncUpdateElement, syncRemoveElement],
+    [canvasPosition, canvasZoom, activeBoardId, activeSurface, syncAddElement, syncUpdateElement, syncRemoveElement, canEdit],
   );
 
   // Touch handling for mobile
@@ -5122,14 +5139,16 @@ export function CXDCanvas() {
 
 
       {/* Canvas Toolkit */}
-      <CanvasToolkit
-        onPlaceElement={handlePlaceElement}
-        canvasRef={containerRef}
-        canvasPosition={canvasPosition}
-        canvasZoom={canvasZoom}
-        activeTool={activeTool}
-        onActiveToolChange={setActiveTool}
-      />
+      {canEdit && (
+        <CanvasToolkit
+          onPlaceElement={handlePlaceElement}
+          canvasRef={containerRef}
+          canvasPosition={canvasPosition}
+          canvasZoom={canvasZoom}
+          activeTool={activeTool}
+          onActiveToolChange={setActiveTool}
+        />
+      )}
       {/* Zoom Controls */}
       <NavigationToolkit
         canvasZoom={canvasZoom}
