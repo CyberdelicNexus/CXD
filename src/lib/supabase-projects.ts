@@ -3,6 +3,7 @@
 import { createClient } from '@/supabase/client';
 import { CXDProject } from '@/types/cxd-schema';
 import { fixDuplicateStageIds } from './fix-duplicate-stage-ids';
+import { resolveCanvasAccess } from '@/lib/canvas-permissions';
 
 export interface DbCXDProject {
   id: string;
@@ -262,6 +263,23 @@ export async function updateProjectMetadata(
 
   const supabase = createClient();
 
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    console.warn('[updateProjectMetadata] No authenticated user — refusing update');
+    return false;
+  }
+  const access = await resolveCanvasAccess({
+    supabase,
+    canvasId: projectId,
+    viewerUserId: user.id,
+  });
+  if (!access.canEdit) {
+    console.warn(
+      `[updateProjectMetadata] Refusing: canvas ${projectId} is not editable for user ${user.id} (locked=${access.isLocked})`,
+    );
+    return false;
+  }
+
   // Build the column-level update
   const dbUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
   if (updates.name !== undefined) dbUpdate.name = updates.name;
@@ -314,8 +332,32 @@ export async function deleteProjectFromDb(projectId: string): Promise<boolean> {
   if (!projectId || !isValidUUID(projectId)) {
     return false;
   }
-  
+
   const supabase = createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    console.warn('[deleteProjectFromDb] No authenticated user — refusing delete');
+    return false;
+  }
+  const access = await resolveCanvasAccess({
+    supabase,
+    canvasId: projectId,
+    viewerUserId: user.id,
+  });
+  if (access.isFreePrimary) {
+    console.warn(
+      `[deleteProjectFromDb] Refusing: canvas ${projectId} is user ${user.id}'s free-primary canvas`,
+    );
+    return false;
+  }
+  if (!access.canEdit) {
+    console.warn(
+      `[deleteProjectFromDb] Refusing: canvas ${projectId} is not editable for user ${user.id}`,
+    );
+    return false;
+  }
+
   const { error } = await supabase
     .from('cxd_projects')
     .delete()
