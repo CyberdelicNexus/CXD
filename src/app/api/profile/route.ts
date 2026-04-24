@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 
+// Route uses cookies() via Supabase auth — force dynamic so Next.js
+// doesn't try to statically pre-render it at build time.
+export const dynamic = 'force-dynamic';
+
 // GET /api/profile - Get current user's profile
 export async function GET() {
   try {

@@ -4,6 +4,10 @@ import type { AIProviderKey } from "@/types/ai-types";
 import { AI_MODELS, type ModelId, getAllowedModels, type TierId } from "@/lib/ai-credit-config";
 import { getPlan } from "@/lib/plans";
 
+// Route uses cookies() via Supabase auth — force dynamic so Next.js
+// doesn't try to statically pre-render it at build time.
+export const dynamic = 'force-dynamic';
+
 // Check if a Supabase error indicates the table doesn't exist
 function isTableMissing(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
