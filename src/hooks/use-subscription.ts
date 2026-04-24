@@ -29,6 +29,7 @@ export interface Subscription {
   canceled_at: string | null;
   trial_start: string | null;
   trial_end: string | null;
+  free_primary_canvas_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +54,14 @@ export interface UseSubscriptionReturn {
   maxCollaborators: number;
   canCreateCanvas: (currentCount: number) => boolean;
   canAddCollaborator: (currentCount: number) => boolean;
+  freePrimaryCanvasId: string | null;
+  /**
+   * True when the dashboard should block with the Pick-Free-Canvas modal.
+   * Computed as: isFree && free_primary_canvas_id == null && userCanvasCount > 1.
+   * The hook cannot compute userCanvasCount on its own, so this helper returns
+   * a *predicate* the caller combines with their own canvas count.
+   */
+  needsPickFreeCanvas: (canvasCount: number) => boolean;
   refetch: () => Promise<void>;
 }
 
@@ -179,6 +188,11 @@ export function useSubscription(): UseSubscriptionReturn {
     maxCollaborators,
     canCreateCanvas: checkCanCreateCanvas,
     canAddCollaborator: checkCanAddCollaborator,
+    freePrimaryCanvasId: subscription?.free_primary_canvas_id ?? null,
+    needsPickFreeCanvas: (canvasCount: number) =>
+      (subscription?.plan_id === 'free')
+      && (subscription?.free_primary_canvas_id == null)
+      && canvasCount > 1,
     refetch: fetchSubscription,
   };
 }
