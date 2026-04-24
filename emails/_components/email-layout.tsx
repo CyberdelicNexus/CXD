@@ -12,7 +12,7 @@ import {
 } from '@react-email/components';
 import * as React from 'react';
 
-const LOGO_URL = 'https://canvas.cyberdelic.design/images/CL%20Logo%20NL.png';
+const LOGO_URL = 'https://canvas.cyberdelic.design/images/CXD%20Logo%202.png';
 const FONT_FAMILY = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 interface EmailLayoutProps {
@@ -35,8 +35,9 @@ export function EmailLayout({
       <Body
         style={{
           backgroundColor: '#000000',
-          backgroundImage: 'radial-gradient(circle, rgba(139,92,246,0.15) 1px, transparent 1px)',
-          backgroundSize: '24px 24px',
+          // Subtle purple dot-grid over pure black — ethereal, never distracting.
+          backgroundImage: 'radial-gradient(circle, rgba(139,92,246,0.18) 1px, transparent 1px)',
+          backgroundSize: '22px 22px',
           margin: 0,
           padding: 0,
           fontFamily: FONT_FAMILY,
@@ -53,7 +54,7 @@ export function EmailLayout({
           <Section style={{ textAlign: 'center' as const, marginBottom: '32px' }}>
             <Img
               src={LOGO_URL}
-              alt="CXD Canvas"
+              alt="Cyberdelic Design Canvas"
               width="48"
               height="48"
               style={{ margin: '0 auto 12px', display: 'block' }}
@@ -68,16 +69,18 @@ export function EmailLayout({
                 letterSpacing: '0.5px',
               }}
             >
-              CXD Canvas
+              Cyberdelic Design Canvas
             </Text>
           </Section>
 
-          {/* Content Card */}
+          {/* Content Card — ghost-purple gradient, violet halo, no blue */}
           <Section
             style={{
-              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+              background:
+                'linear-gradient(135deg, #2a1a5a 0%, #1a0d3f 50%, #0e0624 100%)',
               borderRadius: '16px',
-              border: '1px solid rgba(255,255,255,0.1)',
+              border: '1px solid rgba(167,139,250,0.18)',
+              boxShadow: '0 0 32px -12px rgba(139,92,246,0.35)',
               overflow: 'hidden',
             }}
           >
