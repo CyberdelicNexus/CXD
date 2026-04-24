@@ -275,6 +275,7 @@ export function CXDCanvas() {
     canvasViewMode,
     setCanvasViewMode,
     addCanvasElement,
+    addCanvasElements,
     updateCanvasElement,
     removeCanvasElement,
     getCanvasElements,
@@ -311,7 +312,6 @@ export function CXDCanvas() {
     activeCommentId,
     showResolvedComments,
     setActiveComment,
-    addComment,
     getThreads,
   } = useCXDStore();
 
@@ -344,7 +344,7 @@ export function CXDCanvas() {
   // Uses the shared CollaborationProvider channel (from page.tsx) — avoids
   // creating a duplicate canvas:{projectId} subscription which would cause
   // presence key conflicts and broken cursor visibility.
-  const { collaborators, updateCursor, clearCursor, broadcastUpdate, updateSelection, followingCollaboratorId, setFollowingCollaboratorId } = useCollaborationContext();
+  const { collaborators, updateCursor, clearCursor, broadcastUpdate, updateSelection, followingCollaboratorId, setFollowingCollaboratorId, syncAddComment } = useCollaborationContext();
 
   // Wrapper functions that sync changes to collaborators
   // In CRDT mode, the store action mutates Y.Doc which auto-broadcasts via SupabaseYjsProvider
@@ -3012,7 +3012,6 @@ export function CXDCanvas() {
       // PASTE: Ctrl/Cmd + V
       if (isMod && e.key === "v" && clipboard.length > 0) {
         e.preventDefault();
-        pushCanvasHistory(); // Save state before paste
 
         // Calculate paste position
         const containerRect = containerRef.current?.getBoundingClientRect();
@@ -3026,27 +3025,39 @@ export function CXDCanvas() {
         const minX = Math.min(...clipboard.map((el) => el.x));
         const minY = Math.min(...clipboard.map((el) => el.y));
 
-        // Paste with offset from original or at mouse position
-        const newIds = new Set<string>();
-        clipboard.forEach((element) => {
+        // Deep-clone so pasted elements don't share nested object refs with the
+        // source project (cross-project paste would otherwise leak refs into
+        // the destination). Batch-add via addCanvasElements so all N elements
+        // land in one store update / one re-render, instead of N sequential
+        // renders that intermittently tripped React's render-limit (error #310).
+        const prepared: CanvasElement[] = clipboard.map((element) => {
+          const cloned =
+            typeof structuredClone === "function"
+              ? structuredClone(element)
+              : (JSON.parse(JSON.stringify(element)) as CanvasElement);
           const offsetX = element.x - minX;
           const offsetY = element.y - minY;
-
-          const newElement: CanvasElement = {
-            ...element,
+          return {
+            ...cloned,
             id: uuidv4(),
             x: canvasX + offsetX,
             y: canvasY + offsetY,
-            boardId: activeBoardId, // Use current board ID for cross-board paste
-            containerId: undefined, // Clear container reference when pasting
-            groupId: undefined, // Clear group reference when pasting
+            boardId: activeBoardId,
+            containerId: undefined,
+            groupId: undefined,
           };
-          syncAddElement(newElement);
-          newIds.add(newElement.id);
         });
 
-        // Select pasted elements
-        setSelectedElementIds(newIds);
+        // Single batched store mutation — addCanvasElements pushes history
+        // internally, so we don't call pushCanvasHistory ourselves.
+        addCanvasElements(prepared);
+
+        // Broadcast each element so collaborators receive the paste.
+        prepared.forEach((el) =>
+          broadcastUpdate({ type: "element_add", element: el }),
+        );
+
+        setSelectedElementIds(new Set(prepared.map((el) => el.id)));
         return;
       }
 
@@ -3462,7 +3473,12 @@ export function CXDCanvas() {
     [followingCollaboratorId, collaborators],
   );
 
-  // Live-follow: pan canvas (and match zoom) to keep the followed collaborator's cursor centered
+  // Live-follow: pan the canvas (and match zoom) to track the followed collaborator.
+  // Snap to the target on each cursor broadcast — smoothness is achieved by a CSS
+  // transition on the canvas transform (see `canvasTransformTransition` below),
+  // which the browser compositor interpolates on the GPU at 60fps between our
+  // ~30fps discrete targets. This avoids running a 60fps state-update loop that
+  // would otherwise cause full React re-renders and drop frames on rich canvases.
   useEffect(() => {
     if (!followingCollaboratorId) return;
     const followed = collaborators.find((c) => c.id === followingCollaboratorId);
@@ -3480,6 +3496,14 @@ export function CXDCanvas() {
       y: rect.height / 2 - followed.cursor.y * targetZoom,
     });
   }, [followingCollaboratorId, collaborators, canvasZoom, setCanvasPosition, setCanvasZoom]);
+
+  // Apply the smoothing transition only while following. Stays off during user
+  // pans/zooms so their own interactions feel instant. Duration/timing match
+  // CollaboratorCursors' own `transform 80ms linear`, so the centered follower
+  // cursor stays visually glued to the canvas underneath.
+  const canvasTransformTransition = followingCollaboratorId
+    ? 'transform 80ms linear'
+    : 'none';
 
   // Stop following when the viewer clicks anywhere
   useEffect(() => {
@@ -4077,6 +4101,7 @@ export function CXDCanvas() {
             // Apply same transform as canvas content for perfect alignment
             transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
             transformOrigin: "0 0",
+            transition: canvasTransformTransition,
             // Layered grid: Major dots (3x grid) + Medium dots (1x grid) + Minor dots (0.5x grid)
             backgroundImage: `
               radial-gradient(circle, hsl(270 30% 29% / 0.6) 1.5px, transparent 1.5px),
@@ -4105,6 +4130,7 @@ export function CXDCanvas() {
         style={{
           transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
           transformOrigin: "0 0",
+          transition: canvasTransformTransition,
           zIndex: 10,
         }}
       >
@@ -4522,6 +4548,7 @@ export function CXDCanvas() {
             style={{
               transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
               transformOrigin: "0 0",
+              transition: canvasTransformTransition,
               zIndex: edgeZIndex,
             }}
           >
@@ -5215,7 +5242,7 @@ export function CXDCanvas() {
                       e.preventDefault();
                       const text = (e.target as HTMLTextAreaElement).value.trim();
                       if (text) {
-                        addComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
+                        syncAddComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
                         setNewCommentInput(null);
                         setCommentMode(false);
                       }
@@ -5267,7 +5294,7 @@ export function CXDCanvas() {
                   onClick={() => {
                     const text = newCommentInputRef.current?.value.trim();
                     if (text) {
-                      addComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
+                      syncAddComment(text, { x: newCommentInput.worldX, y: newCommentInput.worldY });
                       setNewCommentInput(null);
                       setCommentMode(false);
                     }

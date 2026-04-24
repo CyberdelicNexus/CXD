@@ -1,10 +1,8 @@
 'use client';
 
-import { memo, useState, useEffect } from 'react';
+import { memo } from 'react';
 import Image from 'next/image';
 import { CollaboratorPresence } from '@/hooks/use-collaboration';
-
-const CURSOR_STALE_MS = 8000; // 8s — accounts for network latency + 50ms throttle
 
 interface CollaboratorCursorsProps {
   collaborators: CollaboratorPresence[];
@@ -39,17 +37,17 @@ const CollaboratorCursor = memo(function CollaboratorCursor({
   collaborator,
   canvasOffset,
   zoom,
-  now,
 }: {
   collaborator: CollaboratorPresence;
   canvasOffset: { x: number; y: number };
   zoom: number;
-  now: number;
 }) {
   const { cursor, name, color, avatarUrl } = collaborator;
 
-  // Don't render if no cursor or cursor is stale
-  if (!cursor || now - cursor.timestamp > CURSOR_STALE_MS) {
+  // Show the cursor whenever the collaborator is live and has a known position.
+  // We intentionally do NOT hide on a timestamp staleness — the cursor stays
+  // parked at its last position and just updates when the peer moves it.
+  if (!cursor) {
     return null;
   }
 
@@ -68,20 +66,20 @@ const CollaboratorCursor = memo(function CollaboratorCursor({
     >
       <CursorIcon color={color} />
       <div
-        className="absolute left-5 top-5 flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium text-white shadow-lg"
+        className="absolute left-5 top-5 flex w-max max-w-none items-center gap-1.5 whitespace-nowrap rounded-full pl-1 pr-3 py-1 text-xs font-medium text-white shadow-lg"
         style={{ backgroundColor: color }}
       >
         {avatarUrl ? (
           <Image
             src={avatarUrl}
             alt={name}
-            width={16}
-            height={16}
-            className="h-4 w-4 rounded-full"
+            width={20}
+            height={20}
+            className="h-5 w-5 shrink-0 rounded-full ring-1 ring-white/30"
             unoptimized
           />
         ) : null}
-        <span>{name}</span>
+        <span className="leading-none">{name}</span>
       </div>
     </div>
   );
@@ -94,19 +92,8 @@ export const CollaboratorCursors = memo(function CollaboratorCursors({
   zoom,
   currentBoardId,
 }: CollaboratorCursorsProps) {
-  // Tick every second so stale cursors expire properly.
-  // useMemo would capture Date.now() at computation time and never update
-  // until `collaborators` changes — causing cursors to stay visible forever.
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (collaborators.length === 0) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [collaborators.length]);
-
   const activeCursors = collaborators.filter((c) => {
-    if (!c.cursor || now - c.cursor.timestamp >= CURSOR_STALE_MS) return false;
+    if (!c.cursor) return false;
     // Only show cursor if collaborator is in the same board context
     // (null/undefined both mean "main canvas" — treat as equal)
     const cursorBoard = c.cursor.boardId ?? null;
@@ -129,7 +116,6 @@ export const CollaboratorCursors = memo(function CollaboratorCursors({
           collaborator={collaborator}
           canvasOffset={canvasOffset}
           zoom={zoom}
-          now={now}
         />
       ))}
     </div>

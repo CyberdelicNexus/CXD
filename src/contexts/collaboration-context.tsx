@@ -38,6 +38,14 @@ interface CollaborationContextValue {
   syncContextMeaning: (field: 'world' | 'story' | 'magic', value: string) => void;
   syncExperienceFlowNarrative: (code: ExperienceFlowStageCode, value: string) => void;
   syncExperienceFlowIntent: (code: ExperienceFlowStageCode, value: string) => void;
+  // Comment sync functions
+  syncAddComment: (content: string, position: { x: number; y: number }) => void;
+  syncAddReply: (parentId: string, content: string) => void;
+  syncUpdateCommentPosition: (commentId: string, position: { x: number; y: number }) => void;
+  syncResolveComment: (commentId: string) => void;
+  syncUnresolveComment: (commentId: string) => void;
+  syncDeleteComment: (commentId: string) => void;
+  syncToggleReaction: (commentId: string, emoji: string) => void;
 }
 
 const CollaborationContext = createContext<CollaborationContextValue | null>(null);
@@ -205,6 +213,49 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
     if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['experienceFlow', code, 'designIntent'], value });
   }, [updateExperienceFlowIntent, broadcastUpdate]);
 
+  // Comment sync wrappers. Comments live outside Yjs, so every mutation broadcasts
+  // a full comments-array snapshot. Peers apply it via `applyRemoteComments` which
+  // updates local Zustand but does NOT re-save (the sender already persisted).
+  const broadcastCommentsSnapshot = useCallback(() => {
+    const comments = useCXDStore.getState().getCurrentProject()?.comments ?? [];
+    broadcastUpdate({ type: 'comments_sync', comments });
+  }, [broadcastUpdate]);
+
+  const syncAddComment = useCallback((content: string, position: { x: number; y: number }) => {
+    useCXDStore.getState().addComment(content, position);
+    broadcastCommentsSnapshot();
+  }, [broadcastCommentsSnapshot]);
+
+  const syncAddReply = useCallback((parentId: string, content: string) => {
+    useCXDStore.getState().addReply(parentId, content);
+    broadcastCommentsSnapshot();
+  }, [broadcastCommentsSnapshot]);
+
+  const syncUpdateCommentPosition = useCallback((commentId: string, position: { x: number; y: number }) => {
+    useCXDStore.getState().updateCommentPosition(commentId, position);
+    broadcastCommentsSnapshot();
+  }, [broadcastCommentsSnapshot]);
+
+  const syncResolveComment = useCallback((commentId: string) => {
+    useCXDStore.getState().resolveComment(commentId);
+    broadcastCommentsSnapshot();
+  }, [broadcastCommentsSnapshot]);
+
+  const syncUnresolveComment = useCallback((commentId: string) => {
+    useCXDStore.getState().unresolveComment(commentId);
+    broadcastCommentsSnapshot();
+  }, [broadcastCommentsSnapshot]);
+
+  const syncDeleteComment = useCallback((commentId: string) => {
+    useCXDStore.getState().deleteComment(commentId);
+    broadcastCommentsSnapshot();
+  }, [broadcastCommentsSnapshot]);
+
+  const syncToggleReaction = useCallback((commentId: string, emoji: string) => {
+    useCXDStore.getState().toggleReaction(commentId, emoji);
+    broadcastCommentsSnapshot();
+  }, [broadcastCommentsSnapshot]);
+
   return (
     <CollaborationContext.Provider
       value={{
@@ -235,6 +286,13 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
         syncContextMeaning,
         syncExperienceFlowNarrative: syncExperienceFlowNarrativeFunc,
         syncExperienceFlowIntent: syncExperienceFlowIntentFunc,
+        syncAddComment,
+        syncAddReply,
+        syncUpdateCommentPosition,
+        syncResolveComment,
+        syncUnresolveComment,
+        syncDeleteComment,
+        syncToggleReaction,
       }}
     >
       {children}
@@ -274,6 +332,13 @@ export function useCollaborationContext() {
       syncContextMeaning: () => {},
       syncExperienceFlowNarrative: () => {},
       syncExperienceFlowIntent: () => {},
+      syncAddComment: () => {},
+      syncAddReply: () => {},
+      syncUpdateCommentPosition: () => {},
+      syncResolveComment: () => {},
+      syncUnresolveComment: () => {},
+      syncDeleteComment: () => {},
+      syncToggleReaction: () => {},
     };
   }
   return context;

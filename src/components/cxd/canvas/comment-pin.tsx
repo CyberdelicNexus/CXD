@@ -3,7 +3,7 @@
 import { useRef, useCallback } from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
-import { useCXDStore } from "@/store/cxd-store";
+import { useCollaborationContext } from "@/contexts/collaboration-context";
 import type { CommentThread } from "@/types/comment-types";
 
 interface CommentPinProps {
@@ -27,7 +27,7 @@ export function CommentPin({
   // Inverse scale so pins stay a consistent screen size regardless of zoom
   const pinScale = 1 / canvasZoom;
 
-  const updateCommentPosition = useCXDStore((s) => s.updateCommentPosition);
+  const { syncUpdateCommentPosition } = useCollaborationContext();
 
   // Drag state refs (avoid re-renders during drag)
   const isDraggingRef = useRef(false);
@@ -80,7 +80,7 @@ export function CommentPin({
           const dy = (upE.clientY - startMouseRef.current.y) / canvasZoom;
           const newX = startPosRef.current.x + dx;
           const newY = startPosRef.current.y + dy;
-          updateCommentPosition(thread.root.id, { x: newX, y: newY });
+          syncUpdateCommentPosition(thread.root.id, { x: newX, y: newY });
         } else {
           // No drag movement: treat as click
           onClick();
@@ -93,7 +93,7 @@ export function CommentPin({
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [canvasZoom, thread.root.id, thread.root.position, updateCommentPosition, onClick]
+    [canvasZoom, thread.root.id, thread.root.position, syncUpdateCommentPosition, onClick]
   );
 
   return (

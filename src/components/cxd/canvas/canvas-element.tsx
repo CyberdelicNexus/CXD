@@ -5596,16 +5596,28 @@ function ImageCard({
         )}
       >
         {element.imageEdits?.preCropBounds ? (
-          <div
-            className="w-full h-full"
-            style={{
-              backgroundImage: `url("${element.src}")`,
-              backgroundSize: `${element.imageEdits.preCropBounds.width}px ${element.imageEdits.preCropBounds.height}px`,
-              backgroundPosition: `${-(crop.x / 100) * element.imageEdits.preCropBounds.width}px ${-(crop.y / 100) * element.imageEdits.preCropBounds.height}px`,
-              backgroundRepeat: "no-repeat",
-              transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
-            }}
-          />
+          (() => {
+            // Scale the background so the cropped region (crop.width% x crop.height%
+            // of the original image) always fills the current element. This lets
+            // the image scale with resize handles instead of revealing cropped-out
+            // content when the element grows.
+            const safeCropW = crop.width > 0 ? crop.width : 100;
+            const safeCropH = crop.height > 0 ? crop.height : 100;
+            const scaledImgW = (element.width * 100) / safeCropW;
+            const scaledImgH = (element.height * 100) / safeCropH;
+            return (
+              <div
+                className="w-full h-full"
+                style={{
+                  backgroundImage: `url("${element.src}")`,
+                  backgroundSize: `${scaledImgW}px ${scaledImgH}px`,
+                  backgroundPosition: `${-(crop.x / 100) * scaledImgW}px ${-(crop.y / 100) * scaledImgH}px`,
+                  backgroundRepeat: "no-repeat",
+                  transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                }}
+              />
+            );
+          })()
         ) : (
           <div
             className="w-full h-full relative"

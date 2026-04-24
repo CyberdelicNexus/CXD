@@ -46,7 +46,7 @@ export interface CollaboratorPresence {
 }
 
 export interface CanvasUpdate {
-  type: 'field_update' | 'element_add' | 'element_update' | 'element_delete' | 'edge_add' | 'edge_update' | 'edge_delete' | 'state_sync' | 'container_move';
+  type: 'field_update' | 'element_add' | 'element_update' | 'element_delete' | 'edge_add' | 'edge_update' | 'edge_delete' | 'state_sync' | 'container_move' | 'comments_sync';
   path?: string[];
   value?: unknown;
   element?: unknown;
@@ -59,6 +59,8 @@ export interface CanvasUpdate {
   edges?: unknown[];
   containerId?: string;
   childUpdates?: { elementId: string; changes: Record<string, unknown> }[];
+  /** Full comments snapshot for cross-peer sync of the project's comment thread state. */
+  comments?: unknown[];
   timestamp: number;
   userId: string;
 }
@@ -76,7 +78,9 @@ const HEARTBEAT_INTERVAL_MS = 30_000; // 30s
 // Minimum gap between re-announcing ourselves when a peer announces (ms)
 const REANNOUNCE_DEBOUNCE_MS = 5_000;
 // Cursor staleness window (must match collaborator-cursors.tsx)
-const CURSOR_THROTTLE_MS = 50; // ~20fps
+// 33ms = ~30fps — denser updates for smoother follow-camera interpolation
+// without saturating Supabase Realtime bandwidth.
+const CURSOR_THROTTLE_MS = 33;
 
 export function useCollaboration(
   canvasId: string | null,
@@ -248,14 +252,20 @@ export function useCollaboration(
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState<CollaboratorPresence>();
       setCollaborators((prev) => {
-        const presencePeers: CollaboratorPresence[] = [];
+        // Dedupe by peer.id. On hard reload, the old session lingers in
+        // Supabase presence (~30s timeout) alongside the new session — both
+        // appear under the same user id. Keep the most recent by lastSeen.
+        const latestByPeerId = new Map<string, CollaboratorPresence>();
         Object.values(state).forEach((presences) => {
           presences.forEach((presence) => {
-            if (presence.id !== currentUser.id) {
-              presencePeers.push(presence);
+            if (presence.id === currentUser.id) return;
+            const existing = latestByPeerId.get(presence.id);
+            if (!existing || (presence.lastSeen ?? 0) > (existing.lastSeen ?? 0)) {
+              latestByPeerId.set(presence.id, presence);
             }
           });
         });
+        const presencePeers = Array.from(latestByPeerId.values());
         if (presencePeers.length === 0) return prev; // presence empty, keep broadcast state
         // Merge: presence data wins for users it knows about; keep broadcast-only users
         const presenceIds = new Set(presencePeers.map((p) => p.id));
@@ -348,6 +358,23 @@ export function useCollaboration(
 
     channelRef.current = channel;
 
+    // pagehide fires on hard reload / tab close even when React's useEffect
+    // cleanup can't run to completion. Sending user_offline here lets peers
+    // drop the ghost session immediately instead of waiting out the ~30s
+    // presence timeout, which is the source of duplicate-user entries after reload.
+    const handlePageHide = () => {
+      try {
+        channel.send({
+          type: 'broadcast',
+          event: 'user_offline',
+          payload: { id: currentUser.id },
+        });
+      } catch {
+        /* best-effort */
+      }
+    };
+    window.addEventListener('pagehide', handlePageHide);
+
     return () => {
       // Notify peers we're leaving before unsubscribing
       try {
@@ -359,6 +386,7 @@ export function useCollaboration(
       } catch {
         // Best-effort
       }
+      window.removeEventListener('pagehide', handlePageHide);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       if (cleanupTimer) clearInterval(cleanupTimer);
       channel.unsubscribe();

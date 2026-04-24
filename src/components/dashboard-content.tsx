@@ -612,7 +612,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 </label>
                 <div className="mt-3">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-white truncate max-w-[200px]">{userName}</h2>
+                    <h2 className="text-xl font-bold text-white truncate max-w-[200px]">{userProfile?.full_name || userProfile?.name || userName}</h2>
                     <Badge className={`text-xs ${planBadge.color}`}>
                       {planBadge.label}
                     </Badge>

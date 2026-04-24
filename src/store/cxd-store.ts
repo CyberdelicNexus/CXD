@@ -305,6 +305,8 @@ interface CXDState {
   unresolveComment: (commentId: string) => void;
   deleteComment: (commentId: string) => void;
   toggleReaction: (commentId: string, emoji: string) => void;
+  /** Applies a peer's comment-array snapshot without persisting (sender already saved). */
+  applyRemoteComments: (comments: Comment[]) => void;
   toggleShowResolved: () => void;
   getComments: () => Comment[];
   getThreads: () => CommentThread[];
@@ -2335,6 +2337,19 @@ export const useCXDStore = create<CXDState>()(
 
       toggleShowResolved: () => {
         set((state) => ({ showResolvedComments: !state.showResolvedComments }));
+      },
+
+      applyRemoteComments: (comments) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, comments, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+        // Intentionally NOT calling saveProject — the sender already persisted.
       },
 
       getComments: () => {

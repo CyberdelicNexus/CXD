@@ -407,6 +407,7 @@ export const HYPERCUBE_FACE_TAGS: HypercubeFaceTag[] = [
   'State Mapping',
   'Trait Mapping',
   'Meaning Architecture',
+  'Core',
 ];
 
 export const HYPERCUBE_FACE_COLORS: Record<HypercubeFaceTag, string> = {

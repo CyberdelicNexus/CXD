@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 import { TextShimmer } from '@/components/ui/text-shimmer';
@@ -23,6 +23,7 @@ import {
   User,
 } from 'lucide-react';
 import Image from 'next/image';
+import { LandingHypercube } from '@/components/landing/landing-hypercube';
 
 // ─── Feature Sections Data ──────────────────────────────────────────────────
 
@@ -43,22 +44,22 @@ interface FeatureSection {
   video?: string; // fallback/section-level video
   poster?: string; // screenshot fallback
   details: FeatureDetail[];
+  hideLabel?: boolean; // when true, section header shows only the divider
+  hideDescription?: boolean; // when true, description paragraph isn't rendered
 }
 
 const FEATURE_SECTIONS: FeatureSection[] = [
   {
     id: 'framing',
-    icon: Compass,
-    label: 'Framing Wizard',
+    icon: Brain,
+    label: 'Framing',
     headline: 'Start with',
     highlight: 'Intent',
     description: 'A guided 11-step framework that structures your experience design from audience and context to transformation goals — before you touch the canvas.',
-    video: '/images/Gifs/Framing_2_web.mp4',
+    video: '/images/Gifs/V2/Dashboard%20%26%20Framing.mp4',
     poster: '/images/Screenshot/0_canvas-screeshot.png',
     details: [
       { title: 'Guided Framework', description: 'Walk through audience, context, intention, and desired outcomes step by step.' },
-      { title: 'Core Message', description: 'Distill your experience into a single transformational message that drives every design decision.' },
-      { title: 'Seamless Transition', description: 'Click "Explore Canvas" and your framing populates the workspace automatically.' },
     ],
   },
   {
@@ -70,23 +71,25 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     description: 'An unlimited workspace with notes, tasks, connectors, boards, and nested containers. Drag, connect, and organize ideas in a spatial environment.',
     poster: '/images/Screenshot/1_canvas-screeshot.png',
     details: [
-      { title: 'Notes & Tasks', description: 'Create rich note cards and actionable task cards with subtasks, tags, and metadata.' },
-      { title: 'Smart Connectors', description: 'Link elements with gradient connectors that auto-inherit tags and create visual relationships.' },
-      { title: 'Nested Boards', description: 'Organize complex projects with boards inside boards — zoom into any level of detail.' },
+      { title: 'Notes & Tasks', description: 'Create rich note cards and actionable task cards with subtasks, tags, and metadata.', video: '/images/Gifs/V2/Notes%20%26%20Tasks.mp4' },
+      { title: 'Smart Connectors', description: 'Link elements with gradient connectors that auto-inherit tags and create visual relationships.', video: '/images/Gifs/V2/Smart%20Connectors.mp4' },
+      { title: 'Nested Boards', description: 'Organize complex projects with boards inside boards — zoom into any level of detail.', video: '/images/Gifs/V2/Nested%20Boards%20-%20V2.mp4' },
     ],
   },
   {
     id: 'hypercube',
     icon: Box,
     label: 'Hypercube Map',
-    headline: 'See the',
-    highlight: 'Bigger Picture',
-    description: 'A 3D cube visualization that maps your experience across multiple dimensions. Tag elements to faces and rotate to explore connections others miss.',
+    headline: 'Design From',
+    highlight: 'Core Outward',
+    description: 'Three ways the Hypercube works for you: tag objects and ask, surface insights and configure, and make it your model, your workflow.',
+    hideLabel: true,
+    hideDescription: true,
     poster: '/images/Screenshot/3_canvas-screeshot.png',
     details: [
-      { title: '3D Navigation', description: 'Rotate the cube to explore six dimensions of your experience design simultaneously.' },
-      { title: 'Face Tagging', description: 'Tag canvas elements to cube faces and see them filter in real-time as you rotate.' },
-      { title: 'Unique Perspective', description: 'A visualization method you won\'t find in any other design tool.' },
+      { title: 'Tag Objects & Ask', description: 'Tag canvas objects to any face to give them context. Then ask Cyberdelic Intelligence questions, in general mode or scoped to a single face, and get answers grounded in exactly what you tagged.', video: '/images/Gifs/V2/Tag%20Objects%20%26%20Ask.mp4' },
+      { title: 'Insights & Configure', description: 'The System Insights panel surfaces suggestions, questions, and tips from your design. The Configure panel sits alongside so you can adjust settings as you read. Insight and control, side by side.', video: '/images/Gifs/V2/System%20Insights.mp4' },
+      { title: 'Your Model, Your Workflow', description: 'Choose from multiple AI models or bring your own key. Turn any reply into a note or task right from the chat window. It lands in your inbox, ready to drop anywhere on the canvas.', video: '/images/Gifs/V2/Your%20Model.mp4' },
     ],
   },
   {
@@ -98,9 +101,8 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     description: 'Transform your experience design into actionable production plans with Kanban boards, Gantt timelines, calendar views, and version milestones.',
     poster: '/images/Screenshot/4_canvas-screeshot.png',
     details: [
-      { title: 'Multiple Views', description: 'Switch between Kanban, Gantt, Calendar, and Table views — same tasks, different perspectives.' },
-      { title: 'Canvas Integration', description: 'Convert any canvas element into a task. Changes sync bidirectionally.' },
-      { title: 'Version Milestones', description: 'Track progress across versions with timeline-based milestone planning.' },
+      { title: 'Plan your production in multiple views', description: 'Switch between Kanban, Gantt, Calendar, and Table. Same tasks, different perspectives.' },
+      { title: 'Tag tasks and view them in context', description: 'Tag tasks with hypercube faces and filter the inbox to surface only what belongs to the slice you are designing.', video: '/images/Gifs/V2/Inbox%20.mp4' },
     ],
   },
   {
@@ -110,11 +112,11 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     headline: 'Create',
     highlight: 'Together',
     description: 'Work with your team in real-time. See live cursors, share feedback, and co-create experiences seamlessly across the canvas.',
+    video: '/images/Gifs/V2/Collab%202.mp4',
     poster: '/images/Screenshot/5_canvas-screeshot.png',
     details: [
-      { title: 'Live Cursors', description: 'See where your team members are working on the canvas in real-time.' },
-      { title: 'Instant Sync', description: 'Every edit propagates immediately — no save buttons, no conflicts.' },
-      { title: 'Share & Invite', description: 'Invite collaborators by email or share read-only links for stakeholder review.' },
+      { title: 'Share, Invite & Collaborate in realtime', description: 'Invite teammates by email or share read-only links for stakeholders. Every edit, cursor, and comment propagates instantly.' },
+      { title: 'Follow their view', description: 'Click a collaborator to ride along with their camera. Your canvas pans and zooms to match exactly what they are seeing.' },
     ],
   },
 ];
@@ -135,10 +137,12 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
 
   const activeDetail = section.details[activeDetailIdx];
   const activeVideoSrc = activeDetail?.video || section.video;
-  const activeDuration = activeDetail?.duration ?? 6; // seconds fallback
+  const fallbackDuration = activeDetail?.duration ?? 6; // seconds, used when no video
   const totalDetails = section.details.length;
+  const hasVideo = Boolean(activeVideoSrc);
+  const shouldLoopVideo = hasVideo && totalDetails === 1;
 
-  // Observe visibility so we only run the timer when the section is on-screen
+  // Observe visibility so we only run animations when the section is on-screen
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => setIsInView(entry.isIntersecting),
@@ -148,7 +152,11 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
     return () => observer.disconnect();
   }, []);
 
-  // Play/pause video when in view
+  // Play/pause video when in view and reset fade-in when switching sources
+  useEffect(() => {
+    setIsVideoLoaded(false);
+  }, [activeVideoSrc]);
+
   useEffect(() => {
     if (!videoRef.current) return;
     if (isInView) {
@@ -158,17 +166,22 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
     }
   }, [isInView, activeVideoSrc]);
 
-  // Cycle through details on a timer (6s default) while in view.
-  // idx + progress advance atomically to avoid transition jumps.
+  // When a detail has a video, progress + advancing are driven by the video
+  // itself (via onTimeUpdate + onEnded). For detail cards without videos we
+  // fall back to a RAF timer so the progress bar still cycles.
   useEffect(() => {
-    if (!isInView) return;
+    if (!isInView || hasVideo) return;
     const startedAt = performance.now();
     let raf = 0;
     const tick = () => {
       const elapsed = (performance.now() - startedAt) / 1000;
-      const pct = elapsed / activeDuration;
+      const pct = elapsed / fallbackDuration;
       if (pct >= 1) {
-        setCycle((prev) => ({ idx: (prev.idx + 1) % totalDetails, progress: 0 }));
+        if (totalDetails > 1) {
+          setCycle((prev) => ({ idx: (prev.idx + 1) % totalDetails, progress: 0 }));
+        } else {
+          setCycle((prev) => ({ idx: prev.idx, progress: 0 }));
+        }
         return;
       }
       setCycle((prev) => ({ idx: prev.idx, progress: pct }));
@@ -176,15 +189,28 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [isInView, activeDetailIdx, activeDuration, totalDetails]);
+  }, [isInView, activeDetailIdx, fallbackDuration, totalDetails, hasVideo]);
 
-  // Reset video progress when switching details
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(() => {});
+  // Video-driven progress: tied to actual playback time, so the progress bar
+  // matches the video length exactly. onEnded advances to the next detail.
+  const handleVideoTimeUpdate = () => {
+    const v = videoRef.current;
+    if (!v || !v.duration || !Number.isFinite(v.duration)) return;
+    const pct = Math.min(1, v.currentTime / v.duration);
+    setCycle((prev) => ({ idx: prev.idx, progress: pct }));
+  };
+
+  const handleVideoEnded = () => {
+    if (totalDetails <= 1) {
+      // Single-detail section: just restart the video
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+        videoRef.current.play().catch(() => {});
+      }
+      return;
     }
-  }, [activeDetailIdx]);
+    setCycle((prev) => ({ idx: (prev.idx + 1) % totalDetails, progress: 0 }));
+  };
 
   const handleDetailClick = (i: number) => {
     if (i === activeDetailIdx) return;
@@ -192,7 +218,7 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
   };
 
   const mediaContent = (
-    <div className="lg:sticky lg:top-28 w-full lg:w-3/4">
+    <div className="order-2 lg:order-none lg:sticky lg:top-28 w-full lg:w-3/4">
       <motion.div
         initial={{ opacity: 0, x: isEven ? -40 : 40 }}
         whileInView={{ opacity: 1, x: 0 }}
@@ -210,30 +236,27 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
           <span className="text-xs text-white/30 ml-3">{section.label} · {activeDetail?.title}</span>
         </div>
 
-        {/* Video or poster */}
-        <div className="relative aspect-video bg-gradient-to-br from-purple-950/30 to-black">
+        {/* Video or poster — aspect matches the V2 crops (1920x990 ≈ 1.94:1) */}
+        <div
+          className="relative bg-gradient-to-br from-purple-950/30 to-black"
+          style={{ aspectRatio: '1920 / 990' }}
+        >
           {activeVideoSrc ? (
-            <>
-              {!isVideoLoaded && section.poster && (
-                <Image
-                  src={section.poster}
-                  alt={section.label}
-                  fill
-                  sizes="(max-width: 768px) 100vw, 75vw"
-                  className="object-cover"
-                />
-              )}
-              <video
-                ref={videoRef}
-                src={activeVideoSrc}
-                muted
-                loop
-                playsInline
-                preload="metadata"
-                onLoadedData={() => setIsVideoLoaded(true)}
-                className={`w-full h-full object-cover transition-opacity duration-500 ${isVideoLoaded ? 'opacity-100' : 'opacity-0'}`}
-              />
-            </>
+            <video
+              ref={videoRef}
+              // key on src forces a clean remount when switching videos,
+              // so the crossfade + load event fire reliably
+              key={activeVideoSrc}
+              src={activeVideoSrc}
+              muted
+              loop={shouldLoopVideo}
+              playsInline
+              preload="auto"
+              onLoadedData={() => setIsVideoLoaded(true)}
+              onTimeUpdate={handleVideoTimeUpdate}
+              onEnded={handleVideoEnded}
+              className={`w-full h-full object-cover transition-opacity duration-500 ease-out ${isVideoLoaded ? 'opacity-100' : 'opacity-0'}`}
+            />
           ) : section.poster ? (
             <div className="relative w-full h-full">
               <Image
@@ -257,7 +280,7 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
   );
 
   const textContent = (
-    <div className="w-full lg:w-1/4 space-y-6">
+    <div className="order-1 lg:order-none w-full lg:w-1/4 space-y-6">
       {/* Headline + description */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -267,11 +290,15 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
       >
         <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
           {section.headline}{' '}
-          <span className="text-gradient-purple">{section.highlight}</span>
+          <TextShimmer shimmerColor="rgba(200, 180, 255, 0.95)" speed={4} size={32}>
+            {section.highlight}
+          </TextShimmer>
         </h2>
-        <p className="text-white/50 text-base leading-relaxed">
-          {section.description}
-        </p>
+        {!section.hideDescription && (
+          <p className="text-white/50 text-base leading-relaxed">
+            {section.description}
+          </p>
+        )}
       </motion.div>
 
       {/* Detail cards — clickable, with per-item progress bar */}
@@ -318,34 +345,37 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
     </div>
   );
 
+  const SectionIcon = section.icon;
+
   return (
     <section
       ref={sectionRef}
-      className="relative py-16 md:py-24 px-4"
+      className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden"
     >
-      <div className="max-w-7xl mx-auto">
-        {/* Centered section header — icon badge + label, defines each view */}
-        <motion.div
-          initial={{ opacity: 0, y: 30, scale: 0.92 }}
-          whileInView={{ opacity: 1, y: 0, scale: 1 }}
-          viewport={{ once: true, margin: '-120px' }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="flex flex-col items-center justify-center mb-12 md:mb-16"
-        >
-          <div className="relative">
-            {/* Glow ring */}
-            <div className="absolute inset-0 rounded-2xl bg-purple-500/30 blur-2xl scale-150" />
-            {/* Icon badge */}
-            <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500/30 to-violet-600/20 border border-purple-400/40 flex items-center justify-center shadow-[0_8px_32px_rgba(168,85,247,0.25)] backdrop-blur-sm">
-              <section.icon className="w-6 h-6 text-purple-200" />
+      {/* Section title + wide gradient divider (80vw, breaks out of max-w container) */}
+      <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: '-120px' }}
+        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        className="flex flex-col items-center justify-center mb-14 md:mb-20"
+      >
+        {!section.hideLabel && (
+          <>
+            {/* Icon badge — matches the section's identity icon */}
+            <div className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 via-purple-500/10 to-transparent border border-violet-500/30 shadow-[0_0_30px_-4px_rgba(139,92,246,0.35)] backdrop-blur-sm mb-5">
+              <SectionIcon className="w-7 h-7 md:w-8 md:h-8 text-violet-200" />
             </div>
-          </div>
-          <span className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-purple-300/80">
-            {section.label}
-          </span>
-          <div className="mt-3 h-px w-16 bg-gradient-to-r from-transparent via-purple-400/50 to-transparent" />
-        </motion.div>
+            {/* Outlined title — same treatment as the hero "Design" / "Experiences" */}
+            <h3 className="text-outline-purple text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-center leading-[0.95] overflow-visible">
+              {section.label}
+            </h3>
+          </>
+        )}
+        <div className={`${section.hideLabel ? '' : 'mt-6'} h-px w-[80vw] max-w-[1400px] bg-gradient-to-r from-transparent via-purple-400/60 to-transparent`} />
+      </motion.div>
 
+      <div className="max-w-7xl mx-auto">
         {/* Content reveal wrapper */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
@@ -357,6 +387,45 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
           {mediaContent}
           {textContent}
         </motion.div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Hypercube Concept Section ──────────────────────────────────────────────
+
+function HypercubeConcept() {
+  return (
+    <section className="relative py-24 md:py-32 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-10 md:gap-16 items-center">
+        {/* Left: Interactive hypercube visualizer */}
+        <div className="order-2 md:order-1">
+          <LandingHypercube className="w-full" />
+        </div>
+
+        {/* Right: Hero title + concept paragraph */}
+        <div className="order-1 md:order-2 space-y-6">
+          <div className="space-y-3">
+            <h2 className="text-4xl md:text-5xl lg:text-6xl font-semibold leading-[1.05] tracking-tight text-white">
+              Flat tools produce flat experiences.
+            </h2>
+            <p className="text-xl md:text-2xl lg:text-3xl leading-snug font-medium bg-gradient-to-r from-violet-300 to-cyan-300 bg-clip-text text-transparent">
+              This tool gives experience design dimensional intelligence.
+            </p>
+          </div>
+
+          <div className="space-y-4 text-white/70 text-base md:text-lg leading-relaxed">
+            <p>
+              Experiences are layered. They happen on more than one surface of reality at once. They activate more than one sense. They shift more than one kind of presence.
+            </p>
+            <p>
+              That&apos;s why we use a higher-dimensional geometry for experience design: the Hypercube.
+            </p>
+            <p>
+              Six faces. Six dimensions. One object you can rotate, tag, and align every part of your experience to.
+            </p>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -663,12 +732,15 @@ export function LandingPage() {
       {/* ─── Feature Showcase Sections ─── */}
       <div id="features">
         {FEATURE_SECTIONS.map((section, index) => (
-          <FeatureShowcase key={section.id} section={section} index={index} />
+          <Fragment key={section.id}>
+            {section.id === 'hypercube' && <HypercubeConcept />}
+            <FeatureShowcase section={section} index={index} />
+          </Fragment>
         ))}
       </div>
 
       {/* ─── Pricing Section ─── */}
-      <section id="pricing" className="relative py-24 px-4">
+      <section id="pricing" className="relative py-24 px-4 sm:px-6 lg:px-8">
         <div className="glow-orb" style={{ top: '30%', left: '50%', transform: 'translateX(-50%)', opacity: 0.3 }} />
 
         <div className="relative z-10 max-w-5xl mx-auto">
@@ -719,7 +791,16 @@ export function LandingPage() {
                   <span className="text-white/40">/month</span>
                 </div>
               </div>
-              <p className="text-white/50 text-sm mb-6">Full power for professional experience designers.</p>
+              <p className="text-white/50 text-sm mb-4">Full power for professional experience designers.</p>
+              <a
+                href="https://www.cyberdelic.nexus/signup"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 mb-6 px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-[11px] font-medium text-violet-200 hover:bg-violet-500/15 hover:border-violet-500/50 hover:text-white transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Included in your Reality Weaver · Cyberdelic Nexus Membership</span>
+              </a>
               <ul className="space-y-3 mb-8">
                 {['Unlimited Canvases', 'Everything in Free', 'AI Design Assistant', 'Plan View', 'Smart Templates', 'Team collaboration (3)', 'Priority support'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
@@ -772,12 +853,15 @@ export function LandingPage() {
             transition={{ duration: 0.6 }}
           >
             <div className="mx-auto mb-8 w-24 h-24 md:w-32 md:h-32 relative">
-              <Image
+              {/* Plain <img> so Next.js doesn't strip the animation. Matches the
+                  Tesseract pattern in HypercubeConcept. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src="/images/holographic-cube.webp"
                 alt="Holographic cube"
-                width={128}
-                height={128}
-                className="object-contain w-full h-full"
+                loading="lazy"
+                decoding="async"
+                className="object-contain w-full h-full select-none pointer-events-none"
                 style={{ mixBlendMode: 'screen' }}
               />
             </div>

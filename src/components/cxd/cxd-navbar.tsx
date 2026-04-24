@@ -999,15 +999,14 @@ export function CXDNavbar() {
           {/* Always visible: Collaborate and Account */}
           {project && viewMode !== "home" && (
             <>
-              {/* Collaboration section — single button with hover-reveal bubbles */}
-              <div className="relative group mr-2" style={{ zIndex: 100 }} data-tour-id="canvas-collaborate-btn">
-                {/* Main circle button */}
+              {/* Collaboration button — always-visible follow bubbles for live collaborators */}
+              <div className="relative mr-2" style={{ zIndex: 100 }} data-tour-id="canvas-collaborate-btn">
                 <div
                   className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 relative cursor-pointer hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all"
                   onClick={() => setShowCollaborationPanel(true)}
                   title="Collaboration"
                 >
-                  <Users className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                  <Users className="w-4 h-4 text-white/60 hover:text-white transition-colors" />
                   {/* Live participant count badge */}
                   {collaborators.length > 0 && (
                     <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(52,211,153,0.8)] text-[10px] flex items-center justify-center text-white font-bold px-0.5">
@@ -1016,14 +1015,9 @@ export function CXDNavbar() {
                   )}
                 </div>
 
-                {/* Hover-reveal: profile bubbles for each online collaborator */}
+                {/* Follow bubbles — always shown below the button when collaborators are live */}
                 {collaborators.length > 0 && (
-                  <div
-                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 flex flex-row items-start gap-2
-                               opacity-0 pointer-events-none -translate-y-1
-                               group-hover:opacity-100 group-hover:pointer-events-auto group-hover:translate-y-0
-                               transition-all duration-200 delay-300 group-hover:delay-0"
-                  >
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 flex flex-row items-start gap-2">
                     {collaborators.map((c) => {
                       const initials = c.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
                       const isFollowing = followingCollaboratorId === c.id;

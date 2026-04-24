@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { listSnapshots, createSnapshot, restoreSnapshot, deleteSnapshot, type SnapshotMeta } from '@/lib/yjs/snapshot-service';
 import type { Doc } from 'yjs';
+import { useCXDStore } from '@/store/cxd-store';
 
 interface VersionHistoryPanelProps {
   open: boolean;
@@ -53,6 +54,7 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
   const [saving, setSaving] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [showCheckpointInput, setShowCheckpointInput] = useState(false);
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [mounted, setMounted] = useState(false);
@@ -85,23 +87,53 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
   };
 
   const handleRestore = async (snapshotId: string) => {
-    if (!yDoc) return;
-    setRestoringId(snapshotId);
-    const success = await restoreSnapshot(snapshotId, yDoc);
-    if (success) {
-      // Flush Y.js persistence immediately so restored state reaches DB
-      // before user navigates away (bypasses the 2-second debounce)
-      try {
-        const { flushYjsPersistence } = await import('@/contexts/yjs-project-context');
-        await flushYjsPersistence();
-      } catch (e) {
-        console.warn('[VersionHistory] Failed to flush after restore:', e);
-      }
+    console.log('[VersionHistory] handleRestore click for snapshot', snapshotId);
+    setRestoreError(null);
+
+    // Read the live yDoc from the store at click-time rather than relying on
+    // the prop closure — if the panel was rendered before Y.Doc was ready,
+    // the prop might still be null while the store has the real doc.
+    const liveDoc = useCXDStore.getState().yDoc ?? yDoc;
+    console.log('[VersionHistory] yDoc available?', !!liveDoc);
+    if (!liveDoc) {
+      setRestoreError('Canvas sync is not ready yet. Close this panel and try again in a moment.');
+      return;
     }
-    setRestoringId(null);
-    setConfirmRestoreId(null);
+
+    setRestoringId(snapshotId);
+    let success = false;
+    let caughtErr: unknown = null;
+    try {
+      success = await restoreSnapshot(snapshotId, liveDoc);
+      console.log('[VersionHistory] restoreSnapshot returned', success);
+      if (success) {
+        // Flush Y.js persistence immediately so the restored state reaches DB
+        // before the user navigates away (bypasses the 2-second debounce).
+        try {
+          const { flushYjsPersistence } = await import('@/contexts/yjs-project-context');
+          await flushYjsPersistence();
+          console.log('[VersionHistory] flushYjsPersistence complete');
+        } catch (e) {
+          console.warn('[VersionHistory] Failed to flush after restore:', e);
+        }
+      }
+    } catch (err) {
+      caughtErr = err;
+      console.error('[VersionHistory] Restore threw:', err);
+    } finally {
+      // Always clear the loading + confirm state so the button can't stay frozen.
+      setRestoringId(null);
+      setConfirmRestoreId(null);
+    }
+
     if (success) {
       onClose();
+    } else {
+      setRestoreError(
+        caughtErr instanceof Error
+          ? `Restore failed: ${caughtErr.message}`
+          : 'Restore failed. Check the browser console for details.',
+      );
     }
   };
 
@@ -154,6 +186,20 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
                 </button>
               </div>
             </div>
+
+            {/* Inline error banner for restore failures */}
+            {restoreError && (
+              <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300 flex items-start justify-between gap-2">
+                <span className="flex-1">{restoreError}</span>
+                <button
+                  onClick={() => setRestoreError(null)}
+                  className="text-red-300/60 hover:text-red-200"
+                  aria-label="Dismiss error"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             {/* Checkpoint input */}
             {showCheckpointInput && (

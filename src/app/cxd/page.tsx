@@ -120,6 +120,7 @@ export default function CXDPage() {
     updateExperienceFlowNarrative,
     updateExperienceFlowIntent,
     setCachedUserProfile,
+    applyRemoteComments,
   } = useCXDStore();
   const [isRestoring, setIsRestoring] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -337,6 +338,12 @@ export default function CXDPage() {
           }
         }
         break;
+      case 'comments_sync':
+        // Peer mutated their comments; replace our local snapshot.
+        if (Array.isArray(update.comments)) {
+          applyRemoteComments(update.comments as any);
+        }
+        break;
     }
   }, [
     addCanvasElement, updateCanvasElement, removeCanvasElement,
@@ -348,7 +355,8 @@ export default function CXDPage() {
     updateDesiredInsights, updateDesiredFeelings, updateDesiredStates, updateDesiredKnowledge,
     updateHumanAudienceNeeds, updateHumanAudienceDesires, updateHumanUserRole,
     updateContextWorld, updateContextStory, updateContextMagic,
-    updateExperienceFlowNarrative, updateExperienceFlowIntent
+    updateExperienceFlowNarrative, updateExperienceFlowIntent,
+    applyRemoteComments,
   ]);
 
   // Auto-sync project changes to database

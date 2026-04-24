@@ -5,6 +5,7 @@ import Image from "next/image";
 import { X, Check, RotateCcw, Trash2, SmilePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
+import { useCollaborationContext } from "@/contexts/collaboration-context";
 import type { CommentThread as CommentThreadType } from "@/types/comment-types";
 
 interface CommentThreadProps {
@@ -31,7 +32,7 @@ const INPUT_EMOJIS = ['😊', '👍', '❤️', '🎉', '🤔', '👀', '🔥', 
 
 function ReactionBar({ commentId, reactions }: { commentId: string; reactions?: Record<string, string[]> }) {
   const [showPicker, setShowPicker] = useState(false);
-  const { toggleReaction } = useCXDStore();
+  const { syncToggleReaction } = useCollaborationContext();
   const currentProject = useCXDStore((s) => s.getCurrentProject());
   const authorId = currentProject?.ownerId || 'anonymous';
 
@@ -41,7 +42,7 @@ function ReactionBar({ commentId, reactions }: { commentId: string; reactions?: 
       {reactions && Object.entries(reactions).map(([emoji, users]) => (
         <button
           key={emoji}
-          onClick={() => toggleReaction(commentId, emoji)}
+          onClick={() => syncToggleReaction(commentId, emoji)}
           className={cn(
             "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs transition-all",
             users.includes(authorId)
@@ -70,7 +71,7 @@ function ReactionBar({ commentId, reactions }: { commentId: string; reactions?: 
               <button
                 key={emoji}
                 onClick={() => {
-                  toggleReaction(commentId, emoji);
+                  syncToggleReaction(commentId, emoji);
                   setShowPicker(false);
                 }}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/10 transition-colors text-base"
@@ -89,7 +90,8 @@ export function CommentThreadPanel({
   thread,
   canvasZoom,
 }: CommentThreadProps) {
-  const { addReply, resolveComment, unresolveComment, deleteComment, setActiveComment } = useCXDStore();
+  const { setActiveComment } = useCXDStore();
+  const { syncAddReply, syncResolveComment, syncUnresolveComment, syncDeleteComment } = useCollaborationContext();
   const [replyText, setReplyText] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -107,9 +109,9 @@ export function CommentThreadPanel({
   const handleSubmitReply = useCallback(() => {
     const trimmed = replyText.trim();
     if (!trimmed) return;
-    addReply(thread.root.id, trimmed);
+    syncAddReply(thread.root.id, trimmed);
     setReplyText("");
-  }, [replyText, addReply, thread.root.id]);
+  }, [replyText, syncAddReply, thread.root.id]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -143,7 +145,7 @@ export function CommentThreadPanel({
           <div className="flex items-center gap-1">
             {isResolved ? (
               <button
-                onClick={() => unresolveComment(thread.root.id)}
+                onClick={() => syncUnresolveComment(thread.root.id)}
                 className="p-1 rounded hover:bg-white/10 text-white/50 hover:text-white transition-colors"
                 title="Reopen thread"
               >
@@ -151,7 +153,7 @@ export function CommentThreadPanel({
               </button>
             ) : (
               <button
-                onClick={() => resolveComment(thread.root.id)}
+                onClick={() => syncResolveComment(thread.root.id)}
                 className="p-1 rounded hover:bg-green-500/20 text-white/50 hover:text-green-400 transition-colors"
                 title="Resolve thread"
               >
@@ -159,7 +161,7 @@ export function CommentThreadPanel({
               </button>
             )}
             <button
-              onClick={() => deleteComment(thread.root.id)}
+              onClick={() => syncDeleteComment(thread.root.id)}
               className="p-1 rounded hover:bg-red-500/20 text-white/50 hover:text-red-400 transition-colors"
               title="Delete thread"
             >

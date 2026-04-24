@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCXDStore } from '@/store/cxd-store';
+import { fetchProjectById } from '@/lib/supabase-projects';
 import dynamic from 'next/dynamic';
 const ShareFramingPresentation = dynamic(
   () => import('@/components/cxd/share/share-framing-presentation').then(m => m.ShareFramingPresentation),
@@ -12,16 +13,42 @@ import { Loader2, ArrowLeft, LogIn } from 'lucide-react';
 
 export default function ProjectOverviewPage({ params }: { params: { projectId: string } }) {
   const router = useRouter();
-  const { getCurrentProject, loadProject } = useCXDStore();
+  const { getCurrentProject, loadProject, setProjects } = useCXDStore();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadProject(params.projectId);
-    const timer = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(timer);
-  }, [params.projectId, loadProject]);
+    let cancelled = false;
+    const hydrate = async () => {
+      loadProject(params.projectId);
+      const existing = useCXDStore.getState().projects.find(p => p.id === params.projectId);
+      if (!existing || (existing as any)._listingOnly) {
+        let fullProject = await fetchProjectById(params.projectId);
+        if (!fullProject) {
+          try {
+            const res = await fetch('/api/projects');
+            if (res.ok) {
+              const data = await res.json();
+              fullProject = data.projects?.find((p: any) => p.id === params.projectId) || null;
+            }
+          } catch {}
+        }
+        if (fullProject && !cancelled) {
+          const updated = useCXDStore.getState().projects.map(p =>
+            p.id === params.projectId ? fullProject! : p
+          );
+          const alreadyIn = updated.some(p => p.id === params.projectId);
+          setProjects(alreadyIn ? updated : [...updated, fullProject]);
+          loadProject(params.projectId);
+        }
+      }
+      if (!cancelled) setLoading(false);
+    };
+    hydrate();
+    return () => { cancelled = true; };
+  }, [params.projectId, loadProject, setProjects]);
 
   const project = getCurrentProject();
+  const isReady = project && !(project as any)._listingOnly;
 
   const handleEnterProject = useCallback(() => {
     router.push('/cxd');
@@ -31,7 +58,7 @@ export default function ProjectOverviewPage({ params }: { params: { projectId: s
     router.push('/dashboard');
   }, [router]);
 
-  if (loading || !project) {
+  if (loading || !project || !isReady) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
