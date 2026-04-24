@@ -83,7 +83,6 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     headline: 'Design From',
     highlight: 'Core Outward',
     description: 'Three ways the Hypercube works for you: tag objects and ask, surface insights and configure, and make it your model, your workflow.',
-    hideLabel: true,
     hideDescription: true,
     poster: '/images/Screenshot/3_canvas-screeshot.png',
     details: [
@@ -101,7 +100,7 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     description: 'Transform your experience design into actionable production plans with Kanban boards, Gantt timelines, calendar views, and version milestones.',
     poster: '/images/Screenshot/4_canvas-screeshot.png',
     details: [
-      { title: 'Plan your production in multiple views', description: 'Switch between Kanban, Gantt, Calendar, and Table. Same tasks, different perspectives.' },
+      { title: 'Plan your production in multiple views', description: 'Switch between Kanban, Gantt, Calendar, and Table. Same tasks, different perspectives.', video: '/images/Gifs/V2/PlanView.mp4' },
       { title: 'Tag tasks and view them in context', description: 'Tag tasks with hypercube faces and filter the inbox to surface only what belongs to the slice you are designing.', video: '/images/Gifs/V2/Inbox.mp4' },
     ],
   },
