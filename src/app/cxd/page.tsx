@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useCXDStore, type ViewMode } from "@/store/cxd-store";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
 import { useProjectSync, getLocalBackup, clearLocalBackup } from "@/hooks/use-project-sync";
+import { useCanvasPermissions } from "@/hooks/use-canvas-permissions";
 import { fetchUserProjects, saveProject } from "@/lib/supabase-projects";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
@@ -122,6 +123,20 @@ export default function CXDPage() {
     setCachedUserProfile,
     applyRemoteComments,
   } = useCXDStore();
+
+  const { access: canvasAccess, isLoading: accessLoading } = useCanvasPermissions(currentProjectId);
+
+  // Route guard: if the currently-loaded canvas is locked (owner on Free, not
+  // the chosen one), send the user to the read-only overview instead of the
+  // editor. Keep the user in the overview's "?locked=1" state so the page
+  // shows the lock banner.
+  useEffect(() => {
+    if (accessLoading || !canvasAccess) return;
+    if (canvasAccess.isLocked && currentProjectId) {
+      router.replace(`/cxd/overview/${currentProjectId}?locked=1`);
+    }
+  }, [accessLoading, canvasAccess, currentProjectId, router]);
+
   const [isRestoring, setIsRestoring] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
