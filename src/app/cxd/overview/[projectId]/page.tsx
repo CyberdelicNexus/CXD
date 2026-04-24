@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { useCanvasPermissions } from '@/hooks/use-canvas-permissions';
 import { useCXDStore } from '@/store/cxd-store';
 import { fetchProjectById } from '@/lib/supabase-projects';
 import dynamic from 'next/dynamic';
@@ -13,6 +15,10 @@ import { Loader2, ArrowLeft, LogIn } from 'lucide-react';
 
 export default function ProjectOverviewPage({ params }: { params: { projectId: string } }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isLockedQuery = searchParams.get('locked') === '1';
+  const { access: canvasAccess } = useCanvasPermissions(params.projectId);
+  const showLockBanner = Boolean(isLockedQuery || canvasAccess?.isLocked);
   const { getCurrentProject, loadProject, setProjects } = useCXDStore();
   const [loading, setLoading] = useState(true);
 
@@ -94,6 +100,21 @@ export default function ProjectOverviewPage({ params }: { params: { projectId: s
           <span className="sm:hidden">Enter</span>
         </button>
       </header>
+
+      {showLockBanner && (
+        <div className="flex-shrink-0 px-4 sm:px-6 py-3 bg-gradient-to-r from-violet-500/15 to-purple-500/10 border-b border-violet-500/25 flex items-center justify-between gap-3">
+          <p className="text-xs sm:text-sm text-violet-100/90 flex-1">
+            <span className="font-semibold text-white">This canvas is archived on your Free plan.</span>{' '}
+            Editing is disabled. Upgrade to Pro to restore full access to every canvas you own.
+          </p>
+          <Link
+            href="/#pricing"
+            className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500 hover:bg-violet-400 text-white transition-colors"
+          >
+            Upgrade to Pro
+          </Link>
+        </div>
+      )}
 
       {/* Dashboard content */}
       <main className="flex-1 overflow-hidden">
