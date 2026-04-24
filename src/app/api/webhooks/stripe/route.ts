@@ -212,6 +212,43 @@ export async function POST(req: Request) {
         break;
       }
 
+      case 'customer.subscription.updated': {
+        const sub = event.data.object as Stripe.Subscription;
+        const customerId = sub.customer as string;
+
+        const { data: row, error: lookupErr } = await supabase
+          .from('subscriptions')
+          .select('user_id')
+          .eq('stripe_customer_id', customerId)
+          .single();
+
+        if (lookupErr || !row) {
+          console.warn('[webhook] subscription.updated: no subscription row found for', customerId);
+          break;
+        }
+
+        const { error: syncErr } = await supabase
+          .from('subscriptions')
+          .update({
+            stripe_subscription_id: sub.id,
+            status: sub.status,
+            current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
+            current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+            trial_start: sub.trial_start ? new Date(sub.trial_start * 1000).toISOString() : null,
+            trial_end: sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null,
+            cancel_at_period_end: sub.cancel_at_period_end,
+            canceled_at: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString() : null,
+            // plan_id only flips away from 'pro' on subscription.deleted; don't
+            // clobber it here.
+          })
+          .eq('user_id', row.user_id);
+
+        if (syncErr) {
+          console.error('[webhook] Failed to sync subscription:', syncErr);
+        }
+        break;
+      }
+
       case 'customer.subscription.deleted': {
         const subscription = event.data.object as Stripe.Subscription;
         const { data: subscriptionRecord, error: subRecordError } = await supabase
