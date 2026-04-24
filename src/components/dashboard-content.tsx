@@ -61,6 +61,7 @@ import {
 } from "@/lib/user-profile";
 import { useSubscription } from "@/hooks/use-subscription";
 import { UpgradeModal } from "@/components/upgrade-modal";
+import { PickFreeCanvasModal } from "@/components/pick-free-canvas-modal";
 import { CollaborationPanel } from "@/components/collaboration";
 import Image from "next/image";
 
@@ -108,7 +109,10 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     hasTemplates,
     canCreateCanvas,
     isTrialing,
-    trialDaysRemaining
+    trialDaysRemaining,
+    freePrimaryCanvasId,
+    needsPickFreeCanvas,
+    refetch: refetchSubscription,
   } = useSubscription();
 
   // Profile customization state
@@ -513,6 +517,25 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
   return (
     <main className="min-h-screen text-white">
+      {needsPickFreeCanvas(projects.length) && (
+        <PickFreeCanvasModal
+          open={true}
+          canvases={projects.filter((p) => p.ownerId === userId)}
+          onChoose={async (canvasId) => {
+            const res = await fetch('/api/subscriptions/free-primary-canvas', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ canvasId }),
+            });
+            if (!res.ok) {
+              throw new Error('Failed to save primary canvas choice');
+            }
+            await refetchSubscription();
+          }}
+          onUpgrade={() => setShowUpgradeModal(true)}
+        />
+      )}
+
       {/* Background gradient overlay */}
       <div className="fixed inset-0 hero-gradient pointer-events-none z-0" />
 
@@ -722,6 +745,8 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {projects.map((project) => {
                     const isOwner = project.ownerId === userId;
+                    const tileIsFreePrimary = isFree && freePrimaryCanvasId === project.id;
+                    const tileIsLocked = isFree && !tileIsFreePrimary;
                     const coverImage = (project as any).coverImage;
                     const isUploading = uploadingCoverFor === project.id;
 
@@ -729,7 +754,13 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                       <div
                         key={project.id}
                         className="relative aspect-square rounded-xl bg-gradient-to-br from-violet-900/60 via-purple-800/50 to-indigo-900/60 hover:from-violet-800/70 hover:via-purple-700/60 hover:to-indigo-800/70 transition-all cursor-pointer group border border-violet-500/20 hover:border-violet-400/40 overflow-hidden shadow-lg hover:shadow-violet-500/20"
-                        onClick={() => handleOpenProject(project.id)}
+                        onClick={() => {
+                          if (tileIsLocked) {
+                            router.push(`/cxd/overview/${project.id}`);
+                          } else {
+                            handleOpenProject(project.id);
+                          }
+                        }}
                       >
                         {/* Cover Image */}
                         {coverImage && coverImage.startsWith('http') && (
@@ -742,6 +773,19 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                               unoptimized
                               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
+                          </div>
+                        )}
+
+                        {tileIsLocked && (
+                          <div className="absolute top-3 left-3 z-30 flex items-center gap-1 px-2 py-1 rounded-full bg-black/60 border border-white/15 backdrop-blur-sm text-[10px] font-medium text-white/70">
+                            <Lock className="w-3 h-3" />
+                            Read-only
+                          </div>
+                        )}
+                        {tileIsFreePrimary && (
+                          <div className="absolute top-3 left-3 z-30 flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 backdrop-blur-sm text-[10px] font-medium text-emerald-200">
+                            <Check className="w-3 h-3" />
+                            Your canvas
                           </div>
                         )}
 
@@ -861,7 +905,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                               <Pencil className="w-4 h-4" />
                             </Button>
 
-                            {isOwner && (
+                            {isOwner && !tileIsFreePrimary && (
                               <Button
                                 variant="ghost"
                                 size="icon"
