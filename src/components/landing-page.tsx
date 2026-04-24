@@ -128,6 +128,11 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
   const sectionRef = useRef<HTMLDivElement>(null);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
   const [isInView, setIsInView] = useState(false);
+  // Sticky "has been in view at least once" — once true, the video src stays
+  // attached so the browser can cache and we don't re-download when the user
+  // scrolls past and back. LCP benefits because only sections actually viewed
+  // contribute to network load on first paint.
+  const [hasBeenInView, setHasBeenInView] = useState(false);
   // Combined state so idx and progress update atomically — prevents the new
   // active bar from momentarily rendering at 100% before the timer resets.
   const [cycle, setCycle] = useState({ idx: 0, progress: 0 });
@@ -150,6 +155,12 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
     if (sectionRef.current) observer.observe(sectionRef.current);
     return () => observer.disconnect();
   }, []);
+
+  // Latch hasBeenInView on first intersection. Once the section has ever been
+  // visible, we keep the video src attached so scrolling back doesn't refetch.
+  useEffect(() => {
+    if (isInView) setHasBeenInView(true);
+  }, [isInView]);
 
   // Play/pause video when in view and reset fade-in when switching sources
   useEffect(() => {
@@ -246,11 +257,16 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
               // key on src forces a clean remount when switching videos,
               // so the crossfade + load event fire reliably
               key={activeVideoSrc}
-              src={activeVideoSrc}
+              // Only attach the real src once the section has been near the
+              // viewport. Before that, the <video> renders empty (the gradient
+              // background shows) and doesn't contend with the hero for LCP.
+              src={hasBeenInView ? activeVideoSrc : undefined}
               muted
               loop={shouldLoopVideo}
               playsInline
-              preload="auto"
+              // metadata preload is much lighter than auto — browser grabs
+              // headers only, full bytes stream when play() is called.
+              preload="metadata"
               onLoadedData={() => setIsVideoLoaded(true)}
               onTimeUpdate={handleVideoTimeUpdate}
               onEnded={handleVideoEnded}
@@ -858,6 +874,8 @@ export function LandingPage() {
               <img
                 src="/images/holographic-cube.webp"
                 alt="Holographic cube"
+                width={128}
+                height={128}
                 loading="lazy"
                 decoding="async"
                 className="object-contain w-full h-full select-none pointer-events-none"
@@ -897,9 +915,24 @@ export function LandingPage() {
             <Image src="/images/CL Logo NL.png" alt="Cyberdelic Labs" width={32} height={32} className="rounded-lg opacity-70" />
             <span className="text-white/50 text-sm">Cyberdelic Labs</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Image src="/images/CXD Logo 2.png" alt="CXD" width={20} height={20} className="object-contain" />
-            <span className="text-white/50 text-sm">CXD Canvas</span>
+          <div className="flex items-center gap-x-5 gap-y-2 flex-wrap justify-center text-xs">
+            <a
+              href="https://www.cyberdelic.nexus/t-c"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-white/40 hover:text-white/80 transition-colors"
+            >
+              Terms &amp; Conditions
+            </a>
+            <Image src="/images/CXD Logo 2.png" alt="CXD" width={24} height={24} className="object-contain opacity-70" />
+            <a
+              href="https://www.cyberdelic.nexus/privacy-notice"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-white/40 hover:text-white/80 transition-colors"
+            >
+              Privacy Notice
+            </a>
           </div>
           <p className="text-white/30 text-sm">© 2025 Cyberdelic Labs</p>
         </div>
