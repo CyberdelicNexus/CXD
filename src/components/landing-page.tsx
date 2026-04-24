@@ -102,7 +102,7 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     poster: '/images/Screenshot/4_canvas-screeshot.png',
     details: [
       { title: 'Plan your production in multiple views', description: 'Switch between Kanban, Gantt, Calendar, and Table. Same tasks, different perspectives.' },
-      { title: 'Tag tasks and view them in context', description: 'Tag tasks with hypercube faces and filter the inbox to surface only what belongs to the slice you are designing.', video: '/images/Gifs/V2/Inbox%20.mp4' },
+      { title: 'Tag tasks and view them in context', description: 'Tag tasks with hypercube faces and filter the inbox to surface only what belongs to the slice you are designing.', video: '/images/Gifs/V2/Inbox.mp4' },
     ],
   },
   {
