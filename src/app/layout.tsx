@@ -53,14 +53,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Preconnect to Google Fonts CDN to reduce connection latency */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* Google Fonts for canvas text elements (display=swap prevents render blocking) */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&family=Unbounded:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Raleway:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
+        {/* Canvas display fonts (Space Grotesk, Syne, Unbounded, Playfair,
+            Raleway, Outfit) are only needed on canvas routes and are loaded
+            in src/app/cxd/layout.tsx — keeping them off landing/dashboard/
+            auth pages eliminates the font-swap CLS on those routes. */}
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body className={inter.className}>
