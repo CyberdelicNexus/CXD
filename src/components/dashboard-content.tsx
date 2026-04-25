@@ -832,19 +832,17 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                           )}
                         </div>
 
-                        {/* Project Name - Top */}
-                        <div className="absolute top-3 left-3 right-16">
-                          <h4 className="font-semibold text-white text-lg truncate group-hover:text-violet-200 transition-colors drop-shadow-md">
-                            {project.name}
-                          </h4>
-                          <div className="flex items-center gap-1 text-xs text-white/50 mt-1">
-                            <Clock className="w-3 h-3" />
-                            <span>{formatDate(project.updatedAt)}</span>
+                        {/* Project Name + Action Buttons - Bottom */}
+                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 via-black/60 to-transparent">
+                          <div className="text-center mb-2 px-1">
+                            <h4 className="font-semibold text-white text-base truncate group-hover:text-violet-200 transition-colors drop-shadow-md">
+                              {project.name}
+                            </h4>
+                            <div className="flex items-center justify-center gap-1 text-[10px] text-white/50 mt-0.5">
+                              <Clock className="w-3 h-3" />
+                              <span>{formatDate(project.updatedAt)}</span>
+                            </div>
                           </div>
-                        </div>
-
-                        {/* Action Buttons - Bottom */}
-                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
                           <div className="flex items-center justify-center gap-1.5">
                             {/* Cover Image Button - Opens Dialog */}
                             <Button
