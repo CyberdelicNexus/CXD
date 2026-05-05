@@ -34,11 +34,17 @@ export async function resolveCanvasAccess(opts: {
 }): Promise<CanvasAccess> {
   const { supabase, canvasId, viewerUserId } = opts;
 
-  const { data: project } = await supabase
+  const { data: project, error: projectError } = await supabase
     .from('cxd_projects')
     .select('id, owner_id')
     .eq('id', canvasId)
     .single();
+
+  if (projectError) {
+    console.warn('[resolveCanvasAccess] project lookup failed', {
+      canvasId, viewerUserId, error: projectError,
+    });
+  }
 
   if (!project) {
     return {
@@ -81,11 +87,25 @@ export async function resolveCanvasAccess(opts: {
 
   // Fetch the OWNER's subscription to decide lock state. This is correct
   // even when the viewer is a collaborator — collaborators follow the owner.
-  const { data: ownerSub } = await supabase
+  const { data: ownerSub, error: ownerSubError } = await supabase
     .from('subscriptions')
     .select('plan_id, free_primary_canvas_id')
     .eq('user_id', project.owner_id)
     .maybeSingle();
+
+  if (ownerSubError) {
+    console.warn('[resolveCanvasAccess] owner subscription lookup failed', {
+      canvasId, viewerUserId, ownerId: project.owner_id, error: ownerSubError,
+    });
+  }
+  // Visibility while diagnosing the "Pro account locked" bug. Remove once stable.
+  if (typeof window !== 'undefined') {
+    console.debug('[resolveCanvasAccess]', {
+      canvasId, viewerUserId, ownerId: project.owner_id,
+      isOwner: project.owner_id === viewerUserId,
+      ownerSub, ownerSubError,
+    });
+  }
 
   const ownerPlan = ownerSub?.plan_id ?? 'free';
   const freePrimary = ownerSub?.free_primary_canvas_id ?? null;
