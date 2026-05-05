@@ -17,8 +17,12 @@ const SHORTCUTS: ShortcutItem[] = [
   {
     category: "Navigation",
     shortcuts: [
-      { keys: ["Space + Drag"], description: "Pan canvas" },
-      { keys: ["Scroll"], description: "Zoom in/out" },
+      { keys: ["Ctrl/Cmd", "+", "Scroll"], description: "Zoom in/out" },
+      { keys: ["Scroll"], description: "Pan canvas vertically" },
+      { keys: ["Shift", "+", "Scroll"], description: "Pan canvas horizontally" },
+      { keys: ["Space", "+", "Drag"], description: "Hand tool (pan canvas)" },
+      { keys: ["Middle Mouse", "+", "Drag"], description: "Pan canvas" },
+      { keys: ["Right Click"], description: "Context menu" },
       { keys: ["Esc"], description: "Cancel current action" },
     ],
   },
@@ -45,20 +49,38 @@ const SHORTCUTS: ShortcutItem[] = [
   {
     category: "Editing",
     shortcuts: [
-      { keys: ["Ctrl/Cmd", "Z"], description: "Undo" },
-      { keys: ["Ctrl/Cmd", "Shift", "Z"], description: "Redo" },
-      { keys: ["Ctrl/Cmd", "C"], description: "Copy selected" },
-      { keys: ["Ctrl/Cmd", "V"], description: "Paste" },
-      { keys: ["Ctrl/Cmd", "D"], description: "Duplicate selected" },
-      { keys: ["Delete"], description: "Delete selected" },
+      { keys: ["Ctrl/Cmd", "+", "Z"], description: "Undo" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "Z"], description: "Redo" },
+      { keys: ["Ctrl/Cmd", "+", "Y"], description: "Redo (alt)" },
+      { keys: ["Ctrl/Cmd", "+", "C"], description: "Copy selected" },
+      { keys: ["Ctrl/Cmd", "+", "X"], description: "Cut selected" },
+      { keys: ["Ctrl/Cmd", "+", "V"], description: "Paste at cursor" },
+      { keys: ["Ctrl/Cmd", "+", "D"], description: "Duplicate selected" },
+      { keys: ["Delete / Backspace"], description: "Delete selected" },
     ],
   },
   {
-    category: "Selection",
+    category: "Selection & Grouping",
     shortcuts: [
-      { keys: ["Click"], description: "Select element" },
-      { keys: ["Shift", "+", "Click"], description: "Multi-select" },
-      { keys: ["Shift", "+", "Drag"], description: "Marquee select" },
+      { keys: ["Click"], description: "Select element (or entire group)" },
+      { keys: ["Shift", "+", "Click"], description: "Add/remove from selection" },
+      { keys: ["Ctrl/Cmd", "+", "Click"], description: "Select individual in group" },
+      { keys: ["Drag"], description: "Marquee select (elements & lines)" },
+      { keys: ["Alt", "+", "Drag"], description: "Duplicate element by dragging" },
+    ],
+  },
+  {
+    category: "Connections",
+    shortcuts: [
+      { keys: ["Ctrl/Cmd", "+", "L"], description: "Connect selected elements" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "O"], description: "Auto-organize selected" },
+    ],
+  },
+  {
+    category: "Canvas",
+    shortcuts: [
+      { keys: ["Drag Image"], description: "Drop images onto canvas" },
+      { keys: ["Double Click"], description: "Enter board / edit element" },
     ],
   },
 ];
@@ -80,15 +102,14 @@ export function ShortcutsGuide() {
   return (
     <>
       {/* Trigger Button */}
-      <Button
-        variant="ghost"
-        size="icon"
+      <div
+        className="cursor-pointer transition-all h-10 w-10 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
         onClick={() => setIsOpen(true)}
-        className="text-muted-foreground hover:text-foreground"
         title="Keyboard Shortcuts"
+        data-tour-id="canvas-shortcuts-btn"
       >
-        <Keyboard className="w-5 h-5" />
-      </Button>
+        <Keyboard className="w-5 h-5 text-white/60 group-hover:text-white transition-colors" />
+      </div>
       {/* Modal Overlay */}
       {isOpen && (
         <div
@@ -97,7 +118,7 @@ export function ShortcutsGuide() {
         >
           {/* Modal Content */}
           <div
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl overflow-y-auto max-h-[80vh] rounded-xl shadow-[0_0_30px_rgba(168,85,247,0.4)] outline outline-2 outline-purple-500/50"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl overflow-y-auto max-h-[80vh] rounded-xl shadow-[0_0_30px_rgba(168,85,247,0.4)] outline outline-2 outline-purple-500/50 custom-scrollbar"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="bg-card border border-border rounded-lg shadow-2xl h-fit">

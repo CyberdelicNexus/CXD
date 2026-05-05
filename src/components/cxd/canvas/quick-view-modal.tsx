@@ -1,23 +1,61 @@
 "use client";
 
 import React from "react";
-import { CanvasElement } from "@/types/canvas-elements";
-import { X, ExternalLink, MapPin, FileText, Image as ImageIcon, Video, Link2, Box } from "lucide-react";
+import Image from "next/image";
+import { CanvasElement, FreeformElement } from "@/types/canvas-elements";
+import { X, ExternalLink, MapPin, FileText, Image as ImageIcon, Video, Link2, Box, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import DOMPurify from "dompurify";
 
 interface QuickViewModalProps {
   element: CanvasElement;
   onClose: () => void;
   onNavigateToCanvas: () => void;
+  // Optional navigation through tagged elements
+  allElements?: CanvasElement[];
+  currentIndex?: number;
+  onNavigate?: (direction: 'prev' | 'next') => void;
 }
 
-export function QuickViewModal({ element, onClose, onNavigateToCanvas }: QuickViewModalProps) {
+export function QuickViewModal({
+  element,
+  onClose,
+  onNavigateToCanvas,
+  allElements,
+  currentIndex,
+  onNavigate,
+}: QuickViewModalProps) {
   // Extract content based on element type
   const renderContent = () => {
     switch (element.type) {
       case "text":
       case "freeform": {
-        const content = (element as any).content || "";
+        const freeform = element as FreeformElement;
+        const noteTitle = freeform.noteTitle;
+        const noteBody = freeform.noteBody;
+        const content = freeform.content || "";
+
+        // Render note cards (with noteTitle/noteBody) differently from plain text
+        if (noteTitle || noteBody) {
+          return (
+            <div className="space-y-4">
+              {noteTitle && (
+                <h3 className="text-lg font-semibold text-foreground">{noteTitle}</h3>
+              )}
+              {noteBody && (
+                <div
+                  className="prose prose-invert prose-sm max-w-none text-foreground/90"
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(noteBody, { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }) }}
+                />
+              )}
+              {!noteTitle && !noteBody && (
+                <p className="text-sm italic text-muted-foreground">Empty note</p>
+              )}
+            </div>
+          );
+        }
+
+        // Plain text/content rendering
         return (
           <div className="prose prose-invert prose-sm max-w-none">
             <pre className="whitespace-pre-wrap font-sans text-sm text-foreground/90 leading-relaxed">
@@ -33,10 +71,13 @@ export function QuickViewModal({ element, onClose, onNavigateToCanvas }: QuickVi
         return (
           <div className="flex flex-col items-center gap-4">
             {src ? (
-              <img
+              <Image
                 src={src}
                 alt={alt}
+                width={800}
+                height={600}
                 className="max-w-full max-h-[60vh] rounded-lg border border-border/50"
+                unoptimized
                 onError={(e) => {
                   (e.target as HTMLImageElement).style.display = "none";
                 }}
@@ -234,8 +275,34 @@ export function QuickViewModal({ element, onClose, onNavigateToCanvas }: QuickVi
           <Icon className="w-5 h-5 mt-0.5 text-primary flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-semibold text-foreground truncate">{title}</h2>
-            <p className="text-xs text-muted-foreground capitalize">{element.type}</p>
+            <p className="text-xs text-muted-foreground capitalize">
+              {element.type}
+              {allElements && currentIndex !== undefined && (
+                <span className="ml-2">• {currentIndex + 1} of {allElements.length}</span>
+              )}
+            </p>
           </div>
+          {/* Navigation arrows */}
+          {onNavigate && allElements && allElements.length > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onNavigate('prev')}
+                className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                aria-label="Previous element"
+                title="Previous element"
+              >
+                <ChevronLeft className="w-5 h-5 text-muted-foreground" />
+              </button>
+              <button
+                onClick={() => onNavigate('next')}
+                className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                aria-label="Next element"
+                title="Next element"
+              >
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </button>
+            </div>
+          )}
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"

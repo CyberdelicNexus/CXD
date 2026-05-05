@@ -31,13 +31,17 @@ import {
   ChevronLeft,
   Compass,
   X,
-  ExternalLink,
   Eye,
   MapPin,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { DiagnosticPanel } from "./diagnostic-panel";
-import { generateDiagnostics } from "@/utils/diagnostic-engine";
+import NextImage from "next/image";
+import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
+import { DiagnosticPanelRedesign } from "./diagnostic-panel-redesign";
+import { AIChatPanel } from "./ai-chat-panel";
+import { ERDGenerator } from "./erd-generator";
+import { generateDiagnostics, calculateFaceIntensities } from "@/utils/diagnostic-engine";
+import { ShimmerGrid } from "@/components/ui/shimmer-grid";
+import type { EnrichedDiagnostic } from "@/types/diagnostics";
 
 // Interaction modes - Two distinct modes per specification
 // DEFAULT MODE: Cube auto-rotates, NOT interactive, face buttons are PRIMARY interaction
@@ -101,7 +105,7 @@ const GLYPHS = {
 };
 
 // Face configuration with identity system
-export interface CubeFace extends FaceIdentity {}
+export interface CubeFace extends FaceIdentity { }
 
 export const CUBE_FACES: CubeFace[] = [
   {
@@ -179,6 +183,7 @@ const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
   stateMapping: "State Mapping",
   traitMapping: "Trait Mapping",
   contextAndMeaning: "Meaning Architecture",
+  intentionCore: "Core",
 };
 
 const ELEMENT_TYPE_ICONS: Record<
@@ -231,6 +236,7 @@ interface ElementPreview {
   url?: string; // For links
 }
 
+
 function getElementPreview(
   element: CanvasElement,
   project?: any,
@@ -259,7 +265,7 @@ function getElementPreview(
       let domain = "";
       try {
         domain = new URL(url).hostname;
-      } catch {}
+      } catch { }
       return { ...base, title, domain, url, isEmpty: !url };
     }
     case "image": {
@@ -282,14 +288,6 @@ function getElementPreview(
       );
       const elementCount = boardElements.length;
 
-      console.log("[Hypercube Board Count]", {
-        elementId: element.id,
-        boardId,
-        totalProjectElements: allElements.length,
-        elementCount,
-        boardTitle: name,
-        elementTypes: boardElements.map((el: any) => el.type),
-      });
 
       return {
         ...base,
@@ -332,15 +330,21 @@ function generateFaceSummary(
     case "realityPlanes": {
       const planes = project.realityPlanesV2 || [];
       const activePlanes = planes.filter((p: any) => p.enabled);
-      const planeNames = activePlanes.map((p: any) => p.name).join(", ");
+      const namedPlanes = activePlanes
+        .map((p: any) => (typeof p?.name === "string" ? p.name.trim() : ""))
+        .filter((name: string) => name.length > 0);
+      const planeNames = namedPlanes.slice(0, 4).join(", ");
 
       if (activePlanes.length === 0) {
         return "No reality planes are currently active. Define which planes of reality this experience operates within.";
       }
       if (activePlanes.length > 4) {
-        return `${activePlanes.length} planes active (${planeNames}). Consider simplifying—cognitive load increases with each layer.`;
+        return `${activePlanes.length} planes active. Consider simplifying - cognitive load increases with each layer.`;
       }
-      return `Operating across ${activePlanes.length} plane${activePlanes.length > 1 ? "s" : ""}: ${planeNames}. ${elementCount} tagged element${elementCount !== 1 ? "s" : ""} ground this domain.`;
+      if (planeNames) {
+        return `Operating across ${activePlanes.length} plane${activePlanes.length > 1 ? "s" : ""}: ${planeNames}. ${elementCount} tagged element${elementCount !== 1 ? "s" : ""} ground this domain.`;
+      }
+      return `Operating across ${activePlanes.length} active plane${activePlanes.length > 1 ? "s" : ""}. ${elementCount} tagged element${elementCount !== 1 ? "s" : ""} ground this domain.`;
     }
 
     case "sensoryDomains": {
@@ -534,6 +538,7 @@ export function Hypercube3D({
   } | null>(null);
   const [hasDragged, setHasDragged] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isTaggedRailCollapsed, setIsTaggedRailCollapsed] = useState(false);
 
   // Two-mode interaction system per specification
   // DEFAULT: auto-rotate, non-interactive cube, face buttons are primary
@@ -545,6 +550,15 @@ export function Hypercube3D({
 
   // Zoom level for explore mode (1.0 = default, can zoom in/out)
   const [exploreZoom, setExploreZoom] = useState(DEFAULT_ZOOM);
+
+  // AI Chatbot state
+  const [isGeneralChatActive, setIsGeneralChatActive] = useState(false);
+  /** Layer 2: Store enriched chat context instead of just message */
+  const [pendingInsightContext, setPendingInsightContext] = useState<EnrichedDiagnostic['chatContext'] | undefined>();
+  const [isERDOpen, setIsERDOpen] = useState(false);
+
+  // Layer 2: Store previous diagnostics for cooldown/deduplication
+  const previousDiagnosticsRef = useRef<EnrichedDiagnostic[]>([]);
 
   // Auto-rotation for overview mode
   const autoRotationRef = useRef<number | null>(null);
@@ -562,6 +576,7 @@ export function Hypercube3D({
       interactionMode === "default" &&
       focusedFaceIndex === null &&
       !isCoreSelected &&
+      !isGeneralChatActive &&
       !isAnimating;
 
     if (!shouldAutoRotate) {
@@ -599,11 +614,31 @@ export function Hypercube3D({
       }
       lastTimeRef.current = 0;
     };
-  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected]);
+  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected, isGeneralChatActive]);
 
-  // Generate real-time diagnostics
+  // Layer 2: Generate real-time diagnostics with cooldown/deduplication
   const diagnostics = useMemo(() => {
-    return generateDiagnostics(project, project?.canvasLayout?.elements || []);
+    const newDiagnostics = generateDiagnostics(
+      project,
+      project?.canvasLayout?.elements || [],
+      previousDiagnosticsRef.current
+    );
+    // Store for next render (cooldown check)
+    previousDiagnosticsRef.current = newDiagnostics;
+    return newDiagnostics;
+  }, [project]);
+
+  // Calculate face completions for overview card
+  const faceCompletions = useMemo(() => {
+    const intensities = calculateFaceIntensities(project, project?.canvasLayout?.elements || []);
+    return {
+      realityPlanes: intensities.realityPlanes?.completion || 0,
+      sensoryDomains: intensities.sensoryDomains?.completion || 0,
+      presence: intensities.presence?.completion || 0,
+      stateMapping: intensities.stateMapping?.completion || 0,
+      traitMapping: intensities.traitMapping?.completion || 0,
+      contextAndMeaning: intensities.contextAndMeaning?.completion || 0
+    };
   }, [project]);
 
   const handleFaceReference = useCallback((faceId: string) => {
@@ -721,10 +756,6 @@ export function Hypercube3D({
         setCubeRotation({ x: targetRotation.x, y: targetRotation.y });
         setIsAnimating(false);
         animationRef.current = null;
-        console.log(
-          "[Hypercube] Animation complete - Cube transform:",
-          targetRotation,
-        );
       }
     };
 
@@ -743,15 +774,13 @@ export function Hypercube3D({
     const face = CUBE_FACES[index];
     if (!face) return;
 
-    console.log("[Hypercube] Selecting face:", index, face.shortLabel);
-
-    // Set focused face and clear core
+    // Set focused face and clear core/general chat
     setFocusedFaceIndex(index);
     setIsCoreSelected(false);
+    setIsGeneralChatActive(false);
 
     // Rotate cube to bring selected face to FRONT
     const targetRot = getRotationForFace(index);
-    console.log("[Hypercube] Target rotation:", targetRot);
 
     setTargetRotation(targetRot);
     setIsAnimating(true);
@@ -763,9 +792,9 @@ export function Hypercube3D({
     // Sidebar should only open via "Configure" button or double-click
     setFocusedFaceIndex(null);
     setIsCoreSelected(true);
+    setIsGeneralChatActive(false);
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
-    console.log("[Hypercube] Core selected - showing core panel");
   }, []);
 
   const returnToDefault = useCallback(() => {
@@ -773,9 +802,154 @@ export function Hypercube3D({
     setInteractionMode("default");
     setFocusedFaceIndex(null);
     setIsCoreSelected(false);
+    setIsGeneralChatActive(false);
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
   }, []);
+
+  // Get the current chat key (face id, 'core', or 'general')
+  const currentChatKey = useMemo(() => {
+    if (isGeneralChatActive) return "general";
+    if (isCoreSelected) return "core";
+    if (focusedFaceIndex !== null) return CUBE_FACES[focusedFaceIndex].id;
+    return null;
+  }, [isGeneralChatActive, isCoreSelected, focusedFaceIndex]);
+
+  // Layer 2: Handle insight click from diagnostic panel - populate chat with enriched context
+  const handleInsightClick = useCallback((chatContext: EnrichedDiagnostic['chatContext']) => {
+    setPendingInsightContext(chatContext);
+  }, []);
+
+  // Open general AI chat
+  const openGeneralChat = useCallback(() => {
+    setFocusedFaceIndex(null);
+    setIsCoreSelected(false);
+    setIsGeneralChatActive(true);
+  }, []);
+
+  // Handle question chip click - send question to chat with diagnostic context
+  const handleSendQuestionToChat = useCallback((question: string, diagnostic: EnrichedDiagnostic) => {
+    // First, ensure the appropriate chat is open
+    if (diagnostic.relatedFaces.length > 0) {
+      const primaryFace = diagnostic.relatedFaces[0];
+      const faceIndex = CUBE_FACES.findIndex(f => f.id === primaryFace);
+      if (faceIndex !== -1) {
+        selectFace(faceIndex);
+      }
+    } else {
+      // Open general chat if no specific face
+      openGeneralChat();
+    }
+
+    // Create a modified context that shows only the question to the user
+    // but provides the full diagnostic context to the AI
+    setPendingInsightContext({
+      issueSummary: diagnostic.chatContext.issueSummary,
+      dataPoints: diagnostic.chatContext.dataPoints,
+      suggestedQuestions: [question], // Only the clicked question
+      relatedFaceIds: diagnostic.chatContext.relatedFaceIds,
+      // Flag to indicate this is a direct question, not the full diagnostic
+      userQuestion: question
+    });
+  }, [selectFace, openGeneralChat]);
+
+  // Handle refresh diagnostics
+  const handleRefreshDiagnostics = useCallback(() => {
+    // Force re-calculation by updating the dependency
+    // In a real implementation, this might clear cooldowns or force fresh analysis
+    previousDiagnosticsRef.current = [];
+  }, []);
+
+  // Generate contextual questions using AI
+  const handleGenerateQuestions = useCallback(async (): Promise<string[]> => {
+    // Build comprehensive context from the entire project
+    const intensities = calculateFaceIntensities(project, project?.canvasLayout?.elements || []);
+    const elements = project?.canvasLayout?.elements || [];
+
+    // Create a rich context description
+    const contextParts = [
+      `Project: ${project.title || 'Untitled Experience'}`,
+      `\nCurrent State:`,
+      `- ${elements.length} canvas elements`,
+      `- ${elements.filter((e: any) => e.hypercubeTags?.length).length} tagged elements`,
+      `- ${Object.values(intensities).filter((i: any) => i.completion > 0.25).length}/6 active faces`,
+    ];
+
+    // Add face-specific context
+    Object.entries(intensities).forEach(([faceKey, intensity]) => {
+      if (intensity.completion > 0.1) {
+        const faceName = getFaceName(faceKey);
+        contextParts.push(
+          `\n${faceName}: ${Math.round(intensity.completion * 100)}% complete, ${intensity.elementCount} elements`
+        );
+      }
+    });
+
+    // Add experience framing context
+    if (project.intentionCore) {
+      contextParts.push(`\nIntention: ${project.intentionCore}`);
+    }
+    if (project.desiredChange) {
+      contextParts.push(`\nDesired Change: ${project.desiredChange}`);
+    }
+
+    const contextDescription = contextParts.join('');
+
+    // This would call the AI API - for now, return mock questions
+    // In production, this would use the AI chat service
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve([
+          "How can I strengthen the connection between my intention core and the canvas elements?",
+          "What aspects of sensory experience am I overlooking in my current design?",
+          "How do the reality planes I've defined relate to the desired change?",
+          "What patterns emerge when I look at all my tagged elements together?",
+          "How can I make the user's journey through this experience more coherent?"
+        ]);
+      }, 1000);
+    });
+  }, [project]);
+
+  // Handle generated question click
+  const handleGeneratedQuestionClick = useCallback((question: string) => {
+    // Open general chat and set the question
+    openGeneralChat();
+    setPendingInsightContext({
+      issueSummary: "User generated contextual question",
+      dataPoints: {},
+      suggestedQuestions: [question],
+      relatedFaceIds: [],
+      userQuestion: question
+    } as any); // Cast to any since we're adding userQuestion field
+  }, [openGeneralChat]);
+
+  function getFaceName(faceKey: string): string {
+    const names: Record<string, string> = {
+      realityPlanes: "Reality Planes",
+      sensoryDomains: "Sensory Domains",
+      presence: "Presence",
+      stateMapping: "State Mapping",
+      traitMapping: "Trait Mapping",
+      contextAndMeaning: "Meaning Architecture"
+    };
+    return names[faceKey] || faceKey;
+  }
+
+  // Navigate to a face by faceKey (used by history panel)
+  const navigateToFace = useCallback((targetFaceKey: string, e?: React.MouseEvent) => {
+    if (targetFaceKey === "general") {
+      openGeneralChat();
+      return;
+    }
+    if (targetFaceKey === "core") {
+      focusCore();
+      return;
+    }
+    const faceIndex = CUBE_FACES.findIndex((f) => f.id === targetFaceKey);
+    if (faceIndex !== -1) {
+      selectFace(faceIndex);
+    }
+  }, [openGeneralChat, focusCore, selectFace]);
 
   const enterExploreMode = useCallback(() => {
     // Explicit toggle to explore mode
@@ -783,6 +957,7 @@ export function Hypercube3D({
     // Clear face selection when entering explore
     setFocusedFaceIndex(null);
     setIsCoreSelected(false);
+    setIsGeneralChatActive(false);
   }, []);
 
   const exitExploreMode = useCallback(() => {
@@ -820,12 +995,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(currentX, newY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Left -> Y:",
-      newY,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const rotateRight = useCallback(() => {
@@ -839,12 +1008,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(currentX, newY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Right -> Y:",
-      newY,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const rotateUp = useCallback(() => {
@@ -858,12 +1021,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(newX, currentY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Up -> X:",
-      newX,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const rotateDown = useCallback(() => {
@@ -877,12 +1034,6 @@ export function Hypercube3D({
     const newFrontFace = getFrontFaceFromRotation(newX, currentY);
     setFocusedFaceIndex(newFrontFace);
     setIsCoreSelected(false);
-    console.log(
-      "[Hypercube] Rotate Down -> X:",
-      newX,
-      "New front face:",
-      newFrontFace,
-    );
   }, [targetRotation]);
 
   const handleMouseDown = useCallback(
@@ -1046,15 +1197,15 @@ export function Hypercube3D({
           coherence =
             avgValue > 0
               ? 1 -
-                Math.min(
-                  values.reduce(
-                    (sum: number, v: any) => sum + Math.pow(v - avgValue, 2),
-                    0,
-                  ) /
-                    values.length /
-                    1000,
-                  1,
-                )
+              Math.min(
+                values.reduce(
+                  (sum: number, v: any) => sum + Math.pow(v - avgValue, 2),
+                  0,
+                ) /
+                values.length /
+                1000,
+                1,
+              )
               : 0.5;
 
           if (avgValue > 70) glowPattern = "fractured";
@@ -1169,31 +1320,33 @@ export function Hypercube3D({
     return frontIndex;
   }, [cubeRotation.x, cubeRotation.y]);
 
-  // Log when activeFaceId changes
-  useEffect(() => {
-    if (focusedFaceIndex !== null) {
-      console.log(
-        "[Hypercube] activeFaceId:",
-        CUBE_FACES[focusedFaceIndex]?.id,
-        "index:",
-        focusedFaceIndex,
-      );
-    }
-  }, [focusedFaceIndex]);
 
   const focusedFace =
     focusedFaceIndex !== null ? CUBE_FACES[focusedFaceIndex] : null;
+  const chatAccentHue = focusedFace?.tint.hue ?? (isCoreSelected ? 195 : 220);
   const focusedFaceTag = focusedFace ? SECTION_TO_TAG[focusedFace.id] : null;
+  const coreFaceTag: HypercubeFaceTag = "Core";
+  const activeFaceTag = focusedFaceTag ?? (isCoreSelected ? coreFaceTag : null);
   const focusedTaggedElements = focusedFaceTag
     ? getTaggedElementsForFace(focusedFaceTag)
     : [];
+  const coreTaggedElements = isCoreSelected
+    ? getTaggedElementsForFace(coreFaceTag)
+    : [];
+  const activeTaggedElements = focusedFaceTag ? focusedTaggedElements : coreTaggedElements;
 
   // Generate rich previews for tagged elements
   const focusedElementPreviews = useMemo(() => {
-    return focusedTaggedElements.map((el: any) =>
+    return activeTaggedElements.map((el: any) =>
       getElementPreview(el, project),
     );
-  }, [focusedTaggedElements, project]);
+  }, [activeTaggedElements, project]);
+
+  useEffect(() => {
+    if ((!focusedFace && !isCoreSelected) || focusedElementPreviews.length === 0) {
+      setIsTaggedRailCollapsed(false);
+    }
+  }, [focusedFace, isCoreSelected, focusedElementPreviews.length]);
 
   // Generate face summary
   const faceSummary = useMemo(() => {
@@ -1208,7 +1361,7 @@ export function Hypercube3D({
   // When a face is selected: cube shrinks and moves to top-right as NAVIGATION MAP
   // Otherwise: cube is centered and visually prominent
   const cubePosition = useMemo(() => {
-    const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected;
+    const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
 
     if (hasFaceSelected && interactionMode === "default") {
       // Minimap position: top-right corner, smaller but still 3D (20-30° tilt preserved)
@@ -1220,15 +1373,60 @@ export function Hypercube3D({
     const scale =
       interactionMode === "explore" ? baseScale * exploreZoom : baseScale;
     return { scale, x: "50%", y: "50%" };
-  }, [interactionMode, focusedFaceIndex, isCoreSelected, exploreZoom]);
+  }, [interactionMode, focusedFaceIndex, isCoreSelected, isGeneralChatActive, exploreZoom]);
+
+  // Keep directional arrows aligned with the projected minimap cube center.
+  const minimapVisualCenterOffset = useMemo(() => {
+    if (
+      interactionMode !== "default" ||
+      (focusedFaceIndex === null && !isCoreSelected)
+    ) {
+      return { x: 0, y: 0 };
+    }
+
+    const centroid = outerCorners.reduce(
+      (acc, corner) => ({ x: acc.x + corner.x, y: acc.y + corner.y }),
+      { x: 0, y: 0 },
+    );
+    const centerX = centroid.x / outerCorners.length;
+    const centerY = centroid.y / outerCorners.length;
+
+    return {
+      x: (centerX - 400) * cubePosition.scale,
+      y: (centerY - 400) * cubePosition.scale,
+    };
+  }, [
+    interactionMode,
+    focusedFaceIndex,
+    isCoreSelected,
+    outerCorners,
+    cubePosition.scale,
+  ]);
+
+  // Dynamic background based on canvas background preference
+  const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
+  const centerColor = extractCenterColor(canvasBackground);
 
   return (
-    <div className="relative w-full h-full bg-background overflow-hidden">
+    <div className="relative w-full h-full overflow-hidden">
+      {/* 1. Underlying Radial Gradient */}
+      <div
+        className="absolute inset-0 -z-20"
+        style={{ background: canvasBackground }}
+      />
+
+      {/* 2. Shimmer Grid on top of the gradient */}
+      <ShimmerGrid className="absolute inset-0 -z-10 opacity-40" />
       {/* Diagnostic Panel - Left side, visible when face is selected */}
-      <DiagnosticPanel
+      <DiagnosticPanelRedesign
         diagnostics={diagnostics}
+        faceCompletions={faceCompletions}
         onFaceReference={handleFaceReference}
-        isOpen={isPanelOpen && (focusedFaceIndex !== null || isCoreSelected)}
+        onSendQuestionToChat={handleSendQuestionToChat}
+        onGenerateQuestions={handleGenerateQuestions}
+        onGeneratedQuestionClick={handleGeneratedQuestionClick}
+        onRefresh={handleRefreshDiagnostics}
+        isOpen={isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)}
         onToggle={() => setIsPanelOpen(!isPanelOpen)}
       />
       {/* 3D Scene Container */}
@@ -1243,8 +1441,7 @@ export function Hypercube3D({
             : "cursor-default",
         )}
         style={{
-          background:
-            "radial-gradient(circle at 50% 50%, hsl(270 30% 8%), hsl(270 30% 3%))",
+          //  background: canvasBackground,
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -1561,70 +1758,76 @@ export function Hypercube3D({
         </svg>
 
         {/* Top Navigation Bar - Upgraded Hypercube Faces Menu */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 items-center p-2 rounded-xl">
-          {/* Mode indicator */}
-          <div
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 items-center p-2 rounded-xl" data-tour-id="map-face-selector">
+          {/* General AI Chat button */}
+          <button
+            data-tour-id="map-cyberdelic-tab"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasDragged) return;
+              openGeneralChat();
+            }}
             className={cn(
-              "w-[88px] h-[72px] rounded-lg flex items-center justify-center transition-all duration-300 cursor-default relative overflow-hidden group",
-              interactionMode === "default" &&
-                "bg-gradient-to-br from-purple-900/60 via-purple-950/80 to-indigo-950/60 border border-purple-500/30",
-              interactionMode === "explore" &&
-                "bg-gradient-to-br from-amber-900/60 via-amber-950/80 to-orange-950/60 border border-amber-500/30",
+              "group relative w-[72px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center",
+              isGeneralChatActive && "scale-105 z-10",
+              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-40 scale-95",
+              !isGeneralChatActive && focusedFaceIndex === null && "hover:scale-105 hover:z-10 overflow-visible",
             )}
+            style={{
+              background: "linear-gradient(135deg, hsl(220 30% 12%) 0%, hsl(220 25% 8%) 50%, hsl(220 20% 5%) 100%)",
+              borderColor: isGeneralChatActive
+                ? "hsl(220 60% 60%)"
+                : "hsl(220 20% 25%)",
+              boxShadow: isGeneralChatActive
+                ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
+                : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
+            }}
+            title="General AI Chat"
           >
-            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-            <div className="flex flex-col items-center gap-1 relative z-10">
-              <div
+            <div
+              className={cn(
+                "absolute inset-0 opacity-0 transition-opacity duration-300",
+                !isGeneralChatActive && focusedFaceIndex === null && "group-hover:opacity-100",
+              )}
+              style={{
+                background: "radial-gradient(circle at center, hsl(220 60% 60% / 0.12) 0%, transparent 70%)",
+              }}
+            />
+            <div className="relative z-10 flex items-center justify-center">
+              <NextImage
+                src="/images/CXD Logo 2.png"
+                alt="AI"
+                width={32}
+                height={32}
                 className={cn(
-                  "w-2 h-2 rounded-full",
-                  interactionMode === "default" &&
-                    focusedFaceIndex === null &&
-                    !isCoreSelected &&
-                    "bg-purple-400 animate-pulse shadow-lg shadow-purple-400/50",
-                  interactionMode === "default" &&
-                    (focusedFaceIndex !== null || isCoreSelected) &&
-                    "bg-cyan-400 shadow-lg shadow-cyan-400/50",
-                  interactionMode === "explore" &&
-                    "bg-amber-400 animate-pulse shadow-lg shadow-amber-400/50",
+                  "w-8 h-8 object-contain transition-all duration-300",
+                  isGeneralChatActive ? "opacity-100" : "opacity-85",
                 )}
               />
-              <span
-                className={cn(
-                  "text-[11px] font-bold uppercase tracking-wide",
-                  interactionMode === "default"
-                    ? "text-purple-300"
-                    : "text-amber-300",
-                )}
-              >
-                {interactionMode === "default" &&
-                  (focusedFaceIndex !== null || isCoreSelected) &&
-                  "Active"}
-                {interactionMode === "default" &&
-                  focusedFaceIndex === null &&
-                  !isCoreSelected &&
-                  "Default"}
-                {interactionMode === "explore" && "Explore"}
-              </span>
             </div>
-          </div>
+          </button>
 
           {/* Face buttons */}
           {CUBE_FACES.map((face, index) => {
             const isFocused = focusedFaceIndex === index;
             const isDimmed =
-              focusedFaceIndex !== null && focusedFaceIndex !== index;
+              (focusedFaceIndex !== null && focusedFaceIndex !== index) || isGeneralChatActive;
             const intensity = calculateFaceIntensity(face);
 
             const { hue, satBase, lightBase } = face.tint;
-            const saturation = satBase + intensity.completion * 20;
-            const lightness = lightBase + intensity.glowIntensity * 15;
+            // Clamp visual drivers so unusual data values do not distort button colors.
+            const visualCompletion = Math.max(0, Math.min(intensity.completion, 1));
+            const visualGlow = Math.max(0, Math.min(intensity.glowIntensity, 1));
+            const saturation = satBase + visualCompletion * 20;
+            const lightness = lightBase + visualGlow * 15;
+            const buttonHue = face.id === "realityPlanes" ? 286 : hue;
 
             // Dark gradient colors for the button
-            const gradientStart = `hsl(${hue} ${Math.min(saturation + 10, 50)}% 12%)`;
-            const gradientMid = `hsl(${hue} ${Math.min(saturation + 5, 45)}% 8%)`;
-            const gradientEnd = `hsl(${hue} ${saturation}% 5%)`;
-            const glowColor = `hsl(${hue} ${Math.min(saturation + 20, 70)}% ${Math.min(lightness + 30, 65)}%)`;
-            const textColor = `hsl(${hue} ${Math.min(saturation + 25, 80)}% ${Math.min(lightness + 35, 75)}%)`;
+            const gradientStart = `hsl(${buttonHue} ${Math.min(saturation + 10, 50)}% 12%)`;
+            const gradientMid = `hsl(${buttonHue} ${Math.min(saturation + 5, 45)}% 8%)`;
+            const gradientEnd = `hsl(${buttonHue} ${Math.min(saturation, 42)}% 5%)`;
+            const glowColor = `hsl(${buttonHue} ${Math.min(saturation + 20, 70)}% ${Math.min(lightness + 30, 65)}%)`;
+            const textColor = `hsl(${buttonHue} ${Math.min(saturation + 25, 80)}% ${Math.min(lightness + 35, 75)}%)`;
 
             return (
               <button
@@ -1643,8 +1846,8 @@ export function Hypercube3D({
                   isFocused && "scale-105 z-10",
                   isDimmed && "opacity-40 scale-95",
                   !isFocused &&
-                    !isDimmed &&
-                    "hover:scale-105 hover:z-10 overflow-visible",
+                  !isDimmed &&
+                  "hover:scale-105 hover:z-10 overflow-visible",
                 )}
                 style={{
                   background: `linear-gradient(135deg, ${gradientStart} 0%, ${gradientMid} 50%, ${gradientEnd} 100%)`,
@@ -1863,14 +2066,21 @@ export function Hypercube3D({
         {/* Directional Navigation Arrows - TRUE 90° cube rotations */}
         {interactionMode === "default" &&
           (focusedFaceIndex !== null || isCoreSelected) && (
-            <div className="absolute right-4 w-[320px] pointer-events-none z-15 top-[10px]">
+            <div
+              className="absolute w-[240px] h-[180px] pointer-events-none z-30"
+              style={{
+                left: cubePosition.x,
+                top: cubePosition.y,
+                transform: `translate(calc(-50% + ${minimapVisualCenterOffset.x}px), calc(-50% + ${minimapVisualCenterOffset.y}px))`,
+              }}
+            >
               {/* Face label below minimap */}
 
-              <div className="relative w-full h-[280px] flex items-center justify-center">
+              <div className="relative w-full h-full flex items-center justify-center">
                 {/* Arrow Up - rotates cube to bring TOP face to front */}
                 <button
                   onClick={rotateUp}
-                  className="pointer-events-auto absolute top-0 left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
+                  className="pointer-events-auto absolute top-[-10px] left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
                   title="Rotate Up (bring bottom face forward)"
                 >
                   <ChevronUp className="w-5 h-5 text-foreground/80" />
@@ -1879,7 +2089,7 @@ export function Hypercube3D({
                 {/* Arrow Down - rotates cube to bring BOTTOM face to front */}
                 <button
                   onClick={rotateDown}
-                  className="pointer-events-auto absolute bottom-0 left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
+                  className="pointer-events-auto absolute bottom-[-10px] left-1/2 -translate-x-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
                   title="Rotate Down (bring top face forward)"
                 >
                   <ChevronDown className="w-5 h-5 text-foreground/80" />
@@ -1888,7 +2098,7 @@ export function Hypercube3D({
                 {/* Arrow Left - rotates cube 90° left (brings right face to front) */}
                 <button
                   onClick={rotateLeft}
-                  className="pointer-events-auto absolute left-0 top-1/2 -translate-y-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
+                  className="pointer-events-auto absolute left-[-10px] top-1/2 -translate-y-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
                   title="Rotate Left"
                 >
                   <ChevronLeft className="w-5 h-5 text-foreground/80" />
@@ -1897,16 +2107,14 @@ export function Hypercube3D({
                 {/* Arrow Right - rotates cube 90° right (brings left face to front) */}
                 <button
                   onClick={rotateRight}
-                  className="pointer-events-auto absolute right-0 top-1/2 -translate-y-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
+                  className="pointer-events-auto absolute right-[-10px] top-1/2 -translate-y-1/2 p-2 rounded-lg backdrop-blur-sm border transition-all bg-card/80 border-border/50 hover:bg-card hover:border-primary/40 hover:scale-110"
                   title="Rotate Right"
                 >
                   <ChevronRight className="w-5 h-5 text-foreground/80" />
                 </button>
               </div>
               <div
-                className={
-                  "text-center mb-2 pointer-events-none py-[0px] absolute top-[205px] text-indigo-500 w-[189.1125px] left-[63px]"
-                }
+                className="text-center pointer-events-none absolute -bottom-6 left-1/2 -translate-x-1/2 text-indigo-500 w-full"
               >
                 <p
                   className={
@@ -1971,314 +2179,198 @@ export function Hypercube3D({
           </div>
         </div>
 
-        {/* CENTER PANEL - When a face is selected in default mode */}
-        {interactionMode === "default" && focusedFace && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-            <div className="w-full max-w-2xl mx-auto px-8 pointer-events-auto">
-              <div
-                className="bg-card/95 backdrop-blur-xl rounded-2xl border shadow-2xl overflow-hidden"
-                style={{
-                  borderColor: `hsl(${focusedFace.tint.hue} 40% 40% / 0.5)`,
-                }}
-              >
-                {/* Header */}
+        {/* CENTER PANEL - AI Chatbot + Tagged Elements (bottom-right dock) */}
+        {interactionMode === "default" && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
+          <div className="absolute inset-0 flex flex-col justify-center pt-[110px] pb-[64px] pointer-events-none z-20">
+            {/* Main Chat Area */}
+            <div
+              className={cn(
+                "w-full pointer-events-none overflow-visible px-4 flex justify-center md:pr-[260px] lg:pr-[300px] xl:pr-[340px]",
+                isPanelOpen ? "md:pl-[340px] lg:pl-[360px]" : "md:pl-[84px] lg:pl-[120px]",
+              )}
+            >
+              <div className="relative w-full max-w-[1120px]">
                 <div
-                  className="px-6 py-4 border-b border-border flex items-center justify-between"
-                  style={{
-                    backgroundColor: `hsl(${focusedFace.tint.hue} 30% 15% / 0.5)`,
-                  }}
-                >
-                  <div className="flex items-center gap-4">
-                    <svg width="36" height="36" viewBox="0 0 40 40">
-                      <path
-                        d={focusedFace.glyph}
-                        fill="none"
-                        stroke={`hsl(${focusedFace.tint.hue} 50% 65%)`}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <div>
-                      <h2 className="text-lg font-semibold text-foreground">
-                        {focusedFace.label}
-                      </h2>
-                      <p className="text-xs text-muted-foreground">
-                        {focusedFace.semanticRole}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onSelectSection(focusedFace.id)}
-                      className="px-3 py-1.5 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded-md transition-colors flex items-center gap-1.5"
-                    >
-                      Configure
-                      <ExternalLink className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={returnToDefault}
-                      className="p-1.5 hover:bg-white/10 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                      title="Return to default"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Summary */}
-                <div className="px-6 py-4 border-b border-border">
-                  <p className="text-sm text-foreground/90 leading-relaxed">
-                    {faceSummary}
-                  </p>
-                </div>
-
-                {/* Rich Content Previews */}
-                <div className="px-6 py-4 max-h-[300px] overflow-y-auto">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-xs uppercase tracking-wider font-semibold text-muted-foreground">
-                      Tagged Canvas Elements
-                    </h3>
-                    <span className="text-xs text-muted-foreground/70">
-                      {focusedElementPreviews.length} element
-                      {focusedElementPreviews.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-
-                  {focusedElementPreviews.length === 0 ? (
-                    <div className="text-center py-8 border border-dashed border-border/50 rounded-lg">
-                      <Type className="w-8 h-8 mx-auto mb-2 text-muted-foreground/40" />
-                      <p className="text-sm text-muted-foreground">
-                        No elements tagged to this face yet
-                      </p>
-                      <p className="text-xs text-muted-foreground/70 mt-1">
-                        Use "Tag to Hypercube" in element context menu on canvas
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {focusedElementPreviews.map((preview: ElementPreview) => {
-                        const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
-                        // Find the actual element for callbacks
-                        const element = focusedTaggedElements.find(
-                          (el: CanvasElement) => el.id === preview.id,
-                        );
-
-                        return (
-                          <div
-                            key={preview.id}
-                            className={cn(
-                              "group p-3 rounded-lg border transition-all hover:bg-white/5 cursor-pointer",
-                              preview.isEmpty
-                                ? "border-border/30 opacity-60"
-                                : "border-border/50",
-                            )}
-                            style={{
-                              borderLeftColor: `hsl(${focusedFace.tint.hue} 40% 50%)`,
-                              borderLeftWidth: "3px",
-                            }}
-                            onClick={() => {
-                              if (onPreviewElement && element) {
-                                onPreviewElement(element);
-                              }
-                            }}
-                          >
-                            <div className="flex items-start gap-3">
-                              <Icon className="w-4 h-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-sm font-medium text-foreground truncate">
-                                    {preview.title}
-                                  </span>
-                                  {preview.domain && (
-                                    <span className="text-[10px] text-muted-foreground/70 px-1.5 py-0.5 bg-white/5 rounded">
-                                      {preview.domain}
-                                    </span>
-                                  )}
-                                  {preview.elementCount !== undefined && (
-                                    <span className="text-[10px] text-muted-foreground/70 px-1.5 py-0.5 bg-white/5 rounded">
-                                      {preview.elementCount}{" "}
-                                      {preview.elementCount === 1
-                                        ? "item"
-                                        : "items"}
-                                    </span>
-                                  )}
-                                </div>
-                                {preview.excerpt && (
-                                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                    {preview.excerpt}
-                                  </p>
-                                )}
-                                {preview.isEmpty && (
-                                  <p className="text-xs text-muted-foreground/50 mt-1 italic">
-                                    No content yet
-                                  </p>
-                                )}
-                                {/* Action buttons - always visible for better discoverability */}
-                                <div className="flex items-center gap-2 mt-2">
-                                  {element && onPreviewElement && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onPreviewElement(element);
-                                      }}
-                                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-primary/20 hover:bg-primary/30 text-primary transition-colors"
-                                    >
-                                      <Eye className="w-3 h-3" />
-                                      Quick View
-                                    </button>
-                                  )}
-                                  {onNavigateToElement && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onNavigateToElement(preview.id);
-                                      }}
-                                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-white/10 hover:bg-white/20 text-foreground/80 transition-colors"
-                                    >
-                                      <MapPin className="w-3 h-3" />
-                                      View on Canvas
-                                    </button>
-                                  )}
-                                  {preview.type === "link" && preview.url && (
-                                    <a
-                                      href={preview.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="flex items-center gap-1 px-2 py-1 text-[10px] rounded bg-white/10 hover:bg-white/20 text-foreground/80 transition-colors"
-                                    >
-                                      <ExternalLink className="w-3 h-3" />
-                                      Open Link
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                              {preview.thumbnail && (
-                                <div className="w-16 h-16 rounded overflow-hidden bg-black/20 flex-shrink-0 border border-border/30">
-                                  <img
-                                    src={preview.thumbnail}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      (
-                                        e.target as HTMLImageElement
-                                      ).style.display = "none";
-                                    }}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                  className={cn(
+                    "relative mx-auto w-full",
+                    (focusedFace || isCoreSelected) && focusedElementPreviews.length > 0
+                      ? "max-w-[860px]"
+                      : "max-w-[820px]",
                   )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CORE PANEL - When core is selected in default mode */}
-        {interactionMode === "default" && isCoreSelected && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-            <div className="w-full max-w-2xl mx-auto px-8 pointer-events-auto">
-              <div className="bg-card/95 backdrop-blur-xl rounded-2xl border border-cyan-500/30 shadow-2xl overflow-hidden">
-                {/* Header */}
-                <div className="px-6 py-4 border-b border-border bg-cyan-950/30 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <svg width="36" height="36" viewBox="0 0 40 40">
-                      <path
-                        d={GLYPHS.core}
-                        fill="none"
-                        stroke="hsl(195 70% 65%)"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <div>
-                      <h2 className="text-lg font-semibold text-foreground">
-                        Core
-                      </h2>
-                      <p className="text-xs text-muted-foreground">
-                        The inner essence of this experience
-                      </p>
-                    </div>
+                >
+                  <div className="pointer-events-auto" data-tour-id="map-chat-panel">
+                    <AIChatPanel
+                      faceKey={currentChatKey}
+                      projectId={project?.id || ""}
+                      accentHue={chatAccentHue}
+                      faceName={focusedFace ? focusedFace.label : isCoreSelected ? "Core" : "Cyberdelic Wizard"}
+                      semanticRole={focusedFace ? focusedFace.semanticRole : isCoreSelected ? "Holistic integration across all dimensions" : "General experience design guidance"}
+                      faceGlyph={focusedFace ? focusedFace.glyph : isCoreSelected ? GLYPHS.core : null}
+                      faceSummary={focusedFace ? faceSummary : undefined}
+                      onClose={returnToDefault}
+                      onConfigure={
+                        focusedFace
+                          ? () => onSelectSection(focusedFace.id)
+                          : isCoreSelected
+                            ? onCoreClick
+                            : undefined
+                      }
+                      onGenerateERD={
+                        (isGeneralChatActive || isCoreSelected)
+                          ? () => setIsERDOpen(true)
+                          : undefined
+                      }
+                      insightContext={pendingInsightContext}
+                      onInsightConsumed={() => setPendingInsightContext(undefined)}
+                      onNavigateToFace={navigateToFace}
+                      sizeVariant={
+                        isGeneralChatActive && !focusedFace && !isCoreSelected
+                          ? "assistant"
+                          : "default"
+                      }
+                    />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onCoreClick()}
-                      className="px-3 py-1.5 text-xs bg-primary/20 hover:bg-primary/30 text-primary rounded-md transition-colors flex items-center gap-1.5"
-                    >
-                      Configure
-                      <ExternalLink className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={returnToDefault}
-                      className="p-1.5 hover:bg-white/10 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                      title="Return to default"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
 
-                {/* Core Overview */}
-                <div className="px-6 py-4">
-                  <p className="text-sm text-foreground/90 leading-relaxed mb-4">
-                    The Core represents the unified center of your experience
-                    design. It's where all six dimensions converge—Reality,
-                    Sensory, Presence, States, Traits, and Meaning—into a
-                    coherent whole.
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    {CUBE_FACES.map((face, index) => {
-                      const intensity = calculateFaceIntensity(face);
-                      return (
-                        <button
-                          key={face.id}
-                          onClick={() => selectFace(index)}
-                          className="p-3 rounded-lg border border-border/50 hover:bg-white/5 transition-all text-left flex items-center gap-3"
-                          style={{
-                            borderLeftColor: `hsl(${face.tint.hue} 40% 50%)`,
-                            borderLeftWidth: "3px",
-                          }}
+                {/* Tagged Elements outside chat on center-right */}
+                {(focusedFace || isCoreSelected) && focusedElementPreviews.length > 0 && (() => {
+                  const railHue = focusedFace ? focusedFace.tint.hue : 270; // Purple for core
+                  return (
+                  <aside
+                    className={cn(
+                      "pointer-events-auto absolute left-full bottom-0 ml-3 rounded-2xl border backdrop-blur-sm bg-black/10 overflow-hidden transition-all duration-300",
+                      isTaggedRailCollapsed ? "w-[36px]" : "w-[240px]",
+                    )}
+                    style={{
+                      borderColor: `hsl(${railHue} 40% 45% / 0.35)`,
+                      boxShadow: `0 0 0 1px hsl(${railHue} 55% 55% / 0.18) inset`,
+                    }}
+                  >
+                    <div
+                      className={cn(
+                        "py-2 border-b border-white/10 flex items-center",
+                        isTaggedRailCollapsed
+                          ? "px-1.5 justify-center"
+                          : "px-3 justify-between",
+                      )}
+                    >
+                      {!isTaggedRailCollapsed && (
+                        <h3
+                          className="text-[10px] uppercase tracking-wider font-semibold"
+                          style={{ color: `hsl(${railHue} 45% 62%)` }}
                         >
-                          <svg width="24" height="24" viewBox="0 0 40 40">
-                            <path
-                              d={face.glyph}
-                              fill="none"
-                              stroke={`hsl(${face.tint.hue} 50% 60%)`}
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                          <div>
-                            <div className="text-sm font-medium text-foreground">
-                              {face.shortLabel}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">
-                              {intensity.state === "undeveloped" &&
-                                "Not started"}
-                              {intensity.state === "emerging" && "In progress"}
-                              {intensity.state === "active" && "Active"}
-                              {intensity.state === "coherent" && "Coherent"}
-                            </div>
-                          </div>
+                          Tagged Elements
+                        </h3>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        {!isTaggedRailCollapsed && (
+                          <span className="text-[10px] text-muted-foreground/60">
+                            {focusedElementPreviews.length}
+                          </span>
+                        )}
+                        <button
+                          onClick={() =>
+                            setIsTaggedRailCollapsed((prev) => !prev)
+                          }
+                          className="p-1 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                          title={
+                            isTaggedRailCollapsed
+                              ? "Expand tagged elements"
+                              : "Collapse tagged elements"
+                          }
+                          aria-label={
+                            isTaggedRailCollapsed
+                              ? "Expand tagged elements"
+                              : "Collapse tagged elements"
+                          }
+                        >
+                          {isTaggedRailCollapsed ? (
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          )}
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                      </div>
+                    </div>
+
+                    {isTaggedRailCollapsed ? (
+                      <div className="flex justify-center py-2">
+                        <span
+                          className="text-[10px] font-medium rounded-full px-1.5 py-0.5 border border-white/20 text-muted-foreground/80"
+                          title={`${focusedElementPreviews.length} tagged elements`}
+                        >
+                          {focusedElementPreviews.length}
+                        </span>
+                      </div>
+                    ) : (
+                        <div
+                          className="chat-scrollbar max-h-[44vh] overflow-y-auto p-2 space-y-2"
+                          style={{
+                            "--chat-scrollbar-hue": railHue,
+                          } as React.CSSProperties}
+                      >
+                        {focusedElementPreviews.map((preview: ElementPreview) => {
+                          const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
+                          const element = activeTaggedElements.find(
+                            (el: CanvasElement) => el.id === preview.id,
+                          );
+                          return (
+                            <div
+                              key={preview.id}
+                              className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-white/15 bg-transparent hover:border-white/30 transition-all group"
+                              style={{
+                                borderLeftColor: `hsl(${railHue} 45% 52%)`,
+                                borderLeftWidth: "2px",
+                              }}
+                            >
+                              <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                              <span className="text-xs text-foreground truncate">
+                                {preview.title}
+                              </span>
+                              <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                                {element && onPreviewElement && (
+                                  <button
+                                    onClick={() => onPreviewElement(element)}
+                                    className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                    title="Quick View"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {onNavigateToElement && (
+                                  <button
+                                    onClick={() => onNavigateToElement(preview.id)}
+                                    className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                    title="View on Canvas"
+                                  >
+                                    <MapPin className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </aside>
+                  );
+                })()}
               </div>
             </div>
+            </div>
+
+
           </div>
         )}
+
       </div>
+
+      {/* ERD Generator Modal */}
+      <ERDGenerator
+        projectId={project?.id || ""}
+        isOpen={isERDOpen}
+        onClose={() => setIsERDOpen(false)}
+      />
     </div>
   );
 }

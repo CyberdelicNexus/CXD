@@ -156,14 +156,15 @@ export interface ExperienceFlowStageV2 {
   presenceTypes: StagePresenceTypes;
   designIntent: string;
   estimatedMinutes: number | null;
+  realityPlanes?: Record<RealityPlaneCode, boolean>;
 }
 
 export const DEFAULT_EXPERIENCE_FLOW_STAGES: ExperienceFlowStageV2[] = [
-  { id: 'preparation', name: 'Preparation', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'induction', name: 'Induction', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'journey', name: 'Journey', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'peak', name: 'Peak', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
-  { id: 'integration', name: 'Integration', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null },
+  { id: 'preparation', name: 'Preparation', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'induction', name: 'Induction', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'journey', name: 'Journey', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'peak', name: 'Peak', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
+  { id: 'integration', name: 'Integration', narrativeNotes: '', engagementDistribution: { ...DEFAULT_ENGAGEMENT_DISTRIBUTION }, presenceTypes: { ...DEFAULT_STAGE_PRESENCE_TYPES }, designIntent: '', estimatedMinutes: null, realityPlanes: { PR: true, VR: false, AR: false, MR: false, GR: false, BR: false, CR: false } },
 ];
 
 export const EXPERIENCE_FLOW_STAGES: Omit<ExperienceFlowStage, 'engagementLevel' | 'narrativeNotes' | 'designIntent'>[] = [
@@ -238,7 +239,7 @@ export interface ContextAndMeaning {
 }
 
 // CXD Section - All major sections of the canvas
-export type CXDSectionId = 
+export type CXDSectionId =
   | 'intentionCore'
   | 'desiredChange'
   | 'humanContext'
@@ -281,7 +282,11 @@ export interface CXDProject {
   schemaVersion: string;
   ownerId: string;
   shareToken?: string;
-  
+  shareCoverImage?: string;   // URL to uploaded cover image for share page
+  shareThumbnail?: string;    // URL to uploaded thumbnail for share page
+  shareDescription?: string;  // Project description for share page
+  canvasBackground?: string; // CSS gradient string for canvas background
+
   // Section data
   intentionCore: IntentionCore;
   desiredChange: DesiredChange;
@@ -296,7 +301,7 @@ export interface CXDProject {
   experienceFlowDescription?: string; // High-level flow description from wizard
   stateMapping: Record<StateQuadrantCode, string>;
   traitMapping: Record<TraitQuadrantCode, string>;
-  
+
   // Canvas layout (persisted per project)
   canvasLayout?: {
     sectionPositions?: Record<string, { x: number; y: number }>;
@@ -304,14 +309,24 @@ export interface CXDProject {
     edges?: import('./canvas-elements').CanvasEdge[];
     boards?: import('./canvas-elements').CanvasBoard[];
   };
-  
+
+  // Comments (Figma-style canvas commenting)
+  comments?: import('./comment-types').Comment[];
+
+  // Version Management (Strategic release planning)
+  versions?: import('./version-types').Version[];
+  okrs?: import('./version-types').OKR[];
+
+  // Tour completion tracking
+  tourCompleted?: { canvas: boolean; map: boolean; plan: boolean };
+
   // Wizard progress
   wizardCompleted: boolean;
   currentWizardStep: number;
 }
 
 // Default project factory
-export function createDefaultProject(id: string, name: string, ownerId: string): CXDProject {
+export function createDefaultProject(id: string, name: string, ownerId: string, initialElements?: import('./canvas-elements').CanvasElement[]): CXDProject {
   return {
     id,
     name,
@@ -320,7 +335,7 @@ export function createDefaultProject(id: string, name: string, ownerId: string):
     updatedAt: new Date().toISOString(),
     schemaVersion: CXD_SCHEMA_VERSION,
     ownerId,
-    
+
     // New wizard sections
     intentionCore: {
       projectName: name,
@@ -402,13 +417,16 @@ export function createDefaultProject(id: string, name: string, ownerId: string):
       somatic: '',
       relational: '',
     },
-    
+
     // High-level flow description
     experienceFlowDescription: '',
-    
+
     // Canvas layout positions
-    canvasLayout: {},
-    
+    canvasLayout: {
+      elements: initialElements ? [...initialElements] : [],
+      edges: [],
+    },
+
     wizardCompleted: false,
     currentWizardStep: 0,
   };

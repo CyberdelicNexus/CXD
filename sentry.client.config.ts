@@ -1,0 +1,28 @@
+// Browser-side Sentry initialization. Loaded automatically by @sentry/nextjs.
+import * as Sentry from "@sentry/nextjs";
+
+const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+if (dsn) {
+  Sentry.init({
+    dsn,
+    environment: process.env.NEXT_PUBLIC_VERCEL_ENV ?? process.env.NODE_ENV,
+
+    // Performance: keep low until we know production volume.
+    tracesSampleRate: 0.1,
+
+    // Session replay disabled for now (extra bundle weight + privacy review).
+    replaysOnErrorSampleRate: 0,
+    replaysSessionSampleRate: 0,
+
+    // Dev console noise off.
+    debug: false,
+
+    // Drop known noise that doesn't actionably matter.
+    ignoreErrors: [
+      "ResizeObserver loop limit exceeded",
+      "ResizeObserver loop completed with undelivered notifications.",
+      "Non-Error promise rejection captured",
+    ],
+  });
+}

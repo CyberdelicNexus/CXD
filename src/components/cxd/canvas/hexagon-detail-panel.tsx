@@ -1,6 +1,7 @@
 "use client";
 
 import { useCXDStore } from "@/store/cxd-store";
+import { useCollaborationContext } from "@/contexts/collaboration-context";
 import {
   CXDSectionId,
   CXD_SECTIONS,
@@ -11,6 +12,7 @@ import {
   TRAIT_QUADRANTS,
 } from "@/types/cxd-schema";
 import { HypercubeFaceTag, CanvasElement } from "@/types/canvas-elements";
+import { cn } from "@/lib/utils";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, AlertTriangle, Layout, Box, Type, Link2, Image, Layers, ExternalLink } from "lucide-react";
+import { X, AlertTriangle, Layout, Box, Type, Link2, Image, Layers, ExternalLink, Eye, Ear, Wind, Apple, Fingerprint, Brain, Heart, Users, PersonStanding, Globe, Zap } from "lucide-react";
 
 // Map CXDSectionId to HypercubeFaceTag
 const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
@@ -29,6 +31,7 @@ const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
   stateMapping: 'State Mapping',
   traitMapping: 'Trait Mapping',
   contextAndMeaning: 'Meaning Architecture',
+  intentionCore: 'Core',
 };
 
 // Element type icons
@@ -42,6 +45,23 @@ const ELEMENT_TYPE_ICONS: Record<string, React.ComponentType<{ className?: strin
   freeform: Type,
 };
 
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  visual: { icon: <Eye className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  auditory: { icon: <Ear className="w-5 h-5" />, color: "from-indigo-950 to-indigo-400", colorRaw: "99, 102, 241" },
+  olfactory: { icon: <Wind className="w-5 h-5" />, color: "from-teal-950 to-teal-400", colorRaw: "20, 184, 166" },
+  gustatory: { icon: <Apple className="w-5 h-5" />, color: "from-rose-950 to-rose-400", colorRaw: "244, 63, 94" },
+  haptic: { icon: <Fingerprint className="w-5 h-5" />, color: "from-purple-950 to-purple-400", colorRaw: "168, 85, 247" },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  mental: { icon: <Brain className="w-5 h-5" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  emotional: { icon: <Heart className="w-5 h-5" />, color: "from-red-950 to-red-400", colorRaw: "239, 68, 68" },
+  social: { icon: <Users className="w-5 h-5" />, color: "from-violet-950 to-violet-400", colorRaw: "139, 92, 246" },
+  embodied: { icon: <PersonStanding className="w-5 h-5" />, color: "from-orange-950 to-orange-400", colorRaw: "249, 115, 22" },
+  environmental: { icon: <Globe className="w-5 h-5" />, color: "from-emerald-950 to-emerald-400", colorRaw: "16, 185, 129" },
+  active: { icon: <Zap className="w-5 h-5" />, color: "from-yellow-950 to-yellow-400", colorRaw: "234, 179, 8" },
+};
+
 // Group elements by type
 function groupElementsByType(elements: CanvasElement[]) {
   const groups: Record<string, CanvasElement[]> = {
@@ -53,13 +73,13 @@ function groupElementsByType(elements: CanvasElement[]) {
     image: [],
     experienceBlock: [],
   };
-  
+
   elements.forEach((el) => {
     if (groups[el.type]) {
       groups[el.type].push(el);
     }
   });
-  
+
   return groups;
 }
 
@@ -109,8 +129,6 @@ export function HexagonDetailPanel({
     updateHumanAudienceNeeds,
     updateHumanAudienceDesires,
     updateHumanUserRole,
-    updateSensoryDomain,
-    updatePresenceType,
     updateExperienceFlowEngagement,
     updateExperienceFlowNarrative,
     updateExperienceFlowIntent,
@@ -121,6 +139,9 @@ export function HexagonDetailPanel({
     setCanvasZoom,
     highlightElementBriefly,
   } = useCXDStore();
+
+  // Get collaboration sync functions for fields that need real-time sync
+  const { syncSensoryDomain, syncPresenceType } = useCollaborationContext();
 
   const project = getCurrentProject();
   const section = CXD_SECTIONS.find((s) => s.id === sectionId);
@@ -140,22 +161,22 @@ export function HexagonDetailPanel({
   const handleNavigateToElement = (element: CanvasElement) => {
     // Switch to canvas view
     setCanvasViewMode('canvas');
-    
+
     // Center on the element with some padding
     // Calculate position to center the element in viewport
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight - 64; // Account for navbar
     const zoom = 0.8;
-    
+
     const centerX = viewportWidth / 2 - (element.x + element.width / 2) * zoom;
     const centerY = viewportHeight / 2 - (element.y + element.height / 2) * zoom;
-    
+
     setCanvasPosition({ x: centerX, y: centerY });
     setCanvasZoom(zoom);
-    
+
     // Highlight the element briefly
     highlightElementBriefly(element.id, 2500);
-    
+
     // Close the panel after navigation
     onClose();
   };
@@ -197,7 +218,7 @@ export function HexagonDetailPanel({
                 placeholder="The central concept..."
                 value={project.intentionCore?.mainConcept || ""}
                 onChange={(e) => updateIntentionMainConcept(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -206,7 +227,7 @@ export function HexagonDetailPanel({
                 placeholder="The core message participants will take away..."
                 value={project.intentionCore?.coreMessage || ""}
                 onChange={(e) => updateIntentionCoreMessage(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
           </div>
@@ -226,7 +247,7 @@ export function HexagonDetailPanel({
                   placeholder="New understanding, perspectives..."
                   value={project.desiredChange?.insights || ""}
                   onChange={(e) => updateDesiredInsights(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
               <div className="space-y-2">
@@ -235,7 +256,7 @@ export function HexagonDetailPanel({
                   placeholder="Emotional responses, sensations..."
                   value={project.desiredChange?.feelings || ""}
                   onChange={(e) => updateDesiredFeelings(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
               <div className="space-y-2">
@@ -244,7 +265,7 @@ export function HexagonDetailPanel({
                   placeholder="Mental states, altered consciousness..."
                   value={project.desiredChange?.states || ""}
                   onChange={(e) => updateDesiredStates(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
               <div className="space-y-2">
@@ -253,7 +274,7 @@ export function HexagonDetailPanel({
                   placeholder="Information, skills, understanding..."
                   value={project.desiredChange?.knowledge || ""}
                   onChange={(e) => updateDesiredKnowledge(e.target.value)}
-                  className="min-h-[80px] bg-input border-border resize-none"
+                  className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                 />
               </div>
             </div>
@@ -269,7 +290,7 @@ export function HexagonDetailPanel({
                 placeholder="Unmet needs, pain points, aspirations..."
                 value={project.humanContext?.audienceNeeds || ""}
                 onChange={(e) => updateHumanAudienceNeeds(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -278,7 +299,7 @@ export function HexagonDetailPanel({
                 placeholder="Motivations, wants, hopes..."
                 value={project.humanContext?.audienceDesires || ""}
                 onChange={(e) => updateHumanAudienceDesires(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -287,7 +308,7 @@ export function HexagonDetailPanel({
                 placeholder="Describe participant agency..."
                 value={project.humanContext?.userRole || ""}
                 onChange={(e) => updateHumanUserRole(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
           </div>
@@ -302,7 +323,7 @@ export function HexagonDetailPanel({
                 placeholder="The world of your experience..."
                 value={project.contextAndMeaning?.world || ""}
                 onChange={(e) => updateContextWorld(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -311,7 +332,7 @@ export function HexagonDetailPanel({
                 placeholder="The story of your experience..."
                 value={project.contextAndMeaning?.story || ""}
                 onChange={(e) => updateContextStory(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
             <div className="space-y-2">
@@ -320,7 +341,7 @@ export function HexagonDetailPanel({
                 placeholder="The magic of your experience..."
                 value={project.contextAndMeaning?.magic || ""}
                 onChange={(e) => updateContextMagic(e.target.value)}
-                className="min-h-[100px] bg-input border-border resize-none"
+                className="min-h-[100px] bg-input border-border resize-y hex-textarea-scroll"
               />
             </div>
           </div>
@@ -333,75 +354,147 @@ export function HexagonDetailPanel({
           </div>
         );
 
-      case "sensoryDomains":
+      case "sensoryDomains": {
+        const intensityLevels = [
+          { value: 0, label: "None" },
+          { value: 25, label: "Minimal" },
+          { value: 50, label: "Moderate" },
+          { value: 75, label: "Significant" },
+          { value: 100, label: "Primary" },
+        ];
+        const getClosestLevel = (value: number) => {
+          return intensityLevels.reduce((prev, curr) =>
+            Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+          ).value;
+        };
         return (
           <div className="space-y-6">
             <p className="text-xs text-muted-foreground">
               Define the intensity of each sensory modality.
             </p>
-            {SENSORY_DOMAINS.map((domain) => (
-              <div key={domain.code} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-sm font-semibold">
-                      {domain.label}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      {domain.description}
-                    </p>
+            {SENSORY_DOMAINS.map((domain) => {
+              const currentValue = getClosestLevel(project.sensoryDomains[domain.code]);
+              const meta = SENSORY_METADATA[domain.code];
+
+              return (
+                <div key={domain.code} className="space-y-4 p-4 rounded-xl bg-white/5 border border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-white/5 text-primary">
+                      {meta.icon}
+                    </div>
+                    <div>
+                      <Label className="text-base font-bold tracking-tight">
+                        {domain.label}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {domain.description}
+                      </p>
+                    </div>
                   </div>
-                  <span className="text-lg font-mono text-primary">
-                    {project.sensoryDomains[domain.code]}%
-                  </span>
+                  <div className="flex gap-1.5 p-1 bg-black/20 rounded-lg">
+                    {intensityLevels.map((level) => {
+                      const isSelected = currentValue === level.value;
+                      const isPrimary = level.label === "Primary" && isSelected;
+
+                      return (
+                        <button
+                          key={level.value}
+                          onClick={() => syncSensoryDomain(domain.code, level.value)}
+                          className={cn(
+                            "flex-1 py-2.5 px-2 text-[10px] uppercase tracking-wider font-bold rounded-md transition-all duration-300",
+                            isSelected
+                              ? `bg-gradient-to-br ${meta.color} text-white shadow-lg`
+                              : "bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                            isPrimary && "scale-105 shadow-[0_0_20px_rgba(var(--primary),0.4)]",
+                            !isSelected && "opacity-40"
+                          )}
+                          style={isSelected ? {
+                            boxShadow: `0 4px 12px rgba(${meta.colorRaw}, 0.3)`,
+                            border: `1px solid rgba(${meta.colorRaw}, 0.5)`
+                          } : {}}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <Slider
-                  value={[project.sensoryDomains[domain.code]]}
-                  onValueChange={([value]) =>
-                    updateSensoryDomain(domain.code, value)
-                  }
-                  max={100}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
+      }
 
-      case "presence":
+      case "presence": {
+        const presenceLevels = [
+          { value: 0, label: "None" },
+          { value: 25, label: "Minimal" },
+          { value: 50, label: "Moderate" },
+          { value: 75, label: "Significant" },
+          { value: 100, label: "Primary" },
+        ];
+        const getClosestPresenceLevel = (value: number) => {
+          return presenceLevels.reduce((prev, curr) =>
+            Math.abs(curr.value - value) < Math.abs(prev.value - value) ? curr : prev
+          ).value;
+        };
         return (
           <div className="space-y-6">
             <p className="text-xs text-muted-foreground">
               Configure the types of presence you want to cultivate.
             </p>
-            {PRESENCE_TYPES.map((presence) => (
-              <div key={presence.code} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-sm font-semibold">
-                      {presence.label}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      {presence.description}
-                    </p>
+            {PRESENCE_TYPES.map((presence) => {
+              const currentValue = getClosestPresenceLevel(project.presenceTypes[presence.code]);
+              const meta = PRESENCE_METADATA[presence.code];
+
+              return (
+                <div key={presence.code} className="space-y-4 p-4 rounded-xl bg-white/5 border border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-white/5 text-primary">
+                      {meta.icon}
+                    </div>
+                    <div>
+                      <Label className="text-base font-bold tracking-tight">
+                        {presence.label}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {presence.description}
+                      </p>
+                    </div>
                   </div>
-                  <span className="text-lg font-mono text-primary">
-                    {project.presenceTypes[presence.code]}%
-                  </span>
+                  <div className="flex gap-1.5 p-1 bg-black/20 rounded-lg">
+                    {presenceLevels.map((level) => {
+                      const isSelected = currentValue === level.value;
+                      const isPrimary = level.label === "Primary" && isSelected;
+
+                      return (
+                        <button
+                          key={level.value}
+                          onClick={() => syncPresenceType(presence.code, level.value)}
+                          className={cn(
+                            "flex-1 py-2.5 px-2 text-[10px] uppercase tracking-wider font-bold rounded-md transition-all duration-300",
+                            isSelected
+                              ? `bg-gradient-to-br ${meta.color} text-white shadow-lg`
+                              : "bg-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                            isPrimary && "scale-105 shadow-[0_0_20px_rgba(var(--primary),0.4)]",
+                            !isSelected && "opacity-40"
+                          )}
+                          style={isSelected ? {
+                            boxShadow: `0 4px 12px rgba(${meta.colorRaw}, 0.3)`,
+                            border: `1px solid rgba(${meta.colorRaw}, 0.5)`
+                          } : {}}
+                        >
+                          {level.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <Slider
-                  value={[project.presenceTypes[presence.code]]}
-                  onValueChange={([value]) =>
-                    updatePresenceType(presence.code, value)
-                  }
-                  max={100}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
+      }
 
       case "experienceFlow":
         return (
@@ -478,7 +571,7 @@ export function HexagonDetailPanel({
                           e.target.value,
                         )
                       }
-                      className="min-h-[70px] bg-input border-border resize-none"
+                      className="min-h-[70px] bg-input border-border resize-y hex-textarea-scroll"
                     />
                   </div>
 
@@ -492,7 +585,7 @@ export function HexagonDetailPanel({
                       onChange={(e) =>
                         updateExperienceFlowIntent(stage.code, e.target.value)
                       }
-                      className="min-h-[70px] bg-input border-border resize-none"
+                      className="min-h-[70px] bg-input border-border resize-y hex-textarea-scroll"
                     />
                   </div>
                 </TabsContent>
@@ -522,7 +615,7 @@ export function HexagonDetailPanel({
                     onChange={(e) =>
                       updateStateMapping(quadrant.code, e.target.value)
                     }
-                    className="min-h-[80px] bg-input border-border resize-none"
+                    className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                   />
                 </div>
               ))}
@@ -569,7 +662,7 @@ export function HexagonDetailPanel({
                     onChange={(e) =>
                       updateTraitMapping(quadrant.code, e.target.value)
                     }
-                    className="min-h-[80px] bg-input border-border resize-none"
+                    className="min-h-[80px] bg-input border-border resize-y hex-textarea-scroll"
                   />
                 </div>
               ))}
@@ -583,7 +676,7 @@ export function HexagonDetailPanel({
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col" onWheel={(e) => e.stopPropagation()} data-prevent-canvas-wheel="true">
       {/* Header */}
       <div className="flex-none flex items-center justify-between p-4 border-b border-border">
         <div>
@@ -600,9 +693,9 @@ export function HexagonDetailPanel({
         </Button>
       </div>
       {/* Content */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 p-4 [&_[data-orientation=vertical]]:w-3 [&_[data-orientation=vertical]]:rounded-full [&_[data-orientation=vertical]]:bg-[#130d1f]/70 [&_[data-orientation=vertical]]:p-[2px] [&_[data-orientation=vertical]>*]:rounded-full [&_[data-orientation=vertical]>*]:border [&_[data-orientation=vertical]>*]:border-violet-300/15 [&_[data-orientation=vertical]>*]:bg-gradient-to-b [&_[data-orientation=vertical]>*]:from-violet-500/65 [&_[data-orientation=vertical]>*]:via-purple-500/55 [&_[data-orientation=vertical]>*]:to-indigo-500/55">
         {renderSectionContent()}
-        
+
         {/* Related Canvas Elements Section */}
         {faceTag && (
           <div className="mt-6 pt-4 border-t border-border">
@@ -615,7 +708,7 @@ export function HexagonDetailPanel({
                 </span>
               )}
             </div>
-            
+
             {!hasTaggedElements ? (
               <div className="text-center py-6">
                 <div className="text-muted-foreground text-sm">
@@ -630,14 +723,14 @@ export function HexagonDetailPanel({
                 {/* Group by element type */}
                 {Object.entries(groupedElements).map(([type, elements]) => {
                   if (elements.length === 0) return null;
-                  
+
                   const Icon = ELEMENT_TYPE_ICONS[type] || Box;
-                  const typeLabel = type === 'experienceBlock' 
-                    ? 'Experience Blocks' 
+                  const typeLabel = type === 'experienceBlock'
+                    ? 'Experience Blocks'
                     : type === 'freeform'
-                    ? 'Cards'
-                    : `${type.charAt(0).toUpperCase() + type.slice(1)}s`;
-                  
+                      ? 'Cards'
+                      : `${type.charAt(0).toUpperCase() + type.slice(1)}s`;
+
                   return (
                     <div key={type} className="space-y-1.5">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider">

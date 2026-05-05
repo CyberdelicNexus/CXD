@@ -40,17 +40,17 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 export async function uploadProfileImage(
   userId: string,
   file: File,
-  type: 'cover' | 'profile'
+  type: string
 ): Promise<string | null> {
   const supabase = createClient();
   
-  // Create unique filename
+  // Create unique filename in dashboard-images folder
   const fileExt = file.name.split('.').pop();
-  const fileName = `${userId}/${type}-${Date.now()}.${fileExt}`;
+  const fileName = `dashboard-images/${userId}-${type}-${Date.now()}.${fileExt}`;
   
   // Upload to Supabase storage
   const { data, error } = await supabase.storage
-    .from('canvas_uploads')
+    .from('canvas-uploads')
     .upload(fileName, file, {
       cacheControl: '3600',
       upsert: true,
@@ -63,7 +63,7 @@ export async function uploadProfileImage(
 
   // Get public URL
   const { data: { publicUrl } } = supabase.storage
-    .from('canvas_uploads')
+    .from('canvas-uploads')
     .getPublicUrl(fileName);
 
   return publicUrl;

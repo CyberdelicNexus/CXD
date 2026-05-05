@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-dev/
 /out/
 
 # production
@@ -52,3 +53,18 @@ node_modules/
 .github/
 **/tempobook/**
 node_modules
+e2e/.auth/
+public/images/Gifs/V2/Plan View.mp4
+
+# Local dev artifacts that escaped earlier
+dev-server.log
+nul
+test-results/
+.superpowers/
+docs/superpowers/
+e2e/inspect.ts
+e2e/inspect.spec.ts
+e2e/global.setup.ts
+
+# Sentry build artifacts
+.sentryclirc

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import NextImage from "next/image";
+import { createPortal } from "react-dom";
 import {
   CanvasElement,
   FreeformElement,
@@ -20,6 +22,7 @@ import {
   ShapeType,
   HypercubeFaceTag,
   HYPERCUBE_FACE_TAGS,
+  ElementStyle,
 } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,11 +30,20 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useCXDStore } from "@/store/cxd-store";
 import {
   CXDProject,
   REALITY_PLANES,
   DEFAULT_REALITY_PLANES_V2,
+  SENSORY_DOMAINS,
+  PRESENCE_TYPES,
 } from "@/types/cxd-schema";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -50,6 +62,12 @@ import {
   LayoutGrid,
   ChevronRight,
   Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  List,
+  ListOrdered,
+  Highlighter,
   Smile,
   Palette,
   Paintbrush,
@@ -68,6 +86,7 @@ import {
   Lock,
   Unlock,
   X,
+  Check,
   Minus,
   Maximize2,
   Crop,
@@ -77,8 +96,39 @@ import {
   CheckCircle2,
   Plus,
   ArrowUpRight,
+  Ear,
+  Wind,
+  Apple,
+  Fingerprint,
+  PersonStanding,
+  Zap,
+  Eye,
+  Brain,
+  Users,
+  Inbox,
+  CaseSensitive,
+  ChevronDown,
+  ListTodo,
+  Calendar,
+  Tag,
+  AlertCircle,
+  Download,
+  ALargeSmall,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
+import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
+import { parseAssignees, serializeAssignees } from "@/components/cxd/plan/assignee-utils";
+import { NoteRichTextEditor } from "@/components/cxd/canvas/note-rich-text-editor";
+import {
+  canResizeFreeformCard,
+  getFreeformCardType,
+  isNoteCard,
+} from "@/components/cxd/canvas/card-type-utils";
+import { FloatingPort } from "./floating-port";
+import DOMPurify from "dompurify";
 
 // Hypercube tag icons mapping (defined at top for use in JSX)
 const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
@@ -88,7 +138,65 @@ const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
   "State Mapping": "🎭",
   "Trait Mapping": "💫",
   "Meaning Architecture": "🏛️",
+  "Core": "🎯",
 };
+
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  visual: { icon: <Eye className="w-4 h-4" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  auditory: { icon: <Ear className="w-4 h-4" />, color: "from-indigo-950 to-indigo-400", colorRaw: "99, 102, 241" },
+  olfactory: { icon: <Wind className="w-4 h-4" />, color: "from-teal-950 to-teal-400", colorRaw: "20, 184, 166" },
+  gustatory: { icon: <Apple className="w-4 h-4" />, color: "from-rose-950 to-rose-400", colorRaw: "244, 63, 94" },
+  haptic: { icon: <Fingerprint className="w-4 h-4" />, color: "from-purple-950 to-purple-400", colorRaw: "168, 85, 247" },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
+  mental: { icon: <Brain className="w-4 h-4" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
+  emotional: { icon: <Heart className="w-4 h-4" />, color: "from-red-950 to-red-400", colorRaw: "239, 68, 68" },
+  social: { icon: <Users className="w-4 h-4" />, color: "from-violet-950 to-violet-400", colorRaw: "139, 92, 246" },
+  embodied: { icon: <PersonStanding className="w-4 h-4" />, color: "from-orange-950 to-orange-400", colorRaw: "249, 115, 22" },
+  environmental: { icon: <Globe className="w-4 h-4" />, color: "from-emerald-950 to-emerald-400", colorRaw: "16, 185, 129" },
+  active: { icon: <Zap className="w-4 h-4" />, color: "from-yellow-950 to-yellow-400", colorRaw: "234, 179, 8" },
+};
+
+/**
+ * Hook to prevent cursor-jump in controlled inputs.
+ * Keeps a local copy of the value so React never resets the cursor
+ * when the store round-trips the value back during editing.
+ * While the input is "active" (between first change and blur), external
+ * syncs are fully suppressed — only local state drives the input value.
+ */
+function useLocalInput(externalValue: string, onChange: (v: string) => void) {
+  const [value, setValue] = useState(externalValue);
+  const lastSent = useRef(externalValue);
+  // When true, the user is actively editing — suppress ALL external syncs
+  const isActive = useRef(false);
+
+  // Sync from external only when not actively editing
+  if (!isActive.current && externalValue !== lastSent.current) {
+    lastSent.current = externalValue;
+    setValue(externalValue);
+  }
+
+  const handleChange = useCallback(
+    (v: string) => {
+      isActive.current = true;
+      setValue(v);
+      lastSent.current = v;
+      onChange(v);
+    },
+    [onChange],
+  );
+
+  // Call this on blur to re-enable external syncs
+  const handleBlur = useCallback(() => {
+    isActive.current = false;
+    // Sync to latest external value in case it changed while we were editing
+    // (e.g. collaboration). We don't call setValue here — the next render
+    // cycle will pick it up via the sync check above.
+  }, []);
+
+  return [value, handleChange, handleBlur] as const;
+}
 
 interface CanvasElementRendererProps {
   element: CanvasElement;
@@ -99,6 +207,7 @@ interface CanvasElementRendererProps {
   onDragEnd: () => void;
   isDragging: boolean;
   isSelected: boolean;
+  isMultiSelected?: boolean; // True when multiple elements are selected (hide individual context menu)
   isDropTarget?: boolean;
   isHighlighted?: boolean;
   onSelect: (e?: React.MouseEvent) => void;
@@ -107,28 +216,38 @@ interface CanvasElementRendererProps {
   onStartConnector?: (
     elementId: string,
     anchor: "top" | "right" | "bottom" | "left",
+    anchorOffset?: number,
   ) => void;
   onEndConnector?: (
     toElementId: string,
     toAnchor: "top" | "right" | "bottom" | "left",
   ) => void;
   isConnecting?: boolean;
+  showConnectorAnchors?: boolean;
   isHoverTarget?: boolean;
   onOpenExperiencePanel?: (sectionId: InspectorSectionId) => void;
   hoveredAnchor?: string | null;
   onAnchorHover?: (anchor: string | null) => void;
+  onSendToInbox?: () => void; // Send task to inbox
+  onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void; // Create connected shape
   isReadOnly?: boolean;
+  snapToGrid?: boolean;
+  /** Optional data-tour-id attribute for onboarding tour targeting */
+  tourId?: string;
+  /** Show hover outline for group individual select (when Ctrl is held) */
+  showGroupHover?: boolean;
 }
 
 export function CanvasElementRenderer({
   element,
-  onUpdate,
+  onUpdate: onUpdateProp,
   onDelete,
   onDuplicate,
   onDragStart,
   onDragEnd,
   isDragging,
   isSelected,
+  isMultiSelected = false,
   isDropTarget,
   isHighlighted,
   onSelect,
@@ -137,13 +256,34 @@ export function CanvasElementRenderer({
   onStartConnector,
   onEndConnector,
   isConnecting,
+  showConnectorAnchors = false,
   isHoverTarget,
   onOpenExperiencePanel,
   hoveredAnchor,
   onAnchorHover,
+  onSendToInbox,
+  onCreateConnectedShape,
   isReadOnly = false,
+  snapToGrid = false,
+  tourId,
+  showGroupHover,
 }: CanvasElementRendererProps) {
+  // Stabilize onUpdate via ref so that effects and sub-component callbacks
+  // that depend on onUpdate don't re-fire just because the parent re-rendered
+  // with a new inline arrow function reference.
+  const onUpdateRef = useRef(onUpdateProp);
+  useEffect(() => { onUpdateRef.current = onUpdateProp; });
+  const onUpdate = useCallback((updates: Partial<CanvasElement>) => {
+    onUpdateRef.current(updates);
+  }, []); // stable — never recreated
+
+  // Get canvas elements for z-index calculations
+  const getCanvasElements = useCXDStore((state) => state.getCanvasElements);
+  // Get pushCanvasHistory for undo support on resize operations
+  const pushCanvasHistory = useCXDStore((state) => state.pushCanvasHistory);
+
   const [isEditing, setIsEditing] = useState(false);
+  const [isCroppingImage, setIsCroppingImage] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showLinkViewMenu, setShowLinkViewMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -151,8 +291,72 @@ export function CanvasElementRenderer({
   const [showBoardColorPicker, setShowBoardColorPicker] = useState(false);
   const [showExperienceViewMenu, setShowExperienceViewMenu] = useState(false);
   const [showTagMenu, setShowTagMenu] = useState(false);
+  const [showShapeTypePicker, setShowShapeTypePicker] = useState(false);
+  const [showTextStyleMenu, setShowTextStyleMenu] = useState(false);
+  const [colorPickerDefaultMode, setColorPickerDefaultMode] = useState<"fill" | "stroke" | "text">("fill");
+  const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
+  const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
+  const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
+  const [newTaskTag, setNewTaskTag] = useState('');
   const elementRef = useRef<HTMLDivElement>(null);
   const menuContainerRef = useRef<HTMLDivElement>(null);
+  const subtaskRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
+  const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
+
+  // Helper to close all submenus - ensures only one submenu is open at a time
+  const closeAllSubmenus = useCallback(() => {
+    setShowColorPicker(false);
+    setShowLinkViewMenu(false);
+    setShowEmojiPicker(false);
+    setShowBoardIconPicker(false);
+    setShowBoardColorPicker(false);
+    setShowExperienceViewMenu(false);
+    setShowTagMenu(false);
+    setShowShapeTypePicker(false);
+    setShowTextStyleMenu(false);
+    setShowTaskPriorityMenu(false);
+  }, []);
+
+  // Submenu openers that close others first
+  const openColorPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowColorPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openLinkViewMenu = useCallback(() => {
+    closeAllSubmenus();
+    setShowLinkViewMenu(true);
+  }, [closeAllSubmenus]);
+
+  const openEmojiPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowEmojiPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openBoardIconPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowBoardIconPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openBoardColorPicker = useCallback(() => {
+    closeAllSubmenus();
+    setShowBoardColorPicker(true);
+  }, [closeAllSubmenus]);
+
+  const openExperienceViewMenu = useCallback(() => {
+    closeAllSubmenus();
+    setShowExperienceViewMenu(true);
+  }, [closeAllSubmenus]);
+
+  const openTagMenu = useCallback(() => {
+    closeAllSubmenus();
+    setShowTagMenu(true);
+  }, [closeAllSubmenus]);
+
+  // Close all submenus when element is deselected
+  useEffect(() => {
+    if (!isSelected) closeAllSubmenus();
+  }, [isSelected, closeAllSubmenus]);
 
   // Close all submenus when clicking outside
   useEffect(() => {
@@ -165,7 +369,8 @@ export function CanvasElementRenderer({
         showBoardIconPicker ||
         showBoardColorPicker ||
         showExperienceViewMenu ||
-        showTagMenu;
+        showTagMenu ||
+        showTaskPriorityMenu;
 
       if (!anyMenuOpen) return;
 
@@ -182,6 +387,7 @@ export function CanvasElementRenderer({
         setShowBoardColorPicker(false);
         setShowExperienceViewMenu(false);
         setShowTagMenu(false);
+        setShowTaskPriorityMenu(false);
       }
     };
 
@@ -195,6 +401,7 @@ export function CanvasElementRenderer({
     showBoardColorPicker,
     showExperienceViewMenu,
     showTagMenu,
+    showTaskPriorityMenu,
   ]);
 
   const handleDoubleClick = useCallback(
@@ -209,12 +416,11 @@ export function CanvasElementRenderer({
       } else if (
         element.type !== "connector" &&
         element.type !== "line" &&
-        element.type !== "shape" &&
         element.type !== "experienceBlock"
       ) {
-        // Don't auto-edit shapes, lines, or experience blocks on double-click
+        // Allow editing for shapes and other elements (not lines, connectors, experience blocks)
         setIsEditing(true);
-        
+
         // For task cards, clear placeholder on double-click if it's still the default
         if (element.type === "freeform" && element.taskMetadata && element.content === "Task Title") {
           onUpdate({ content: "" });
@@ -250,53 +456,131 @@ export function CanvasElementRenderer({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isEditing]);
 
+  // Auto-typing for shapes: when selected and user types, start editing
+  useEffect(() => {
+    if (element.type !== "shape" || !isSelected || isEditing || isReadOnly) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in another input
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.contentEditable === "true") return;
+
+      // Ignore modifier keys and special keys
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key.length !== 1 && e.key !== "Backspace" && e.key !== "Delete") return;
+
+      // Start editing with the typed character
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === "Backspace" || e.key === "Delete") {
+        // Clear content and start editing
+        onUpdate({ content: "" });
+      } else {
+        // Start with the typed character
+        onUpdate({ content: e.key });
+      }
+      setIsEditing(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [element.type, isSelected, isEditing, isReadOnly, onUpdate]);
+
   // Auto-resize experience blocks when view mode changes
   // NOTE: Avoid calling onUpdate during render (can trigger "Cannot update a component while rendering").
+  // NOTE: Skip auto-resize if user has manually resized the element.
+  const prevViewModeRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     if (element.type !== "experienceBlock") return;
 
     const expElement = element as ExperienceBlockElement;
-    const viewMode = expElement.viewMode || "compact";
+    const viewMode = expElement.viewMode || "inline";
 
+    // Skip auto-resize if user has manually resized
+    if (expElement.manuallyResized) {
+      prevViewModeRef.current = viewMode;
+      return;
+    }
+
+    // Only auto-resize when viewMode actually changes, not on every render
+    const viewModeChanged = prevViewModeRef.current !== undefined && prevViewModeRef.current !== viewMode;
+    prevViewModeRef.current = viewMode;
+
+    // Skip if this is just the initial render (not a viewMode change)
+    if (!viewModeChanged && element.width > 0 && element.height > 0) return;
+
+    // Inline height is measured from DOM content by ExperienceBlockCard — only enforce width here
     const nextSize =
       viewMode === "inline"
-        ? { width: 420, height: 360 }
+        ? { width: 420 }
         : { width: 220, height: 100 };
 
     // Only update if size differs
-    const needsUpdate =
-      element.width !== nextSize.width || element.height !== nextSize.height;
+    const needsUpdate = viewMode === "inline"
+      ? element.width !== nextSize.width
+      : element.width !== nextSize.width || element.height !== (nextSize as any).height;
 
     if (!needsUpdate) return;
 
     // Defer to next tick and re-check against the latest element size to avoid render-phase updates
     const t = window.setTimeout(() => {
-      if (
-        element.width !== nextSize.width ||
-        element.height !== nextSize.height
-      ) {
+      const stillNeedsUpdate = viewMode === "inline"
+        ? element.width !== nextSize.width
+        : element.width !== nextSize.width || element.height !== (nextSize as any).height;
+      if (stillNeedsUpdate) {
         onUpdate(nextSize);
       }
     }, 0);
 
     return () => window.clearTimeout(t);
   }, [
-    element,
     element.type,
     (element as ExperienceBlockElement).viewMode,
+    (element as ExperienceBlockElement).manuallyResized,
     element.width,
     element.height,
     onUpdate,
   ]);
 
-  // Z-index management helpers
+  // Z-index management helpers - bring to front/send to back relative to all elements
   const handleBringForward = useCallback(() => {
-    onUpdate({ zIndex: (element.zIndex || 0) + 1 });
-  }, [element.zIndex, onUpdate]);
+    // Containers cannot be reordered — they always stay at the back
+    if (element.type === 'container') return;
+    const allElements = getCanvasElements();
+    const maxZIndex = allElements.reduce(
+      (max, el) => Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0),
+      0
+    );
+    // Only update if not already at max
+    if ((element.zIndex || 0) < maxZIndex) {
+      pushCanvasHistory();
+      onUpdate({ zIndex: maxZIndex + 1 });
+    }
+  }, [element.type, element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
 
   const handleSendBackward = useCallback(() => {
-    onUpdate({ zIndex: Math.max(0, (element.zIndex || 0) - 1) });
-  }, [element.zIndex, onUpdate]);
+    // Containers cannot be reordered — they always stay at the back
+    if (element.type === 'container') return;
+    const allElements = getCanvasElements();
+    // Non-container elements cannot go below the highest container z-index
+    const maxContainerZ = allElements.reduce(
+      (max, el) => el.type === 'container' ? Math.max(max, Number.isFinite(el.zIndex) ? el.zIndex : 0) : max,
+      -Infinity
+    );
+    const minNonContainerZ = allElements.reduce(
+      (min, el) => el.type !== 'container' ? Math.min(min, Number.isFinite(el.zIndex) ? el.zIndex : 0) : min,
+      Infinity
+    );
+    const targetZ = minNonContainerZ - 1;
+    // Don't go below containers
+    const safeZ = Math.max(targetZ, maxContainerZ + 1);
+    if ((element.zIndex || 0) > safeZ) {
+      pushCanvasHistory();
+      onUpdate({ zIndex: safeZ });
+    }
+  }, [element.type, element.zIndex, onUpdate, getCanvasElements, pushCanvasHistory]);
 
   // Handle drag from element body (not just the handle)
   const handleBodyMouseDown = useCallback(
@@ -339,6 +623,8 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isEditing={isEditing}
             onBlur={handleBlur}
+            isSelected={isSelected}
+            onStartEdit={() => setIsEditing(true)}
             className=" h-full"
           />
         );
@@ -349,6 +635,7 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isSelected={isSelected}
             isReadOnly={isReadOnly}
+            onCropModeChange={setIsCroppingImage}
           />
         );
       case "shape":
@@ -358,6 +645,8 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isEditing={isEditing}
             onBlur={handleBlur}
+            isSelected={isSelected}
+            onCreateConnectedShape={onCreateConnectedShape}
           />
         );
       case "container":
@@ -417,6 +706,52 @@ export function CanvasElementRenderer({
     }
   };
 
+  // Determine if this is a resizable note card (needed before hooks below)
+  const freeformCardType =
+    element.type === "freeform"
+      ? getFreeformCardType(element as FreeformElement)
+      : null;
+  const isResizableNoteCard =
+    element.type === "freeform" &&
+    freeformCardType === "note" &&
+    !(element as FreeformElement).isDocument;
+
+  // Any freeform card rendered with height:auto needs its element.height synced
+  // from the DOM so connectors and selection math target the real rendered bounds.
+  const isAutoHeightFreeform =
+    element.type === "freeform" &&
+    !(element as FreeformElement).isDocument;
+
+  // Observe actual DOM size via ResizeObserver and sync element.width/height so
+  // connectors, group reflow, and alignment guides target the real rendered bounds.
+  const lastObservedHeight = useRef(element.height);
+  const lastObservedWidth = useRef(element.width);
+  useEffect(() => {
+    if (!isAutoHeightFreeform) return;
+    const el = elementRef.current;
+    if (!el) return;
+    const minHeight = freeformCardType === "task" ? 0 : 300;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const h = Math.ceil(entry.contentRect.height);
+      const w = Math.ceil(entry.contentRect.width);
+      const nextH = Math.max(minHeight, h);
+      const updates: { height?: number; width?: number } = {};
+      if (Math.abs(nextH - lastObservedHeight.current) > 3) {
+        lastObservedHeight.current = nextH;
+        updates.height = nextH;
+      }
+      if (Math.abs(w - lastObservedWidth.current) > 3) {
+        lastObservedWidth.current = w;
+        updates.width = w;
+      }
+      if (Object.keys(updates).length) onUpdate(updates);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isAutoHeightFreeform, freeformCardType]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Don't render connectors as regular elements
   if (element.type === "connector") return null;
 
@@ -424,62 +759,103 @@ export function CanvasElementRenderer({
     <div
       ref={elementRef}
       data-element-id={element.id}
+      {...(tourId ? { "data-tour-id": tourId } : {})}
+      draggable={false}
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
-        isDragging && "opacity-80 shadow-2xl cursor-grabbing",
+        isDragging && !((element as FreeformElement).isDocument) && "opacity-80 shadow-2xl cursor-grabbing",
+        isDragging && (element as FreeformElement).isDocument && "cursor-grabbing",
         // Locked state indicator
         element.locked && "opacity-60 cursor-not-allowed",
-        // Highlight effect (from hypercube navigation)
+        // Ctrl+hover on grouped elements: show individual selection hint
+        showGroupHover && "hover:ring-2 hover:ring-violet-400/50 hover:shadow-[0_0_12px_rgba(139,92,246,0.25)] cursor-pointer",
+        // Highlight effect (from hypercube navigation) — soft 4s fade glow with 1s delay
         isHighlighted &&
-          "ring-4 ring-cyan-400 shadow-[0_0_40px_rgba(34,211,238,0.6)] animate-pulse",
+        "ring-2 ring-purple-400/70 shadow-[0_0_24px_rgba(167,139,250,0.35)] animate-[highlightGlow_4s_cubic-bezier(0.4,0,0.2,1)_1s_forwards]",
         // Selection ring for non-text elements (excluding lines which handle their own visualization)
         isSelected &&
-          !isHighlighted &&
-          element.type !== "board" &&
-          element.type !== "text" &&
-          element.type !== "line" &&
-          element.type !== "freeform" &&
-          "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
-        // Selection ring for freeform cards - rounded
+        !isHighlighted &&
+        element.type !== "board" &&
+        element.type !== "text" &&
+        element.type !== "line" &&
+        element.type !== "freeform" &&
+        "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
+        // Selection ring for freeform cards - rounded (except documents)
         isSelected &&
-          !isHighlighted &&
-          element.type === "freeform" &&
-          "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
-        // Selection ring for boards only when drop target
-        isSelected &&
-          !isHighlighted &&
-          element.type === "board" &&
-          isDropTarget &&
-          "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
-        // Glow when connector is hovering this element
+        !isHighlighted &&
+        element.type === "freeform" &&
+        !(element as FreeformElement).isDocument &&
+        "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
+        // Documents: no selection ring or outline
+        element.type === "freeform" &&
+        (element as FreeformElement).isDocument &&
+        "ring-0 outline-none shadow-none",
+        element.type === "freeform" &&
+        freeformCardType === "note" &&
+        "card--note-resizable",
+        // Boards: no rectangular border/ring — the hexagon glow handles feedback
+        element.type === "board" &&
+        "ring-0 outline-none",
+        // Glow when connector is hovering this element (not boards — they use hex glow)
         isHoverTarget &&
-          !isHighlighted &&
-          "ring-2 ring-green-400 shadow-[0_0_30px_rgba(74,222,128,0.6)]",
+        !isHighlighted &&
+        element.type !== "board" &&
+        "ring-2 ring-green-400 shadow-[0_0_30px_rgba(74,222,128,0.6)]",
         // Subtle glow for text when editing
         isEditing &&
-          element.type === "text" &&
-          "shadow-[0_0_12px_rgba(168,85,247,0.15)]",
+        element.type === "text" &&
+        "shadow-[0_0_12px_rgba(168,85,247,0.15)]",
         // Cursor styles
         !isDragging &&
-          !isEditing &&
-          !element.locked &&
-          element.type !== "text" &&
-          element.type !== "line" &&
-          "cursor-grab",
+        !isEditing &&
+        !element.locked &&
+        element.type !== "text" &&
+        element.type !== "line" &&
+        "cursor-grab",
         !isDragging &&
-          !isEditing &&
-          element.type === "text" &&
-          !element.locked &&
-          "cursor-text h-full",
+        !isEditing &&
+        element.type === "text" &&
+        !element.locked &&
+        "cursor-text h-full",
       )}
       style={{
         left: element.x,
         top: element.y,
-        width: element.width,
-        minWidth: element.type === "freeform" ? "250px" : undefined,
-        height: element.type === "freeform" ? "auto" : element.height,
-        minHeight: element.type === "freeform" ? "300px" : undefined,
-        zIndex: Number.isFinite(element.zIndex) ? element.zIndex : 0,
+        width:
+          element.type === "freeform" && freeformCardType === "task"
+            ? 300
+            : element.width,
+        minWidth:
+          element.type === "freeform"
+            ? (element as FreeformElement).isDocument
+              ? "100px"
+              : isResizableNoteCard
+                ? "200px"
+                : "300px"
+            : undefined,
+        maxWidth:
+          element.type === "freeform"
+            ? (element as FreeformElement).isDocument
+              ? "100px"
+              : !isResizableNoteCard
+                ? "300px"
+                : undefined
+            : undefined,
+        height:
+          element.type === "container" && (element as ContainerElement).collapsed
+            ? 28
+            : element.type === "freeform"
+            ? "auto"
+            : element.height,
+        minHeight:
+          element.type === "freeform"
+            ? (element as FreeformElement).isDocument
+              ? "100px"
+              : "300px"
+            : undefined,
+        zIndex: isSelected
+          ? 2000000000  // Selected element always on top so toolbar/menus aren't hidden by other elements
+          : Number.isFinite(element.zIndex) ? element.zIndex : 0,
         transform: element.rotation
           ? `rotate(${element.rotation}deg)`
           : undefined,
@@ -494,71 +870,68 @@ export function CanvasElementRenderer({
       onMouseUp={onDragEnd}
       onDoubleClick={handleDoubleClick}
     >
-      {/* Connection anchors - shown when connecting or hovering (not for line elements) */}
-      {(isConnecting || isSelected) &&
-        onStartConnector &&
-        element.type !== "line" && (
-          <>
-            <ConnectionAnchor
-              position="top"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-            <ConnectionAnchor
-              position="right"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-            <ConnectionAnchor
-              position="bottom"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-            <ConnectionAnchor
-              position="left"
-              elementId={element.id}
-              onStartConnector={onStartConnector}
-              onEndConnector={onEndConnector}
-              isConnecting={isConnecting}
-              isHoverTarget={isHoverTarget}
-              hoveredAnchor={hoveredAnchor}
-              onAnchorHover={onAnchorHover}
-            />
-          </>
+      {/* Connection port - floating dot that slides along the nearest edge following the cursor */}
+      {onStartConnector &&
+        !isCroppingImage &&
+        element.type !== "line" &&
+        element.type !== "text" &&
+        !(element.type === "freeform" && (element as FreeformElement).isDocument) && (
+          <FloatingPort
+            elementId={element.id}
+            elementRef={elementRef as React.RefObject<HTMLDivElement | null>}
+            isDragging={isDragging ?? false}
+            isConnecting={isConnecting ?? false}
+            canvasZoom={canvasZoom ?? 1}
+            isShape={element.type === 'shape'}
+            isContainer={element.type === 'container'}
+            isCollapsed={
+              element.type === 'container'
+                ? (element as ContainerElement).collapsed ?? false
+                : false
+            }
+            isFreeform={element.type === 'freeform'}
+            isImage={element.type === 'image'}
+            isBoard={element.type === 'board'}
+            onStartConnector={onStartConnector}
+            onEndConnector={onEndConnector ?? (() => {})}
+          />
         )}
-      {/* Unified context menu (hidden for line elements as they have floating menu) */}
-      {isSelected && !isDragging && element.type !== "line" && !isReadOnly && (
+      {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
+      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && (
+        /* Counter-rotation wrapper: un-rotates around element center so menu stays fixed above */
+        <div
+          className="absolute inset-0 pointer-events-none z-50"
+          style={{
+            transform: element.rotation ? `rotate(${-element.rotation}deg)` : undefined,
+          }}
+        >
         <div
           className={cn(
-            "absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-lg",
-            "bg-card/95 backdrop-blur border border-border/50 shadow-lg z-50 top-[-57px]",
+            "absolute left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl pointer-events-auto",
+            "bg-white/10 backdrop-blur-3xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
           )}
+          style={{
+            top: -57,
+            transform: `translateX(-50%) scale(${1 / canvasZoom})`,
+            transformOrigin: 'center bottom',
+          }}
           onMouseDown={(e) => e.stopPropagation()}
         >
           {/* Element-specific actions */}
           {element.type === "shape" && (
             <>
+              {/* Color Picker (Fill/Stroke/Text unified) */}
               <div className="relative">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    if (showColorPicker) {
+                      closeAllSubmenus();
+                    } else {
+                      setColorPickerDefaultMode("fill");
+                      openColorPicker();
+                    }
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -574,6 +947,8 @@ export function CanvasElementRenderer({
                     strokeColor={(element as ShapeElement).style?.borderColor}
                     strokeWidth={(element as ShapeElement).style?.borderWidth}
                     fillOpacity={(element as ShapeElement).style?.fillOpacity}
+                    textColor={(element as ShapeElement).style?.textColor}
+                    fontSize={(element as ShapeElement).style?.fontSize}
                     onFillColorChange={(color) =>
                       onUpdate({ style: { ...element.style, bgColor: color } })
                     }
@@ -592,21 +967,93 @@ export function CanvasElementRenderer({
                         style: { ...element.style, fillOpacity: opacity },
                       })
                     }
+                    onTextColorChange={(color) =>
+                      onUpdate({ style: { ...element.style, textColor: color } })
+                    }
+                    onFontSizeChange={(size) =>
+                      onUpdate({ style: { ...element.style, fontSize: size } })
+                    }
                     onClose={() => setShowColorPicker(false)}
+                    defaultMode={colorPickerDefaultMode}
                   />
                 )}
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditing(true);
-                }}
-                className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-                title="Add Text"
-              >
-                <Type className="w-4 h-4" />
-              </button>
+
+              {/* Text Formatting Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (showTextStyleMenu) {
+                      closeAllSubmenus();
+                    } else {
+                      closeAllSubmenus();
+                      setShowTextStyleMenu(true);
+                    }
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showTextStyleMenu && "bg-primary/20 text-primary",
+                  )}
+                  title="Text Formatting"
+                >
+                  <Type className="w-4 h-4" />
+                </button>
+                {showTextStyleMenu && (
+                  <ShapeTextStylePicker
+                    style={(element as ShapeElement).style}
+                    onStyleChange={(updates) =>
+                      onUpdate({ style: { ...element.style, ...updates } })
+                    }
+                    onOpenColorPicker={() => {
+                      setShowTextStyleMenu(false);
+                      setColorPickerDefaultMode("text");
+                      openColorPicker();
+                    }}
+                    onClose={() => setShowTextStyleMenu(false)}
+                  />
+                )}
+              </div>
+
               <div className="w-px h-4 bg-border/50 mx-0.5" />
+
+              {/* Shape Type Picker */}
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (showShapeTypePicker) {
+                      closeAllSubmenus();
+                    } else {
+                      closeAllSubmenus();
+                      setShowShapeTypePicker(true);
+                    }
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showShapeTypePicker && "bg-primary/20 text-primary",
+                  )}
+                  title="Change Shape"
+                >
+                  {/* Hexagon icon for shape picker */}
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  </svg>
+                </button>
+                {showShapeTypePicker && (
+                  <ShapeTypePicker
+                    currentType={(element as ShapeElement).shapeType}
+                    onTypeSelect={(shapeType) => {
+                      onUpdate({ shapeType } as Partial<CanvasElement>);
+                      setShowShapeTypePicker(false);
+                    }}
+                    onClose={() => setShowShapeTypePicker(false)}
+                  />
+                )}
+              </div>
+
             </>
           )}
           {element.type === "freeform" && (
@@ -616,7 +1063,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -644,7 +1091,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowEmojiPicker(!showEmojiPicker);
+                    showEmojiPicker ? closeAllSubmenus() : openEmojiPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -670,7 +1117,7 @@ export function CanvasElementRenderer({
                   const isBold =
                     (element as FreeformElement).style?.fontWeight === "bold" ||
                     (element as FreeformElement).style?.fontWeight ===
-                      "semibold";
+                    "semibold";
                   onUpdate({
                     style: {
                       ...element.style,
@@ -682,8 +1129,8 @@ export function CanvasElementRenderer({
                   "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
                   ((element as FreeformElement).style?.fontWeight === "bold" ||
                     (element as FreeformElement).style?.fontWeight ===
-                      "semibold") &&
-                    "bg-primary/20 text-primary",
+                    "semibold") &&
+                  "bg-primary/20 text-primary",
                 )}
                 title="Bold"
               >
@@ -705,7 +1152,7 @@ export function CanvasElementRenderer({
                 className={cn(
                   "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
                   (element as FreeformElement).taskMetadata?.isActionable &&
-                    "bg-purple-500/20 text-purple-400",
+                  "bg-purple-500/20 text-purple-400",
                 )}
                 title={
                   (element as FreeformElement).taskMetadata?.isActionable
@@ -715,6 +1162,25 @@ export function CanvasElementRenderer({
               >
                 <CheckCircle2 className="w-4 h-4" />
               </button>
+              {/* Send to Inbox button */}
+              {onSendToInbox &&
+                element.type === "freeform" &&
+                getFreeformCardType(element as FreeformElement) === "task" &&
+                !(element as FreeformElement).isDocument && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSendToInbox();
+                    }}
+                    className={cn(
+                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                      element.inInbox && "bg-cyan-500/20 text-cyan-400",
+                    )}
+                    title={element.inInbox ? "Already in Inbox" : "Send to Inbox"}
+                  >
+                    <Inbox className="w-4 h-4" />
+                  </button>
+                )}
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
@@ -725,7 +1191,7 @@ export function CanvasElementRenderer({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setShowLinkViewMenu(!showLinkViewMenu);
+                      showLinkViewMenu ? closeAllSubmenus() : openLinkViewMenu();
                     }}
                     className={cn(
                       "p-1.5 rounded text-muted-foreground hover:text-primary transition-colors",
@@ -765,7 +1231,7 @@ export function CanvasElementRenderer({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowBoardIconPicker(!showBoardIconPicker);
+                    showBoardIconPicker ? closeAllSubmenus() : openBoardIconPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -790,7 +1256,7 @@ export function CanvasElementRenderer({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowBoardColorPicker(!showBoardColorPicker);
+                    showBoardColorPicker ? closeAllSubmenus() : openBoardColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -816,6 +1282,37 @@ export function CanvasElementRenderer({
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
+          {element.type === "container" && (
+            <>
+              {TINT_ORDER.map((name) => {
+                const c = CONTAINER_TINTS[name];
+                const isActive = (element as ContainerElement).tintColor === name ||
+                  (!(element as ContainerElement).tintColor && name === 'violet');
+                return (
+                  <button
+                    key={name}
+                    title={name.charAt(0).toUpperCase() + name.slice(1)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdate({ tintColor: name } as Partial<CanvasElement>);
+                    }}
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.mid})`,
+                      border: isActive ? '2px solid rgba(255,255,255,0.9)' : '2px solid rgba(255,255,255,0.15)',
+                      boxShadow: isActive ? `0 0 6px ${c.mid}88` : 'none',
+                      flexShrink: 0,
+                      cursor: 'pointer',
+                      transition: 'border-color 0.15s, box-shadow 0.15s',
+                    }}
+                  />
+                );
+              })}
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+            </>
+          )}
           {element.type === "experienceBlock" && (
             <>
               <div className="relative">
@@ -823,7 +1320,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -853,7 +1350,7 @@ export function CanvasElementRenderer({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowExperienceViewMenu(!showExperienceViewMenu);
+                    showExperienceViewMenu ? closeAllSubmenus() : openExperienceViewMenu();
                   }}
                   className={cn(
                     "p-1.5 rounded text-muted-foreground hover:text-primary transition-colors",
@@ -872,7 +1369,7 @@ export function CanvasElementRenderer({
                 {showExperienceViewMenu && (
                   <ExperienceViewSubmenu
                     currentMode={
-                      (element as ExperienceBlockElement).viewMode || "compact"
+                      (element as ExperienceBlockElement).viewMode || "inline"
                     }
                     onModeSelect={(mode) => {
                       onUpdate({ viewMode: mode } as Partial<CanvasElement>);
@@ -887,63 +1384,6 @@ export function CanvasElementRenderer({
           )}
           {element.type === "container" && (
             <>
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showColorPicker && "bg-primary/20 text-primary",
-                  )}
-                  title="Styling"
-                >
-                  <Palette className="w-4 h-4" />
-                </button>
-                {showColorPicker && element.type === "container" && (
-                  <ContainerStylePicker
-                    fillColor={(element as ContainerElement).style?.bgColor}
-                    strokeColor={
-                      (element as ContainerElement).style?.borderColor
-                    }
-                    strokeWidth={
-                      (element as ContainerElement).style?.borderWidth
-                    }
-                    strokeStyle={
-                      (element as ContainerElement).style?.borderStyle
-                    }
-                    fillOpacity={
-                      (element as ContainerElement).style?.fillOpacity
-                    }
-                    onFillColorChange={(color) =>
-                      onUpdate({ style: { ...element.style, bgColor: color } })
-                    }
-                    onStrokeColorChange={(color) =>
-                      onUpdate({
-                        style: { ...element.style, borderColor: color },
-                      })
-                    }
-                    onStrokeWidthChange={(width) =>
-                      onUpdate({
-                        style: { ...element.style, borderWidth: width },
-                      })
-                    }
-                    onStrokeStyleChange={(style) =>
-                      onUpdate({
-                        style: { ...element.style, borderStyle: style },
-                      })
-                    }
-                    onFillOpacityChange={(opacity) =>
-                      onUpdate({
-                        style: { ...element.style, fillOpacity: opacity },
-                      })
-                    }
-                    onClose={() => setShowColorPicker(false)}
-                  />
-                )}
-              </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1003,8 +1443,8 @@ export function CanvasElementRenderer({
                   "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
                   ((element as TextElement).style?.fontWeight === "bold" ||
                     (element as TextElement).style?.fontWeight ===
-                      "semibold") &&
-                    "bg-primary/20 text-primary",
+                    "semibold") &&
+                  "bg-primary/20 text-primary",
                 )}
                 title="Bold"
               >
@@ -1033,7 +1473,7 @@ export function CanvasElementRenderer({
                   onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    setShowColorPicker(!showColorPicker);
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
@@ -1081,65 +1521,69 @@ export function CanvasElementRenderer({
             element.type === "freeform" ||
             element.type === "link" ||
             element.type === "image") && (
-            <>
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    setShowTagMenu(!showTagMenu);
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showTagMenu && "bg-primary/20 text-primary",
-                    element.hypercubeTags &&
+              <>
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      showTagMenu ? closeAllSubmenus() : openTagMenu();
+                    }}
+                    className={cn(
+                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                      showTagMenu && "bg-primary/20 text-primary",
+                      element.hypercubeTags &&
                       element.hypercubeTags.length > 0 &&
                       "text-cyan-400",
+                    )}
+                    title="Tag to Hypercube"
+                  >
+                    <Box className="w-4 h-4" />
+                  </button>
+                  {showTagMenu && (
+                    <HypercubeTagPicker
+                      currentTags={element.hypercubeTags || []}
+                      onTagToggle={(tag) => {
+                        const currentTags = element.hypercubeTags || [];
+                        const newTags = currentTags.includes(tag)
+                          ? currentTags.filter((t) => t !== tag)
+                          : [...currentTags, tag];
+                        onUpdate({
+                          hypercubeTags: newTags,
+                        } as Partial<CanvasElement>);
+                      }}
+                      onClose={() => setShowTagMenu(false)}
+                    />
                   )}
-                  title="Tag to Hypercube"
-                >
-                  <Box className="w-4 h-4" />
-                </button>
-                {showTagMenu && (
-                  <HypercubeTagPicker
-                    currentTags={element.hypercubeTags || []}
-                    onTagToggle={(tag) => {
-                      const currentTags = element.hypercubeTags || [];
-                      const newTags = currentTags.includes(tag)
-                        ? currentTags.filter((t) => t !== tag)
-                        : [...currentTags, tag];
-                      onUpdate({
-                        hypercubeTags: newTags,
-                      } as Partial<CanvasElement>);
-                    }}
-                    onClose={() => setShowTagMenu(false)}
-                  />
-                )}
-              </div>
-              <div className="w-px h-4 bg-border/50 mx-0.5" />
+                </div>
+                <div className="w-px h-4 bg-border/50 mx-0.5" />
+              </>
+            )}
+          {/* Universal actions — z-order controls hidden for containers (they always stay at back) */}
+          {element.type !== 'container' && (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleBringForward();
+                }}
+                className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Bring Forward"
+              >
+                <ArrowUp className="w-4 h-4" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSendBackward();
+                }}
+                className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Send Backward"
+              >
+                <ArrowDown className="w-4 h-4" />
+              </button>
             </>
           )}
-          {/* Universal actions */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleBringForward();
-            }}
-            className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-            title="Bring Forward"
-          >
-            <ArrowUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleSendBackward();
-            }}
-            className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-            title="Send Backward"
-          >
-            <ArrowDown className="w-4 h-4" />
-          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1164,6 +1608,50 @@ export function CanvasElementRenderer({
           >
             <Copy className="w-4 h-4" />
           </button>
+          {/* Send to Inbox button - only for note cards (not documents) */}
+          {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle || (element as any).emoji === '🤖') && !element.inInbox && !(element as FreeformElement).isDocument && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                // Ensure cardType is set to 'note' when sending to inbox
+                onUpdate({
+                  inInbox: true,
+                  cardType: 'note'
+                } as any);
+              }}
+              className="p-1.5 rounded hover:bg-violet-500/20 text-muted-foreground hover:text-violet-400 transition-colors"
+              title="Send to Inbox"
+            >
+              <Inbox className="w-4 h-4" />
+            </button>
+          )}
+          {/* Download Image button - only for image elements */}
+          {element.type === 'image' && (element as ImageElement).src && (
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                const imageElement = element as ImageElement;
+                try {
+                  const response = await fetch(imageElement.src);
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = imageElement.imageMeta?.originalName || 'image.png';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  window.URL.revokeObjectURL(url);
+                } catch (error) {
+                  console.error('Failed to download image:', error);
+                }
+              }}
+              className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+              title="Download Image"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1174,6 +1662,7 @@ export function CanvasElementRenderer({
           >
             <Trash2 className="w-4 h-4" />
           </button>
+        </div>
         </div>
       )}
       {/* Hypercube tag indicators */}
@@ -1196,29 +1685,67 @@ export function CanvasElementRenderer({
       )}
       {/* Element content */}
       {renderContent()}
-      {/* Resize handles - shown when selected (not for boards, text, or line elements) */}
+      {/* Resize handles - shown when selected (not for boards, lines, or images in crop mode) */}
       {isSelected &&
         !isDragging &&
+        !isCroppingImage &&
         element.type !== "board" &&
-        element.type !== "text" &&
         element.type !== "line" && (
           <>
-            {/* For freeform cards, only show horizontal (left/right) resize handles */}
+            {/* Note cards are the only resizable freeform cards (width-only). */}
             {element.type === "freeform" ? (
-              <>
-                <ResizeHandle
-                  position="e"
-                  element={element}
-                  onUpdate={onUpdate}
-                  canvasZoom={canvasZoom}
-                />
-                <ResizeHandle
-                  position="w"
-                  element={element}
-                  onUpdate={onUpdate}
-                  canvasZoom={canvasZoom}
-                />
-              </>
+              isResizableNoteCard ? (
+                <>
+                  <ResizeHandle
+                    position="nw"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="sw"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="ne"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="se"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="e"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                  <ResizeHandle
+                    position="w"
+                    element={element}
+                    onUpdate={onUpdate}
+                    canvasZoom={canvasZoom}
+                    snapToGrid={snapToGrid}
+                    onResizeStart={pushCanvasHistory}
+                  />
+                </>
+              ) : null
             ) : (
               <>
                 <ResizeHandle
@@ -1226,43 +1753,61 @@ export function CanvasElementRenderer({
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
+                  onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
                   position="sw"
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
+                  onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
                   position="ne"
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
+                  onResizeStart={pushCanvasHistory}
                 />
                 <ResizeHandle
                   position="nw"
                   element={element}
                   onUpdate={onUpdate}
                   canvasZoom={canvasZoom}
+                  snapToGrid={snapToGrid}
+                  onResizeStart={pushCanvasHistory}
                 />
               </>
             )}
           </>
         )}
+      {/* Rotation handle — for shapes (below) and images (right side, to clear edit pill) */}
+      {isSelected &&
+        !isDragging &&
+        !isEditing &&
+        !isCroppingImage &&
+        !isReadOnly &&
+        !element.locked &&
+        (element.type === "shape" || element.type === "image") && (
+          <RotationHandle
+            element={element}
+            onUpdate={onUpdate}
+            canvasZoom={canvasZoom}
+            onResizeStart={pushCanvasHistory}
+            side={element.type === "image" ? "right" : "bottom"}
+          />
+        )}
       {/* Text font-size resize handle - shown when text selected and not editing */}
       {isSelected && !isEditing && element.type === "text" && !isReadOnly && (
-        <>
-          <TextFontSizeHandle
-            element={element as TextElement}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-          />
-          <TextWrapWidthHandle
-            element={element as TextElement}
-            onUpdate={onUpdate}
-            canvasZoom={canvasZoom}
-          />
-        </>
+        <TextFontSizeHandle
+          element={element as TextElement}
+          onUpdate={onUpdate}
+          canvasZoom={canvasZoom}
+          onResizeStart={pushCanvasHistory}
+        />
       )}
     </div>
   );
@@ -1313,7 +1858,7 @@ function ConnectionAnchor({
         isConnecting && isHoverTarget && "bg-green-500 animate-pulse",
         // The specific anchor being hovered glows brightly
         showGlow &&
-          "bg-green-400 scale-150 shadow-[0_0_20px_rgba(74,222,128,0.8)]",
+        "bg-green-400 scale-150 shadow-[0_0_20px_rgba(74,222,128,0.8)]",
       )}
       style={positionStyles[position]}
       data-port-id={anchorId}
@@ -1331,18 +1876,9 @@ function ConnectionAnchor({
       }}
       onMouseDown={(e) => {
         e.stopPropagation();
-        console.log(
-          "[PORT] Mouse down on port:",
-          elementId,
-          position,
-          "isConnecting:",
-          isConnecting,
-        );
         if (isConnecting && onEndConnector) {
-          console.log("[PORT] Ending connector at:", elementId, position);
           onEndConnector(elementId, position);
         } else {
-          console.log("[PORT] Starting connector from:", elementId, position);
           onStartConnector(elementId, position);
         }
       }}
@@ -1350,11 +1886,6 @@ function ConnectionAnchor({
         // Allow mouseup on anchor to complete connection
         if (isConnecting && onEndConnector) {
           e.stopPropagation();
-          console.log(
-            "[PORT] Mouse up on port (completing):",
-            elementId,
-            position,
-          );
           onEndConnector(elementId, position);
         }
       }}
@@ -1368,16 +1899,28 @@ function ResizeHandle({
   element,
   onUpdate,
   canvasZoom,
+  snapToGrid,
+  onResizeStart,
 }: {
   position: "nw" | "ne" | "sw" | "se" | "e" | "w";
   element: CanvasElement;
   onUpdate: (updates: Partial<CanvasElement>) => void;
   canvasZoom: number;
+  snapToGrid?: boolean;
+  onResizeStart?: () => void;
 }) {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
+
+      if (element.type === "freeform") {
+        // Type guard: task cards are intentionally non-resizable.
+        if (!canResizeFreeformCard(element as FreeformElement)) return;
+      }
+
+      // Capture history before starting resize for undo support
+      onResizeStart?.();
 
       const startX = e.clientX;
       const startY = e.clientY;
@@ -1394,31 +1937,102 @@ function ResizeHandle({
         let newHeight = startHeight;
         let newX = startPosX;
         let newY = startPosY;
+        const isResizableNote =
+          element.type === "freeform" &&
+          canResizeFreeformCard(element as FreeformElement);
 
         // Determine minimum sizes based on element type
-        const minWidth = element.type === "freeform" ? 250 : 50;
-        const minHeight = element.type === "freeform" ? 300 : 30;
-        
+        const minWidth =
+          element.type === "freeform" && isResizableNote ? 200 : element.type === "freeform" ? 200 : 50;
+        const minHeight =
+          element.type === "freeform" && isResizableNote ? 300 : element.type === "freeform" ? 120 : 30;
+
+        // For images, maintain aspect ratio
+        const isImage = element.type === "image";
+        // Shift key: maintain aspect ratio for any element type
+        const shouldMaintainAspectRatio = isImage || moveEvent.shiftKey;
+        const aspectRatio = shouldMaintainAspectRatio ? startWidth / startHeight : null;
+
         if (position.includes("e")) {
           newWidth = Math.max(minWidth, startWidth + deltaX);
+          if (shouldMaintainAspectRatio && aspectRatio) {
+            newHeight = newWidth / aspectRatio;
+          }
         }
         if (position.includes("w")) {
           newWidth = Math.max(minWidth, startWidth - deltaX);
           newX = startPosX + (startWidth - newWidth);
+          if (shouldMaintainAspectRatio && aspectRatio) {
+            newHeight = newWidth / aspectRatio;
+          }
         }
-        
-        // For freeform cards, don't allow height resizing - height is content-based
-        if (element.type !== "freeform") {
+
+        // Note cards are width-resizable only; keep height content-driven.
+        if (!isResizableNote) {
           if (position.includes("s")) {
             newHeight = Math.max(minHeight, startHeight + deltaY);
+            if (shouldMaintainAspectRatio && aspectRatio) {
+              newWidth = newHeight * aspectRatio;
+            }
           }
           if (position.includes("n")) {
             newHeight = Math.max(minHeight, startHeight - deltaY);
             newY = startPosY + (startHeight - newHeight);
+            if (shouldMaintainAspectRatio && aspectRatio) {
+              newWidth = newHeight * aspectRatio;
+            }
           }
         }
 
-        onUpdate({ width: newWidth, height: newHeight, x: newX, y: newY });
+        if (snapToGrid) {
+          const gridSize = 30;
+          newWidth = Math.round(newWidth / gridSize) * gridSize;
+          if (!isResizableNote) {
+            newHeight = Math.round(newHeight / gridSize) * gridSize;
+          }
+          newX = Math.round(newX / gridSize) * gridSize;
+          if (!isResizableNote) {
+            newY = Math.round(newY / gridSize) * gridSize;
+          }
+        }
+
+        // For corner handles on images (or shift-held), resize proportionally
+        if (shouldMaintainAspectRatio && aspectRatio && (position === "nw" || position === "ne" || position === "sw" || position === "se")) {
+          // Use the larger delta to determine resize
+          const delta = Math.max(Math.abs(deltaX), Math.abs(deltaY)) * Math.sign(position.includes("e") ? deltaX : -deltaX);
+          newWidth = Math.max(minWidth, startWidth + delta);
+          newHeight = newWidth / aspectRatio;
+
+          if (position.includes("w")) {
+            newX = startPosX + (startWidth - newWidth);
+          }
+          if (position.includes("n")) {
+            newY = startPosY + (startHeight - newHeight);
+          }
+        }
+
+        // Alt key: resize from center (both sides move equally)
+        if (moveEvent.altKey) {
+          const widthDiff = newWidth - startWidth;
+          const heightDiff = newHeight - startHeight;
+          newX = startPosX - widthDiff / 2;
+          newY = startPosY - heightDiff / 2;
+          // Double the size change since we're expanding in both directions
+          newWidth = startWidth + widthDiff;
+          newHeight = startHeight + heightDiff;
+        }
+
+        // For experience blocks, mark as manually resized to prevent auto-resize from overriding
+        const updates: Partial<CanvasElement> = { width: newWidth, height: newHeight, x: newX, y: newY };
+        if (element.type === "experienceBlock") {
+          (updates as any).manuallyResized = true;
+        }
+        // For containers, update the user-set minimum size floor
+        if (element.type === "container") {
+          (updates as any).minWidth = newWidth;
+          (updates as any).minHeight = newHeight;
+        }
+        onUpdate(updates);
       };
 
       const handleMouseUp = () => {
@@ -1429,16 +2043,19 @@ function ResizeHandle({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [element, onUpdate, position, canvasZoom],
+    [element, onUpdate, position, canvasZoom, snapToGrid, onResizeStart],
   );
 
+  // Scale handles inversely with zoom to keep them visible at all zoom levels
+  const handleScale = 1 / canvasZoom;
+
   const positionStyles: Record<string, React.CSSProperties> = {
-    nw: { top: -4, left: -4, cursor: "nw-resize" },
-    ne: { top: -4, right: -4, cursor: "ne-resize" },
-    sw: { bottom: -4, left: -4, cursor: "sw-resize" },
-    se: { bottom: -4, right: -4, cursor: "se-resize" },
-    e: { top: "50%", right: -4, transform: "translateY(-50%)", cursor: "ew-resize" },
-    w: { top: "50%", left: -4, transform: "translateY(-50%)", cursor: "ew-resize" },
+    nw: { top: -4, left: -4, cursor: "nw-resize", transform: `scale(${handleScale})`, transformOrigin: "top left" },
+    ne: { top: -4, right: -4, cursor: "ne-resize", transform: `scale(${handleScale})`, transformOrigin: "top right" },
+    sw: { bottom: -4, left: -4, cursor: "sw-resize", transform: `scale(${handleScale})`, transformOrigin: "bottom left" },
+    se: { bottom: -4, right: -4, cursor: "se-resize", transform: `scale(${handleScale})`, transformOrigin: "bottom right" },
+    e: { top: "50%", right: -4, transform: `translateY(-50%) scale(${handleScale})`, transformOrigin: "center right", cursor: "ew-resize" },
+    w: { top: "50%", left: -4, transform: `translateY(-50%) scale(${handleScale})`, transformOrigin: "center left", cursor: "ew-resize" },
   };
 
   return (
@@ -1450,15 +2067,135 @@ function ResizeHandle({
   );
 }
 
+// Rotation handle — line + dot extending from the element, drag to rotate
+function RotationHandle({
+  element,
+  onUpdate,
+  canvasZoom,
+  onResizeStart,
+  side = "bottom",
+}: {
+  element: CanvasElement;
+  onUpdate: (updates: Partial<CanvasElement>) => void;
+  canvasZoom: number;
+  onResizeStart?: () => void;
+  side?: "bottom" | "right";
+}) {
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      onResizeStart?.();
+
+      // Get the element's screen-space center from its DOM node
+      const elNode = (e.target as HTMLElement).closest('[data-element-id]') as HTMLElement | null;
+      if (!elNode) return;
+      const elRect = elNode.getBoundingClientRect();
+      const screenCenterX = elRect.left + elRect.width / 2;
+      const screenCenterY = elRect.top + elRect.height / 2;
+
+      // Compute the initial angle of the mouse relative to center at drag start
+      const startAngle = Math.atan2(
+        e.clientY - screenCenterY,
+        e.clientX - screenCenterX,
+      ) * (180 / Math.PI);
+      const startRotation = element.rotation || 0;
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        // Compute current angle from element center to mouse
+        const currentAngle = Math.atan2(
+          moveEvent.clientY - screenCenterY,
+          moveEvent.clientX - screenCenterX,
+        ) * (180 / Math.PI);
+
+        // Rotation = starting rotation + delta from where the drag began
+        let rotation = startRotation + (currentAngle - startAngle);
+
+        // Snap to 15° increments when Shift is held
+        if (moveEvent.shiftKey) {
+          rotation = Math.round(rotation / 15) * 15;
+        }
+
+        onUpdate({ rotation });
+      };
+
+      const handleMouseUp = () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [element, onUpdate, onResizeStart],
+  );
+
+  const handleScale = 1 / canvasZoom;
+  const stemLength = 30;
+  const dotSize = 10;
+
+  if (side === "right") {
+    return (
+      <div
+        className="absolute top-1/2 pointer-events-none flex items-center"
+        style={{
+          right: -(stemLength + dotSize / 2 + 4),
+          transform: `translateY(-50%) scale(${handleScale})`,
+          transformOrigin: "left center",
+        }}
+      >
+        {/* Stem line */}
+        <div
+          className="bg-primary/60"
+          style={{ width: stemLength, height: 1.5 }}
+        />
+        {/* Dot handle */}
+        <div
+          className="rounded-full bg-primary border-2 border-background cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+          style={{ width: dotSize, height: dotSize }}
+          onMouseDown={handleMouseDown}
+          title="Drag to rotate (Shift for 15° snaps)"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="absolute left-1/2 pointer-events-none"
+      style={{
+        bottom: -(stemLength + dotSize / 2 + 4),
+        transform: `translateX(-50%) scale(${handleScale})`,
+        transformOrigin: "top center",
+      }}
+    >
+      {/* Stem line */}
+      <div
+        className="mx-auto bg-primary/60"
+        style={{ width: 1.5, height: stemLength }}
+      />
+      {/* Dot handle */}
+      <div
+        className="mx-auto rounded-full bg-primary border-2 border-background cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+        style={{ width: dotSize, height: dotSize }}
+        onMouseDown={handleMouseDown}
+        title="Drag to rotate (Shift for 15° snaps)"
+      />
+    </div>
+  );
+}
+
 // Text font-size resize handle - drag to scale font size
 function TextFontSizeHandle({
   element,
   onUpdate,
   canvasZoom,
+  onResizeStart,
 }: {
   element: TextElement;
   onUpdate: (updates: Partial<TextElement>) => void;
   canvasZoom: number;
+  onResizeStart?: () => void;
 }) {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -1466,17 +2203,19 @@ function TextFontSizeHandle({
     (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
+
+      // Capture history before starting resize for undo support
+      onResizeStart?.();
+
       setIsDragging(true);
 
-      const startX = e.clientX;
       const startY = e.clientY;
       const startFontSize = element.style?.fontSize || 16;
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
-        // Calculate delta - diagonal movement (right/down increases, left/up decreases)
-        const deltaX = (moveEvent.clientX - startX) / canvasZoom;
+        // Calculate delta - vertical only (down increases, up decreases)
         const deltaY = (moveEvent.clientY - startY) / canvasZoom;
-        const delta = (deltaX + deltaY) / 2; // Average of both axes for smooth diagonal
+        const delta = deltaY;
 
         // Scale factor: each 10px of drag = 1px font size change
         const fontSizeChange = Math.round(delta / 10);
@@ -1502,98 +2241,36 @@ function TextFontSizeHandle({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [element, onUpdate, canvasZoom],
+    [element, onUpdate, canvasZoom, onResizeStart],
   );
+
+  // Scale handle inversely with zoom to keep it visible at all zoom levels
+  const handleScale = 1 / canvasZoom;
+  const baseScale = isDragging ? 1.25 : 1;
+
+  // Offset the handle below the element
+  const handleOffset = 8;
 
   return (
     <div
       className={cn(
-        "absolute bottom-0 right-0 w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-nwse-resize transition-all hover:scale-110",
-        isDragging && "scale-125 shadow-lg",
+        "absolute w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-ns-resize transition-all hover:scale-110",
+        isDragging && "shadow-lg",
       )}
       style={{
-        transform: "translate(50%, 50%)",
+        position: 'absolute',
+        left: '50%',
+        bottom: `-${handleOffset}px`,
+        transform: `translateX(-50%) scale(${handleScale * baseScale})`,
       }}
       onMouseDown={handleMouseDown}
       title="Drag to resize text"
     >
-      <Type className="w-3 h-3 text-background" />
+      <ALargeSmall className="w-3.5 h-3.5 text-background" />
     </div>
   );
 }
 
-// Text wrap-width handle - drag horizontally to control text wrapping
-function TextWrapWidthHandle({
-  element,
-  onUpdate,
-  canvasZoom,
-}: {
-  element: TextElement;
-  onUpdate: (updates: Partial<TextElement>) => void;
-  canvasZoom: number;
-}) {
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      setIsDragging(true);
-
-      const startX = e.clientX;
-      const startWidth = element.wrapWidth || element.width;
-
-      const handleMouseMove = (moveEvent: MouseEvent) => {
-        // Calculate horizontal delta only
-        const deltaX = (moveEvent.clientX - startX) / canvasZoom;
-        let newWrapWidth = startWidth + deltaX;
-
-        // Clamp to reasonable bounds (min 60px, no max)
-        newWrapWidth = Math.max(60, newWrapWidth);
-
-        onUpdate({
-          wrapWidth: newWrapWidth,
-        });
-      };
-
-      const handleMouseUp = () => {
-        setIsDragging(false);
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    },
-    [element, onUpdate, canvasZoom],
-  );
-
-  return (
-    <div
-      className={cn(
-        "absolute top-0 right-0 w-5 h-5 bg-accent/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-ew-resize transition-all hover:scale-110",
-        isDragging && "scale-125 shadow-lg",
-      )}
-      style={{
-        transform: "translate(50%, -50%)",
-      }}
-      onMouseDown={handleMouseDown}
-      title="Drag to control text wrapping"
-    >
-      <svg
-        className="w-3 h-3 text-background"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M4 12h16M4 6h16M4 18h10" />
-      </svg>
-    </div>
-  );
-}
 
 // Color picker popover - positioned above the toolbar
 function ColorPicker({
@@ -1625,7 +2302,7 @@ function ColorPicker({
             "w-6 h-6 rounded border-2 transition-transform hover:scale-110",
             currentColor === color ? "border-primary" : "border-transparent",
             color === "transparent" &&
-              "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+            "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
           )}
           style={{
             background: color === "transparent" ? undefined : color,
@@ -1640,177 +2317,393 @@ function ColorPicker({
   );
 }
 
-// Shape color picker with fill/stroke toggle and stroke width control
+// Shape type picker - allows changing shape type without recreating element
+function ShapeTypePicker({
+  currentType,
+  onTypeSelect,
+  onClose,
+}: {
+  currentType: ShapeType;
+  onTypeSelect: (shapeType: ShapeType) => void;
+  onClose: () => void;
+}) {
+  const shapeTypes: { type: ShapeType; label: string; icon: React.ReactNode }[] = [
+    { type: "rectangle", label: "Rectangle", icon: <div className="w-4 h-3 bg-current rounded-sm" /> },
+    { type: "circle", label: "Circle", icon: <div className="w-4 h-4 bg-current rounded-full" /> },
+    { type: "diamond", label: "Diamond", icon: <div className="w-3 h-3 bg-current rotate-45" /> },
+    { type: "triangle", label: "Triangle", icon: <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-current" /> },
+    { type: "hexagon", label: "Hexagon", icon: <div className="w-4 h-4 bg-current" style={{ clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }} /> },
+    { type: "star", label: "Star", icon: <Star className="w-4 h-4 fill-current" /> },
+  ];
+
+  return (
+    <div
+      className="absolute top-full mt-2 left-1/2 -translate-x-1/2 p-2 rounded-lg bg-card backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[180px]"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-1 px-1.5 py-1">
+        {shapeTypes.map(({ type, label, icon }) => (
+          <button
+            key={type}
+            onClick={() => onTypeSelect(type)}
+            className={cn(
+              "flex items-center justify-center w-8 h-8 rounded-md transition-colors",
+              currentType === type
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-white/10 text-muted-foreground hover:text-foreground"
+            )}
+            title={label}
+          >
+            <div className="w-5 h-5 flex items-center justify-center">
+              {icon}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Shape text style picker - simplified to only show font weight (secondary popover)
+function ShapeTextStylePicker({
+  style,
+  onStyleChange,
+  onOpenColorPicker,
+  onClose,
+}: {
+  style?: ElementStyle;
+  onStyleChange: (updates: Partial<ElementStyle>) => void;
+  onOpenColorPicker?: () => void;
+  onClose: () => void;
+}) {
+  const currentFontWeight = style?.fontWeight || 'normal';
+  const currentFontFamily = style?.fontFamily || 'inherit';
+  const currentFontSize = style?.fontSize || 14;
+  const isBold = currentFontWeight === 'bold' || currentFontWeight === 'semibold';
+  const isItalic = style?.fontStyle === 'italic';
+  const isUnderline = style?.textDecoration === 'underline';
+  const currentTextAlign = style?.textAlign || 'center';
+
+  return (
+    <div
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[200px] p-3 pointer-events-auto"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {/* Font family */}
+      <select
+        value={currentFontFamily}
+        onChange={(e) => onStyleChange({ fontFamily: e.target.value })}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full h-7 px-2 mb-2 text-[11px] rounded bg-muted/50 border border-border/50 text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/50"
+      >
+        {FONT_FAMILIES.map(({ value, label }) => (
+          <option key={value} value={value}>{label}</option>
+        ))}
+      </select>
+
+      {/* Font size slider */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] text-muted-foreground w-8">Size</span>
+        <input
+          type="range" value={currentFontSize}
+          onChange={(e) => onStyleChange({ fontSize: parseInt(e.target.value) })}
+          min={8} max={72} step={1}
+          className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+        />
+        <span className="text-[10px] text-muted-foreground w-6 text-right">{currentFontSize}</span>
+      </div>
+
+      {/* Formatting buttons row: B | I | U | divider | AlignLeft | AlignCenter | AlignRight */}
+      <div className="flex items-center gap-1 mb-2">
+        {/* Bold */}
+        <button
+          onClick={() => onStyleChange({ fontWeight: isBold ? 'normal' : 'bold' })}
+          className={cn("p-1.5 rounded transition-colors text-xs font-bold", isBold ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Bold"
+        >
+          B
+        </button>
+        {/* Italic */}
+        <button
+          onClick={() => onStyleChange({ fontStyle: isItalic ? 'normal' : 'italic' })}
+          className={cn("p-1.5 rounded transition-colors text-xs italic", isItalic ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Italic"
+        >
+          I
+        </button>
+        {/* Underline */}
+        <button
+          onClick={() => onStyleChange({ textDecoration: isUnderline ? 'none' : 'underline' })}
+          className={cn("p-1.5 rounded transition-colors text-xs underline", isUnderline ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Underline"
+        >
+          U
+        </button>
+        {/* Divider */}
+        <div className="w-px h-4 bg-border/50 mx-0.5" />
+        {/* Align Left */}
+        <button
+          onClick={() => onStyleChange({ textAlign: 'left' })}
+          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'left' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Left"
+        >
+          <AlignLeft className="w-3.5 h-3.5" />
+        </button>
+        {/* Align Center */}
+        <button
+          onClick={() => onStyleChange({ textAlign: 'center' })}
+          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'center' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Center"
+        >
+          <AlignCenter className="w-3.5 h-3.5" />
+        </button>
+        {/* Align Right */}
+        <button
+          onClick={() => onStyleChange({ textAlign: 'right' })}
+          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'right' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
+          title="Align Right"
+        >
+          <AlignRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Text color button */}
+      {onOpenColorPicker && (
+        <button
+          onClick={() => { onClose(); onOpenColorPicker(); }}
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded hover:bg-white/5 transition-colors"
+        >
+          <Palette className="w-3.5 h-3.5" /> Text Color
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Shape color picker with fill/stroke/text toggle and stroke width control
 function ShapeColorPicker({
   fillColor,
   strokeColor,
   strokeWidth,
   fillOpacity,
+  textColor,
+  fontSize,
   onFillColorChange,
   onStrokeColorChange,
   onStrokeWidthChange,
   onFillOpacityChange,
+  onTextColorChange,
+  onFontSizeChange,
   onClose,
+  defaultMode,
 }: {
   fillColor?: string;
   strokeColor?: string;
   strokeWidth?: number;
   fillOpacity?: number;
+  textColor?: string;
+  fontSize?: number;
   onFillColorChange: (color: string) => void;
   onStrokeColorChange: (color: string) => void;
   onStrokeWidthChange: (width: number) => void;
   onFillOpacityChange: (opacity: number) => void;
+  onTextColorChange?: (color: string) => void;
+  onFontSizeChange?: (size: number) => void;
   onClose: () => void;
+  defaultMode?: "fill" | "stroke" | "text";
 }) {
-  const [mode, setMode] = useState<"fill" | "stroke">("fill");
+  const [mode, setMode] = useState<"fill" | "stroke" | "text">(defaultMode || "fill");
+  const [lastCustomColor, setLastCustomColor] = useState<string | null>(null);
+  const customColorRef = useRef<HTMLInputElement>(null);
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
+  const currentFontSize = fontSize || 16;
 
-  // Convert color to hex for color picker
   const colorToHex = (color?: string): string => {
-    if (!color || color === "transparent") return "#000000";
+    if (!color || color === "transparent" || color === "inherit") return "#ffffff";
     if (color.startsWith("#")) return color;
-    // Handle HSL colors
     if (color.startsWith("hsl")) {
       try {
         const match = color.match(/hsl\((\d+)\s+(\d+)%\s+(\d+)%\)/);
         if (match) {
           const [, h, s, l] = match;
-          return hslToHex(Number(h), Number(s), Number(l));
+          const hN = Number(h); const sN = Number(s); const lN = Number(l) / 100;
+          const a = (sN * Math.min(lN, 1 - lN)) / 100;
+          const f = (n: number) => { const k = (n + hN / 30) % 12; return Math.round(255 * (lN - a * Math.max(Math.min(k - 3, 9 - k, 1), -1))).toString(16).padStart(2, "0"); };
+          return `#${f(0)}${f(8)}${f(4)}`;
         }
-      } catch (e) {
-        console.error("Error parsing HSL color:", e);
-      }
+      } catch {}
     }
     return "#A855F7";
   };
 
-  const hslToHex = (h: number, s: number, l: number): string => {
-    l /= 100;
-    const a = (s * Math.min(l, 1 - l)) / 100;
-    const f = (n: number) => {
-      const k = (n + h / 30) % 12;
-      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-      return Math.round(255 * color)
-        .toString(16)
-        .padStart(2, "0");
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
+  const presetColors = [
+    "#ffffff", "#a3a3a3", "#404040",
+  ];
+
+  const handleColorChange = (color: string) => {
+    switch (mode) {
+      case "fill": onFillColorChange(color); break;
+      case "stroke": onStrokeColorChange(color); break;
+      case "text": onTextColorChange?.(color); break;
+    }
   };
 
-  const currentFillHex = colorToHex(fillColor);
-  const currentStrokeHex = colorToHex(strokeColor);
+  const handleCustomColorChange = (color: string) => {
+    handleColorChange(color);
+    if (!presetColors.includes(color)) {
+      setLastCustomColor(color);
+    }
+  };
+
+  const getCurrentColor = () => {
+    switch (mode) {
+      case "fill": return colorToHex(fillColor);
+      case "stroke": return colorToHex(strokeColor);
+      case "text": return colorToHex(textColor);
+    }
+  };
 
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto w-[220px] p-3"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Compact single row layout */}
-      <div className="flex items-center gap-1 px-2 py-1.5">
-        {/* Mode toggle buttons */}
+      {/* Mode tabs: Fill / Outline / Text */}
+      <div className="flex gap-1 mb-3 p-0.5 bg-muted/50 rounded-md">
         <button
           onClick={() => setMode("fill")}
-          className={cn(
-            "p-1.5 rounded hover:bg-primary/20 transition-colors",
-            mode === "fill" && "bg-primary/30 ring-1 ring-primary",
-          )}
-          title="Fill"
+          className={cn("flex-1 py-1.5 px-2 text-xs rounded transition-colors flex items-center justify-center gap-1",
+            mode === "fill" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
         >
-          <Paintbrush className="w-4 h-4" />
+          <Paintbrush className="w-3 h-3" /> Fill
         </button>
         <button
           onClick={() => setMode("stroke")}
-          className={cn(
-            "p-1.5 rounded hover:bg-primary/20 transition-colors",
-            mode === "stroke" && "bg-primary/30 ring-1 ring-primary",
-          )}
-          title="Outline"
+          className={cn("flex-1 py-1.5 px-2 text-xs rounded transition-colors flex items-center justify-center gap-1",
+            mode === "stroke" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
         >
-          <PenLine className="w-4 h-4" />
+          <PenLine className="w-3 h-3" /> Outline
         </button>
+        {onTextColorChange && (
+          <button
+            onClick={() => setMode("text")}
+            className={cn("flex-1 py-1.5 px-2 text-xs rounded transition-colors flex items-center justify-center gap-1",
+              mode === "text" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+          >
+            <Type className="w-3 h-3" /> Text
+          </button>
+        )}
+      </div>
 
-        <div className="w-px h-4 bg-border/50 mx-0.5" />
+      {/* Color swatches — two rows */}
+      <div className="space-y-2 mb-3">
+        {/* Row 1: white, gray, dark gray, dynamic (last picked), transparent, rainbow wheel */}
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {presetColors.map((color) => (
+            <button
+              key={color}
+              onClick={() => handleColorChange(color)}
+              className={cn(
+                "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+                getCurrentColor() === color ? "border-foreground shadow-lg scale-110" : "border-border/50 hover:border-border",
+              )}
+              style={{ backgroundColor: color }}
+            />
+          ))}
+          {/* Dynamic last custom color swatch */}
+          {lastCustomColor && !presetColors.includes(lastCustomColor) && (
+            <button
+              onClick={() => handleColorChange(lastCustomColor)}
+              className={cn(
+                "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+                getCurrentColor() === lastCustomColor ? "border-foreground shadow-lg scale-110" : "border-border/50 hover:border-border",
+              )}
+              style={{ backgroundColor: lastCustomColor }}
+              title="Last custom color"
+            />
+          )}
+          {/* Transparent swatch — all modes */}
+          <button
+            onClick={() => handleColorChange("transparent")}
+            className={cn(
+              "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+              (mode === "fill" ? fillColor : mode === "stroke" ? strokeColor : textColor) === "transparent" ? "border-foreground shadow-lg" : "border-border/50",
+              "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+            )}
+            title="Transparent"
+          />
+          {/* Rainbow color picker */}
+          <button
+            onClick={() => customColorRef.current?.click()}
+            className={cn(
+              "w-6 h-6 rounded-full border-2 transition-all hover:scale-110 relative overflow-hidden",
+              getCurrentColor() && !presetColors.includes(getCurrentColor()) && getCurrentColor() !== lastCustomColor ? "border-foreground shadow-lg scale-110" : "border-border/50",
+            )}
+            style={{ background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
+            title="Custom color"
+          >
+            <input
+              ref={customColorRef}
+              type="color"
+              value={getCurrentColor()}
+              onChange={(e) => handleCustomColorChange(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            />
+          </button>
+        </div>
+        {/* Row 2: 6 gradient circles — all modes */}
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {TEXT_GRADIENTS.slice(0, 6).map((gradient, i) => (
+            <button
+              key={i}
+              onClick={() => handleColorChange(gradient)}
+              className="w-6 h-6 rounded-full border-2 border-border/50 hover:border-border transition-all hover:scale-110"
+              style={{ background: gradient }}
+              title={`Gradient ${i + 1}`}
+            />
+          ))}
+        </div>
+      </div>
 
-        {/* Color picker */}
-        <input
-          type="color"
-          value={mode === "fill" ? currentFillHex : currentStrokeHex}
-          onChange={(e) => {
-            if (mode === "fill") {
-              onFillColorChange(e.target.value);
-            } else {
-              onStrokeColorChange(e.target.value);
-            }
-          }}
-          className="w-6 h-6 rounded cursor-pointer border-0"
-          title="Color"
-        />
-
-        {/* Transparent button for fill mode */}
+      {/* Slider — context-dependent */}
+      <div className="flex items-center gap-2">
         {mode === "fill" && (
           <>
-            <button
-              onClick={() => onFillColorChange("transparent")}
-              className={cn(
-                "w-6 h-6 rounded border-2 transition-all",
-                fillColor === "transparent"
-                  ? "border-primary"
-                  : "border-border",
-                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
-              )}
-              title="Transparent"
+            <span className="text-[10px] text-muted-foreground w-12">Opacity</span>
+            <input
+              type="range" value={currentOpacity} onChange={(e) => onFillOpacityChange(parseInt(e.target.value))}
+              min={0} max={100} step={1}
+              className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
             />
-            <div className="w-px h-4 bg-border/50 mx-0.5" />
+            <span className="text-[10px] text-muted-foreground w-8 text-right">{currentOpacity}%</span>
           </>
         )}
-
-        {/* Stroke width slider - only show when in stroke mode */}
         {mode === "stroke" && (
           <>
+            <span className="text-[10px] text-muted-foreground w-12">Width</span>
             <input
-              type="range"
-              value={currentWidth}
-              onChange={(e) => onStrokeWidthChange(parseInt(e.target.value))}
-              min={1}
-              max={12}
-              step={1}
-              className="w-16 h-1 rounded-full appearance-none bg-muted cursor-pointer"
-              title={`Width: ${currentWidth}px`}
+              type="range" value={currentWidth} onChange={(e) => onStrokeWidthChange(parseInt(e.target.value))}
+              min={0} max={16} step={1}
+              className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
             />
+            <span className="text-[10px] text-muted-foreground w-8 text-right">{currentWidth}px</span>
           </>
         )}
-
-        {/* Fill opacity slider - only show when in fill mode */}
-        {mode === "fill" && (
+        {mode === "text" && onFontSizeChange && (
           <>
-            <span className="text-xs text-muted-foreground px-1">
-              {currentOpacity}%
-            </span>
+            <span className="text-[10px] text-muted-foreground w-12">Size</span>
             <input
-              type="range"
-              value={currentOpacity}
-              onChange={(e) => onFillOpacityChange(parseInt(e.target.value))}
-              min={0}
-              max={100}
-              step={1}
-              className="w-20 h-1 rounded-full appearance-none bg-muted cursor-pointer"
-              title={`Opacity: ${currentOpacity}%`}
+              type="range" value={currentFontSize} onChange={(e) => onFontSizeChange(parseInt(e.target.value))}
+              min={8} max={72} step={1}
+              className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
             />
+            <span className="text-[10px] text-muted-foreground w-8 text-right">{currentFontSize}</span>
           </>
         )}
-
-        <div className="w-px h-4 bg-border/50 mx-0.5" />
-
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-          title="Close"
-        >
-          <X className="w-4 h-4" />
-        </button>
       </div>
     </div>
   );
@@ -1884,7 +2777,7 @@ function ContainerStylePicker({
 
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
+      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -1978,7 +2871,7 @@ function ContainerStylePicker({
               className={cn(
                 "p-1.5 rounded hover:bg-primary/20 transition-colors",
                 currentStyle === "dashed" &&
-                  "bg-primary/30 ring-1 ring-primary",
+                "bg-primary/30 ring-1 ring-primary",
               )}
               title="Dashed"
             >
@@ -1999,7 +2892,7 @@ function ContainerStylePicker({
               className={cn(
                 "p-1.5 rounded hover:bg-primary/20 transition-colors",
                 currentStyle === "dotted" &&
-                  "bg-primary/30 ring-1 ring-primary",
+                "bg-primary/30 ring-1 ring-primary",
               )}
               title="Dotted"
             >
@@ -2069,6 +2962,8 @@ function TextColorPicker({
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"solid" | "gradient">("solid");
+  const [customColor, setCustomColor] = useState(currentColor || "#ffffff");
+  const colorInputRef = useRef<HTMLInputElement>(null);
 
   // Solid colors for text (white, grays, and some accent colors)
   const solidColors = [
@@ -2082,11 +2977,12 @@ function TextColorPicker({
     "#F472B6", // Pink
     "#34D399", // Green
     "#60A5FA", // Blue
+    "#F59E0B", // Amber
   ];
 
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[200px] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[180px] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2117,7 +3013,7 @@ function TextColorPicker({
       </div>
       {/* Solid color swatches */}
       {mode === "solid" && (
-        <div className="grid grid-cols-5 gap-2">
+        <div className="flex flex-wrap gap-2 justify-center">
           {solidColors.map((color) => (
             <button
               key={color}
@@ -2126,20 +3022,45 @@ function TextColorPicker({
                 onClose();
               }}
               className={cn(
-                "w-8 h-8 rounded-md border-2 transition-all hover:scale-110",
+                "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
                 currentColor === color && !currentGradient
-                  ? "border-foreground shadow-lg"
+                  ? "border-foreground shadow-lg scale-110"
                   : "border-border/50 hover:border-border",
               )}
               style={{ backgroundColor: color }}
               title={color}
             />
           ))}
+          {/* Rainbow color picker button */}
+          <button
+            onClick={() => colorInputRef.current?.click()}
+            className={cn(
+              "w-7 h-7 rounded-full border-2 transition-all hover:scale-110 relative overflow-hidden",
+              currentColor && !solidColors.includes(currentColor) && !currentGradient
+                ? "border-foreground shadow-lg scale-110"
+                : "border-border/50 hover:border-border",
+            )}
+            style={{
+              background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)",
+            }}
+            title="Custom color"
+          >
+            <input
+              ref={colorInputRef}
+              type="color"
+              value={customColor}
+              onChange={(e) => {
+                setCustomColor(e.target.value);
+                onColorChange(e.target.value);
+              }}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            />
+          </button>
         </div>
       )}
-      {/* Gradient swatches */}
+      {/* Gradient swatches — circular previews */}
       {mode === "gradient" && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-wrap gap-2 justify-center">
           {TEXT_GRADIENTS.map((gradient, index) => (
             <button
               key={index}
@@ -2148,9 +3069,9 @@ function TextColorPicker({
                 onClose();
               }}
               className={cn(
-                "h-10 rounded-md border-2 transition-all hover:scale-105",
+                "w-7 h-7 rounded-full border-2 transition-all hover:scale-110 flex-shrink-0",
                 currentGradient === gradient
-                  ? "border-foreground shadow-lg"
+                  ? "border-foreground shadow-lg scale-110"
                   : "border-border/50 hover:border-border",
               )}
               style={{ background: gradient }}
@@ -2159,13 +3080,6 @@ function TextColorPicker({
           ))}
         </div>
       )}
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        Done
-      </button>
     </div>
   );
 }
@@ -2182,22 +3096,22 @@ function GradientPicker({
 }) {
   const gradients = [
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)", // 1 - Keep original
-    "linear-gradient(135deg, #5b21b6 0%, #4c1d95 30%, #3b0764 70%, #2d0552 100%)", // 2 - Darker purple
-    "linear-gradient(135deg, #7e22ce 0%, #6b21a8 30%, #581c87 70%, #4c1d95 100%)", // 3 - Darker violet
-    "linear-gradient(135deg, #a21caf 0%, #86198f 30%, #701a75 70%, #581c87 100%)", // 4 - Darker pink/purple
-    "linear-gradient(135deg, #0891b2 0%, #0e7490 30%, #155e75 70%, #164e63 100%)", // 5 - Darker cyan
-    "linear-gradient(135deg, #0f766e 0%, #115e59 30%, #134e4a 70%, #0f3d3b 100%)", // 6 - Darker teal
-    "linear-gradient(135deg, #4f46e5 0%, #4338ca 30%, #3730a3 70%, #312e81 100%)", // 7 - Darker indigo
-    "linear-gradient(135deg, #7c3aed 0%, #6d28d9 30%, #5b21b6 70%, #4c1d95 100%)", // 8 - Darker lavender
-    "linear-gradient(135deg, #1e40af 0%, #1e3a8a 30%, #1e293b 70%, #0f172a 100%)", // 9 - Keep original
-    "linear-gradient(135deg, #6b21a8 0%, #581c87 30%, #4c1d95 70%, #3b0764 100%)", // 10 - Keep original
-    "linear-gradient(135deg, #b45309 0%, #92400e 30%, #78350f 70%, #451a03 100%)", // 11 - Darker orange
-    "linear-gradient(135deg, #15803d 0%, #166534 30%, #14532d 70%, #052e16 100%)", // 12 - Darker green
+    "linear-gradient(135deg, #290d56ff 0%, #460e3bff 30%, #3b0764 70%, #2d0552 100%)", // 2 - Darker purple
+    "linear-gradient(135deg, #000000ff 0%, #000000ff 30%, #1a0a2dff 70%, #2f0330ff 100%)", // 3 - Darker violet
+    "linear-gradient(135deg, #2d2d2dff 0%, #000000ff 30%, #000000ff 70%, #323232ff 100%)", // 4 - Darker pink/purple
+    "linear-gradient(135deg, #000d10ff 0%, #063a48ff 30%, #0b323eff 70%, #01080bff 100%)", // 5 - Darker cyan
+    "linear-gradient(135deg, #052320ff 0%, #000d0cff 30%, #091337ff 70%, #072012ff 100%)", // 6 - Darker teal
+    "linear-gradient(135deg, #2d0064ff 0%, #22061cff 30%, #3c2f0aff 70%, #292e04ff 100%)", // 7 - Darker indigo
+    "linear-gradient(135deg, #140927ff 0%, #2d1807ff 30%, #260e4dff 70%, #240e06ff 100%)", // 8 - Darker lavender
+    "linear-gradient(135deg, #afa01eff 0%, #513812ff 20%, #390021ff 50%, #000000ff 100%)", // 9 - Keep original
+    "linear-gradient(135deg, #1e0434ff 0%, #146065ff 30%, #34092aff 70%, #043634ff 100%)", // 10 - Keep original
+    "linear-gradient(135deg, #3e0c04ff 0%, #510808ff 30%, #280505ff 70%, #2b0000ff 100%)", // 11 - Darker orange
+    "linear-gradient(135deg, #093a1bff 0%, #00240eff 30%, #000000ff 70%, #052e16 100%)", // 12 - Darker green
   ];
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[260px] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[260px] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2245,7 +3159,7 @@ function HypercubeTagPicker({
 }) {
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-[100] min-w-[220px] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[220px] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2308,7 +3222,7 @@ function EmojiPicker({
 }) {
   return (
     <div
-      className="absolute right-0 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-50 grid grid-cols-4 gap-1 w-[148px] left-[-5px] top-[-175px] bottom-[45px]"
+      className="absolute right-0 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-50 grid grid-cols-4 gap-1 w-[148px] left-[-5px] top-[-175px] bottom-[45px]"
       onClick={(e) => e.stopPropagation()}
     >
       {COMMON_EMOJIS.map((emoji) => (
@@ -2435,7 +3349,7 @@ function BoardIconPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl z-50 grid grid-cols-4 gap-1 w-[165px] h-[96px]"
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-4 gap-1 w-[165px] h-[96px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2470,7 +3384,7 @@ function BoardColorPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card/95 backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px] h-[156px]"
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px] h-[156px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2605,12 +3519,16 @@ function FreeformCard({
   onUpdate,
   isEditing,
   onBlur,
+  isSelected,
+  onStartEdit,
   className,
 }: {
   element: FreeformElement;
   onUpdate: (updates: Partial<FreeformElement>) => void;
   isEditing: boolean;
   onBlur: (e?: React.FocusEvent) => void;
+  isSelected: boolean;
+  onStartEdit: () => void;
   className?: string;
 }) {
   // Use the passed-in onBlur handler (from the parent renderer) to avoid undefined refs.
@@ -2620,12 +3538,201 @@ function FreeformCard({
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
   const textColor = element.style?.textColor || "#ffffff"; // Default white for dark backgrounds
   const fontWeight = element.style?.fontWeight || "normal";
+  const cardRef = useRef<HTMLDivElement>(null);
+  const noteContentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const noteBodyRef = useRef<HTMLDivElement>(null);
+  const subtaskRefs = useRef<Map<string, HTMLTextAreaElement | null>>(new Map());
+  const [focusedSubtaskId, setFocusedSubtaskId] = useState<string | null>(null);
+  const [showTaskPriorityMenu, setShowTaskPriorityMenu] = useState(false);
+  const [noteEditingField, setNoteEditingField] = useState<"title" | "body" | null>(null);
+  const [isNoteFocusMode, setIsNoteFocusMode] = useState(false);
+  const [showFocusNoteColorPicker, setShowFocusNoteColorPicker] = useState(false);
+  const [noteTextStyle, setNoteTextStyle] = useState<"heading" | "subheading" | "body" | "small">("body");
+  const [noteToolbarMenu, setNoteToolbarMenu] = useState<"none" | "style" | "textColor" | "highlight">("none");
+  const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
+  const pendingNoteBodyRef = useRef<string>("");
+  const freeformCardType = getFreeformCardType(element);
+  const isNote = isNoteCard(element);
+  const isTask = freeformCardType === "task";
+  const legacyLines = (element.content || "").split("\n");
+  const noteTitle = element.noteTitle ?? (legacyLines[0] || "Untitled Note");
+  const noteBody = element.noteBody ?? legacyLines.slice(1).join("\n");
+
+  // Local input hooks to prevent cursor-jump on controlled inputs
+  const [localNoteTitle, setLocalNoteTitle] = useLocalInput(
+    noteTitle,
+    (v) => {
+      const safeTitle = v.trim() || "Untitled Note";
+      const combined = noteBody.trim().length > 0 ? `${safeTitle}\n${noteBody}` : safeTitle;
+      onUpdate({ noteTitle: safeTitle, noteBody, content: combined });
+    },
+  );
+  const [localTaskContent, setLocalTaskContent] = useLocalInput(
+    element.content || "",
+    (v) => onUpdate({ content: v }),
+  );
+  const [localTaskDescription, setLocalTaskDescription] = useLocalInput(
+    element.taskMetadata?.description || "",
+    (v) => onUpdate({ taskMetadata: { ...element.taskMetadata, description: v } }),
+  );
+  const renderedNoteBody = useMemo(
+    () => DOMPurify.sanitize(
+      noteBody
+        .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
+        .replace(/>\s*\n+\s*</g, '><'),
+      { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }
+    ),
+    [noteBody],
+  );
 
   // Get the store methods for navigation
   const setCanvasViewMode = useCXDStore((state) => state.setCanvasViewMode);
   const setViewMode = useCXDStore((state) => state.setViewMode);
+
+  // Document mode state
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false);
+
+  useEffect(() => {
+    if (!isSelected) {
+      setNoteEditingField(null);
+      setNoteToolbarMenu("none");
+    }
+  }, [isSelected]);
+
+  useEffect(() => {
+    pendingNoteBodyRef.current = noteBody;
+  }, [noteBody]);
+
+  useEffect(() => {
+    if (!isNoteFocusMode) {
+      setShowFocusNoteColorPicker(false);
+    }
+  }, [isNoteFocusMode]);
+
+  useEffect(() => {
+    if (!isNoteFocusMode) return;
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowFocusNoteColorPicker(false);
+        setIsNoteFocusMode(false);
+      }
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [isNoteFocusMode]);
+
+  useEffect(() => {
+    if (!isNote) return;
+    if (noteEditingField !== "body") return;
+    if (!noteBodyRef.current) return;
+    const active = document.activeElement;
+    if (active !== noteBodyRef.current) {
+      noteBodyRef.current.innerHTML = DOMPurify.sanitize(noteBody || "", { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] });
+    }
+  }, [isNote, noteBody, noteEditingField]);
+
+  // Handle clicks outside document to blur title input
+  useEffect(() => {
+    if (!element.isDocument) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+        // Click was outside the card, blur any focused input
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLInputElement) {
+          if (cardRef.current.contains(activeElement)) {
+            activeElement.blur();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [element.isDocument]);
+
+  const updateNoteStyleFromSelection = useCallback(() => {
+    if (!isNote || noteEditingField !== "body") return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !noteBodyRef.current) return;
+    const anchorNode = sel.anchorNode;
+    if (!anchorNode) return;
+    const anchorElement =
+      anchorNode.nodeType === Node.TEXT_NODE
+        ? anchorNode.parentElement
+        : (anchorNode as HTMLElement);
+    if (!anchorElement || !noteBodyRef.current.contains(anchorElement)) return;
+    const block = anchorElement.closest("h1,h2,h3,h4,small,p,div,li");
+    if (!block) return;
+    const tag = block.tagName.toLowerCase();
+    if (tag === "h1" || tag === "h2") setNoteTextStyle("heading");
+    else if (tag === "h3" || tag === "h4") setNoteTextStyle("subheading");
+    else if (tag === "small") setNoteTextStyle("small");
+    else setNoteTextStyle("body");
+  }, [isNote, noteEditingField]);
+
+  useEffect(() => {
+    if (!isNote || noteEditingField !== "body") return;
+    const onSelectionChange = () => updateNoteStyleFromSelection();
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [isNote, noteEditingField, updateNoteStyleFromSelection]);
+
+  const syncNoteFields = useCallback(
+    (nextTitle: string, nextBody: string) => {
+      const safeTitle = nextTitle.trim() || "Untitled Note";
+      const combined = nextBody.trim().length > 0 ? `${safeTitle}\n${nextBody}` : safeTitle;
+      onUpdate({
+        noteTitle: safeTitle,
+        noteBody: nextBody,
+        content: combined,
+      });
+    },
+    [onUpdate],
+  );
+
+  const handleNoteFieldBlur = useCallback(() => {
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!cardRef.current?.contains(active)) {
+        setNoteEditingField(null);
+        handleBlur();
+      }
+    });
+  }, [handleBlur]);
+
+  // Convert note to document
+  const handleToggleDocumentMode = useCallback(() => {
+    if (element.isDocument) {
+      // Revert to note
+      onUpdate({
+        isDocument: false,
+        wordCount: undefined,
+        width: 300,
+        height: 300,
+      });
+    } else {
+      // Convert to document
+      // Calculate word count from noteBody
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = DOMPurify.sanitize(noteBody || "", { USE_PROFILES: { html: true } });
+      const textContent = tempDiv.textContent || tempDiv.innerText || '';
+      const wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
+
+      // Update element to be a document
+      onUpdate({
+        isDocument: true,
+        wordCount,
+        width: 100,
+        height: 100,
+      });
+
+      // Exit editing mode
+      handleBlur();
+    }
+  }, [element.isDocument, noteBody, onUpdate, handleBlur]);
 
   // Handle description key events - allow normal line breaks
   const handleDescriptionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -2633,7 +3740,7 @@ function FreeformCard({
     if (e.key === "Backspace" || e.key === "Delete") {
       e.stopPropagation();
     }
-    
+
     // Allow Enter to work normally for line breaks
     if (e.key === "Enter") {
       e.stopPropagation(); // Just stop propagation, don't prevent default
@@ -2673,7 +3780,7 @@ function FreeformCard({
             value.substring(0, lineStartPos) +
             "\n" +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             textarea.setSelectionRange(lineStartPos + 1, lineStartPos + 1);
           }, 0);
@@ -2685,7 +3792,7 @@ function FreeformCard({
             indent +
             "- " +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             const newPos = selectionEnd + indent.length + 3;
             textarea.setSelectionRange(newPos, newPos);
@@ -2699,7 +3806,7 @@ function FreeformCard({
             value.substring(0, lineStartPos) +
             "\n" +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             textarea.setSelectionRange(lineStartPos + 1, lineStartPos + 1);
           }, 0);
@@ -2711,7 +3818,7 @@ function FreeformCard({
             indent +
             "[ ] " +
             value.substring(selectionEnd);
-          onUpdate({ content: newValue });
+          setLocalTaskContent(newValue);
           setTimeout(() => {
             const newPos = selectionEnd + indent.length + 5;
             textarea.setSelectionRange(newPos, newPos);
@@ -2723,7 +3830,7 @@ function FreeformCard({
           value.substring(0, selectionEnd) +
           "\n" +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(selectionEnd + 1, selectionEnd + 1);
         }, 0);
@@ -2739,7 +3846,7 @@ function FreeformCard({
           value.substring(0, lineStartPos) +
           "- " +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos + 2, lineStartPos + 2);
         }, 0);
@@ -2751,7 +3858,7 @@ function FreeformCard({
           value.substring(0, lineStartPos) +
           "[ ] " +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos + 4, lineStartPos + 4);
         }, 0);
@@ -2763,7 +3870,7 @@ function FreeformCard({
           value.substring(0, lineStartPos) +
           "[x] " +
           value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos + 4, lineStartPos + 4);
         }, 0);
@@ -2780,7 +3887,7 @@ function FreeformCard({
         // Remove the list marker
         const newValue =
           value.substring(0, lineStartPos) + value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos, lineStartPos);
         }, 0);
@@ -2792,13 +3899,114 @@ function FreeformCard({
         // Remove the todo marker
         const newValue =
           value.substring(0, lineStartPos) + value.substring(selectionEnd);
-        onUpdate({ content: newValue });
+        setLocalTaskContent(newValue);
         setTimeout(() => {
           textarea.setSelectionRange(lineStartPos, lineStartPos);
         }, 0);
       }
     }
   };
+
+  // adjustNoteHeight is now a lightweight no-op fallback.
+  // The ResizeObserver on elementRef (in CanvasElementRenderer) handles
+  // syncing element.height with actual DOM size for note cards.
+  const adjustNoteHeight = useCallback(() => {
+    // no-op — ResizeObserver handles height syncing
+  }, []);
+
+  const ensureNoteEditorFocus = useCallback(() => {
+    if (!isNote) return;
+    if (document.activeElement !== noteBodyRef.current) {
+      noteBodyRef.current?.focus();
+    }
+  }, [isNote]);
+
+  const placeCaretAtPoint = useCallback((clientX: number, clientY: number) => {
+    const editor = noteBodyRef.current;
+    if (!editor) return;
+
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    const docWithCaret = document as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+
+    let range: Range | null = null;
+    const caretPos = docWithCaret.caretPositionFromPoint?.(clientX, clientY) ?? null;
+    if (caretPos) {
+      range = document.createRange();
+      range.setStart(caretPos.offsetNode, caretPos.offset);
+      range.collapse(true);
+    } else {
+      range = docWithCaret.caretRangeFromPoint?.(clientX, clientY) ?? null;
+    }
+
+    if (!range || !editor.contains(range.startContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
+  const applyNoteCommand = useCallback(
+    (command: string, value?: string) => {
+      if (!isNote) return;
+      ensureNoteEditorFocus();
+      document.execCommand(command, false, value);
+      const html = noteBodyRef.current?.innerHTML ?? "";
+      pendingNoteBodyRef.current = html;
+      syncNoteFields(noteTitle, html);
+      adjustNoteHeight();
+    },
+    [adjustNoteHeight, ensureNoteEditorFocus, isNote, noteTitle, syncNoteFields],
+  );
+
+  const applyNoteTextStyle = useCallback(
+    (style: "heading" | "subheading" | "body" | "small") => {
+      if (!isNote) return;
+      ensureNoteEditorFocus();
+      if (style === "heading") {
+        document.execCommand("formatBlock", false, "h2");
+      } else if (style === "subheading") {
+        document.execCommand("formatBlock", false, "h4");
+      } else if (style === "small") {
+        document.execCommand("formatBlock", false, "small");
+      } else {
+        document.execCommand("formatBlock", false, "p");
+      }
+      const html = noteBodyRef.current?.innerHTML ?? "";
+      pendingNoteBodyRef.current = html;
+      syncNoteFields(noteTitle, html);
+      setNoteTextStyle(style);
+    },
+    [ensureNoteEditorFocus, isNote, noteTitle, syncNoteFields],
+  );
+
+  const applyNoteLink = useCallback(() => {
+    if (!isNote) return;
+  }, [isNote]);
+
+  const handleNoteKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isNote) return;
+    const isMod = e.ctrlKey || e.metaKey;
+    if (!isMod) return;
+    const key = e.key.toLowerCase();
+    if (key === "b") {
+      e.preventDefault();
+      applyNoteCommand("bold");
+    } else if (key === "i") {
+      e.preventDefault();
+      applyNoteCommand("italic");
+    } else if (key === "u") {
+      e.preventDefault();
+      applyNoteCommand("underline");
+    }
+  }, [isNote, applyNoteCommand]);
 
   // Render content with markdown-like formatting
   const renderContent = (content: string) => {
@@ -2911,138 +4119,328 @@ function FreeformCard({
     );
   };
 
-  // Check if this card is actionable (task metadata or markdown tasks or hypercube tags)
-  const isActionable =
-    element.taskMetadata?.isActionable ||
-    element.content?.includes("[ ]") ||
-    element.content?.includes("[x]") ||
-    (element.hypercubeTags && element.hypercubeTags.length > 0);
+  const isActionable = isTask;
+  const taskStatus = element.taskMetadata?.status || "not_started";
+  const statusDisplay = taskStatus.replace("_", " ");
+  const statusClasses: Record<string, string> = {
+    not_started: "bg-slate-500/20 text-slate-300 border-slate-400/30",
+    in_progress: "bg-blue-500/20 text-blue-300 border-blue-400/30",
+    blocked: "bg-rose-500/20 text-rose-300 border-rose-400/30",
+    completed: "bg-emerald-500/20 text-emerald-300 border-emerald-400/30",
+  };
+  const assigneeTagPalette = [
+    "bg-violet-500/20 text-violet-200 border-violet-400/30",
+    "bg-cyan-500/20 text-cyan-200 border-cyan-400/30",
+    "bg-emerald-500/20 text-emerald-200 border-emerald-400/30",
+    "bg-amber-500/20 text-amber-200 border-amber-400/30",
+    "bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/30",
+  ];
+  const assignees = parseAssignees(element.taskMetadata?.assignee);
+  const assigneeTagClass = (name: string) => {
+    let hash = 0;
+    for (let i = 0; i < name.length; i += 1) {
+      hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+    }
+    return assigneeTagPalette[hash % assigneeTagPalette.length];
+  };
 
   return (
     <div
-      className={cn("w-full rounded-lg shadow-md overflow-visible flex flex-col relative", className)}
+      ref={cardRef}
+      className={cn(
+        "w-full overflow-visible flex flex-col relative",
+        !element.isDocument && "rounded-lg shadow-md",
+        isNote && "card--note-resizable",
+        className,
+      )}
       style={{
-        background: bgColor,
-        border: "1px solid rgba(255, 255, 255, 0.1)",
-        boxShadow:
-          "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
-        minWidth: "250px",
-        minHeight: "300px",
+        background: element.isDocument ? "transparent" : bgColor,
+        border: element.isDocument ? "none" : "1px solid rgba(255, 255, 255, 0.1)",
+        boxShadow: element.isDocument ? "none" : "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
+        minWidth: element.isDocument ? "100px" : isNote ? "200px" : "100%",
+        maxWidth: element.isDocument ? "100px" : undefined,
+        minHeight: element.isDocument ? "100px" : isNote ? "300px" : "100%",
       }}
     >
       {/* Task indicator - subtle corner badge */}
-      {isActionable && (
+      {isActionable && !element.isDocument && (
         <div
           className="absolute top-2 right-2 w-2 h-2 rounded-full bg-purple-400 ring-2 ring-purple-400/30 z-10"
           title="Actionable task"
         />
       )}
-      {/* Emoji display (top-left) */}
-      {element.emoji && (
+      {/* Emoji display (top-left) - hide for documents */}
+      {element.emoji && !element.isDocument && (
         <div className="top-2 text-lg leading-none z-10 right-[auto] left-[50%] static w-full text-center py-[7px]">
           {element.emoji}
         </div>
       )}
       {/* Content */}
       <div
-        className={`p-3 flex flex-col gap-2 ${element.emoji ? "" : " pt-[0]"}`}
+        className={`${element.isDocument ? "" : "p-3"} flex flex-col gap-2 ${element.emoji && !element.isDocument ? "" : " pt-[0]"}`}
       >
-        {isEditing ? (
-          <>
-            {/* Title Input */}
-            <Textarea
-              ref={textareaRef}
-              autoFocus
-              value={element.content}
-              onChange={(e) => onUpdate({ content: e.target.value })}
-              onBlur={handleBlur}
-              onKeyDown={handleTitleKeyDown}
-              onFocus={(e) => {
-                // Select all text when focused if it's still the default placeholder
-                if (element.content === "Task Title") {
+        {element.isDocument && !isEditing ? (
+          // Document icon view (compact - no padding/margin)
+          <div
+            className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105"
+            onDoubleClick={(e) => { e.stopPropagation(); setIsNoteFocusMode(true); }}
+          >
+            <div className="text-4xl mb-1">{element.emoji || '📄'}</div>
+            <div className="w-full px-1">
+              <textarea
+                value={localNoteTitle}
+                onChange={(e) => {
+                  setLocalNoteTitle(e.target.value);
+                  // Auto-resize height
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Auto-select all text on click
+                  (e.target as HTMLTextAreaElement).select();
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation(); // Prevent opening focus mode
+                }}
+                onFocus={(e) => {
+                  // Auto-select all text when focused
                   e.target.select();
-                }
-              }}
-              className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white placeholder:text-white/40 text-xl font-bold"
-              style={{
-                color: textColor,
-                fontWeight: "bold",
-                fontSize: "1.25rem",
-                lineHeight: "1.75rem",
-                minHeight: "1.75rem",
-                height: "auto",
-                wordWrap: "break-word",
-                overflowWrap: "break-word",
-              }}
-              placeholder="Enter title..."
-              data-no-drag
-              rows={1}
-            />
-
-            {/* Description Input */}
-            <Textarea
-              ref={descriptionRef}
-              value={element.taskMetadata?.description || ""}
-              onChange={(e) => {
-                onUpdate({
-                  taskMetadata: {
-                    ...element.taskMetadata,
-                    description: e.target.value,
-                  },
-                });
-                // Auto-expand textarea
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
-              }}
-              onBlur={handleBlur}
-              onKeyDown={handleDescriptionKeyDown}
-              onClick={(e) => e.stopPropagation()}
-              onFocus={(e) => {
-                e.stopPropagation();
-                // Ensure proper height on focus
-                e.target.style.height = 'auto';
-                e.target.style.height = e.target.scrollHeight + 'px';
-              }}
-              placeholder="Add description..."
-              className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white/70 placeholder:text-white/30 text-sm"
-              style={{
-                color: textColor,
-                opacity: 0.7,
-                minHeight: "3rem",
-                height: "auto",
-                wordWrap: "break-word",
-                overflowWrap: "break-word",
-              }}
-              data-no-drag
-              rows={2}
-            />
-          </>
-        ) : (
-          <>
-            {/* Title Display */}
-            <div
-              className="w-full text-xl font-bold break-words whitespace-pre-wrap flex-shrink-0"
-              style={{
-                color: textColor,
-                wordWrap: "break-word",
-                overflowWrap: "break-word",
-              }}
-            >
-              {element.content || "Untitled"}
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onBlur={() => {
+                  // Deselect when clicking outside - handled by browser
+                }}
+                className="text-[10px] font-semibold text-center text-white bg-transparent border-none outline-none w-full hover:bg-white/5 rounded focus:bg-white/10 resize-none overflow-y-hidden"
+                style={{
+                  lineHeight: "0.875rem",
+                  wordWrap: "break-word",
+                  whiteSpace: "pre-wrap",
+                  minHeight: "0.875rem"
+                }}
+              />
             </div>
-
-            {/* Description Display */}
-            {element.taskMetadata?.description && (
+          </div>
+        ) : isEditing ? (
+          isNote ? (
+            <div ref={noteContentRef} className="flex min-h-0 flex-1 flex-col gap-2">
+              {/* Toolbar buttons */}
+              <div className="absolute right-2 top-2 z-20 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleDocumentMode();
+                  }}
+                  className="rounded p-1 bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-500 hover:to-purple-700 text-white transition-all"
+                  title={element.isDocument ? "Revert to Note" : "Convert to Document"}
+                  data-no-drag
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsNoteFocusMode(true);
+                  }}
+                  className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                  title="Focus editor"
+                  data-no-drag
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <Input
+                autoFocus={noteEditingField === "title"}
+                value={localNoteTitle}
+                onChange={(e) => setLocalNoteTitle(e.target.value)}
+                onBlur={handleNoteFieldBlur}
+                onFocus={() => setNoteEditingField("title")}
+                className="h-9 border-0 bg-transparent p-0 text-lg font-semibold focus-visible:ring-0"
+                style={{ color: textColor }}
+                data-no-drag
+              />
+              <div className="h-px bg-white/10" />
               <div
-                className="w-full text-sm opacity-70 break-words whitespace-pre-wrap"
+                className="w-full flex-1 min-h-0"
+                onMouseDown={(e) => e.stopPropagation()}
+                data-no-drag
+              >
+                <NoteRichTextEditor
+                  value={noteBody}
+                  textColor={textColor}
+                  isSelected={isSelected}
+                  onChange={(nextHtml) => syncNoteFields(noteTitle, nextHtml)}
+                  onBlurCard={handleNoteFieldBlur}
+                  onFocusBody={() => setNoteEditingField("body")}
+                  onHeightChange={adjustNoteHeight}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Title Input */}
+              <Textarea
+                ref={textareaRef}
+                autoFocus
+                value={localTaskContent}
+                onChange={(e) => setLocalTaskContent(e.target.value)}
+                onBlur={handleBlur}
+                onKeyDown={handleTitleKeyDown}
+                onFocus={(e) => {
+                  // Select all text when focused if it's still the default placeholder
+                  if (element.content === "Task Title") {
+                    e.target.select();
+                  }
+                }}
+                className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white placeholder:text-white/40 text-xl font-bold"
                 style={{
                   color: textColor,
+                  fontWeight: "bold",
+                  fontSize: "1.25rem",
+                  lineHeight: "1.75rem",
+                  minHeight: "1.75rem",
+                  height: "auto",
                   wordWrap: "break-word",
                   overflowWrap: "break-word",
                 }}
-              >
-                {element.taskMetadata.description}
+                placeholder="Enter title..."
+                data-no-drag
+                rows={1}
+              />
+
+              {/* Description Input */}
+              <Textarea
+                ref={descriptionRef}
+                value={localTaskDescription}
+                onChange={(e) => {
+                  setLocalTaskDescription(e.target.value);
+                  // Auto-expand textarea
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
+                onBlur={handleBlur}
+                onKeyDown={handleDescriptionKeyDown}
+                onClick={(e) => e.stopPropagation()}
+                onFocus={(e) => {
+                  e.stopPropagation();
+                  // Ensure proper height on focus
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
+                placeholder="Add description..."
+                className="w-full resize-none border-0 bg-transparent p-0 focus-visible:ring-0 text-white/70 placeholder:text-white/30 text-sm"
+                style={{
+                  color: textColor,
+                  opacity: 0.7,
+                  minHeight: "3rem",
+                  height: "auto",
+                  wordWrap: "break-word",
+                  overflowWrap: "break-word",
+                }}
+                data-no-drag
+                rows={2}
+              />
+            </>
+          )
+        ) : (
+          <>
+            {isNote ? (
+              <div ref={noteContentRef} className="w-full min-h-0 flex-1 flex flex-col gap-2">
+                {/* Toolbar buttons - always visible */}
+                <div className="absolute right-2 top-2 z-20 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleDocumentMode();
+                    }}
+                    className="rounded p-1 bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-500 hover:to-purple-700 text-white transition-all"
+                    title={element.isDocument ? "Revert to Note" : "Convert to Document"}
+                    data-no-drag
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStartEdit();
+                      setNoteEditingField("body");
+                      setIsNoteFocusMode(true);
+                    }}
+                    className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                    title="Focus editor"
+                    data-no-drag
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStartEdit();
+                    setNoteEditingField("title");
+                  }}
+                  className="w-full text-left text-lg font-semibold break-words rounded px-0.5 py-0.5 hover:bg-white/5 cursor-text"
+                  style={{ color: textColor, whiteSpace: "pre-wrap" }}
+                  data-no-drag
+                >
+                  {noteTitle || "Untitled Note"}
+                </div>
+                <div className="h-px bg-white/10" />
+                <div
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    onStartEdit();
+                    setNoteEditingField("body");
+                  }}
+                  className="min-h-0 flex-1 rounded px-0.5 py-0.5 text-left text-sm leading-relaxed hover:bg-white/5 cursor-text w-full overflow-hidden"
+                  style={{ color: textColor }}
+                  data-no-drag
+                >
+                  {noteBody.trim().length > 0 ? (
+                    <div
+                      className="w-full break-words overflow-wrap-anywhere [&_a]:text-purple-300 [&_a]:underline [&_h1]:mt-1 [&_h1]:mb-0.5 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-1 [&_h2]:mb-0.5 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mt-0.5 [&_h3]:mb-0 [&_h3]:text-base [&_h3]:font-semibold [&_p]:my-0.5 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_p]:break-words [&_h1]:break-words [&_h2]:break-words [&_h3]:break-words [&_li]:break-words"
+                      style={{ wordWrap: "break-word", overflowWrap: "anywhere" }}
+                      dangerouslySetInnerHTML={{ __html: renderedNoteBody }}
+                    />
+                  ) : (
+                    <span className="text-white/40">Write your note...</span>
+                  )}
+                </div>
               </div>
+            ) : (
+              <>
+                {/* Title Display */}
+                <div
+                  className="w-full text-xl font-bold break-words whitespace-pre-wrap flex-shrink-0"
+                  style={{
+                    color: textColor,
+                    wordWrap: "break-word",
+                    overflowWrap: "break-word",
+                  }}
+                >
+                  {element.content || "Untitled"}
+                </div>
+
+                {/* Description Display */}
+                {element.taskMetadata?.description && (
+                  <div
+                    className="w-full text-sm opacity-70 break-words whitespace-pre-wrap"
+                    style={{
+                      color: textColor,
+                      wordWrap: "break-word",
+                      overflowWrap: "break-word",
+                    }}
+                  >
+                    {element.taskMetadata.description}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
@@ -3054,10 +4452,10 @@ function FreeformCard({
             data-no-drag
           >
             {/* Existing subtasks */}
-            {element.taskMetadata.subtasks &&
+            {Array.isArray(element.taskMetadata.subtasks) &&
               element.taskMetadata.subtasks.length > 0 && (
                 <div className="space-y-1.5">
-                  {element.taskMetadata.subtasks
+                  {[...element.taskMetadata.subtasks]
                     .sort((a, b) => a.order - b.order)
                     .map((subtask, index) => (
                       <div
@@ -3149,8 +4547,20 @@ function FreeformCard({
                             </svg>
                           )}
                         </div>
-                        <input
-                          type="text"
+                        <textarea
+                          ref={(el) => {
+                            if (el) {
+                              subtaskRefs.current.set(subtask.id, el);
+                              // Auto-focus if this is the newly created subtask
+                              if (focusedSubtaskId === subtask.id) {
+                                el.focus();
+                                el.select();
+                                setFocusedSubtaskId(null);
+                              }
+                            } else {
+                              subtaskRefs.current.delete(subtask.id);
+                            }
+                          }}
                           value={subtask.text}
                           onChange={(e) => {
                             e.stopPropagation();
@@ -3166,12 +4576,77 @@ function FreeformCard({
                                 subtasks: updatedSubtasks,
                               },
                             });
+                            // Auto-resize textarea
+                            e.target.style.height = 'auto';
+                            e.target.style.height = e.target.scrollHeight + 'px';
+                          }}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            // Enter creates new subtask (unless Shift is held for line break)
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              const newSubtaskId = `subtask-${Date.now()}`;
+                              const currentIndex = element.taskMetadata?.subtasks?.findIndex(
+                                (st) => st.id === subtask.id
+                              ) ?? -1;
+                              const newSubtask: import("@/types/canvas-elements").Subtask = {
+                                id: newSubtaskId,
+                                text: "",
+                                isCompleted: false,
+                                order: currentIndex + 1,
+                              };
+                              // Insert after current subtask and reorder
+                              const currentSubtasks = element.taskMetadata?.subtasks || [];
+                              const updatedSubtasks = [
+                                ...currentSubtasks.slice(0, currentIndex + 1),
+                                newSubtask,
+                                ...currentSubtasks.slice(currentIndex + 1).map((st) => ({
+                                  ...st,
+                                  order: st.order + 1,
+                                })),
+                              ];
+                              onUpdate({
+                                taskMetadata: {
+                                  ...element.taskMetadata,
+                                  subtasks: updatedSubtasks,
+                                },
+                              });
+                              // Set focus to the new subtask
+                              setFocusedSubtaskId(newSubtaskId);
+                            }
+                            // Prevent backspace/delete from bubbling when at start of empty field
+                            if ((e.key === 'Backspace' || e.key === 'Delete') && subtask.text === '') {
+                              e.preventDefault();
+                              // Delete this subtask and focus previous one
+                              const currentIndex = element.taskMetadata?.subtasks?.findIndex(
+                                (st) => st.id === subtask.id
+                              ) ?? -1;
+                              const prevSubtask = element.taskMetadata?.subtasks?.[currentIndex - 1];
+                              const updatedSubtasks =
+                                element.taskMetadata?.subtasks?.filter(
+                                  (st) => st.id !== subtask.id,
+                                ) || [];
+                              onUpdate({
+                                taskMetadata: {
+                                  ...element.taskMetadata,
+                                  subtasks: updatedSubtasks,
+                                },
+                              });
+                              if (prevSubtask) {
+                                setFocusedSubtaskId(prevSubtask.id);
+                              }
+                            }
                           }}
                           onClick={(e) => e.stopPropagation()}
+                          rows={1}
                           className={cn(
-                            "text-xs flex-1 bg-transparent border-0 outline-none focus:outline-none text-white p-0",
+                            "text-xs flex-1 bg-transparent border-0 outline-none focus:outline-none text-white p-0 resize-none overflow-hidden break-words",
                             subtask.isCompleted && "line-through opacity-60",
                           )}
+                          style={{
+                            minHeight: '1.25rem',
+                            lineHeight: '1.25rem',
+                          }}
                         />
                         <button
                           onClick={(e) => {
@@ -3200,9 +4675,10 @@ function FreeformCard({
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                const newSubtaskId = `subtask-${Date.now()}`;
                 const newSubtask: import("@/types/canvas-elements").Subtask = {
-                  id: `subtask-${Date.now()}`,
-                  text: "New subtask",
+                  id: newSubtaskId,
+                  text: "",
                   isCompleted: false,
                   order: element.taskMetadata?.subtasks?.length || 0,
                 };
@@ -3215,6 +4691,8 @@ function FreeformCard({
                     ],
                   },
                 });
+                // Focus the new subtask
+                setFocusedSubtaskId(newSubtaskId);
               }}
               className="flex items-center gap-2 text-xs text-white/50 hover:text-white/80 transition-colors w-full"
             >
@@ -3226,66 +4704,218 @@ function FreeformCard({
       </div>
       {/* Task Properties Display - only show for actionable cards */}
       {isActionable && element.taskMetadata && (
-        <div className="px-3 pb-3 pt-1 border-t border-white/10 space-y-1.5">
-          {element.taskMetadata.status && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Status:</span>
-              <span className="px-2 py-0.5 rounded bg-white/10 capitalize">
-                {element.taskMetadata.status.replace("_", " ")}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.priority && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Priority:</span>
-              <span
-                className={cn("px-2 py-0.5 rounded capitalize", {
-                  "bg-red-500/20 text-red-400":
-                    element.taskMetadata.priority === "urgent",
-                  "bg-orange-500/20 text-orange-400":
-                    element.taskMetadata.priority === "high",
-                  "bg-yellow-500/20 text-yellow-400":
-                    element.taskMetadata.priority === "medium",
-                  "bg-blue-500/20 text-blue-400":
-                    element.taskMetadata.priority === "low",
-                })}
+        <div className="px-3 pb-3 pt-1 border-t border-white/10 space-y-2">
+          {/* Status - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Status:</span>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={(e) => e.stopPropagation()}
+                  className={cn(
+                    "h-6 rounded border px-2 text-xs capitalize focus:outline-none focus:ring-1 focus:ring-purple-400/40",
+                    statusClasses[taskStatus] || "bg-zinc-900/80 border-zinc-700/70 text-zinc-100",
+                  )}
+                >
+                  {statusDisplay}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="z-[230] bg-zinc-950/95 border border-zinc-700/70 text-zinc-100 rounded-lg p-1.5 min-w-[150px]"
+                onClick={(e) => e.stopPropagation()}
               >
-                {element.taskMetadata.priority}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.dueDate && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Due:</span>
-              <span className="text-white/70">
-                {new Date(element.taskMetadata.dueDate).toLocaleDateString()}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.assignee && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-white/50">Assigned:</span>
-              <span className="text-white/70">
-                {element.taskMetadata.assignee}
-              </span>
-            </div>
-          )}
-          {element.taskMetadata.customProperties &&
-            Object.keys(element.taskMetadata.customProperties).length > 0 && (
-              <div className="mt-2 pt-2 border-t border-white/5">
-                <div className="text-xs text-white/50 mb-1">
-                  Custom Properties:
+                {[
+                  { value: "not_started", label: "Not Started" },
+                  { value: "in_progress", label: "In Progress" },
+                  { value: "blocked", label: "Blocked" },
+                  { value: "completed", label: "Completed" },
+                ].map((statusOpt) => (
+                  <DropdownMenuItem
+                    key={statusOpt.value}
+                    className="text-xs rounded-md hover:bg-zinc-800/80 focus:bg-zinc-800/80"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpdate({
+                        taskMetadata: {
+                          ...element.taskMetadata,
+                          status: statusOpt.value as any,
+                        },
+                      } as Partial<FreeformElement>);
+                    }}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-block h-2 w-2 rounded-full",
+                          statusOpt.value === "not_started" && "bg-slate-300",
+                          statusOpt.value === "in_progress" && "bg-blue-300",
+                          statusOpt.value === "blocked" && "bg-rose-300",
+                          statusOpt.value === "completed" && "bg-emerald-300",
+                        )}
+                      />
+                      {statusOpt.label}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {/* Priority - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Priority:</span>
+            <div ref={taskPriorityMenuRef} className="relative flex-1">
+              {element.taskMetadata.priority ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTaskPriorityMenu(!showTaskPriorityMenu);
+                  }}
+                  className={cn("px-2 py-0.5 rounded capitalize hover:ring-1 hover:ring-white/20 transition-all flex items-center gap-1", {
+                    "bg-red-500/20 text-red-400": element.taskMetadata.priority === "urgent",
+                    "bg-orange-500/20 text-orange-400": element.taskMetadata.priority === "high",
+                    "bg-yellow-500/20 text-yellow-400": element.taskMetadata.priority === "medium",
+                    "bg-blue-500/20 text-blue-400": element.taskMetadata.priority === "low",
+                  })}
+                >
+                  {element.taskMetadata.priority}
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTaskPriorityMenu(!showTaskPriorityMenu);
+                  }}
+                  className="px-2 py-0.5 rounded bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-xs"
+                >
+                  Set Priority
+                </button>
+              )}
+
+              {showTaskPriorityMenu && (
+                <div className="absolute top-full left-0 mt-1 bg-card backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[100] min-w-[120px]">
+                  {[
+                    { value: 'urgent', label: 'Urgent', color: 'bg-red-500/20 text-red-400' },
+                    { value: 'high', label: 'High', color: 'bg-orange-500/20 text-orange-400' },
+                    { value: 'medium', label: 'Medium', color: 'bg-yellow-500/20 text-yellow-400' },
+                    { value: 'low', label: 'Low', color: 'bg-blue-500/20 text-blue-400' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdate({
+                          taskMetadata: {
+                            ...element.taskMetadata,
+                            priority: opt.value as any,
+                          }
+                        } as Partial<FreeformElement>);
+                        setShowTaskPriorityMenu(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-white/5 transition-colors first:rounded-t-lg last:rounded-b-lg text-left"
+                    >
+                      <div className={cn("w-2 h-2 rounded-full", opt.color)} />
+                      {opt.label}
+                    </button>
+                  ))}
+                  {element.taskMetadata.priority && (
+                    <>
+                      <div className="h-px bg-white/10 my-1" />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdate({
+                            taskMetadata: {
+                              ...element.taskMetadata,
+                              priority: undefined,
+                            }
+                          } as Partial<FreeformElement>);
+                          setShowTaskPriorityMenu(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-white/50 hover:bg-white/5 transition-colors rounded-b-lg"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                        Clear
+                      </button>
+                    </>
+                  )}
                 </div>
-                {Object.entries(element.taskMetadata.customProperties).map(
-                  ([key, value]) => (
-                    <div key={key} className="flex items-center gap-2 text-xs">
-                      <span className="text-white/50">{key}:</span>
-                      <span className="text-white/70">{String(value)}</span>
-                    </div>
-                  ),
-                )}
-              </div>
-            )}
+              )}
+            </div>
+          </div>
+
+          {/* Start Date - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Start:</span>
+            <DatePicker
+              date={element.taskMetadata.startDate ? new Date(element.taskMetadata.startDate) : undefined}
+              onSelect={(nextDate) => {
+                onUpdate({
+                  taskMetadata: {
+                    ...element.taskMetadata,
+                    startDate: nextDate ? nextDate.toISOString() : undefined,
+                  }
+                } as Partial<FreeformElement>);
+              }}
+              placeholder="Set Start"
+              fitContent
+              triggerClassName="h-6 px-2 py-0.5 text-[11px] bg-zinc-900/80 border-zinc-700/70 text-zinc-100"
+            />
+          </div>
+
+          {/* Due Date - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Due:</span>
+            <DatePicker
+              date={element.taskMetadata.dueDate ? new Date(element.taskMetadata.dueDate) : undefined}
+              onSelect={(nextDate) => {
+                onUpdate({
+                  taskMetadata: {
+                    ...element.taskMetadata,
+                    dueDate: nextDate ? nextDate.toISOString() : undefined,
+                  }
+                } as Partial<FreeformElement>);
+              }}
+              placeholder="Set Due Date"
+              fitContent
+              triggerClassName="h-6 px-2 py-0.5 text-[11px] bg-zinc-900/80 border-zinc-700/70 text-zinc-100"
+            />
+          </div>
+
+          {/* Assignee - Editable */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-white/50 min-w-[60px]">Assignee:</span>
+            <div className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
+              <AssigneeMultiSelect
+                value={assignees}
+                onChange={(next) => {
+                  onUpdate({
+                    taskMetadata: {
+                      ...element.taskMetadata,
+                      assignee: serializeAssignees(next),
+                    },
+                  } as Partial<FreeformElement>);
+                }}
+                compact
+                iconOnly
+              />
+              {assignees.length === 0 && (
+                <span className="text-[10px] text-white/45">Unassigned</span>
+              )}
+              {assignees.map((name) => (
+                <span
+                  key={name}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded-md text-[10px] border",
+                    assigneeTagClass(name),
+                  )}
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
       )}
       {/* View in Plan button - only for actionable cards */}
@@ -3304,9 +4934,130 @@ function FreeformCard({
               boxShadow: "0 4px 12px rgba(168, 85, 247, 0.3)",
             }}
           >
-            <LayoutGrid className="w-4 h-4 text-white" />
+            <ListTodo className="w-4 h-4 text-white" />
           </button>
         </div>
+      )}
+      {isNote &&
+        isNoteFocusMode &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-6"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowFocusNoteColorPicker(false);
+                setIsNoteFocusMode(false);
+                onBlur();
+              }
+            }}
+          >
+            <div
+              className="relative w-full max-w-3xl max-h-[85vh] overflow-visible rounded-xl border border-white/15 p-5 shadow-2xl"
+              style={{
+                background: bgColor,
+                boxShadow: "0 16px 48px rgba(0,0,0,0.45)",
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="absolute right-3 top-3 rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                onClick={() => {
+                  setShowFocusNoteColorPicker(false);
+                  setIsNoteFocusMode(false);
+                  onBlur();
+                }}
+                title="Close focus mode"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <div
+                className="absolute left-6 top-7 z-30"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white",
+                    showFocusNoteColorPicker && "bg-black/55 text-white",
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowFocusNoteColorPicker((prev) => !prev);
+                  }}
+                  title="Change note color"
+                >
+                  <Palette className="h-4 w-4" />
+                </button>
+                {showFocusNoteColorPicker && (
+                  <ColorPicker
+                    currentColor={bgColor}
+                    onColorChange={(color) =>
+                      onUpdate({ style: { ...element.style, bgColor: color } })
+                    }
+                    onClose={() => setShowFocusNoteColorPicker(false)}
+                    position="below"
+                  />
+                )}
+              </div>
+              <div className="max-h-[calc(85vh-2.5rem)] overflow-y-auto pl-[52px] pr-2 [scrollbar-width:thin] [scrollbar-color:rgba(167,139,250,0.65)_rgba(255,255,255,0.08)] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-violet-400/60 [&::-webkit-scrollbar-thumb]:border [&::-webkit-scrollbar-thumb]:border-white/10">
+                <div className="flex flex-col gap-3">
+                  <Input
+                    autoFocus
+                    value={noteTitle}
+                    onChange={(e) => syncNoteFields(e.target.value, noteBody)}
+                    onFocus={() => setNoteEditingField("title")}
+                    className="h-11 border-0 bg-black/25 p-0 text-2xl font-semibold focus-visible:ring-0"
+                    style={{ color: textColor }}
+                    data-no-drag
+                  />
+                  <div className="h-px bg-white/10" />
+                  <div className="min-h-[420px]">
+                    <NoteRichTextEditor
+                      value={noteBody}
+                      textColor={textColor}
+                      isSelected
+                      isFocusMode
+                      onChange={(nextHtml) => syncNoteFields(noteTitle, nextHtml)}
+                      onBlurCard={() => { }}
+                      onFocusBody={() => setNoteEditingField("body")}
+                      onHeightChange={adjustNoteHeight}
+                    />
+                  </div>
+                </div>
+              </div>
+              {/* Convert/Revert button - bottom left */}
+              <div className="absolute left-6 bottom-6">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleDocumentMode();
+                  }}
+                  className="rounded p-1 bg-gradient-to-br from-purple-600 to-purple-800 hover:from-purple-500 hover:to-purple-700 text-white transition-all shadow-md"
+                  title={element.isDocument ? "Revert to Note" : "Convert to Document"}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {/* Document Viewer Modal */}
+      {showDocumentViewer && (
+        <>
+          {(() => {
+            const { DocumentViewerModal } = require('./document-viewer-modal');
+            return (
+              <DocumentViewerModal
+                element={element}
+                onClose={() => setShowDocumentViewer(false)}
+              />
+            );
+          })()}
+        </>
       )}
     </div>
   );
@@ -3318,32 +5069,38 @@ function ImageCard({
   onUpdate,
   isSelected,
   isReadOnly = false,
+  onCropModeChange,
 }: {
   element: ImageElement;
   onUpdate: (updates: Partial<ImageElement>) => void;
   isSelected: boolean;
   isReadOnly?: boolean;
+  onCropModeChange?: (cropping: boolean) => void;
 }) {
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
-  const [isEditMode, setIsEditMode] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
+
+  // Notify parent when crop mode changes so resize handles can hide
+  useEffect(() => {
+    onCropModeChange?.(isCropping);
+  }, [isCropping, onCropModeChange]);
   const [cropBox, setCropBox] = useState(
     element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 },
   );
   const [dragState, setDragState] = useState<{
     active: boolean;
     handle:
-      | "tl"
-      | "tr"
-      | "bl"
-      | "br"
-      | "top"
-      | "right"
-      | "bottom"
-      | "left"
-      | "move"
-      | null;
+    | "tl"
+    | "tr"
+    | "bl"
+    | "br"
+    | "top"
+    | "right"
+    | "bottom"
+    | "left"
+    | "move"
+    | null;
     startX: number;
     startY: number;
     startCrop: typeof cropBox;
@@ -3354,6 +5111,10 @@ function ImageCard({
   const compressAndUploadImage = async (file: File) => {
     setIsUploading(true);
     try {
+      // Animated formats (GIF, animated WebP) must be uploaded as-is —
+      // re-encoding through a <canvas> strips every frame but the first.
+      const isAnimated = file.type === "image/gif" || file.type === "image/webp";
+
       // Create image element to read dimensions
       const img = document.createElement("img");
       const objectUrl = URL.createObjectURL(file);
@@ -3364,37 +5125,49 @@ function ImageCard({
         img.src = objectUrl;
       });
 
-      // Compress if needed
-      const maxWidth = 1600;
       let width = img.width;
       let height = img.height;
+      let blob: Blob;
+      let ext: string;
+      let contentType: string;
 
-      if (width > maxWidth) {
-        height = (height * maxWidth) / width;
-        width = maxWidth;
+      if (isAnimated) {
+        // Upload the original file unchanged so animation is preserved
+        blob = file;
+        ext = file.type === "image/gif" ? "gif" : "webp";
+        contentType = file.type;
+        URL.revokeObjectURL(objectUrl);
+      } else {
+        // Compress non-animated images through a canvas
+        const maxWidth = 1600;
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        URL.revokeObjectURL(objectUrl);
+
+        blob = await new Promise<Blob>((resolve) => {
+          canvas.toBlob((b) => resolve(b!), "image/webp", 0.8);
+        });
+        ext = "webp";
+        contentType = "image/webp";
       }
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx?.drawImage(img, 0, 0, width, height);
-
-      URL.revokeObjectURL(objectUrl);
-
-      // Convert to blob with compression
-      const blob = await new Promise<Blob>((resolve) => {
-        canvas.toBlob((b) => resolve(b!), "image/webp", 0.8);
-      });
 
       // Upload to Supabase Storage
       const supabase = createClient();
-      const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.webp`;
+      const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;
 
       const { data, error } = await supabase.storage
         .from("canvas-uploads")
         .upload(fileName, blob, {
-          contentType: "image/webp",
+          contentType,
           cacheControl: "3600",
         });
 
@@ -3410,6 +5183,33 @@ function ImageCard({
         .from("canvas-uploads")
         .getPublicUrl(data.path);
 
+      // Calculate element dimensions based on image aspect ratio
+      // Max size constraints for the canvas element
+      const maxElementWidth = 400;
+      const maxElementHeight = 400;
+      const aspectRatio = width / height;
+
+      let elementWidth = width;
+      let elementHeight = height;
+
+      // Scale down if image is too large
+      if (elementWidth > maxElementWidth) {
+        elementWidth = maxElementWidth;
+        elementHeight = elementWidth / aspectRatio;
+      }
+
+      if (elementHeight > maxElementHeight) {
+        elementHeight = maxElementHeight;
+        elementWidth = elementHeight * aspectRatio;
+      }
+
+      // Ensure minimum size
+      const minSize = 100;
+      if (elementWidth < minSize) {
+        elementWidth = minSize;
+        elementHeight = elementWidth / aspectRatio;
+      }
+
       onUpdate({
         src: urlData.publicUrl,
         imageMeta: {
@@ -3418,6 +5218,9 @@ function ImageCard({
           bytes: blob.size,
           originalName: file.name,
         },
+        // Update element dimensions to match image aspect ratio
+        width: Math.round(elementWidth),
+        height: Math.round(elementHeight),
       });
       setHasImage(true);
     } catch (err) {
@@ -3632,19 +5435,53 @@ function ImageCard({
   }, [dragState, cropBox]);
 
   const applyCrop = () => {
+    // Use preCropBounds if re-cropping, otherwise current element bounds
+    const base = element.imageEdits?.preCropBounds || {
+      x: element.x,
+      y: element.y,
+      width: element.width,
+      height: element.height,
+    };
+
+    // The cropBox is relative to the current element view.
+    // If re-cropping (preCropBounds exists), compound with existing crop.
+    const existingCrop = element.imageEdits?.preCropBounds
+      ? (element.imageEdits.crop || { x: 0, y: 0, width: 100, height: 100 })
+      : { x: 0, y: 0, width: 100, height: 100 };
+
+    // Convert cropBox (relative to current view) to absolute crop (relative to original)
+    const absoluteCrop = {
+      x: existingCrop.x + (cropBox.x / 100) * existingCrop.width,
+      y: existingCrop.y + (cropBox.y / 100) * existingCrop.height,
+      width: (cropBox.width / 100) * existingCrop.width,
+      height: (cropBox.height / 100) * existingCrop.height,
+    };
+
+    // Resize element to match the cropped area
+    const newWidth = Math.max(20, base.width * (absoluteCrop.width / 100));
+    const newHeight = Math.max(20, base.height * (absoluteCrop.height / 100));
+    const newX = base.x + base.width * (absoluteCrop.x / 100);
+    const newY = base.y + base.height * (absoluteCrop.y / 100);
+
     onUpdate({
+      x: newX,
+      y: newY,
+      width: newWidth,
+      height: newHeight,
       imageEdits: {
         ...element.imageEdits,
-        crop: cropBox,
+        crop: absoluteCrop,
+        preCropBounds: base,
       },
     });
     setIsCropping(false);
-    setIsEditMode(false);
   };
 
   const cancelCrop = () => {
     setCropBox(
-      element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 },
+      element.imageEdits?.preCropBounds
+        ? { x: 0, y: 0, width: 100, height: 100 }
+        : (element.imageEdits?.crop || { x: 0, y: 0, width: 100, height: 100 }),
     );
     setIsCropping(false);
   };
@@ -3668,9 +5505,20 @@ function ImageCard({
   };
 
   const resetImage = () => {
-    onUpdate({ imageEdits: undefined });
+    const preCrop = element.imageEdits?.preCropBounds;
+    if (preCrop) {
+      // Restore original element bounds
+      onUpdate({
+        x: preCrop.x,
+        y: preCrop.y,
+        width: preCrop.width,
+        height: preCrop.height,
+        imageEdits: undefined,
+      });
+    } else {
+      onUpdate({ imageEdits: undefined });
+    }
     setCropBox({ x: 0, y: 0, width: 100, height: 100 });
-    setIsEditMode(false);
   };
 
   // Show upload UI when no image
@@ -3740,30 +5588,61 @@ function ImageCard({
       <div
         ref={imageContainerRef}
         className={cn(
-          "w-full h-full overflow-hidden rounded-lg transition-all relative",
-          isSelected ? "ring-0" : "", // Selection ring is handled by parent
+          "w-full h-full rounded-lg transition-all relative",
+          // Only clip image content, not the crop overlay handles
+          !isCropping && "overflow-hidden",
+          isSelected ? "ring-0" : "",
           isCropping && "ring-2 ring-cyan-400",
         )}
       >
-        <div
-          className="w-full h-full"
-          style={{
-            clipPath: `inset(${crop.y}% ${100 - crop.x - crop.width}% ${100 - crop.y - crop.height}% ${crop.x}%)`,
-          }}
-        >
-          <img
-            src={element.src}
-            alt={element.alt || ""}
-            className="w-full h-full"
+        {element.imageEdits?.preCropBounds ? (
+          (() => {
+            // Scale the background so the cropped region (crop.width% x crop.height%
+            // of the original image) always fills the current element. This lets
+            // the image scale with resize handles instead of revealing cropped-out
+            // content when the element grows.
+            const safeCropW = crop.width > 0 ? crop.width : 100;
+            const safeCropH = crop.height > 0 ? crop.height : 100;
+            const scaledImgW = (element.width * 100) / safeCropW;
+            const scaledImgH = (element.height * 100) / safeCropH;
+            return (
+              <div
+                className="w-full h-full"
+                style={{
+                  backgroundImage: `url("${element.src}")`,
+                  backgroundSize: `${scaledImgW}px ${scaledImgH}px`,
+                  backgroundPosition: `${-(crop.x / 100) * scaledImgW}px ${-(crop.y / 100) * scaledImgH}px`,
+                  backgroundRepeat: "no-repeat",
+                  transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                }}
+              />
+            );
+          })()
+        ) : (
+          <div
+            className="w-full h-full relative"
             style={{
-              objectFit: element.objectFit || "cover",
-              transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+              clipPath: `inset(${crop.y}% ${100 - crop.x - crop.width}% ${100 - crop.y - crop.height}% ${crop.x}%)`,
             }}
-            onError={() => setHasImage(false)}
-            draggable={false}
-            onDragStart={(e) => e.preventDefault()}
-          />
-        </div>
+          >
+            {/* Plain <img> keeps the same DOM node across parent re-renders,
+                so animated GIFs / WebPs don't restart their loop on canvas
+                mouse-move / zoom / selection updates. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={element.src}
+              alt={element.alt || ""}
+              className="absolute inset-0 w-full h-full object-contain"
+              style={{
+                objectFit: "contain",
+                transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+              }}
+              onError={() => setHasImage(false)}
+              draggable={false}
+              onDragStart={(e) => e.preventDefault()}
+            />
+          </div>
+        )}
 
         {/* Crop overlay */}
         {isCropping && (
@@ -3848,102 +5727,86 @@ function ImageCard({
           </div>
         )}
       </div>
-      {/* Edit toolbar - shown when selected */}
+      {/* Image edit toolbar — single icon-only pill below the image.
+          Positioned at -bottom-16 to clear the rotation handle (~ -39px stem). */}
       {isSelected && !isCropping && !isReadOnly && (
         <div
-          className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10"
+          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
-            onClick={() => setIsEditMode(!isEditMode)}
-            className={cn(
-              "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-              isEditMode && "bg-primary/20 text-primary",
-            )}
-            title="Edit Image"
+            onClick={() => {
+              setIsCropping(true);
+              setCropBox(
+                element.imageEdits?.preCropBounds
+                  ? { x: 0, y: 0, width: 100, height: 100 }
+                  : crop,
+              );
+            }}
+            className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            title="Crop"
           >
             <Crop className="w-4 h-4" />
           </button>
+          <button
+            onClick={toggleFlipH}
+            className={cn(
+              "p-2 rounded-md transition-colors",
+              flipH
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
+            )}
+            title="Flip horizontal"
+          >
+            <FlipHorizontal className="w-4 h-4" />
+          </button>
+          <button
+            onClick={toggleFlipV}
+            className={cn(
+              "p-2 rounded-md transition-colors",
+              flipV
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
+            )}
+            title="Flip vertical"
+          >
+            <FlipVertical className="w-4 h-4" />
+          </button>
           {hasEdits && (
-            <button
-              onClick={resetImage}
-              className="p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-              title="Reset Image"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
+            <>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              <button
+                onClick={resetImage}
+                className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Reset image"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            </>
           )}
-        </div>
-      )}
-      {/* Edit panel */}
-      {isEditMode && isSelected && !isCropping && !isReadOnly && (
-        <div
-          className="absolute -bottom-24 left-1/2 -translate-x-1/2 flex flex-col gap-2 p-3 rounded-lg bg-card/95 backdrop-blur border border-border shadow-lg z-10 min-w-[200px]"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="text-xs font-medium text-muted-foreground mb-1">
-            Image Edits
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setIsCropping(true);
-                setCropBox(crop);
-              }}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-primary/10 hover:bg-primary/20 text-sm transition-colors"
-            >
-              <Crop className="w-3.5 h-3.5" />
-              Crop
-            </button>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={toggleFlipH}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
-                flipH
-                  ? "bg-primary/20 text-primary"
-                  : "bg-primary/10 hover:bg-primary/20",
-              )}
-            >
-              <FlipHorizontal className="w-3.5 h-3.5" />
-              Flip H
-            </button>
-            <button
-              onClick={toggleFlipV}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
-                flipV
-                  ? "bg-primary/20 text-primary"
-                  : "bg-primary/10 hover:bg-primary/20",
-              )}
-            >
-              <FlipVertical className="w-3.5 h-3.5" />
-              Flip V
-            </button>
-          </div>
         </div>
       )}
       {/* Crop controls */}
       {isCropping && (
         <div
-          className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/95 backdrop-blur border border-cyan-500/50 shadow-lg z-10"
+          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-cyan-500/50 shadow-lg z-10"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
           <button
             onClick={applyCrop}
-            className="px-3 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition-colors"
+            title="Apply crop"
+            className="p-2 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 transition-colors flex items-center justify-center"
           >
-            Apply Crop
+            <Check className="w-4 h-4" />
           </button>
           <button
             onClick={cancelCrop}
-            className="px-3 py-1 rounded bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground text-sm transition-colors"
+            title="Cancel"
+            className="p-2 rounded-md bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
           >
-            Cancel
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
@@ -3957,12 +5820,21 @@ function ShapeCard({
   onUpdate,
   isEditing,
   onBlur,
+  isSelected,
+  onCreateConnectedShape,
 }: {
   element: ShapeElement;
   onUpdate: (updates: Partial<ShapeElement>) => void;
   isEditing: boolean;
   onBlur: (e?: React.FocusEvent) => void;
+  isSelected?: boolean;
+  onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void;
 }) {
+  const [localContent, setLocalContent] = useLocalInput(
+    element.content || "",
+    (v) => onUpdate({ content: v }),
+  );
+
   const bgColor = element.style?.bgColor || "hsl(var(--primary) / 0.3)";
   const borderColor = element.style?.borderColor || "hsl(var(--primary))";
   const borderWidth = element.style?.borderWidth || 2;
@@ -4000,13 +5872,81 @@ function ShapeCard({
     return color;
   };
 
+  // Helper to extract colors from gradient strings (defined before renderSVGShape uses it)
+  const extractGradientColor = (gradient: string, position: number): string => {
+    // Extract colors from linear-gradient string
+    const matches = gradient.match(/#[0-9A-Fa-f]{6}/g);
+    if (matches && matches.length > position) {
+      return matches[position];
+    }
+    return "#a855f7"; // fallback
+  };
+
+  const isGradientStroke = borderColor?.includes("gradient");
+
   const renderSVGShape = () => {
     const fill = bgColor.includes("gradient")
       ? `url(#gradient-${element.id})`
       : getBackgroundWithOpacity(bgColor, fillOpacity);
-    const stroke = borderColor;
+    const stroke = isGradientStroke
+      ? `url(#stroke-gradient-${element.id})`
+      : borderColor;
     const strokeWidth = borderWidth;
     const opacity = bgColor.includes("gradient") ? fillOpacity / 100 : 1;
+
+    // Build gradient defs for both fill and stroke
+    const gradientDefs = (
+      <defs>
+        {bgColor.includes("gradient") && (
+          <linearGradient
+            id={`gradient-${element.id}`}
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop
+              offset="0%"
+              style={{
+                stopColor: extractGradientColor(bgColor, 0),
+                stopOpacity: 1,
+              }}
+            />
+            <stop
+              offset="100%"
+              style={{
+                stopColor: extractGradientColor(bgColor, 1),
+                stopOpacity: 1,
+              }}
+            />
+          </linearGradient>
+        )}
+        {isGradientStroke && (
+          <linearGradient
+            id={`stroke-gradient-${element.id}`}
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop
+              offset="0%"
+              style={{
+                stopColor: extractGradientColor(borderColor, 0),
+                stopOpacity: 1,
+              }}
+            />
+            <stop
+              offset="100%"
+              style={{
+                stopColor: extractGradientColor(borderColor, 1),
+                stopOpacity: 1,
+              }}
+            />
+          </linearGradient>
+        )}
+      </defs>
+    );
 
     switch (element.shapeType) {
       case "circle":
@@ -4019,32 +5959,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <circle
               cx="50"
               cy="50"
@@ -4066,32 +5981,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <polygon
               points="50,5 95,50 50,95 5,50"
               fill={fill}
@@ -4111,32 +6001,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <polygon
               points="50,5 93.3,25 93.3,75 50,95 6.7,75 6.7,25"
               fill={fill}
@@ -4156,32 +6021,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <path
               d="M50,10 L61,40 L92,40 L68,60 L78,90 L50,70 L22,90 L32,60 L8,40 L39,40 Z"
               fill={fill}
@@ -4201,32 +6041,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <polygon
               points="50,10 90,90 10,90"
               fill={fill}
@@ -4246,32 +6061,7 @@ function ShapeCard({
             preserveAspectRatio="none"
             style={{ overflow: "visible" }}
           >
-            {bgColor.includes("gradient") && (
-              <defs>
-                <linearGradient
-                  id={`gradient-${element.id}`}
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 0),
-                      stopOpacity: 1,
-                    }}
-                  />
-                  <stop
-                    offset="100%"
-                    style={{
-                      stopColor: extractGradientColor(bgColor, 1),
-                      stopOpacity: 1,
-                    }}
-                  />
-                </linearGradient>
-              </defs>
-            )}
+            {gradientDefs}
             <rect
               x="2"
               y="2"
@@ -4288,22 +6078,42 @@ function ShapeCard({
     }
   };
 
-  // Helper to extract colors from gradient strings
-  const extractGradientColor = (gradient: string, position: number): string => {
-    // Extract colors from linear-gradient string
-    const matches = gradient.match(/#[0-9A-Fa-f]{6}/g);
-    if (matches && matches.length > position) {
-      return matches[position];
-    }
-    return "#a855f7"; // fallback
-  };
-
   // Check if this shape is actionable
   const isActionable =
     element.taskMetadata?.isActionable ||
     element.content?.includes("[ ]") ||
     element.content?.includes("[x]") ||
     (element.hypercubeTags && element.hypercubeTags.length > 0);
+
+  // Gradient text detection
+  const isGradientText = textColor?.includes("gradient");
+  const shapeTextAlign = element.style?.textAlign || 'center';
+  const shapeFontStyle = element.style?.fontStyle || 'normal';
+  const shapeTextDecoration = element.style?.textDecoration || 'none';
+
+  // Common text styles (shared between editing and display)
+  const baseTextStyle: React.CSSProperties = {
+    fontSize: element.style?.fontSize || 14,
+    fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
+    fontFamily: element.style?.fontFamily || 'inherit',
+    fontStyle: shapeFontStyle,
+    textDecoration: shapeTextDecoration,
+    textAlign: shapeTextAlign,
+    wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+    whiteSpace: 'pre-wrap',
+    lineHeight: 1.3,
+  };
+
+  // Text color styles (gradient or solid)
+  const textColorStyle: React.CSSProperties = isGradientText
+    ? {
+        background: textColor,
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        backgroundClip: 'text',
+      }
+    : { color: textColor };
 
   return (
     <div className="relative w-full h-full flex items-center justify-center overflow-visible">
@@ -4315,38 +6125,145 @@ function ShapeCard({
         />
       )}
       {renderSVGShape()}
-      <div className="relative z-10 text-center px-2">
+      <div
+        className="absolute inset-0 z-10 overflow-hidden"
+        style={{
+          padding: '8%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: shapeTextAlign,
+        }}
+      >
         {isEditing ? (
-          <input
-            autoFocus
-            value={element.content || ""}
-            onChange={(e) => onUpdate({ content: e.target.value })}
+          <textarea
+            ref={(el) => {
+              if (el) {
+                el.focus();
+                // Auto-size to content
+                el.style.height = 'auto';
+                el.style.height = `${Math.min(el.scrollHeight, el.parentElement?.clientHeight || 9999)}px`;
+              }
+            }}
+            value={localContent}
+            onChange={(e) => {
+              setLocalContent(e.target.value);
+              // Re-size on content change
+              const target = e.target;
+              target.style.height = 'auto';
+              target.style.height = `${Math.min(target.scrollHeight, target.parentElement?.clientHeight || 9999)}px`;
+            }}
             onBlur={onBlur}
-            className="w-full bg-transparent border-0 text-center focus:outline-none"
+            className="w-full bg-transparent border-0 focus:outline-none resize-none"
             style={{
-              color: textColor,
-              fontSize: element.style?.fontSize || 14,
+              ...baseTextStyle,
+              ...textColorStyle,
+              maxHeight: '100%',
             }}
             placeholder="Text..."
             data-no-drag
           />
         ) : (
           <span
-            className="text-sm"
+            key={isGradientText ? textColor : 'solid'}
             style={{
-              color: textColor,
-              fontSize: element.style?.fontSize || 14,
+              ...baseTextStyle,
+              ...textColorStyle,
+              display: isGradientText ? 'inline-block' : 'block',
+              maxWidth: '100%',
+              maxHeight: '100%',
+              overflow: 'hidden',
             }}
           >
             {element.content}
           </span>
         )}
       </div>
+
+      {/* Plus controls for flow continuation - appear when selected */}
+      {isSelected && onCreateConnectedShape && (
+        <>
+          {/* Top plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("top");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute -top-4 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30 opacity-0 group-hover:opacity-100 hover:opacity-100"
+            style={{ opacity: 1 }}
+            title="Add shape above"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {/* Right plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("right");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute top-1/2 -right-4 -translate-y-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30"
+            title="Add shape to right"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {/* Bottom plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("bottom");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30"
+            title="Add shape below"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {/* Left plus */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateConnectedShape("left");
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute top-1/2 -left-4 -translate-y-1/2 w-6 h-6 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:scale-110 transition-all z-30"
+            title="Add shape to left"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </>
+      )}
     </div>
   );
 }
 
 // Container card component (true grouping)
+
+// Tint palette — matches SWATCH_COLORS in connector-radial-menu.tsx
+const CONTAINER_TINTS = {
+  violet:  { mid: '#7C3AED', light: '#C4B5FD' },
+  ocean:   { mid: '#2563EB', light: '#67E8F9' },
+  emerald: { mid: '#059669', light: '#6EE7B7' },
+  sunset:  { mid: '#EA580C', light: '#FDE68A' },
+  rose:    { mid: '#DB2777', light: '#FBCFE8' },
+  glacier: { mid: '#475569', light: '#E2E8F0' },
+} as const;
+
+const TINT_ORDER = ['violet', 'ocean', 'emerald', 'sunset', 'rose', 'glacier'] as const;
+type TintName = keyof typeof CONTAINER_TINTS;
+
+/** Convert a 6-digit hex color to "r,g,b" string for use in rgba(). */
+function hexToRgb(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `${r},${g},${b}`;
+}
+
 function ContainerCard({
   element,
   isEditing,
@@ -4362,66 +6279,214 @@ function ContainerCard({
   isSelected: boolean;
   isDropTarget?: boolean;
 }) {
-  const bgColor = element.style?.bgColor || "transparent";
-  const borderColor = element.style?.borderColor || "hsl(var(--primary) / 0.4)";
-  const strokeWidth = element.style?.borderWidth || 2;
-  const borderStyle = element.style?.borderStyle || "dashed";
-  const fillOpacity =
-    element.style?.fillOpacity !== undefined ? element.style.fillOpacity : 20;
+  const tintName = (element.tintColor ?? 'violet') as TintName;
+  const tint = CONTAINER_TINTS[tintName];
 
-  // Convert fillOpacity to CSS opacity
-  const backgroundWithOpacity =
-    bgColor === "transparent"
-      ? `rgba(var(--card-rgb) / ${fillOpacity / 100})`
-      : bgColor;
+  // Live child count from store (returns a number so Zustand === comparison works)
+  const childCount = useCXDStore(
+    (state) =>
+      (state.getCurrentProject()?.canvasLayout?.elements ?? []).filter(
+        (el) => el.containerId === element.id,
+      ).length,
+  );
+
+  const [localLabel, setLocalLabel] = useLocalInput(
+    element.label ?? "",
+    (v) => onUpdate({ label: v }),
+  );
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const dotButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handleOutside = (e: PointerEvent) => {
+      if (
+        (pickerRef.current && pickerRef.current.contains(e.target as Node)) ||
+        (dotButtonRef.current && dotButtonRef.current.contains(e.target as Node))
+      ) return;
+      setPickerOpen(false);
+    };
+    document.addEventListener('pointerdown', handleOutside);
+    return () => document.removeEventListener('pointerdown', handleOutside);
+  }, [pickerOpen]);
+
+  const handleLock = () => {
+    const newLocked = !element.locked;
+    // Lock/unlock the container itself
+    onUpdate({ locked: newLocked });
+    // Lock/unlock all current children (snapshot operation)
+    const allEls =
+      useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements ?? [];
+    allEls
+      .filter((el) => el.containerId === element.id)
+      .forEach((child) =>
+        useCXDStore.getState().updateCanvasElement(child.id, { locked: newLocked }),
+      );
+  };
 
   return (
     <div
-      className={cn(
-        "w-full h-full rounded-lg backdrop-blur transition-all",
-        isDropTarget &&
-          "border-primary shadow-lg shadow-primary/20 brightness-110",
-      )}
+      className="w-full h-full flex flex-col overflow-hidden"
       style={{
-        backgroundColor: backgroundWithOpacity,
-        borderColor: borderColor,
-        borderWidth: `${strokeWidth}px`,
-        borderStyle: borderStyle,
+        borderRadius: 14,
+        background: `rgba(${hexToRgb(tint.mid)}, 0.08)`,
+        border: `1px solid rgba(${hexToRgb(tint.mid)}, 0.35)`,
         boxShadow: isDropTarget
-          ? "0 0 20px rgba(168, 85, 247, 0.5), inset 0 0 10px rgba(168, 85, 247, 0.2)"
-          : undefined,
+          ? `0 0 20px rgba(${hexToRgb(tint.mid)}, 0.45), inset 0 0 30px rgba(${hexToRgb(tint.mid)}, 0.12)`
+          : `inset 0 0 30px rgba(${hexToRgb(tint.mid)}, 0.06)`,
       }}
     >
-      {/* Container label */}
+      {/* ── Header bar (always visible) ── */}
       <div
-        className="px-3 py-2"
+        className="flex items-center gap-1.5 px-2 flex-shrink-0 relative"
         style={{
-          borderBottom: `${strokeWidth}px ${borderStyle} ${borderColor}`,
+          height: 28,
+          background: `rgba(${hexToRgb(tint.mid)}, 0.12)`,
+          borderBottom: element.collapsed
+            ? 'none'
+            : `1px solid rgba(${hexToRgb(tint.mid)}, 0.20)`,
         }}
       >
-        {isEditing ? (
-          <Input
-            autoFocus
-            value={element.label || ""}
-            onChange={(e) => onUpdate({ label: e.target.value })}
-            onBlur={onBlur}
-            className="text-sm font-medium bg-transparent border-0 p-0 h-auto focus-visible:ring-0"
-            placeholder="Container label..."
-          />
-        ) : (
-          <div className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-            <LayoutGrid className="w-4 h-4" />
-            {element.label || "Container"}
+        {/* Color dot */}
+        <button
+          ref={dotButtonRef}
+          className="w-3 h-3 rounded-full flex-shrink-0 focus:outline-none"
+          style={{
+            background: `radial-gradient(circle at 35% 30%, ${tint.light}, ${tint.mid})`,
+          }}
+          onClick={(e) => { e.stopPropagation(); setPickerOpen((p) => !p); }}
+          title="Change color"
+        />
+
+        {/* Color picker popup */}
+        {pickerOpen && (
+          <div
+            ref={pickerRef}
+            className="absolute top-8 left-0 flex gap-1.5 rounded-full px-2.5 py-2 border backdrop-blur-sm shadow-lg z-50"
+            style={{
+              background: 'rgba(15,12,25,0.95)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            {TINT_ORDER.map((name) => {
+              const c = CONTAINER_TINTS[name];
+              return (
+                <button
+                  key={name}
+                  title={name}
+                  className="w-4 h-4 rounded-full transition-transform hover:scale-110 focus:outline-none flex-shrink-0"
+                  style={{
+                    background: `radial-gradient(circle at 35% 30%, ${c.light}, ${c.mid})`,
+                    outline: tintName === name ? '2px solid rgba(255,255,255,0.9)' : 'none',
+                    outlineOffset: 2,
+                    boxShadow: tintName === name ? `0 0 6px ${c.mid}88` : 'none',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdate({ tintColor: name });
+                    setPickerOpen(false);
+                  }}
+                />
+              );
+            })}
           </div>
         )}
-      </div>
-      {/* Container content area */}
-      <div className="flex-1 p-2 text-xs text-muted-foreground/50 text-center">
-        {isSelected && <span>Drop elements here to group</span>}
-        {isDropTarget && !isSelected && (
-          <span className="text-primary font-medium">Drop to attach</span>
+
+        {/* Editable label */}
+        {isEditing ? (
+          <input
+            autoFocus
+            value={localLabel}
+            onChange={(e) => setLocalLabel(e.target.value)}
+            onBlur={onBlur}
+            placeholder="Name"
+            className="flex-1 min-w-0 bg-transparent border-0 p-0 focus:outline-none"
+            style={{
+              color: `rgba(${hexToRgb(tint.light)}, 0.85)`,
+              fontFamily: "'Poppins', sans-serif",
+              fontSize: 17,
+              fontWeight: 600,
+            }}
+          />
+        ) : (
+          <span
+            className="flex-1 min-w-0 truncate"
+            style={{
+              color: `rgba(${hexToRgb(tint.light)}, 0.85)`,
+              fontFamily: "'Poppins', sans-serif",
+              fontSize: 17,
+              fontWeight: 600,
+            }}
+          >
+            {element.label || 'Name'}
+          </span>
         )}
+
+        {/* Item count badge */}
+        <span
+          className="text-[9px] px-1.5 py-0.5 rounded flex-shrink-0"
+          style={{
+            color: `rgba(${hexToRgb(tint.light)}, 0.45)`,
+            background: `rgba(${hexToRgb(tint.mid)}, 0.10)`,
+            fontFamily: 'monospace',
+          }}
+        >
+          {childCount} {childCount === 1 ? 'item' : 'items'}
+        </span>
+
+        {/* Collapse button */}
+        <button
+          className="flex-shrink-0 flex items-center justify-center rounded focus:outline-none"
+          style={{
+            width: 18,
+            height: 18,
+            background: 'rgba(255,255,255,0.07)',
+            border: '1px solid rgba(255,255,255,0.10)',
+            color: 'rgba(255,255,255,0.45)',
+            fontSize: 9,
+          }}
+          onClick={(e) => { e.stopPropagation(); onUpdate({ collapsed: !element.collapsed }); }}
+          title={element.collapsed ? 'Expand' : 'Collapse'}
+        >
+          {element.collapsed ? '▸' : '▾'}
+        </button>
+
+        {/* Lock button */}
+        <button
+          className="flex-shrink-0 flex items-center justify-center rounded focus:outline-none"
+          style={{
+            width: 18,
+            height: 18,
+            background: element.locked
+              ? `rgba(${hexToRgb(tint.mid)}, 0.25)`
+              : 'rgba(255,255,255,0.07)',
+            border: `1px solid ${element.locked ? tint.mid + '88' : 'rgba(255,255,255,0.10)'}`,
+            fontSize: 9,
+          }}
+          onClick={(e) => { e.stopPropagation(); handleLock(); }}
+          title={element.locked ? 'Unlock' : 'Lock'}
+        >
+          {element.locked ? '🔒' : '🔓'}
+        </button>
       </div>
+
+      {/* ── Body (hidden when collapsed) ── */}
+      {!element.collapsed && (
+        <div className="flex-1 relative">
+          {isDropTarget && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span
+                className="text-xs font-medium"
+                style={{ color: `rgba(${hexToRgb(tint.light)}, 0.7)` }}
+              >
+                Drop to attach
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -4442,6 +6507,11 @@ function TextCard({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [originalContent, setOriginalContent] = useState("");
+
+  const [localContent, setLocalContent, onLocalBlur] = useLocalInput(
+    element.content || "",
+    (v) => onUpdate({ content: v }),
+  );
 
   const fontSize = element.style?.fontSize || 16;
   const fontWeight = element.style?.fontWeight || "normal";
@@ -4482,7 +6552,10 @@ function TextCard({
     };
   }, [isEditing, onBlur]);
 
-  // Auto-grow textarea height while editing
+  // Auto-grow textarea height while editing — uses refs to avoid re-render cascades
+  const elementHeightRef = useRef(element.height);
+  elementHeightRef.current = element.height;
+
   const autoGrowTextarea = useCallback(() => {
     if (textareaRef.current) {
       const textarea = textareaRef.current;
@@ -4494,13 +6567,13 @@ function TextCard({
 
       // Update element height to match (plus padding)
       const totalHeight = newHeight + 16;
-      if (Math.abs(element.height - totalHeight) > 2) {
+      if (Math.abs(elementHeightRef.current - totalHeight) > 2) {
         onUpdate({ height: totalHeight });
       }
     }
-  }, [element.height, onUpdate]);
+  }, [onUpdate]);
 
-  // Auto-grow on mount (enter edit mode) and content change
+  // Auto-grow on mount (enter edit mode)
   useEffect(() => {
     if (isEditing) {
       // Small delay to ensure textarea is rendered
@@ -4517,37 +6590,29 @@ function TextCard({
         });
       }
     }
-  }, [isEditing, autoGrowTextarea]);
+  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-size height based on content (width controlled by wrapWidth or auto)
+  // Auto-size: only adjust HEIGHT to fit content, never change width
+  // Width is controlled by the user via resize handles
   useEffect(() => {
     if (!isEditing && measureRef.current && element.content) {
       const measured = measureRef.current.getBoundingClientRect();
 
-      // Width: use wrapWidth if set, otherwise auto-size to content
-      const newWidth = wrapWidth
-        ? wrapWidth
-        : Math.max(60, measured.width + 16);
+      // Height: auto-size to fit wrapped content within current width
+      const newHeight = Math.max(30, Math.ceil(measured.height) + 16);
 
-      // Height: always auto-size to fit wrapped content
-      const newHeight = Math.max(30, measured.height + 16);
-
-      // Only update if size changed significantly (avoid infinite loops)
-      if (
-        Math.abs(element.width - newWidth) > 5 ||
-        Math.abs(element.height - newHeight) > 5
-      ) {
-        onUpdate({ width: newWidth, height: newHeight });
+      // Only update height if changed significantly
+      if (Math.abs(element.height - newHeight) > 8) {
+        onUpdate({ height: newHeight });
       }
     }
   }, [
     element.content,
-    fontSize,
-    fontWeight,
-    fontFamily,
     wrapWidth,
     isEditing,
     onUpdate,
+    element.width, // Re-measure height when width changes (text reflows)
+    // within existing bounds via CSS.
   ]);
 
   // Removed automatic click-outside blur - user must click outside or press Escape to exit editing
@@ -4569,7 +6634,7 @@ function TextCard({
 
   // Handle content change with auto-grow
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onUpdate({ content: e.target.value });
+    setLocalContent(e.target.value);
     // Auto-grow after content update
     if (typeof window !== "undefined") {
       window.requestAnimationFrame(autoGrowTextarea);
@@ -4627,8 +6692,9 @@ function TextCard({
       {isEditing ? (
         <textarea
           ref={textareaRef}
-          value={element.content}
+          value={localContent}
           onChange={handleContentChange}
+          onBlur={onLocalBlur}
           onKeyDown={handleKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
@@ -4668,12 +6734,12 @@ function TextCard({
               style={
                 hasGradient
                   ? {
-                      background: gradient,
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      backgroundClip: "text",
-                      display: "inline-block",
-                    }
+                    background: gradient,
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    backgroundClip: "text",
+                    display: "inline-block",
+                  }
                   : { color: textColor }
               }
             >
@@ -4712,6 +6778,20 @@ function LinkCard({
   const [embedError, setEmbedError] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-fetch bookmark metadata when element is created with a URL but no metadata yet.
+  // This handles the paste-as-bookmark flow where the URL is set but the card is empty.
+  useEffect(() => {
+    if (
+      element.url &&
+      element.linkMode === 'bookmark' &&
+      !element.title &&
+      !element.domain
+    ) {
+      fetchLinkMetadata(element.url);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync draft with element when element URL changes externally
   useEffect(() => {
@@ -5006,13 +7086,15 @@ function LinkCard({
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>
-            <div className="flex-1 min-h-0 bg-gradient-to-br from-muted/30 to-muted/10">
-              <img
+            <div className="flex-1 min-h-0 bg-gradient-to-br from-muted/30 to-muted/10 relative">
+              <NextImage
                 src={element.url}
-                alt={element.fileName}
-                className="w-full h-full object-contain"
+                alt={element.fileName || ""}
+                fill
+                className="object-contain"
                 draggable={false}
                 onDragStart={(e) => e.preventDefault()}
+                unoptimized
               />
             </div>
           </div>
@@ -5160,12 +7242,14 @@ function LinkCard({
         {/* Large thumbnail area - top priority */}
         <div className="flex-1 min-h-0 bg-gradient-to-br from-muted/30 to-muted/10 relative overflow-hidden">
           {element.thumbnail ? (
-            <img
+            <NextImage
               src={element.thumbnail}
               alt=""
-              className="w-full h-full object-cover"
+              fill
+              className="object-cover"
               draggable={false}
               onDragStart={(e) => e.preventDefault()}
+              unoptimized
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
@@ -5208,11 +7292,14 @@ function LinkCard({
           {/* Domain with favicon */}
           <div className="flex items-center gap-1.5 pt-0.5">
             {element.favicon && (
-              <img
+              <NextImage
                 src={element.favicon}
                 alt=""
+                width={16}
+                height={16}
                 className="w-4 h-4"
                 draggable={false}
+                unoptimized
               />
             )}
             <span className="text-xs text-muted-foreground/80 truncate">
@@ -5245,11 +7332,14 @@ function LinkCard({
       {/* Header bar for dragging in embed mode */}
       <div className="px-3 py-2 bg-card/80 border-b border-border/50 flex items-center gap-2 flex-shrink-0">
         {element.favicon && (
-          <img
+          <NextImage
             src={element.favicon}
             alt=""
+            width={16}
+            height={16}
             className="w-4 h-4"
             draggable={false}
+            unoptimized
           />
         )}
         <span className="text-xs text-muted-foreground truncate flex-1">
@@ -5338,40 +7428,63 @@ function BoardCard({
   const selectedIcon = BOARD_ICONS.find((i) => i.id === iconId);
   const IconComponent = selectedIcon?.Icon || LayoutGrid;
 
-  // Count elements in this board
-  const project = (window as any).__currentProject;
-  const allElements = project?.canvasLayout?.elements || [];
-  const boardElements = allElements.filter(
-    (el: any) =>
-      el.boardId === element.childBoardId &&
-      el.type !== "line" &&
-      el.type !== "connector",
-  );
-  const elementCount = boardElements.length;
+  // Count elements in this board using Zustand store
+  const allElements = useCXDStore((state) => state.getCurrentProject()?.canvasLayout?.elements || []);
+  const elementCount = useMemo(() => {
+    return allElements.filter(
+      (el) =>
+        el.boardId === element.childBoardId &&
+        el.type !== "line" &&
+        el.type !== "connector",
+    ).length;
+  }, [allElements, element.childBoardId]);
 
   return (
     <div
       className={cn(
-        "flex items-center justify-center transition-all relative",
-        isDropTarget && "scale-105 w-fit h-fit",
+        "relative w-full h-full transition-all",
+        isDropTarget && "scale-105",
       )}
     >
-      {/* Drop target glow overlay */}
-      {isDropTarget && (
-        <div
-          className="absolute inset-0 rounded-lg animate-pulse"
-          style={{
-            background:
-              "radial-gradient(circle, rgba(168, 85, 247, 0.3) 0%, transparent 70%)",
-            boxShadow:
-              "0 0 40px rgba(168, 85, 247, 0.8), inset 0 0 20px rgba(168, 85, 247, 0.4)",
-          }}
-        />
-      )}
-      {/* Hexagon badge container with 3D effect */}
-      <div className="relative flex flex-col items-center gap-3 justify-center w-fit h-fit gap-y-[3.5px]">
-        {/* Hexagon icon container */}
-        <div className="relative w-32 h-32 flex items-center justify-center">
+      {/* Hexagon — absolutely centered so its center matches element.height/2 */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 flex items-center justify-center" data-port-bounds>
+          {/* Drop target glow - SVG hexagon outline */}
+          {isDropTarget && (
+            <svg
+              className="absolute inset-0 w-32 h-32 pointer-events-none animate-pulse"
+              viewBox="0 0 128 128"
+              style={{ overflow: "visible" }}
+            >
+              <defs>
+                {/* Glow filter for the hexagon outline */}
+                <filter id="hexagon-glow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="6" result="blur1" />
+                  <feGaussianBlur stdDeviation="12" result="blur2" />
+                  <feMerge>
+                    <feMergeNode in="blur2" />
+                    <feMergeNode in="blur1" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+              {/* Hexagon path matching the clip-path: 50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25% */}
+              <polygon
+                points="64,0 119.4,32 119.4,96 64,128 8.6,96 8.6,32"
+                fill="none"
+                stroke="rgba(168, 85, 247, 0.9)"
+                strokeWidth="3"
+                filter="url(#hexagon-glow)"
+              />
+              {/* Additional outer glow ring */}
+              <polygon
+                points="64,0 119.4,32 119.4,96 64,128 8.6,96 8.6,32"
+                fill="none"
+                stroke="rgba(168, 85, 247, 0.4)"
+                strokeWidth="8"
+                filter="url(#hexagon-glow)"
+              />
+            </svg>
+          )}
           {/* Isometric cube shape with 3D gradient and glow */}
           <div
             className={cn(
@@ -5394,8 +7507,11 @@ function BoardCard({
           </div>
         </div>
 
-        {/* Board name */}
-        <div className="flex flex-col items-center gap-1 w-full px-4">
+        {/* Board name + item count — absolutely positioned below the hex */}
+        <div
+          className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-1"
+          style={{ top: 'calc(50% + 72px)' }}
+        >
           {isEditingName ? (
             <Input
               autoFocus
@@ -5421,18 +7537,17 @@ function BoardCard({
                 e.stopPropagation();
                 setIsEditingName(true);
               }}
-              className="text-sm font-medium text-white hover:text-primary transition-colors max-w-full truncate px-2 py-1 rounded hover:bg-white/10"
+              className="text-sm font-medium text-white hover:text-primary transition-colors max-w-full truncate px-2 py-1 rounded hover:bg-white/10 whitespace-nowrap"
               data-no-drag
             >
               {element.title || "New Board"}
             </button>
           )}
           {/* Item count */}
-          <p className="text-xs text-purple-400 font-medium">
+          <p className="text-xs text-purple-400 font-medium whitespace-nowrap">
             {elementCount} {elementCount === 1 ? "Item" : "Items"}
           </p>
         </div>
-      </div>
     </div>
   );
 }
@@ -5478,7 +7593,7 @@ function ExperienceBlockCard({
   };
 
   const icon = iconMap[element.componentKey];
-  const viewMode = element.viewMode || "compact";
+  const viewMode = element.viewMode || "inline";
 
   // Get project from store
   const project = useCXDStore((state) => state.getCurrentProject());
@@ -5503,6 +7618,70 @@ function ExperienceBlockCard({
     updateStateMapping,
     updateTraitMapping,
   } = useCXDStore();
+
+  // Local input hooks for all intention editor fields to prevent cursor-jump
+  const [liProjectName, setLiProjectName] = useLocalInput(
+    project?.intentionCore?.projectName || "", updateIntentionProjectName);
+  const [liMainConcept, setLiMainConcept] = useLocalInput(
+    project?.intentionCore?.mainConcept || "", updateIntentionMainConcept);
+  const [liCoreMessage, setLiCoreMessage] = useLocalInput(
+    project?.intentionCore?.coreMessage || "", updateIntentionCoreMessage);
+  const [liInsights, setLiInsights] = useLocalInput(
+    project?.desiredChange?.insights || "", updateDesiredInsights);
+  const [liFeelings, setLiFeelings] = useLocalInput(
+    project?.desiredChange?.feelings || "", updateDesiredFeelings);
+  const [liStates, setLiStates] = useLocalInput(
+    project?.desiredChange?.states || "", updateDesiredStates);
+  const [liKnowledge, setLiKnowledge] = useLocalInput(
+    project?.desiredChange?.knowledge || "", updateDesiredKnowledge);
+  const [liAudienceNeeds, setLiAudienceNeeds] = useLocalInput(
+    project?.humanContext?.audienceNeeds || "", updateHumanAudienceNeeds);
+  const [liAudienceDesires, setLiAudienceDesires] = useLocalInput(
+    project?.humanContext?.audienceDesires || "", updateHumanAudienceDesires);
+  const [liUserRole, setLiUserRole] = useLocalInput(
+    project?.humanContext?.userRole || "", updateHumanUserRole);
+  const [liWorld, setLiWorld] = useLocalInput(
+    project?.contextAndMeaning?.world || "", updateContextWorld);
+  const [liStory, setLiStory] = useLocalInput(
+    project?.contextAndMeaning?.story || "", updateContextStory);
+  const [liMagic, setLiMagic] = useLocalInput(
+    project?.contextAndMeaning?.magic || "", updateContextMagic);
+
+  // Auto-size the element height to fit inline content (must be before conditional returns)
+  const contentRef = useRef<HTMLDivElement>(null);
+  const lastAutoHeightRef = useRef<number>(0);
+  const manuallyResized = (element as any).manuallyResized ?? false;
+
+  useEffect(() => {
+    if (viewMode !== 'inline' || manuallyResized) return;
+    const el = contentRef.current;
+    if (!el) return;
+
+    // Header: py-2 (16px) + h-8 icon (32px) + border-b ≈ 52px
+    const HEADER_HEIGHT = 52;
+
+    const measure = () => {
+      const totalHeight = Math.max(el.scrollHeight + HEADER_HEIGHT, 200);
+      if (Math.abs(totalHeight - lastAutoHeightRef.current) > 2) {
+        lastAutoHeightRef.current = totalHeight;
+        onUpdate({ height: totalHeight } as any);
+      }
+    };
+
+    // RAF debounce: coalesce rapid observer callbacks into a single frame.
+    // Without this, ScrollArea's internal DOM rearrangements after each height
+    // update can trigger the observer again → oscillation loop.
+    let rafId: number | null = null;
+    const debouncedMeasure = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => { rafId = null; measure(); });
+    };
+
+    measure();
+    const ro = new ResizeObserver(debouncedMeasure);
+    ro.observe(el);
+    return () => { ro.disconnect(); if (rafId !== null) cancelAnimationFrame(rafId); };
+  }, [viewMode, manuallyResized, onUpdate]);
 
   if (!project) return null;
 
@@ -5557,26 +7736,20 @@ function ExperienceBlockCard({
         <div className="flex-1 min-w-0 text-sm font-semibold text-white truncate">
           {element.title}
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            // Auto-expand to fit content - measure the ScrollArea content
-            const scrollContent = e.currentTarget
-              .closest(".group")
-              ?.querySelector("[data-no-drag]");
-            if (scrollContent) {
-              const contentHeight = scrollContent.scrollHeight;
-              const newHeight = Math.min(contentHeight + 80, 800); // 80px for header, max 800px
-              const newWidth = Math.max(element.width, 500); // Min 500px width
-              onUpdate({ width: newWidth, height: newHeight });
-            }
-          }}
-          className="flex-shrink-0 p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-          title="Expand to fit content"
-          data-no-drag
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
+        {manuallyResized && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              // Reset to auto-size by clearing the manuallyResized flag
+              onUpdate({ manuallyResized: false } as any);
+            }}
+            className="flex-shrink-0 p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            title="Reset to auto-size"
+            data-no-drag
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -5594,7 +7767,7 @@ function ExperienceBlockCard({
         className="flex-1 overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 space-y-4" data-no-drag>
+        <div className="p-4 space-y-4" data-no-drag ref={contentRef}>
           {element.componentKey === "intentionCore" && (
             <>
               <div className="space-y-2">
@@ -5607,8 +7780,8 @@ function ExperienceBlockCard({
                 <Input
                   id="projectName"
                   placeholder="Enter project name..."
-                  value={project.intentionCore?.projectName || ""}
-                  onChange={(e) => updateIntentionProjectName(e.target.value)}
+                  value={liProjectName}
+                  onChange={(e) => setLiProjectName(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white"
                   data-no-drag
                 />
@@ -5623,8 +7796,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="mainConcept"
                   placeholder="What is the central idea or concept?"
-                  value={project.intentionCore?.mainConcept || ""}
-                  onChange={(e) => updateIntentionMainConcept(e.target.value)}
+                  value={liMainConcept}
+                  onChange={(e) => setLiMainConcept(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -5639,8 +7812,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="coreMessage"
                   placeholder="What is the core message or takeaway?"
-                  value={project.intentionCore?.coreMessage || ""}
-                  onChange={(e) => updateIntentionCoreMessage(e.target.value)}
+                  value={liCoreMessage}
+                  onChange={(e) => setLiCoreMessage(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -5660,8 +7833,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="insights"
                   placeholder="What insights should users gain?"
-                  value={project.desiredChange?.insights || ""}
-                  onChange={(e) => updateDesiredInsights(e.target.value)}
+                  value={liInsights}
+                  onChange={(e) => setLiInsights(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -5676,8 +7849,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="feelings"
                   placeholder="What feelings should they experience?"
-                  value={project.desiredChange?.feelings || ""}
-                  onChange={(e) => updateDesiredFeelings(e.target.value)}
+                  value={liFeelings}
+                  onChange={(e) => setLiFeelings(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -5692,8 +7865,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="states"
                   placeholder="What states should emerge?"
-                  value={project.desiredChange?.states || ""}
-                  onChange={(e) => updateDesiredStates(e.target.value)}
+                  value={liStates}
+                  onChange={(e) => setLiStates(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -5708,8 +7881,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="knowledge"
                   placeholder="What knowledge should they acquire?"
-                  value={project.desiredChange?.knowledge || ""}
-                  onChange={(e) => updateDesiredKnowledge(e.target.value)}
+                  value={liKnowledge}
+                  onChange={(e) => setLiKnowledge(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
                   data-no-drag
                 />
@@ -5729,8 +7902,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="audienceNeeds"
                   placeholder="What are the audience's needs?"
-                  value={project.humanContext?.audienceNeeds || ""}
-                  onChange={(e) => updateHumanAudienceNeeds(e.target.value)}
+                  value={liAudienceNeeds}
+                  onChange={(e) => setLiAudienceNeeds(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -5745,8 +7918,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="audienceDesires"
                   placeholder="What do they desire?"
-                  value={project.humanContext?.audienceDesires || ""}
-                  onChange={(e) => updateHumanAudienceDesires(e.target.value)}
+                  value={liAudienceDesires}
+                  onChange={(e) => setLiAudienceDesires(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -5761,8 +7934,8 @@ function ExperienceBlockCard({
                 <Input
                   id="userRole"
                   placeholder="What role does the user play?"
-                  value={project.humanContext?.userRole || ""}
-                  onChange={(e) => updateHumanUserRole(e.target.value)}
+                  value={liUserRole}
+                  onChange={(e) => setLiUserRole(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white"
                   data-no-drag
                 />
@@ -5782,8 +7955,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="world"
                   placeholder="Describe the world..."
-                  value={project.contextAndMeaning?.world || ""}
-                  onChange={(e) => updateContextWorld(e.target.value)}
+                  value={liWorld}
+                  onChange={(e) => setLiWorld(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -5798,8 +7971,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="story"
                   placeholder="What is the narrative?"
-                  value={project.contextAndMeaning?.story || ""}
-                  onChange={(e) => updateContextStory(e.target.value)}
+                  value={liStory}
+                  onChange={(e) => setLiStory(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -5814,8 +7987,8 @@ function ExperienceBlockCard({
                 <Textarea
                   id="magic"
                   placeholder="How does the magic work?"
-                  value={project.contextAndMeaning?.magic || ""}
-                  onChange={(e) => updateContextMagic(e.target.value)}
+                  value={liMagic}
+                  onChange={(e) => setLiMagic(e.target.value)}
                   className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
                   data-no-drag
                 />
@@ -5829,57 +8002,131 @@ function ExperienceBlockCard({
             </div>
           )}
 
-          {element.componentKey === "sensoryDomains" && (
-            <div className="space-y-3">
-              {Object.entries(project.sensoryDomains || {}).map(
-                ([key, value]) => (
-                  <div key={key} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium text-white capitalize">
-                        {key}
-                      </Label>
-                      <span className="text-xs text-white/70">{value}%</span>
-                    </div>
-                    <Slider
-                      value={[value]}
-                      onValueChange={([v]) =>
-                        updateSensoryDomain(key as any, v)
-                      }
-                      max={100}
-                      step={1}
-                      className="w-full"
-                      data-no-drag
-                    />
-                  </div>
-                ),
-              )}
-            </div>
-          )}
+          {element.componentKey === "sensoryDomains" && (() => {
+            const intensityLevels = [
+              { value: 0, label: "None" },
+              { value: 25, label: "Minimal" },
+              { value: 50, label: "Moderate" },
+              { value: 75, label: "Significant" },
+              { value: 100, label: "Primary" },
+            ];
+            const getClosestLevel = (val: number) =>
+              intensityLevels.reduce((prev, curr) =>
+                Math.abs(curr.value - val) < Math.abs(prev.value - val) ? curr : prev
+              );
+            return (
+              <div className="space-y-4">
+                {SENSORY_DOMAINS.map((domain) => {
+                  const val = project.sensoryDomains[domain.code];
+                  const currentLevel = getClosestLevel(val);
+                  const meta = SENSORY_METADATA[domain.code];
 
-          {element.componentKey === "presenceTypes" && (
-            <div className="space-y-3">
-              {Object.entries(project.presenceTypes || {}).map(
-                ([key, value]) => (
-                  <div key={key} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium text-white capitalize">
-                        {key.replace(/([A-Z])/g, " $1").trim()}
-                      </Label>
-                      <span className="text-xs text-white/70">{value}%</span>
+                  return (
+                    <div key={domain.code} className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/5">
+                      <div className="flex items-center gap-2">
+                        <div className="text-primary/80">
+                          {meta.icon}
+                        </div>
+                        <Label className="text-sm font-bold text-white tracking-tight">
+                          {domain.label}
+                        </Label>
+                        <span className="ml-auto text-[10px] font-mono text-white/50">{currentLevel.label}</span>
+                      </div>
+                      <div className="flex gap-1" data-no-drag>
+                        {intensityLevels.map((level) => {
+                          const isSelected = currentLevel.value === level.value;
+                          const isPrimary = level.label === "Primary" && isSelected;
+
+                          return (
+                            <button
+                              key={level.value}
+                              onClick={() => updateSensoryDomain(domain.code, level.value)}
+                              className={cn(
+                                "flex-1 py-1.5 px-1 text-[9px] uppercase font-bold rounded transition-all duration-300",
+                                isSelected
+                                  ? `bg-gradient-to-br ${meta.color} text-white shadow-md`
+                                  : "bg-secondary/30 text-white/40 hover:bg-secondary/50 hover:text-white",
+                                isPrimary && "scale-105 shadow-[0_0_15px_rgba(var(--primary),0.3)]",
+                                !isSelected && "opacity-60"
+                              )}
+                              style={isSelected ? {
+                                border: `1px solid rgba(${meta.colorRaw}, 0.3)`
+                              } : {}}
+                            >
+                              {level.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <Slider
-                      value={[value]}
-                      onValueChange={([v]) => updatePresenceType(key as any, v)}
-                      max={100}
-                      step={1}
-                      className="w-full"
-                      data-no-drag
-                    />
-                  </div>
-                ),
-              )}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {element.componentKey === "presenceTypes" && (() => {
+            const presenceLevels = [
+              { value: 0, label: "None" },
+              { value: 25, label: "Minimal" },
+              { value: 50, label: "Moderate" },
+              { value: 75, label: "Significant" },
+              { value: 100, label: "Primary" },
+            ];
+            const getClosestLevel = (val: number) =>
+              presenceLevels.reduce((prev, curr) =>
+                Math.abs(curr.value - val) < Math.abs(prev.value - val) ? curr : prev
+              );
+            return (
+              <div className="space-y-4">
+                {PRESENCE_TYPES.map((presence) => {
+                  const val = project.presenceTypes?.[presence.code];
+                  const currentLevel = getClosestLevel(val);
+                  const meta = PRESENCE_METADATA[presence.code];
+
+                  return (
+                    <div key={presence.code} className="space-y-2 p-3 rounded-lg bg-white/5 border border-white/5">
+                      <div className="flex items-center gap-2">
+                        <div className="text-primary/80">
+                          {meta.icon}
+                        </div>
+                        <Label className="text-sm font-bold text-white tracking-tight">
+                          {presence.label}
+                        </Label>
+                        <span className="ml-auto text-[10px] font-mono text-white/50">{currentLevel.label}</span>
+                      </div>
+                      <div className="flex gap-1" data-no-drag>
+                        {presenceLevels.map((level) => {
+                          const isSelected = currentLevel.value === level.value;
+                          const isPrimary = level.label === "Primary" && isSelected;
+
+                          return (
+                            <button
+                              key={level.value}
+                              onClick={() => updatePresenceType(presence.code, level.value)}
+                              className={cn(
+                                "flex-1 py-1.5 px-1 text-[9px] uppercase font-bold rounded transition-all duration-300",
+                                isSelected
+                                  ? `bg-gradient-to-br ${meta.color} text-white shadow-md`
+                                  : "bg-secondary/30 text-white/40 hover:bg-secondary/50 hover:text-white",
+                                isPrimary && "scale-105 shadow-[0_0_15px_rgba(var(--primary),0.3)]",
+                                !isSelected && "opacity-60"
+                              )}
+                              style={isSelected ? {
+                                border: `1px solid rgba(${meta.colorRaw}, 0.3)`
+                              } : {}}
+                            >
+                              {level.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {element.componentKey === "stateMapping" && (
             <div className="grid grid-cols-2 gap-3">

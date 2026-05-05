@@ -57,21 +57,21 @@ export interface TaskProjection {
   sourceElementId: string;           // Reference to original canvas element
   sourceElementType: 'freeform' | 'text' | 'shape'; // Type of source element
   sourceBoardId: string | null;      // Board containing this element (null = root canvas)
-  
+
   // Qualification info
   qualificationCriteria: TaskQualificationCriteria;
-  
+
   // Task content (extracted/derived)
   title: string;                     // First line or extracted task text
   description: string;               // Full content of the card
   subtasks: SubtaskProjection[];     // Parsed from markdown checkboxes
-  
+
   // Status (computed from content)
   status: TaskStatus;
   completedSubtasks: number;
   totalSubtasks: number;
   completionPercent: number;         // 0-100
-  
+
   // Metadata (optional, from card extensions)
   priority?: TaskPriority;
   taskType?: TaskType;               // Task categorization
@@ -81,17 +81,41 @@ export interface TaskProjection {
   estimatedHours?: number;
   tags?: string[];                   // Custom tags beyond hypercube
   customProperties?: Record<string, string | number | boolean>; // User-defined properties
-  
+  isArchived?: boolean;
+  inInbox?: boolean;
+
   // Hypercube integration
   hypercubeTags: HypercubeFaceTag[]; // Links to hypercube faces
   linkedIntentId?: string;           // Indirect link to core intent via board hierarchy
-  
+
+  // Gantt chart: Hierarchy (parent/child relationships)
+  parentTaskId?: string;             // ID of parent task (if this is a subtask)
+  childTaskIds?: string[];           // IDs of child tasks (if this is a parent)
+  depth?: number;                    // Hierarchy depth (0 = root, 1 = child, etc.)
+  isExpanded?: boolean;              // For collapsible parent tasks
+
+  // Gantt chart: Dependencies
+  dependencies?: TaskDependency[];   // Tasks this task depends on
+  dependents?: string[];             // Task IDs that depend on this task
+
   // Position in canvas (for navigation)
   canvasPosition: { x: number; y: number };
-  
+
   // Timestamps
   createdAt?: string;
   updatedAt?: string;
+
+  // Raw task metadata (includes versionId and other metadata)
+  taskMetadata?: TaskMetadata;
+}
+
+/**
+ * Task dependency definition
+ */
+export interface TaskDependency {
+  taskId: string;                    // ID of the task this depends on
+  type: 'finish-to-start' | 'start-to-start' | 'finish-to-finish' | 'start-to-finish';
+  lag?: number;                      // Days to add/subtract after dependency (can be negative)
 }
 
 /**
@@ -102,6 +126,11 @@ export interface SubtaskProjection {
   text: string;                      // Task text after checkbox
   isCompleted: boolean;              // [x] = true, [ ] = false
   lineIndex: number;                 // Line number in source content
+  customProperties?: {
+    startDate?: string;
+    dueDate?: string;
+    [key: string]: any;
+  };
 }
 
 // ============================================================================
@@ -206,7 +235,7 @@ export type PlanViewConfig =
   | TimelineViewConfig 
   | CalendarViewConfig;
 
-export type PlanViewType = 'kanban' | 'table' | 'timeline' | 'calendar';
+export type PlanViewType = 'kanban' | 'table' | 'timeline' | 'calendar' | 'archive' | 'versions';
 
 // ============================================================================
 // FILTER & QUERY TYPES
@@ -378,6 +407,7 @@ export const HYPERCUBE_FACE_TAGS: HypercubeFaceTag[] = [
   'State Mapping',
   'Trait Mapping',
   'Meaning Architecture',
+  'Core',
 ];
 
 export const HYPERCUBE_FACE_COLORS: Record<HypercubeFaceTag, string> = {
@@ -387,4 +417,5 @@ export const HYPERCUBE_FACE_COLORS: Record<HypercubeFaceTag, string> = {
   'State Mapping': '#F59E0B',
   'Trait Mapping': '#10B981',
   'Meaning Architecture': '#6366F1',
+  'Core': '#F97316',
 };

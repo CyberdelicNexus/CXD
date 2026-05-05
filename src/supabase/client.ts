@@ -9,7 +9,13 @@ const isProbablyTempoPreview = () => {
   return host.endsWith(".canvases.tempo.build");
 };
 
+// Singleton browser client — prevents auth token lock contention
+// caused by multiple client instances competing for the same Web Lock.
+let browserClient: ReturnType<typeof createBrowserClient> | null = null;
+
 export const createClient = () => {
+  if (browserClient) return browserClient;
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -41,5 +47,6 @@ export const createClient = () => {
     supabase.auth.getSession = wrap(supabase.auth.getSession.bind(supabase.auth));
   }
 
+  browserClient = supabase;
   return supabase;
 };

@@ -1,0 +1,24 @@
+{
+  "functions": {
+    "src/app/api/ai/**/*.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "src/app/api/webhooks/**/*.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/cron/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/email-scheduler",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/spend-monitor",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

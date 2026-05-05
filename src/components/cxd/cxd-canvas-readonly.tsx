@@ -1,27 +1,12 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { CXD_SECTIONS, CXDProject, CXDSectionId } from "@/types/cxd-schema";
+import { CXDProject } from "@/types/cxd-schema";
 import { CanvasElementRenderer } from "./canvas/canvas-element";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
-// import { LineLayer } from "@/components/cxd/canvas/line-layer";
-import { Button } from "@/components/ui/button";
-import { ChevronRight, Home, Target, Sparkles, Users, Globe, Layers, Eye, Radio, Brain, Heart, LucideIcon } from "lucide-react";
+import { ChevronRight, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-// Icon mapping for sections
-const SECTION_ICONS: Record<CXDSectionId, LucideIcon> = {
-  intentionCore: Target,
-  desiredChange: Sparkles,
-  humanContext: Users,
-  contextAndMeaning: Globe,
-  realityPlanes: Layers,
-  sensoryDomains: Eye,
-  presence: Radio,
-  experienceFlow: Radio,
-  stateMapping: Brain,
-  traitMapping: Heart,
-};
+import { extractCenterColor } from "@/lib/utils";
 import type {
   CanvasElement,
   CanvasEdge,
@@ -32,20 +17,8 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
 const ZOOM_SENSITIVITY = 0.001;
 
-// Default section positions
-const DEFAULT_SECTION_POSITIONS: Record<string, { x: number; y: number }> = {
-  intentionCore: { x: 600, y: 100 },
-  desiredChange: { x: 200, y: 50 },
-  humanContext: { x: 1000, y: 50 },
-  contextAndMeaning: { x: 100, y: 400 },
-  realityPlanes: { x: 500, y: 400 },
-  sensoryDomains: { x: 900, y: 400 },
-  presence: { x: 1300, y: 400 },
-  stateMapping: { x: 400, y: 750 },
-  traitMapping: { x: 800, y: 750 },
-};
-
-const CANVAS_SECTIONS = CXD_SECTIONS.filter((s) => s.id !== "experienceFlow");
+// Default canvas background
+const DEFAULT_CANVAS_BG = 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
 
 interface CXDCanvasReadOnlyProps {
   project: CXDProject;
@@ -61,24 +34,23 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
   const [currentBoardId, setCurrentBoardId] = useState<string | null>(null);
 
   // Get canvas elements and edges from project
-  const canvasElements = useMemo(() => project.canvasLayout?.elements || [], [project.canvasLayout?.elements]);
-  const canvasEdges = useMemo(() => project.canvasLayout?.edges || [], [project.canvasLayout?.edges]);
+  const canvasElements = useMemo(() => project?.canvasLayout?.elements || [], [project?.canvasLayout?.elements]);
+  const canvasEdges = useMemo(() => project?.canvasLayout?.edges || [], [project?.canvasLayout?.edges]);
 
-  // Get section positions from layout or use defaults
-  const localPositions = useMemo(() => {
-    return project.canvasLayout?.sectionPositions || DEFAULT_SECTION_POSITIONS;
-  }, [project.canvasLayout?.sectionPositions]);
+  // Canvas background from project
+  const canvasBackground = project?.canvasBackground || DEFAULT_CANVAS_BG;
 
-  // Filter elements for current board
+  // Filter elements for current board (normalize undefined/null/empty string)
   const visibleElements = useMemo(() => {
-    return canvasElements.filter((el) => el.boardId === currentBoardId);
+    const normalizedBoardId = currentBoardId || null;
+    return canvasElements.filter((el) => (el.boardId || null) === normalizedBoardId);
   }, [canvasElements, currentBoardId]);
 
   // Filter edges for current board
   const visibleEdges = useMemo(() => {
     return canvasEdges.filter((edge) => {
-      const fromEl = canvasElements.find((el) => el.id === edge.from);
-      const toEl = canvasElements.find((el) => el.id === edge.to);
+      const fromEl = canvasElements.find((el) => el.id === edge.fromNodeId);
+      const toEl = canvasElements.find((el) => el.id === edge.toNodeId);
       return fromEl?.boardId === currentBoardId && toEl?.boardId === currentBoardId;
     });
   }, [canvasEdges, canvasElements, currentBoardId]);
@@ -148,24 +120,28 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
 
     const bounds = allElements.reduce(
       (acc, el) => ({
-        minX: Math.min(acc.minX, el.position.x),
-        minY: Math.min(acc.minY, el.position.y),
-        maxX: Math.max(acc.maxX, el.position.x + (el.size?.width || 0)),
-        maxY: Math.max(acc.maxY, el.position.y + (el.size?.height || 0)),
+        minX: Math.min(acc.minX, el.x),
+        minY: Math.min(acc.minY, el.y),
+        maxX: Math.max(acc.maxX, el.x + (el.width || 0)),
+        maxY: Math.max(acc.maxY, el.y + (el.height || 0)),
       }),
       { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
     );
 
     const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || rect.width === 0 || rect.height === 0) return;
 
     const padding = 100;
     const contentWidth = bounds.maxX - bounds.minX + padding * 2;
     const contentHeight = bounds.maxY - bounds.minY + padding * 2;
 
+    if (contentWidth <= 0 || contentHeight <= 0) return;
+
     const zoomX = rect.width / contentWidth;
     const zoomY = rect.height / contentHeight;
     const newZoom = Math.min(Math.max(Math.min(zoomX, zoomY), MIN_ZOOM), MAX_ZOOM);
+
+    if (!isFinite(newZoom) || isNaN(newZoom)) return;
 
     const centerX = (bounds.minX + bounds.maxX) / 2;
     const centerY = (bounds.minY + bounds.maxY) / 2;
@@ -178,13 +154,10 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
   }, [visibleElements]);
 
   // Board navigation (read-only)
-  const handleElementDoubleClick = useCallback((elementId: string) => {
-    const element = canvasElements.find((el) => el.id === elementId);
-    if (element?.type === "board") {
-      setBoardPath([...boardPath, { id: element.id, title: element.content || "Board" }]);
-      setCurrentBoardId(element.id);
-    }
-  }, [canvasElements, boardPath]);
+  const handleEnterBoard = useCallback((boardId: string, title: string) => {
+    setBoardPath([...boardPath, { id: boardId, title: title || "Board" }]);
+    setCurrentBoardId(boardId);
+  }, [boardPath]);
 
   const navigateToBoardPath = useCallback((index: number) => {
     if (index === -1) {
@@ -197,8 +170,24 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
     }
   }, [boardPath]);
 
+  // Auto-fit all elements on initial load — retry until container has dimensions
+  useEffect(() => {
+    let attempts = 0;
+    const tryFit = () => {
+      attempts++;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect && rect.width > 0 && rect.height > 0) {
+        handleFitAll();
+      } else if (attempts < 10) {
+        setTimeout(tryFit, 200);
+      }
+    };
+    const timer = setTimeout(tryFit, 200);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="relative w-full h-full overflow-hidden bg-background">
+    <div className="relative w-full h-full overflow-hidden" style={{ background: canvasBackground }}>
       {/* Canvas Container */}
       <div
         ref={containerRef}
@@ -256,46 +245,12 @@ export function CXDCanvasReadOnly({ project }: CXDCanvasReadOnlyProps) {
               onDragStart={() => {}}
               onDragEnd={() => {}}
               onSelect={() => {}}
-              onDoubleClick={() => handleElementDoubleClick(element.id)}
-              onEnterBoard={handleElementDoubleClick}
+              onEnterBoard={handleEnterBoard}
               isReadOnly={true}
             />
           ))}
 
-          {/* Section Cards (only on root board) */}
-          {currentBoardId === null &&
-            CANVAS_SECTIONS.map((section) => {
-              const pos = localPositions[section.id] || { x: 0, y: 0 };
-              const Icon = SECTION_ICONS[section.id];
-
-              return (
-                <div
-                  key={section.id}
-                  className="absolute"
-                  style={{
-                    left: pos.x,
-                    top: pos.y,
-                    transform: "translate(-50%, -50%)",
-                  }}
-                >
-                  <div className="w-64 rounded-xl gradient-border bg-card/80 backdrop-blur p-4 shadow-2xl pointer-events-auto">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center glow-purple">
-                        <Icon className="w-5 h-5 text-primary" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-sm text-gradient">
-                          {section.label}
-                        </h3>
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2">
-                      {section.description}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
+          {/* Section Cards removed - canvas view shows only canvas elements */}
         </div>
       </div>
 

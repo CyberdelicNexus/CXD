@@ -2,6 +2,7 @@
 
 import { useMemo, useCallback } from 'react';
 import { useCXDStore } from '@/store/cxd-store';
+import { useCollaborationContext } from '@/contexts/collaboration-context';
 import type { CanvasElement, HypercubeFaceTag } from '@/types/canvas-elements';
 import type { 
   TaskProjection, 
@@ -16,7 +17,6 @@ import type {
 import { 
   queryTasks, 
   groupTasksBy, 
-  projectElementAsTask,
   getTasksForDate,
   getTasksInRange,
   createUpdatedContent,
@@ -61,6 +61,15 @@ const DEFAULT_SORT: TaskSort[] = [
   { field: 'dueDate', direction: 'asc' },
 ];
 
+const updateContentTitle = (content: string, title: string): string => {
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) return content;
+  const lines = (content || '').split('\n');
+  if (lines.length === 0) return trimmedTitle;
+  lines[0] = trimmedTitle;
+  return lines.join('\n');
+};
+
 /**
  * Hook for accessing and manipulating tasks derived from canvas elements
  */
@@ -79,8 +88,10 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   
   // Get canvas elements from store
   const project = useCXDStore(state => state.getCurrentProject());
-  const updateCanvasElement = useCXDStore(state => state.updateCanvasElement);
   const setViewMode = useCXDStore(state => state.setViewMode);
+
+  // Use collaboration context for synced updates
+  const { syncUpdateElement } = useCollaborationContext();
   const setCanvasViewMode = useCXDStore(state => state.setCanvasViewMode);
   const setActiveBoardId = useCXDStore(state => state.setActiveBoardId);
   const highlightElementBriefly = useCXDStore(state => state.highlightElementBriefly);
@@ -90,16 +101,16 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   // Get all elements from project (including boards)
   const allElements = useMemo(() => {
     if (!project) return [];
-    
+
     const elements: CanvasElement[] = [...(project.canvasLayout?.elements || [])];
-    
+
     // Include elements from all boards
-    if (project.boards) {
-      project.boards.forEach(board => {
+    if (project.canvasLayout?.boards) {
+      project.canvasLayout.boards.forEach(board => {
         elements.push(...board.nodes);
       });
     }
-    
+
     return elements;
   }, [project]);
   
@@ -114,9 +125,6 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
   // Execute query
   const { tasks, total } = useMemo(() => {
     const result = queryTasks(allElements, query);
-    console.log('[PLAN TASKS] All elements:', allElements.length);
-    console.log('[PLAN TASKS] Query result:', result.tasks.length, 'tasks');
-    console.log('[PLAN TASKS] First few tasks:', result.tasks.slice(0, 3));
     return result;
   }, [allElements, query]);
   
@@ -143,9 +151,9 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     // Find and update the source element
     const element = allElements.find(el => el.id === taskId);
     if (element && 'content' in element) {
-      updateCanvasElement(taskId, { content: newContent } as Partial<CanvasElement>);
+      syncUpdateElement(taskId, { content: newContent } as Partial<CanvasElement>);
     }
-  }, [tasks, allElements, updateCanvasElement]);
+  }, [tasks, allElements, syncUpdateElement]);
   
   // Update task status
   const updateTaskStatus = useCallback((taskId: string, status: TaskStatus) => {
@@ -158,8 +166,8 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     
     const newMetadata = createTaskMetadataUpdate(existingMetadata, { status });
     
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+  }, [allElements, syncUpdateElement]);
   
   // Update task priority
   const updateTaskPriority = useCallback((taskId: string, priority: TaskPriority) => {
@@ -172,8 +180,8 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     
     const newMetadata = createTaskMetadataUpdate(existingMetadata, { priority });
     
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+  }, [allElements, syncUpdateElement]);
   
   // Update task due date
   const updateTaskDueDate = useCallback((taskId: string, dueDate: string | undefined) => {
@@ -186,13 +194,17 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     
     const newMetadata = createTaskMetadataUpdate(existingMetadata, { dueDate });
     
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+    syncUpdateElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
+  }, [allElements, syncUpdateElement]);
   
   // Update any task metadata
   const updateTaskMetadata = useCallback((taskId: string, updates: Partial<TaskProjection>) => {
     const element = allElements.find(el => el.id === taskId);
     if (!element) return;
+
+    if (updates.hypercubeTags) {
+      syncUpdateElement(taskId, { hypercubeTags: updates.hypercubeTags } as Partial<CanvasElement>);
+    }
     
     const existingMetadata = 'taskMetadata' in element 
       ? (element as any).taskMetadata 
@@ -209,16 +221,38 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     if (updates.tags) metadataUpdates.customTags = updates.tags;
     if (updates.subtasks) metadataUpdates.subtasks = updates.subtasks;
     if (updates.customProperties) metadataUpdates.customProperties = updates.customProperties;
-    
+    if (updates.dependencies) metadataUpdates.dependencies = updates.dependencies;
+    if (updates.isArchived !== undefined) metadataUpdates.isArchived = updates.isArchived;
+    if (updates.taskMetadata !== undefined && 'versionId' in updates.taskMetadata) {
+      metadataUpdates.versionId = updates.taskMetadata.versionId;
+    }
     const newMetadata = createTaskMetadataUpdate(existingMetadata, metadataUpdates);
-    
-    updateCanvasElement(taskId, { taskMetadata: newMetadata } as Partial<CanvasElement>);
-  }, [allElements, updateCanvasElement]);
+
+    const elementUpdates: Partial<CanvasElement> = { taskMetadata: newMetadata };
+
+    if ('content' in element && typeof (element as any).content === 'string') {
+      const content = (element as any).content as string;
+      if (updates.title !== undefined) {
+        (elementUpdates as any).content = updateContentTitle(content, updates.title);
+      }
+    }
+
+    if (updates.description !== undefined) {
+      const normalized = updates.description.trim();
+      (elementUpdates as any).taskMetadata = createTaskMetadataUpdate(newMetadata, {
+        description: normalized || undefined,
+      });
+    }
+
+    syncUpdateElement(taskId, elementUpdates);
+  }, [allElements, syncUpdateElement]);
   
   // Navigate to task in canvas
   const navigateToTask = useCallback((taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
+    const sourceElement = allElements.find(el => el.id === taskId);
+    const isInInbox = Boolean((sourceElement as any)?.inInbox);
     
     // Switch to canvas view
     setViewMode('canvas');
@@ -238,9 +272,16 @@ export function usePlanTasks(options: UsePlanTasksOptions = {}): UsePlanTasksRet
     });
     setCanvasZoom(1);
     
+    if (isInInbox) {
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('cxd:pulse-task-inbox', { detail: { durationMs: 3000 } }));
+      }, 120);
+      return;
+    }
+
     // Highlight the element briefly
-    highlightElementBriefly(taskId, 2000);
-  }, [tasks, setViewMode, setCanvasViewMode, setActiveBoardId, setCanvasPosition, setCanvasZoom, highlightElementBriefly]);
+    highlightElementBriefly(taskId, 2500);
+  }, [tasks, allElements, setViewMode, setCanvasViewMode, setActiveBoardId, setCanvasPosition, setCanvasZoom, highlightElementBriefly]);
   
   // Get task by ID
   const getTaskById = useCallback((taskId: string): TaskProjection | undefined => {

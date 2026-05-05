@@ -3,14 +3,26 @@
 import { encodedRedirect } from "@/utils/utils";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createClient } from "../../supabase/server";
+import { revalidatePath } from "next/cache";
+import { createClient, createSessionClient } from "../../supabase/server";
+import { getSupabaseAdmin } from "@/supabase/admin";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export const signUpAction = async (formData: FormData) => {
+  const headersList = headers();
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rateCheck = checkRateLimit(ip, 'sign-up');
+  if (!rateCheck.allowed) {
+    return encodedRedirect("error", "/sign-up", "Too many attempts. Please try again later.");
+  }
+
   const email = formData.get("email")?.toString();
   const password = formData.get("password")?.toString();
   const fullName = formData.get("full_name")?.toString() || '';
+  const promo = formData.get("promo")?.toString();
+  const redirectTo = formData.get("redirectTo")?.toString();
   const supabase = await createClient();
-  const origin = headers().get("origin");
+  const origin = headersList.get("origin");
 
   if (!email || !password) {
     return encodedRedirect(
@@ -24,43 +36,33 @@ export const signUpAction = async (formData: FormData) => {
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
+      emailRedirectTo: `${origin}/auth/callback${redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : ''}`,
       data: {
         full_name: fullName,
         email: email,
+        promo: promo,
       }
     },
   });
 
-  console.log("After signUp", error);
-
-
   if (error) {
-    console.error(error.code + " " + error.message);
+    console.error(`Signup error [${error.code}]: ${error.message}`);
+
+    // Check for specific database-related errors that might be cryptic to the user
+    if (error.message.includes("Database error saving new user")) {
+      return encodedRedirect(
+        "error",
+        "/sign-up",
+        "Our database is experiencing a temporary issue. Please try signing up again in a few moments."
+      );
+    }
+
     return encodedRedirect("error", "/sign-up", error.message);
   }
 
-  if (user) {
-    try {
-      const { error: updateError } = await supabase
-        .from('users')
-        .insert({
-          id: user.id,
-          name: fullName,
-          full_name: fullName,
-          email: email,
-          user_id: user.id,
-          token_identifier: user.id,
-          created_at: new Date().toISOString()
-        });
-
-      if (updateError) {
-        console.error('Error updating user profile:', updateError);
-      }
-    } catch (err) {
-      console.error('Error in user profile creation:', err);
-    }
-  }
+  // Note: The public.users and public.subscriptions records are created 
+  // automatically by the on_auth_user_created trigger in the database.
+  // We no longer need to manually insert them here.
 
   return encodedRedirect(
     "success",
@@ -70,9 +72,18 @@ export const signUpAction = async (formData: FormData) => {
 };
 
 export const signInAction = async (formData: FormData) => {
+  const headersList = headers();
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rateCheck = checkRateLimit(ip, 'sign-in');
+  if (!rateCheck.allowed) {
+    return encodedRedirect("error", "/sign-in", "Too many attempts. Please try again later.");
+  }
+
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
-  const supabase = await createClient();
+  const redirectTo = formData.get("redirectTo") as string | null;
+  const rememberMe = formData.get("rememberMe") === "on";
+  const supabase = rememberMe ? await createClient() : await createSessionClient();
 
   const { error } = await supabase.auth.signInWithPassword({
     email,
@@ -80,16 +91,45 @@ export const signInAction = async (formData: FormData) => {
   });
 
   if (error) {
+    const params = redirectTo ? `?redirectTo=${encodeURIComponent(redirectTo)}` : "";
+    return encodedRedirect("error", `/sign-in${params}`, error.message);
+  }
+
+  return redirect(redirectTo || "/dashboard");
+};
+
+export const signInWithGoogleAction = async (formData: FormData) => {
+  const supabase = await createClient();
+  const origin = headers().get("origin");
+  const redirectTo = formData.get("redirectTo") as string | null;
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${origin}/auth/callback${redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : ""}`,
+    },
+  });
+
+  if (error) {
     return encodedRedirect("error", "/sign-in", error.message);
   }
 
-  return redirect("/dashboard");
+  if (data.url) {
+    return redirect(data.url);
+  }
 };
 
 export const forgotPasswordAction = async (formData: FormData) => {
+  const headersList = headers();
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rateCheck = checkRateLimit(ip, 'forgot-password');
+  if (!rateCheck.allowed) {
+    return encodedRedirect("error", "/forgot-password", "Too many attempts. Please try again later.");
+  }
+
   const email = formData.get("email")?.toString();
   const supabase = await createClient();
-  const origin = headers().get("origin");
+  const origin = headersList.get("origin");
   const callbackUrl = formData.get("callbackUrl")?.toString();
 
   if (!email) {
@@ -160,5 +200,84 @@ export const resetPasswordAction = async (formData: FormData) => {
 export const signOutAction = async () => {
   const supabase = await createClient();
   await supabase.auth.signOut();
-  return redirect("/sign-in");
+  return redirect("/");
 };
+
+export const updateNameAction = async (formData: FormData) => {
+  const fullName = formData.get("full_name")?.toString();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return encodedRedirect("error", "/dashboard/profile", "Not authenticated");
+  }
+
+  if (!fullName) {
+    return encodedRedirect("error", "/dashboard/profile", "Name is required");
+  }
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      full_name: fullName,
+      name: fullName
+    })
+    .eq('id', user.id);
+
+  if (error) {
+    return encodedRedirect("error", "/dashboard/profile", "Failed to update name");
+  }
+
+  revalidatePath("/dashboard/profile");
+  return encodedRedirect("success", "/dashboard/profile", "Name updated successfully");
+};
+
+export const deleteAccountAction = async () => {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return redirect("/sign-in");
+  }
+
+  // Need a service role client to delete the user from auth.users
+  const adminClient = getSupabaseAdmin();
+  const { error } = await adminClient.auth.admin.deleteUser(user.id);
+
+  if (error) {
+    console.error("Delete account error:", error);
+    return encodedRedirect("error", "/dashboard/profile", "Failed to delete account. Please contact support.");
+  }
+
+  // Sign out locally too
+  await supabase.auth.signOut();
+
+  return redirect("/");
+};
+
+export const cancelSubscriptionAction = async () => {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return redirect("/sign-in");
+  }
+
+  // Update subscription to 'free'
+  const { error } = await supabase
+    .from('subscriptions')
+    .update({
+      plan_id: 'free',
+      status: 'active',
+      updated_at: new Date().toISOString()
+    })
+    .eq('user_id', user.id);
+
+  if (error) {
+    return encodedRedirect("error", "/dashboard/profile", "Failed to cancel subscription");
+  }
+
+  revalidatePath("/dashboard/profile");
+  return encodedRedirect("success", "/dashboard/profile", "Subscription cancelled. You are now on the Free tier.");
+};
+

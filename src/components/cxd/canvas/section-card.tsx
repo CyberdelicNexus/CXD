@@ -4,21 +4,27 @@ import { CXDSection, CXDProject, REALITY_PLANES, SENSORY_DOMAINS, PRESENCE_TYPES
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Globe, 
-  BookOpen, 
-  Wand2, 
-  User, 
+import {
+  Globe,
+  BookOpen,
+  Wand2,
+  User,
   Users,
-  Layers, 
-  Eye, 
-  Radio, 
-  Activity, 
-  Brain, 
+  Layers,
+  Eye,
+  Radio,
+  Activity,
+  Brain,
   Heart,
   Maximize2,
   Target,
-  Lightbulb
+  Lightbulb,
+  Ear,
+  Wind,
+  Apple,
+  Fingerprint,
+  PersonStanding,
+  Zap,
 } from 'lucide-react';
 
 interface SectionCardProps {
@@ -52,10 +58,27 @@ const sectionColors: Record<string, string> = {
   contextAndMeaning: 'from-purple-500/20 to-indigo-500/20',
   realityPlanes: 'from-teal-500/20 to-cyan-500/20',
   sensoryDomains: 'from-pink-500/20 to-rose-500/20',
-  presence: 'from-blue-500/20 to-sky-500/20',
-  experienceFlow: 'from-orange-500/20 to-amber-500/20',
-  stateMapping: 'from-violet-500/20 to-purple-500/20',
-  traitMapping: 'from-emerald-500/20 to-teal-500/20',
+  presence: 'from-blue-600/20 to-indigo-600/20',
+  experienceFlow: 'from-orange-600/20 to-amber-600/20',
+  stateMapping: 'from-violet-600/20 to-purple-600/20',
+  traitMapping: 'from-emerald-600/20 to-green-600/20',
+};
+
+const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string }> = {
+  visual: { icon: <Eye className="w-3 h-3" />, color: "bg-blue-500" },
+  auditory: { icon: <Ear className="w-3 h-3" />, color: "bg-indigo-500" },
+  olfactory: { icon: <Wind className="w-3 h-3" />, color: "bg-teal-500" },
+  gustatory: { icon: <Apple className="w-3 h-3" />, color: "bg-rose-500" },
+  haptic: { icon: <Fingerprint className="w-3 h-3" />, color: "bg-purple-500" },
+};
+
+const PRESENCE_METADATA: Record<string, { icon: React.ReactNode; color: string }> = {
+  mental: { icon: <Brain className="w-3 h-3" />, color: "bg-blue-500" },
+  emotional: { icon: <Heart className="w-3 h-3" />, color: "bg-red-500" },
+  social: { icon: <Users className="w-3 h-3" />, color: "bg-violet-500" },
+  embodied: { icon: <PersonStanding className="w-3 h-3" />, color: "bg-orange-500" },
+  environmental: { icon: <Globe className="w-3 h-3" />, color: "bg-emerald-500" },
+  active: { icon: <Zap className="w-3 h-3" />, color: "bg-yellow-500" },
 };
 
 export function SectionCard({ section, project, position, onClick, onMouseDown, onMouseUp, onDoubleClick, isDragging }: SectionCardProps) {
@@ -171,32 +194,53 @@ export function SectionCard({ section, project, position, onClick, onMouseDown, 
       case 'sensoryDomains':
         return (
           <div className="space-y-1">
-            {SENSORY_DOMAINS.map((domain) => (
-              <div key={domain.code} className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground w-16 capitalize">{domain.code}</span>
-                <Progress value={project.sensoryDomains[domain.code]} className="h-1.5 flex-1" />
-                <span className="text-xs font-mono text-muted-foreground w-8">
-                  {project.sensoryDomains[domain.code]}%
-                </span>
-              </div>
-            ))}
+            {SENSORY_DOMAINS.map((domain) => {
+              const meta = SENSORY_METADATA[domain.code];
+              const value = project.sensoryDomains[domain.code];
+              return (
+                <div key={domain.code} className="flex items-center gap-2">
+                  <div className="text-muted-foreground w-4">{meta.icon}</div>
+                  <Progress
+                    value={value}
+                    className="h-1.5 flex-1"
+                    indicatorClassName={`bg-gradient-to-r from-zinc-800 to-${meta.color.replace('bg-', '')}`}
+                  />
+                  <span className="text-[10px] font-mono text-muted-foreground w-8">
+                    {value}%
+                  </span>
+                </div>
+              );
+            })}
           </div>
         );
 
       case 'presence':
         return (
-          <div className="grid grid-cols-2 gap-1">
-            {PRESENCE_TYPES.map((presence) => (
-              <div key={presence.code} className="flex items-center gap-1">
-                <div 
-                  className="w-2 h-2 rounded-full bg-primary"
-                  style={{ opacity: project.presenceTypes[presence.code] / 100 }}
-                />
-                <span className="text-xs text-muted-foreground capitalize truncate">
-                  {presence.code}
-                </span>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+            {PRESENCE_TYPES.map((presence) => {
+              const meta = PRESENCE_METADATA[presence.code];
+              const value = project.presenceTypes[presence.code];
+              return (
+                <div key={presence.code} className="flex items-center gap-1.5 p-1 rounded bg-white/5 border border-white/5">
+                  <div
+                    className={`w-4 h-4 rounded flex items-center justify-center text-[10px] ${meta.color} bg-opacity-20 text-white`}
+                  >
+                    {meta.icon}
+                  </div>
+                  <div className="flex-1 flex flex-col gap-0.5">
+                    <span className="text-[10px] text-muted-foreground capitalize leading-none">
+                      {presence.code}
+                    </span>
+                    <div className="h-0.5 w-full bg-secondary/50 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${meta.color}`}
+                        style={{ width: `${value}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
 
@@ -205,7 +249,7 @@ export function SectionCard({ section, project, position, onClick, onMouseDown, 
           <div className="flex items-end justify-between h-16 gap-1">
             {EXPERIENCE_FLOW_STAGES.map((stage) => (
               <div key={stage.code} className="flex-1 flex flex-col items-center gap-1">
-                <div 
+                <div
                   className="w-full bg-primary rounded-t transition-all"
                   style={{ height: `${project.experienceFlow[stage.code].engagementLevel * 0.6}px` }}
                 />
@@ -251,8 +295,8 @@ export function SectionCard({ section, project, position, onClick, onMouseDown, 
   return (
     <div
       className={`absolute select-none ${isDragging ? 'z-50' : 'z-10'}`}
-      style={{ 
-        left: position.x, 
+      style={{
+        left: position.x,
         top: position.y,
         transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
       }}
@@ -263,12 +307,11 @@ export function SectionCard({ section, project, position, onClick, onMouseDown, 
         onDoubleClick?.();
       }}
     >
-      <Card 
-        className={`w-[300px] gradient-border bg-gradient-to-br ${sectionColors[section.id]} backdrop-blur transition-all group ${
-          isDragging 
-            ? 'scale-105 shadow-2xl ring-2 ring-primary/50 cursor-move' 
+      <Card
+        className={`w-[300px] gradient-border bg-gradient-to-br ${sectionColors[section.id]} backdrop-blur transition-all group ${isDragging
+            ? 'scale-105 shadow-2xl ring-2 ring-primary/50 cursor-move'
             : 'hover:glow-teal cursor-grab active:cursor-grabbing'
-        }`}
+          }`}
       >
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
