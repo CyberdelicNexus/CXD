@@ -16,10 +16,11 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   let concurrencyHeldFor: string | null = null;
-  const releaseConcurrency = () => {
+  const releaseConcurrency = async () => {
     if (concurrencyHeldFor) {
-      releaseConcurrencySlot(concurrencyHeldFor);
+      const userId = concurrencyHeldFor;
       concurrencyHeldFor = null;
+      try { await releaseConcurrencySlot(userId); } catch { /* noop */ }
     }
   };
 
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
     }
 
     // 4. Rate limit check (per-tier limits)
-    const rateCheck = checkRateLimit(user.id, "chat", subscription?.plan_id || 'free');
+    const rateCheck = await checkRateLimit(user.id, "chat", subscription?.plan_id || 'free');
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Try again shortly.", retryAfterMs: rateCheck.retryAfterMs },
@@ -129,7 +130,7 @@ export async function POST(request: Request) {
     }
 
     // 4b. Concurrent-stream cap (cost runaway protection: one user can't hold N streams open)
-    if (!acquireConcurrencySlot(user.id)) {
+    if (!(await acquireConcurrencySlot(user.id))) {
       return NextResponse.json(
         { error: "Too many concurrent AI requests. Wait for the previous one to finish." },
         { status: 429 },
@@ -166,8 +167,8 @@ export async function POST(request: Request) {
       // not `error`. Surface them with a clear 402.
       if (creditResult && (creditResult as { success?: boolean }).success === false) {
         const result = creditResult as { error?: string; message?: string; used_today?: number; daily_cap?: number };
-        releaseConcurrency();
         if (result.error === 'daily_cap_reached') {
+          await releaseConcurrency();
           return NextResponse.json(
             {
               error: result.message ?? "Daily AI usage limit reached. Resets at UTC midnight.",
@@ -178,6 +179,7 @@ export async function POST(request: Request) {
           );
         }
         if (result.error === 'insufficient_credits') {
+          await releaseConcurrency();
           return NextResponse.json(
             { error: "Insufficient credits. Upgrade your plan or wait for monthly reset." },
             { status: 402 },
@@ -308,7 +310,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    releaseConcurrency();
+    await releaseConcurrency();
     console.error("[AI Chat Error]", error);
 
     // Tag with route + provider/model so provider outages cluster cleanly in Sentry.

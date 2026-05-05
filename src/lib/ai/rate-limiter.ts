@@ -1,17 +1,22 @@
-// In-memory rate limiter for AI endpoints.
-// Tracks request timestamps per user per endpoint type.
+// AI rate limiter with two-mode operation:
 //
-// LIMITATION: in-memory means each Vercel instance has its own counter,
-// so under autoscale the effective limit = configured × instance_count.
-// Fine at low scale (single instance). Replace with Upstash Redis sliding
-// window when Phase 3 lands.
+// 1. Upstash Redis (distributed) — when UPSTASH_REDIS_REST_URL + TOKEN are
+//    set. Sliding-window via @upstash/ratelimit. Correct under autoscale.
+// 2. In-memory fallback — when Redis isn't configured. Correct on a single
+//    Vercel instance only; under autoscale the effective limit becomes
+//    configured × instance_count. Fine for local dev or low-traffic prod.
+//
+// Both modes share the same async API. Callers pass the user's plan_id to
+// pick the per-tier limit. Same module also gates concurrent in-flight
+// requests per user (cost-runaway protection).
 
-type EndpointType = "chat" | "analysis";
+import { Ratelimit } from '@upstash/ratelimit';
+import { getRedis } from '@/lib/redis';
+
+type EndpointType = 'chat' | 'analysis';
 
 const WINDOW_MS = 60_000;
 
-// Per-plan request budgets per endpoint per minute. Tunable via env vars
-// without redeploys.
 function intFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -50,97 +55,176 @@ function tierLimits(planId: string): TierLimits {
   }
 }
 
-const requestLog = new Map<string, number[]>();
+// ---------------------------------------------------------------------------
+// Upstash Ratelimit cache: one instance per (limit, endpoint) so we re-use
+// the underlying script. Created lazily.
+// ---------------------------------------------------------------------------
+const limiterCache = new Map<string, Ratelimit>();
 
-function getKey(userId: string, endpoint: EndpointType): string {
-  return `${userId}:${endpoint}`;
+function getLimiter(maxRequests: number, endpoint: EndpointType): Ratelimit | null {
+  const redis = getRedis();
+  if (!redis) return null;
+  const key = `${endpoint}:${maxRequests}`;
+  let cached = limiterCache.get(key);
+  if (!cached) {
+    cached = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(maxRequests, '1 m'),
+      prefix: `cxd:ai-rl:${endpoint}`,
+      analytics: false,
+    });
+    limiterCache.set(key, cached);
+  }
+  return cached;
 }
 
-/**
- * Check if a user is rate-limited for an endpoint type, scoped to their
- * plan tier. Returns { allowed: true } or { allowed: false, retryAfterMs }.
- *
- * Pass the user's plan_id ('free' | 'pro' | 'lifetime' | 'beta_tester').
- * Unknown plans fall back to free limits.
- */
-export function checkRateLimit(
+// ---------------------------------------------------------------------------
+// In-memory fallback (per-instance only)
+// ---------------------------------------------------------------------------
+const inMemoryLog = new Map<string, number[]>();
+
+function inMemoryCheck(
   userId: string,
   endpoint: EndpointType,
-  planId: string = 'free',
+  maxRequests: number,
 ): { allowed: true } | { allowed: false; retryAfterMs: number } {
-  const key = getKey(userId, endpoint);
-  const maxRequests = tierLimits(planId)[endpoint];
+  const key = `${userId}:${endpoint}`;
   const now = Date.now();
-
-  // Get existing timestamps, filter to current window
-  const timestamps = (requestLog.get(key) || []).filter(
+  const timestamps = (inMemoryLog.get(key) || []).filter(
     (t) => now - t < WINDOW_MS,
   );
-
   if (timestamps.length >= maxRequests) {
     const oldestInWindow = timestamps[0];
-    const retryAfterMs = WINDOW_MS - (now - oldestInWindow);
-    return { allowed: false, retryAfterMs };
+    return { allowed: false, retryAfterMs: WINDOW_MS - (now - oldestInWindow) };
   }
-
   return { allowed: true };
 }
 
-/**
- * Record a request for rate-limiting purposes.
- * Call this AFTER a successful check.
- */
-export function recordRequest(userId: string, endpoint: EndpointType): void {
-  const key = getKey(userId, endpoint);
+function inMemoryRecord(userId: string, endpoint: EndpointType): void {
+  const key = `${userId}:${endpoint}`;
   const now = Date.now();
-
-  const timestamps = (requestLog.get(key) || []).filter(
+  const timestamps = (inMemoryLog.get(key) || []).filter(
     (t) => now - t < WINDOW_MS,
   );
   timestamps.push(now);
-  requestLog.set(key, timestamps);
+  inMemoryLog.set(key, timestamps);
 }
 
-// Periodic cleanup to prevent memory leaks (every 5 minutes)
-if (typeof setInterval !== "undefined") {
+// In-memory cleanup (only relevant when Redis isn't configured)
+if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     const now = Date.now();
-    const keys = Array.from(requestLog.keys());
+    const keys = Array.from(inMemoryLog.keys());
     for (const key of keys) {
-      const timestamps = requestLog.get(key) || [];
+      const timestamps = inMemoryLog.get(key) || [];
       const filtered = timestamps.filter((t: number) => now - t < 120_000);
-      if (filtered.length === 0) {
-        requestLog.delete(key);
-      } else {
-        requestLog.set(key, filtered);
-      }
+      if (filtered.length === 0) inMemoryLog.delete(key);
+      else inMemoryLog.set(key, filtered);
     }
   }, 300_000);
 }
 
 // ---------------------------------------------------------------------------
-// Concurrent stream cap (cost-runaway protection)
-// A single scripted user can otherwise hold many streams open in parallel
-// and burn through your AI provider budget. This caps in-flight AI requests
-// per user. In-memory; per Vercel instance — fine at low scale, replace with
-// Redis when autoscaling kicks in.
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a user is rate-limited for an endpoint, scoped to their plan tier.
+ * Distributed via Redis when configured, in-memory fallback otherwise.
+ *
+ * Pass the user's plan_id ('free' | 'pro' | 'lifetime' | 'beta_tester').
+ * Unknown plans fall back to free limits.
+ */
+export async function checkRateLimit(
+  userId: string,
+  endpoint: EndpointType,
+  planId: string = 'free',
+): Promise<{ allowed: true } | { allowed: false; retryAfterMs: number }> {
+  const maxRequests = tierLimits(planId)[endpoint];
+  const limiter = getLimiter(maxRequests, endpoint);
+
+  if (limiter) {
+    try {
+      const { success, reset } = await limiter.limit(userId);
+      if (!success) {
+        return { allowed: false, retryAfterMs: Math.max(0, reset - Date.now()) };
+      }
+      return { allowed: true };
+    } catch (err) {
+      // Redis hiccup — fall back to in-memory rather than DDoS ourselves.
+      console.warn('[rate-limiter] Redis check failed, falling back to in-memory', err);
+    }
+  }
+
+  return inMemoryCheck(userId, endpoint, maxRequests);
+}
+
+/**
+ * Record a request for rate-limiting purposes.
+ *
+ * No-op when running with Upstash (the limit() call already counts the
+ * request atomically). Kept for in-memory mode and call-site compatibility.
+ */
+export function recordRequest(userId: string, endpoint: EndpointType): void {
+  if (getRedis()) return; // Upstash counts on .limit() — nothing to do.
+  inMemoryRecord(userId, endpoint);
+}
+
+// ---------------------------------------------------------------------------
+// Concurrent in-flight cap (per user)
 // ---------------------------------------------------------------------------
 
 const MAX_CONCURRENT_AI_REQUESTS_PER_USER = 2;
-const concurrentRequests = new Map<string, number>();
+const CONCURRENCY_TTL_SECONDS = 90; // safety: stale slots auto-expire if release fails
+const inMemoryConcurrent = new Map<string, number>();
 
-export function acquireConcurrencySlot(userId: string): boolean {
-  const current = concurrentRequests.get(userId) || 0;
+/**
+ * Try to acquire a concurrent-request slot for the user.
+ * Returns true on success, false if the user is at their cap.
+ *
+ * In Redis mode: INCR a per-user counter with TTL. If post-incr value
+ * exceeds the cap, DECR back and refuse.
+ */
+export async function acquireConcurrencySlot(userId: string): Promise<boolean> {
+  const redis = getRedis();
+  if (redis) {
+    const key = `cxd:ai-conc:${userId}`;
+    try {
+      const after = await redis.incr(key);
+      if (after === 1) {
+        // First holder — set TTL so a crashed handler doesn't pin the slot forever
+        await redis.expire(key, CONCURRENCY_TTL_SECONDS);
+      }
+      if (after > MAX_CONCURRENT_AI_REQUESTS_PER_USER) {
+        await redis.decr(key); // give the slot back; we're refusing
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('[rate-limiter] Redis concurrency check failed, falling back', err);
+    }
+  }
+
+  const current = inMemoryConcurrent.get(userId) || 0;
   if (current >= MAX_CONCURRENT_AI_REQUESTS_PER_USER) return false;
-  concurrentRequests.set(userId, current + 1);
+  inMemoryConcurrent.set(userId, current + 1);
   return true;
 }
 
-export function releaseConcurrencySlot(userId: string): void {
-  const current = concurrentRequests.get(userId) || 0;
-  if (current <= 1) {
-    concurrentRequests.delete(userId);
-  } else {
-    concurrentRequests.set(userId, current - 1);
+export async function releaseConcurrencySlot(userId: string): Promise<void> {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const after = await redis.decr(`cxd:ai-conc:${userId}`);
+      // Don't go negative if release is called more times than acquire (defensive).
+      if (after < 0) await redis.set(`cxd:ai-conc:${userId}`, 0, { ex: CONCURRENCY_TTL_SECONDS });
+      return;
+    } catch (err) {
+      console.warn('[rate-limiter] Redis concurrency release failed, falling back', err);
+    }
   }
+
+  const current = inMemoryConcurrent.get(userId) || 0;
+  if (current <= 1) inMemoryConcurrent.delete(userId);
+  else inMemoryConcurrent.set(userId, current - 1);
 }
