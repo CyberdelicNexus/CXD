@@ -10,6 +10,7 @@ import {
   getGeneralSystemPrompt,
 } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
+import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
 import type { AIProviderKey, AIProjectContext, FaceContext } from "@/types/ai-types";
 import { CREDIT_COSTS } from "@/types/ai-types";
 
@@ -101,21 +102,50 @@ export async function POST(request: Request) {
     // 4. Credit deduction — gracefully skip if tables/RPC not deployed yet
     const costKey = analysisType === "erd" ? "erd" : "analyze";
     const creditCost = (CREDIT_COSTS as Record<string, Record<string, number>>)[costKey]?.[resolvedProvider] || 5;
-    const { error: creditError } = await supabase.rpc(
+
+    // Resolve daily cap from caller's plan tier.
+    const { data: subForCap } = await supabase
+      .from('subscriptions')
+      .select('plan_id')
+      .eq('user_id', user.id)
+      .single();
+    const dailyCap = getDailyCreditCap(subForCap?.plan_id || 'free');
+
+    const { data: creditResult, error: creditError } = await supabase.rpc(
       "deduct_ai_credits",
-      { p_user_id: user.id, p_cost: creditCost },
+      { p_user_id: user.id, p_cost: creditCost, p_daily_cap: dailyCap },
     );
 
     if (creditError) {
       if (isMissing(creditError)) {
         console.warn("[AI Analyze] deduct_ai_credits RPC not found — skipping. Run migrations to fix.");
-      } else if ((creditError.message || "").includes("insufficient")) {
+      } else {
+        console.error("[AI Analyze Credit Error]", creditError);
+      }
+    }
+
+    // RPC business-logic failures land in `data`, not `error`. Surface as 402.
+    if (creditResult && (creditResult as { success?: boolean }).success === false) {
+      const result = creditResult as { error?: string; message?: string; used_today?: number; daily_cap?: number };
+      releaseConcurrency();
+      if (result.error === 'daily_cap_reached') {
+        return NextResponse.json(
+          {
+            error: result.message ?? "Daily AI usage limit reached. Resets at UTC midnight.",
+            usedToday: result.used_today,
+            dailyCap: result.daily_cap,
+          },
+          { status: 402 },
+        );
+      }
+      if (result.error === 'insufficient_credits') {
         return NextResponse.json(
           { error: "Insufficient credits. Upgrade your plan or wait for monthly reset." },
           { status: 402 },
         );
-      } else {
-        console.error("[AI Analyze Credit Error]", creditError);
+      }
+      if (result.error === 'no_credits_record') {
+        console.warn("[AI Analyze] no record for user; allowing request and relying on /api/ai/credits to provision");
       }
     }
 

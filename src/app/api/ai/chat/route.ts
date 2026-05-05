@@ -6,6 +6,7 @@ import { getModelConfig, getModelInstance, getModelInstanceByModelId, MODEL_ID_M
 import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { canBringOwnKeys, type ModelId } from "@/lib/ai-credit-config";
+import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
 import { decryptAPIKey } from "@/lib/encryption";
 import type { AIProviderKey, AIProjectContext, FaceContext } from "@/types/ai-types";
 import { CREDIT_COSTS } from "@/types/ai-types";
@@ -139,9 +140,11 @@ export async function POST(request: Request) {
     // 5. Credit check and deduction (skip if using BYOK)
     if (!userApiKey) {
       const creditCost = CREDIT_COSTS.chat[resolvedProvider] || 1;
-      const { error: creditError } = await supabase.rpc(
+      const dailyCap = getDailyCreditCap(subscription?.plan_id || 'free');
+
+      const { data: creditResult, error: creditError } = await supabase.rpc(
         "deduct_ai_credits",
-        { p_user_id: user.id, p_cost: creditCost },
+        { p_user_id: user.id, p_cost: creditCost, p_daily_cap: dailyCap },
       );
 
       if (creditError) {
@@ -154,13 +157,36 @@ export async function POST(request: Request) {
         if (isMissing) {
           // RPC or table doesn't exist yet — skip credit deduction
           console.warn("[AI Credits] deduct_ai_credits RPC not found — skipping. Run migrations to fix.");
-        } else if (msg.includes("insufficient")) {
+        } else {
+          console.error("[AI Credit Error]", creditError);
+        }
+      }
+
+      // The RPC returns a JSONB object; business-logic failures land in `data`,
+      // not `error`. Surface them with a clear 402.
+      if (creditResult && (creditResult as { success?: boolean }).success === false) {
+        const result = creditResult as { error?: string; message?: string; used_today?: number; daily_cap?: number };
+        releaseConcurrency();
+        if (result.error === 'daily_cap_reached') {
+          return NextResponse.json(
+            {
+              error: result.message ?? "Daily AI usage limit reached. Resets at UTC midnight.",
+              usedToday: result.used_today,
+              dailyCap: result.daily_cap,
+            },
+            { status: 402 },
+          );
+        }
+        if (result.error === 'insufficient_credits') {
           return NextResponse.json(
             { error: "Insufficient credits. Upgrade your plan or wait for monthly reset." },
             { status: 402 },
           );
-        } else {
-          console.error("[AI Credit Error]", creditError);
+        }
+        if (result.error === 'no_credits_record') {
+          // Auto-provision happens in /api/ai/credits — let the request through
+          // and the user's first GET will create their row.
+          console.warn("[AI Credits] no record for user; allowing request and relying on GET to provision");
         }
       }
     } else {
