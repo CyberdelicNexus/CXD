@@ -98,14 +98,6 @@ export async function resolveCanvasAccess(opts: {
       canvasId, viewerUserId, ownerId: project.owner_id, error: ownerSubError,
     });
   }
-  // Visibility while diagnosing the "Pro account locked" bug. Remove once stable.
-  if (typeof window !== 'undefined') {
-    console.debug('[resolveCanvasAccess]', {
-      canvasId, viewerUserId, ownerId: project.owner_id,
-      isOwner: project.owner_id === viewerUserId,
-      ownerSub, ownerSubError,
-    });
-  }
 
   const ownerPlan = ownerSub?.plan_id ?? 'free';
   const freePrimary = ownerSub?.free_primary_canvas_id ?? null;
