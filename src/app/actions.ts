@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient, createSessionClient } from "../../supabase/server";
-import { getSupabaseAdmin } from "../../supabase/admin";
+import { getSupabaseAdmin } from "@/supabase/admin";
 import { checkRateLimit } from "@/lib/rate-limiter";
 
 export const signUpAction = async (formData: FormData) => {

@@ -74,6 +74,7 @@ module.exports = process.env.NEXT_PUBLIC_SENTRY_DSN
       // Tunnel through /monitoring to bypass ad blockers (optional but cheap).
       tunnelRoute: '/monitoring',
       hideSourceMaps: true,
-      disableLogger: true,
+      // disableLogger replaced by webpack tree-shake config (deprecated in @sentry/nextjs 10).
+      webpack: { treeshake: { removeDebugLogging: true } },
     })
   : nextConfig;
