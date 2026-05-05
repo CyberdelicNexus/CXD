@@ -30,7 +30,7 @@ export const AI_MODELS = {
   },
   'kimi': {
     id: 'kimi',
-    name: 'Kimi K2.5',
+    name: 'Kimi K2.6',
     provider: 'moonshot',
     creditWeight: 6,
     pricing: {
@@ -96,6 +96,25 @@ export const AI_MODELS = {
 } as const;
 
 export type ModelId = keyof typeof AI_MODELS;
+
+/**
+ * Models that exist in the type system / pricing config but are intentionally
+ * hidden from user-facing pickers. Use when an API tier doesn't expose the
+ * underlying model — keeping the IDs registered prevents type churn elsewhere
+ * but the UI shouldn't offer them.
+ *
+ * Currently hiding Claude Haiku 4.5 and Opus 4.6 — Anthropic account only
+ * exposes Sonnet 4 right now. Re-enable by removing from this list when the
+ * tier is upgraded.
+ */
+export const HIDDEN_MODEL_IDS: readonly ModelId[] = [
+  'claude-haiku-4.5',
+  'claude-opus-4.6',
+];
+
+export function isModelVisible(id: ModelId): boolean {
+  return !HIDDEN_MODEL_IDS.includes(id);
+}
 
 /**
  * Tier Credit Allowances

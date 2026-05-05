@@ -8,20 +8,22 @@ import { google, createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { AIProviderKey, AIModelTier } from "@/types/ai-types";
 import type { ModelId } from "@/lib/ai-credit-config";
 
-// Map our model IDs to actual API model IDs
-// IMPORTANT: These must match what's actually available in the APIs
-// Run test-models.mjs to verify which models work with your API keys
+// Map our model IDs to actual API model IDs.
+// IMPORTANT: These must match what's actually available in the APIs.
+// Run test-models.mjs to verify which models work with your API keys.
 export const MODEL_ID_MAP: Record<ModelId, string> = {
   // Gemini - requires 'models/' prefix
   'gemini-2.0-flash': 'models/gemini-2.0-flash',
   'gemini-2.5-pro': 'models/gemini-2.5-pro',
-  // Kimi - working
-  'kimi': 'moonshotai/kimi-k2.5',
-  // Claude - only claude-3-haiku-20240307 works with current API key
-  // Claude 3.5 models require upgraded API access
-  'claude-haiku-4.5': 'claude-3-haiku-20240307',
-  'claude-sonnet-4.5': 'claude-3-haiku-20240307', // Fallback to working model
-  'claude-opus-4.6': 'claude-3-haiku-20240307', // Fallback to working model
+  // Kimi - upgraded from deprecated k2.5 to k2.6 on NVIDIA's hosted endpoint.
+  'kimi': 'moonshotai/kimi-k2.6',
+  // Claude - account currently has access to Sonnet 4 only. Haiku 4.5 and
+  // Opus 4.6 are hidden in the picker UI (see ai-credit-config.ts HIDDEN_MODEL_IDS)
+  // until the Anthropic tier is upgraded. All Claude IDs map to Sonnet 4 as a
+  // safety net in case anything still references them.
+  'claude-haiku-4.5': 'claude-sonnet-4-20250514',
+  'claude-sonnet-4.5': 'claude-sonnet-4-20250514',
+  'claude-opus-4.6': 'claude-sonnet-4-20250514',
 };
 
 // NVIDIA API (OpenAI-compatible) for Kimi K2.5
@@ -46,16 +48,16 @@ const MODEL_CONFIGS: Record<AIProviderKey, Record<AIModelTier, ModelEntry>> = {
     chat: {
       provider: "claude",
       tier: "chat",
-      modelId: process.env.CLAUDE_TIER1_MODEL || "claude-sonnet-4-5-20250929",
-      displayName: "Claude Sonnet 4.5",
+      modelId: process.env.CLAUDE_TIER1_MODEL || "claude-sonnet-4-20250514",
+      displayName: "Claude Sonnet 4",
       costMultiplier: 1.5,
       maxTokens: 4096,
     },
     analysis: {
       provider: "claude",
       tier: "analysis",
-      modelId: process.env.CLAUDE_TIER2_MODEL || "claude-sonnet-4-5-20250929",
-      displayName: "Claude Sonnet 4.5",
+      modelId: process.env.CLAUDE_TIER2_MODEL || "claude-sonnet-4-20250514",
+      displayName: "Claude Sonnet 4",
       costMultiplier: 2.5,
       maxTokens: 8192,
     },
@@ -82,16 +84,16 @@ const MODEL_CONFIGS: Record<AIProviderKey, Record<AIModelTier, ModelEntry>> = {
     chat: {
       provider: "kimi",
       tier: "chat",
-      modelId: process.env.KIMI_TIER1_MODEL || "moonshotai/kimi-k2.5",
-      displayName: "Kimi K2.5",
+      modelId: process.env.KIMI_TIER1_MODEL || "moonshotai/kimi-k2.6",
+      displayName: "Kimi K2.6",
       costMultiplier: 1.0,
       maxTokens: 4096,
     },
     analysis: {
       provider: "kimi",
       tier: "analysis",
-      modelId: process.env.KIMI_TIER2_MODEL || "moonshotai/kimi-k2.5",
-      displayName: "Kimi K2.5",
+      modelId: process.env.KIMI_TIER2_MODEL || "moonshotai/kimi-k2.6",
+      displayName: "Kimi K2.6",
       costMultiplier: 2.0,
       maxTokens: 8192,
     },

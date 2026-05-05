@@ -5,7 +5,7 @@ import { Sparkles, Zap, Crown, TrendingUp, ExternalLink, Key, Lock } from "lucid
 import { cn } from "@/lib/utils";
 import { useAICredits } from "@/hooks/use-ai-credits";
 import { useSubscription } from "@/hooks/use-subscription";
-import { AI_MODELS, type ModelId, TIER_CREDIT_ALLOWANCES, getModelCreditWeight, estimateConversationsRemaining } from "@/lib/ai-credit-config";
+import { AI_MODELS, type ModelId, TIER_CREDIT_ALLOWANCES, getModelCreditWeight, estimateConversationsRemaining, isModelVisible } from "@/lib/ai-credit-config";
 
 export function AISettings() {
   const { credits, isLoading, selectedModel, setSelectedModel, remainingCredits, totalCredits } = useAICredits();
@@ -105,7 +105,7 @@ export function AISettings() {
         </p>
 
         <div className="grid grid-cols-1 gap-3">
-          {Object.values(AI_MODELS).map((model) => {
+          {Object.values(AI_MODELS).filter((m) => isModelVisible(m.id as ModelId)).map((model) => {
             const isSelected = selectedModel === model.id;
             const isAllowed = allowedModels.includes(model.id as ModelId);
             const providerColor = getProviderColor(model.provider);

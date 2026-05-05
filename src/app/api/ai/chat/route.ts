@@ -260,9 +260,16 @@ export async function POST(request: Request) {
         clearTimeout(timeoutId);
         releaseConcurrency();
       },
-      onError: () => {
+      onError: ({ error }) => {
         clearTimeout(timeoutId);
         releaseConcurrency();
+        // streamText errors fire AFTER HTTP 200, so the outer try/catch never
+        // sees them. Capture here so provider outages and bad model IDs
+        // (which produce empty streams, not throws) actually surface in Sentry.
+        Sentry.captureException(error, {
+          tags: { route: "ai/chat", phase: "streamText" },
+          extra: { provider: resolvedProvider, model: selectedModel },
+        });
       },
     });
 
