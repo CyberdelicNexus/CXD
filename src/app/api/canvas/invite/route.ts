@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { getPlan } from '@/lib/plans';
-import { sendEmail } from '@/lib/email';
-import { render } from '@react-email/render';
+import { enqueueEmail } from '@/lib/email-queue';
 import CanvasInviteEmail from '../../../../../emails/canvas-invite';
 
 // POST - Create new invitation
@@ -193,26 +192,20 @@ export async function POST(request: Request) {
         });
     }
 
-    // Send invitation email using Resend + React Email
+    // Queue invitation email through Inngest — request returns ~50ms now
+    // instead of holding for the Resend roundtrip.
     try {
-      const emailHtml = await render(
-        CanvasInviteEmail({
+      await enqueueEmail({
+        to: email.toLowerCase(),
+        subject: `${inviterName} invited you to collaborate on "${canvas.name}"`,
+        template: CanvasInviteEmail({
           inviterName,
           canvasName: canvas.name,
           inviteUrl,
-        })
-      );
-
-      await sendEmail({
-        to: email.toLowerCase(),
-        subject: `${inviterName} invited you to collaborate on "${canvas.name}"`,
-        html: emailHtml,
+        }),
       });
-
-      console.log(`Invitation email sent to ${email}`);
     } catch (emailError) {
-      // Log but don't fail the request if email fails
-      console.error('Failed to send invitation email:', emailError);
+      console.error('Failed to enqueue invitation email:', emailError);
     }
 
     return NextResponse.json({

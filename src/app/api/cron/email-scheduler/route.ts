@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import TrialDay1 from '../../../../../emails/trial-day-1';
 import PaymentFinalWarning from '../../../../../emails/payment-final-warning';
-import { EMAIL_KINDS, sendKindOnce } from '@/lib/email-kinds';
+import { EMAIL_KINDS } from '@/lib/email-kinds';
+import { enqueueEmail } from '@/lib/email-queue';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,20 +54,25 @@ async function runTrialDay1Scan(): Promise<{ sent: number; skipped: number }> {
         })
       : 'soon';
 
-    const wasSent = await sendKindOnce({
-      userId: row.user_id,
-      userEmail: userObj.email,
-      kind: EMAIL_KINDS.TRIAL_DAY_1,
-      subject: "Your Pro trial is live — let's get started",
-      template: TrialDay1({
-        userName: userObj.full_name || 'there',
-        trialEndDate,
-        dashboardUrl: `${baseUrl}/dashboard`,
-      }),
-    });
-
-    if (wasSent) sent++;
-    else skipped++;
+    // Fire-and-forget — Inngest worker handles the email_log idempotency,
+    // delivery, and retries. We count enqueue success here.
+    try {
+      await enqueueEmail({
+        to: userObj.email,
+        subject: "Your Pro trial is live — let's get started",
+        template: TrialDay1({
+          userName: userObj.full_name || 'there',
+          trialEndDate,
+          dashboardUrl: `${baseUrl}/dashboard`,
+        }),
+        userId: row.user_id,
+        emailKind: EMAIL_KINDS.TRIAL_DAY_1,
+      });
+      sent++;
+    } catch (err) {
+      console.error('[trial-day-1] enqueue failed', err);
+      skipped++;
+    }
   }
 
   return { sent, skipped };
@@ -147,21 +153,24 @@ async function runPaymentFinalWarningScan(): Promise<{ sent: number; skipped: nu
       console.warn('[cron] Could not retrieve open invoice amount:', err);
     }
 
-    const wasSent = await sendKindOnce({
-      userId: sub.user_id,
-      userEmail: userObj.email,
-      kind: EMAIL_KINDS.PAYMENT_FINAL_WARNING,
-      subject: 'Last chance to restore your Pro access',
-      template: PaymentFinalWarning({
-        userName: userObj.full_name || 'there',
-        amountDue,
-        accessEndsDate,
-        updatePaymentUrl: `${baseUrl}/dashboard/profile`,
-      }),
-    });
-
-    if (wasSent) sent++;
-    else skipped++;
+    try {
+      await enqueueEmail({
+        to: userObj.email,
+        subject: 'Last chance to restore your Pro access',
+        template: PaymentFinalWarning({
+          userName: userObj.full_name || 'there',
+          amountDue,
+          accessEndsDate,
+          updatePaymentUrl: `${baseUrl}/dashboard/profile`,
+        }),
+        userId: sub.user_id,
+        emailKind: EMAIL_KINDS.PAYMENT_FINAL_WARNING,
+      });
+      sent++;
+    } catch (err) {
+      console.error('[payment-final-warning] enqueue failed', err);
+      skipped++;
+    }
   }
 
   return { sent, skipped };

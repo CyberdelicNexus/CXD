@@ -3,8 +3,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@/supabase/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
-import { sendEmail } from '@/lib/email';
-import { render } from '@react-email/render';
+import { enqueueEmail } from '@/lib/email-queue';
 import { getCreditPack } from '@/lib/credit-packs';
 import SubscriptionConfirmed from '../../../../../emails/subscription-confirmed';
 import SubscriptionCancelled from '../../../../../emails/subscription-cancelled';
@@ -12,7 +11,7 @@ import CreditPurchaseReceipt from '../../../../../emails/credit-purchase-receipt
 import TrialEndingSoon from '../../../../../emails/trial-ending-soon';
 import TrialConverted from '../../../../../emails/trial-converted';
 import PaymentFailed from '../../../../../emails/payment-failed';
-import { EMAIL_KINDS, sendKindOnce } from '@/lib/email-kinds';
+import { EMAIL_KINDS } from '@/lib/email-kinds';
 
 // Helper to get user email and name
 async function getUserInfo(userId: string): Promise<{ email: string; name: string | null } | null> {
@@ -141,28 +140,24 @@ export async function POST(req: Request) {
               const userInfo = await getUserInfo(userId);
               if (userInfo?.email) {
                 const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
-                const emailHtml = await render(
-                  SubscriptionConfirmed({
+                await enqueueEmail({
+                  to: userInfo.email,
+                  subject: `Welcome, Founding Member #${nextFoundingNumber}!`,
+                  template: SubscriptionConfirmed({
                     userName: userInfo.name || 'there',
                     planName: 'Founding Member',
                     planPrice: '$399 one-time',
                     isLifetime: true,
                     foundingMemberNumber: nextFoundingNumber,
                     dashboardUrl: `${baseUrl}/dashboard`,
-                  })
-                );
-
-                await Promise.race([
-                  sendEmail({
-                    to: userInfo.email,
-                    subject: `Welcome, Founding Member #${nextFoundingNumber}!`,
-                    html: emailHtml,
                   }),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
-                ]);
+                  userId,
+                  emailKind: EMAIL_KINDS.SUBSCRIPTION_CONFIRMED_LIFETIME,
+                  stripeEventId: event.id,
+                });
               }
             } catch (emailError) {
-              console.error('Failed to send lifetime confirmation email:', emailError);
+              console.error('Failed to enqueue lifetime confirmation email:', emailError);
             }
           }
         } else if (subscriptionId) {
@@ -210,8 +205,10 @@ export async function POST(req: Request) {
             const userInfo = await getUserInfo(userId);
             if (userInfo?.email) {
               const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
-              const emailHtml = await render(
-                SubscriptionConfirmed({
+              await enqueueEmail({
+                to: userInfo.email,
+                subject: 'Your CXD Canvas Pro plan is confirmed!',
+                template: SubscriptionConfirmed({
                   userName: userInfo.name || 'there',
                   planName: 'Pro',
                   planPrice: '$20/month',
@@ -220,20 +217,14 @@ export async function POST(req: Request) {
                     ? new Date(stripeSubscription.trial_end * 1000).toISOString()
                     : undefined,
                   dashboardUrl: `${baseUrl}/dashboard`,
-                })
-              );
-
-              await Promise.race([
-                sendEmail({
-                  to: userInfo.email,
-                  subject: 'Your CXD Canvas Pro plan is confirmed!',
-                  html: emailHtml,
                 }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
-              ]);
+                userId,
+                emailKind: EMAIL_KINDS.SUBSCRIPTION_CONFIRMED_PRO,
+                stripeEventId: event.id,
+              });
             }
           } catch (emailError) {
-            console.error('Failed to send Pro confirmation email:', emailError);
+            console.error('Failed to enqueue Pro confirmation email:', emailError);
           }
         }
         break;
@@ -287,10 +278,8 @@ export async function POST(req: Request) {
             })
           : undefined;
 
-        await sendKindOnce({
-          userId: row.user_id,
-          userEmail: userInfo.email,
-          kind: EMAIL_KINDS.PAYMENT_FAILED,
+        await enqueueEmail({
+          to: userInfo.email,
           subject: 'We could not charge your card',
           template: PaymentFailed({
             userName: userInfo.name || 'there',
@@ -300,6 +289,8 @@ export async function POST(req: Request) {
             nextRetryDate,
             updatePaymentUrl: `${baseUrl}/dashboard/profile`,
           }),
+          userId: row.user_id,
+          emailKind: EMAIL_KINDS.PAYMENT_FAILED,
           stripeEventId: event.id,
         });
         break;
@@ -343,10 +334,8 @@ export async function POST(req: Request) {
             })
           : 'next month';
 
-        await sendKindOnce({
-          userId: row.user_id,
-          userEmail: userInfo.email,
-          kind: EMAIL_KINDS.TRIAL_CONVERTED,
+        await enqueueEmail({
+          to: userInfo.email,
           subject: 'Welcome to CXD Canvas Pro',
           template: TrialConverted({
             userName: userInfo.name || 'there',
@@ -355,6 +344,8 @@ export async function POST(req: Request) {
             dashboardUrl: `${baseUrl}/dashboard`,
             receiptUrl: invoice.hosted_invoice_url || undefined,
           }),
+          userId: row.user_id,
+          emailKind: EMAIL_KINDS.TRIAL_CONVERTED,
           stripeEventId: event.id,
         });
         break;
@@ -402,10 +393,8 @@ export async function POST(req: Request) {
           console.warn('[webhook] Could not retrieve payment method for trial_will_end:', err);
         }
 
-        await sendKindOnce({
-          userId: row.user_id,
-          userEmail: userInfo.email,
-          kind: EMAIL_KINDS.TRIAL_ENDING_SOON,
+        await enqueueEmail({
+          to: userInfo.email,
           subject: `Your CXD Canvas Pro trial ends on ${trialEndDate}`,
           template: TrialEndingSoon({
             userName: userInfo.name || 'there',
@@ -414,6 +403,8 @@ export async function POST(req: Request) {
             cardLast4,
             manageBillingUrl: `${baseUrl}/dashboard/profile`,
           }),
+          userId: row.user_id,
+          emailKind: EMAIL_KINDS.TRIAL_ENDING_SOON,
           stripeEventId: event.id,
         });
         break;
@@ -503,27 +494,23 @@ export async function POST(req: Request) {
             const userInfo = await getUserInfo(subscriptionRecord.user_id);
             if (userInfo?.email) {
               const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
-              const emailHtml = await render(
-                SubscriptionCancelled({
+              await enqueueEmail({
+                to: userInfo.email,
+                subject: 'Your CXD Canvas subscription has been cancelled',
+                template: SubscriptionCancelled({
                   userName: userInfo.name || 'there',
                   planName: 'Pro',
                   accessEndDate: new Date(subscription.current_period_end * 1000).toISOString(),
                   feedbackUrl: `${baseUrl}/feedback`,
                   resubscribeUrl: `${baseUrl}/pricing`,
-                })
-              );
-
-              await Promise.race([
-                sendEmail({
-                  to: userInfo.email,
-                  subject: 'Your CXD Canvas subscription has been cancelled',
-                  html: emailHtml,
                 }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
-              ]);
+                userId: subscriptionRecord.user_id,
+                emailKind: EMAIL_KINDS.SUBSCRIPTION_CANCELLED,
+                stripeEventId: event.id,
+              });
             }
           } catch (emailError) {
-            console.error('Failed to send cancellation email:', emailError);
+            console.error('Failed to enqueue cancellation email:', emailError);
           }
         }
         break;
@@ -598,8 +585,10 @@ export async function POST(req: Request) {
 
               if (userInfo?.email) {
                 const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
-                const emailHtml = await render(
-                  CreditPurchaseReceipt({
+                await enqueueEmail({
+                  to: userInfo.email,
+                  subject: `Receipt: ${parseInt(creditAmount, 10)} AI credits added`,
+                  template: CreditPurchaseReceipt({
                     userName: userInfo.name || 'there',
                     packName: pack?.name || 'Credit Pack',
                     creditsAmount: parseInt(creditAmount, 10),
@@ -611,20 +600,14 @@ export async function POST(req: Request) {
                       day: 'numeric',
                     }),
                     dashboardUrl: `${baseUrl}/cxd`,
-                  })
-                );
-
-                await Promise.race([
-                  sendEmail({
-                    to: userInfo.email,
-                    subject: `Receipt: ${parseInt(creditAmount, 10)} AI credits added`,
-                    html: emailHtml,
                   }),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 5000)),
-                ]);
+                  userId,
+                  emailKind: EMAIL_KINDS.CREDIT_PURCHASE_RECEIPT,
+                  stripeEventId: event.id,
+                });
               }
             } catch (emailError) {
-              console.error('Failed to send credit purchase receipt:', emailError);
+              console.error('Failed to enqueue credit purchase receipt:', emailError);
             }
           }
         }

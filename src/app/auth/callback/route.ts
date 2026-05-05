@@ -1,7 +1,6 @@
 import { createClient } from "../../../../supabase/server";
 import { NextResponse } from "next/server";
-import { sendEmail } from "@/lib/email";
-import { render } from "@react-email/render";
+import { enqueueEmail } from "@/lib/email-queue";
 import WelcomeEmail from "../../../../emails/welcome";
 
 export async function GET(request: Request) {
@@ -29,20 +28,16 @@ export async function GET(request: Request) {
             user.email?.split("@")[0] ||
             "there";
 
-          const emailHtml = await render(
-            WelcomeEmail({
-              userName,
-              dashboardUrl: `${baseUrl}/dashboard`,
-            })
-          );
-
-          await sendEmail({
+          await enqueueEmail({
             to: user.email!,
             subject: "Welcome to CXD Canvas!",
-            html: emailHtml,
+            template: WelcomeEmail({
+              userName,
+              dashboardUrl: `${baseUrl}/dashboard`,
+            }),
           });
         } catch (e) {
-          console.error("Failed to send welcome email:", e);
+          console.error("Failed to enqueue welcome email:", e);
         }
       }
     }

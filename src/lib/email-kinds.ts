@@ -13,6 +13,12 @@ export const EMAIL_KINDS = {
   TRIAL_CONVERTED: 'trial-converted',
   PAYMENT_FAILED: 'payment-failed',
   PAYMENT_FINAL_WARNING: 'payment-final-warning',
+  // Webhook-driven confirmation emails (added with the Inngest migration so
+  // they get email_log idempotency too).
+  SUBSCRIPTION_CONFIRMED_LIFETIME: 'subscription-confirmed-lifetime',
+  SUBSCRIPTION_CONFIRMED_PRO: 'subscription-confirmed-pro',
+  SUBSCRIPTION_CANCELLED: 'subscription-cancelled',
+  CREDIT_PURCHASE_RECEIPT: 'credit-purchase-receipt',
 } as const;
 
 export type EmailKind = typeof EMAIL_KINDS[keyof typeof EMAIL_KINDS];

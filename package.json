@@ -73,6 +73,7 @@
     "file-saver": "^2.0.5",
     "framer-motion": "^12.5.0",
     "html2canvas": "^1.4.1",
+    "inngest": "^4.2.6",
     "input-otp": "^1.4.2",
     "jspdf": "^4.1.0",
     "lucide-react": "^0.468.0",
