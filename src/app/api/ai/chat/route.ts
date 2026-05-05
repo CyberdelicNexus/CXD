@@ -119,8 +119,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // 4. Rate limit check
-    const rateCheck = checkRateLimit(user.id, "chat");
+    // 4. Rate limit check (per-tier limits)
+    const rateCheck = checkRateLimit(user.id, "chat", subscription?.plan_id || 'free');
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Try again shortly.", retryAfterMs: rateCheck.retryAfterMs },

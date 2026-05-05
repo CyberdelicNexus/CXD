@@ -81,8 +81,14 @@ export async function POST(request: Request) {
     // 2b. Resolve provider (client may send a ModelId instead of AIProviderKey)
     const resolvedProvider: AIProviderKey = modelToProvider[provider] || (provider as AIProviderKey);
 
-    // 3. Rate limit check
-    const rateCheck = checkRateLimit(user.id, "analysis");
+    // 3. Rate limit check (per-tier limits) — fetch plan upfront and reuse for cap below
+    const { data: subForRate } = await supabase
+      .from('subscriptions')
+      .select('plan_id')
+      .eq('user_id', user.id)
+      .single();
+    const callerPlan = subForRate?.plan_id || 'free';
+    const rateCheck = checkRateLimit(user.id, "analysis", callerPlan);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded for analysis. Try again shortly.", retryAfterMs: rateCheck.retryAfterMs },
@@ -103,13 +109,8 @@ export async function POST(request: Request) {
     const costKey = analysisType === "erd" ? "erd" : "analyze";
     const creditCost = (CREDIT_COSTS as Record<string, Record<string, number>>)[costKey]?.[resolvedProvider] || 5;
 
-    // Resolve daily cap from caller's plan tier.
-    const { data: subForCap } = await supabase
-      .from('subscriptions')
-      .select('plan_id')
-      .eq('user_id', user.id)
-      .single();
-    const dailyCap = getDailyCreditCap(subForCap?.plan_id || 'free');
+    // Reuse plan from rate-limit fetch above.
+    const dailyCap = getDailyCreditCap(callerPlan);
 
     const { data: creditResult, error: creditError } = await supabase.rpc(
       "deduct_ai_credits",
