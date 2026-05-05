@@ -1,9 +1,10 @@
 import { streamText, convertToModelMessages } from "ai";
 import { NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { createClient } from "@/supabase/server";
 import { getModelConfig, getModelInstance, getModelInstanceByModelId, MODEL_ID_MAP } from "@/lib/ai/provider-registry";
 import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt } from "@/lib/ai/system-prompts";
-import { checkRateLimit, recordRequest } from "@/lib/ai/rate-limiter";
+import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { canBringOwnKeys, type ModelId } from "@/lib/ai-credit-config";
 import { decryptAPIKey } from "@/lib/encryption";
 import type { AIProviderKey, AIProjectContext, FaceContext } from "@/types/ai-types";
@@ -13,6 +14,14 @@ import { retrieveKnowledge, buildSearchQuery } from "@/lib/ai/knowledge-retrieva
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  let concurrencyHeldFor: string | null = null;
+  const releaseConcurrency = () => {
+    if (concurrencyHeldFor) {
+      releaseConcurrencySlot(concurrencyHeldFor);
+      concurrencyHeldFor = null;
+    }
+  };
+
   try {
     // 1. Authenticate
     const supabase = await createClient();
@@ -118,6 +127,15 @@ export async function POST(request: Request) {
       );
     }
 
+    // 4b. Concurrent-stream cap (cost runaway protection: one user can't hold N streams open)
+    if (!acquireConcurrencySlot(user.id)) {
+      return NextResponse.json(
+        { error: "Too many concurrent AI requests. Wait for the previous one to finish." },
+        { status: 429 },
+      );
+    }
+    concurrencyHeldFor = user.id;
+
     // 5. Credit check and deduction (skip if using BYOK)
     if (!userApiKey) {
       const creditCost = CREDIT_COSTS.chat[resolvedProvider] || 1;
@@ -215,16 +233,37 @@ export async function POST(request: Request) {
     // 9. Convert UIMessages to ModelMessages for streamText
     const modelMessages = await convertToModelMessages(rawMessages as any);
 
-    // 10. Stream the response (60s timeout)
+    // 10. Stream the response (60s timeout, abort on client disconnect)
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), 60000);
+
+    // Forward client disconnect (tab close, navigate away) to model so we stop billing tokens
+    // and release the concurrency slot.
+    const onAbort = () => {
+      abortController.abort();
+      clearTimeout(timeoutId);
+      releaseConcurrency();
+    };
+    if (request.signal.aborted) {
+      onAbort();
+    } else {
+      request.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     const result = streamText({
       model,
       system: systemPrompt,
       messages: modelMessages,
       temperature: 0.7,
       abortSignal: abortController.signal,
-      onFinish: () => clearTimeout(timeoutId),
+      onFinish: () => {
+        clearTimeout(timeoutId);
+        releaseConcurrency();
+      },
+      onError: () => {
+        clearTimeout(timeoutId);
+        releaseConcurrency();
+      },
     });
 
     return result.toTextStreamResponse({
@@ -236,7 +275,13 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    releaseConcurrency();
     console.error("[AI Chat Error]", error);
+
+    // Tag with route + provider/model so provider outages cluster cleanly in Sentry.
+    Sentry.captureException(error, {
+      tags: { route: "ai/chat" },
+    });
 
     const message = error instanceof Error ? error.message : "Unknown error";
 

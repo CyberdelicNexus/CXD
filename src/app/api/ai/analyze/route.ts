@@ -1,5 +1,6 @@
 import { generateText } from "ai";
 import { NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { createClient } from "@/supabase/server";
 import { getModelInstance, getModelConfig } from "@/lib/ai/provider-registry";
 import {
@@ -8,7 +9,7 @@ import {
   getCoreSystemPrompt,
   getGeneralSystemPrompt,
 } from "@/lib/ai/system-prompts";
-import { checkRateLimit, recordRequest } from "@/lib/ai/rate-limiter";
+import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import type { AIProviderKey, AIProjectContext, FaceContext } from "@/types/ai-types";
 import { CREDIT_COSTS } from "@/types/ai-types";
 
@@ -36,6 +37,14 @@ function isMissing(error: { code?: string; message?: string } | null): boolean {
 }
 
 export async function POST(request: Request) {
+  let concurrencyHeldFor: string | null = null;
+  const releaseConcurrency = () => {
+    if (concurrencyHeldFor) {
+      releaseConcurrencySlot(concurrencyHeldFor);
+      concurrencyHeldFor = null;
+    }
+  };
+
   try {
     // 1. Authenticate
     const supabase = await createClient();
@@ -79,6 +88,15 @@ export async function POST(request: Request) {
         { status: 429 },
       );
     }
+
+    // 3b. Concurrent-request cap (cost runaway protection)
+    if (!acquireConcurrencySlot(user.id)) {
+      return NextResponse.json(
+        { error: "Too many concurrent AI requests. Wait for the previous one to finish." },
+        { status: 429 },
+      );
+    }
+    concurrencyHeldFor = user.id;
 
     // 4. Credit deduction — gracefully skip if tables/RPC not deployed yet
     const costKey = analysisType === "erd" ? "erd" : "analyze";
@@ -131,9 +149,17 @@ export async function POST(request: Request) {
     // 7. Record the request
     recordRequest(user.id, "analysis");
 
-    // 8. Generate full response (non-streaming for analysis, 120s timeout)
+    // 8. Generate full response (non-streaming for analysis, 120s timeout, abort on client disconnect)
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), 120000);
+
+    // Forward client disconnect (tab close, navigate away) to model so we stop billing tokens
+    if (request.signal.aborted) {
+      abortController.abort();
+    } else {
+      request.signal.addEventListener("abort", () => abortController.abort(), { once: true });
+    }
+
     let result;
     try {
       result = await generateText({
@@ -146,6 +172,7 @@ export async function POST(request: Request) {
       });
     } finally {
       clearTimeout(timeoutId);
+      releaseConcurrency();
     }
 
     return NextResponse.json({
@@ -153,7 +180,13 @@ export async function POST(request: Request) {
       usage: result.usage,
     });
   } catch (error) {
+    releaseConcurrency();
     console.error("[AI Analysis Error]", error);
+
+    // Tag with route so provider/model issues cluster cleanly in Sentry.
+    Sentry.captureException(error, {
+      tags: { route: "ai/analyze" },
+    });
 
     const message = error instanceof Error ? error.message : String(error);
 

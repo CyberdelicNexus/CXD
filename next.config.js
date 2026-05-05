@@ -26,7 +26,7 @@ const nextConfig = {
                     { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
                     { key: 'X-DNS-Prefetch-Control', value: 'on' },
                     { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-                    { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co https://images.unsplash.com https://*.stripe.com; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://generativelanguage.googleapis.com https://api.anthropic.com https://integrate.api.nvidia.com; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self';" },
+                    { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.supabase.co https://images.unsplash.com https://*.stripe.com; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://generativelanguage.googleapis.com https://api.anthropic.com https://integrate.api.nvidia.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io; frame-src https://js.stripe.com; object-src 'none'; base-uri 'self';" },
                 ],
             },
         ];
@@ -59,4 +59,21 @@ const nextConfig = {
     },
 };
 
-module.exports = nextConfig;
+// Wrap with Sentry only when DSN is set, so dev without Sentry still works.
+const { withSentryConfig } = require('@sentry/nextjs');
+
+module.exports = process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? withSentryConfig(nextConfig, {
+      // Silence the "Sentry config is missing" warnings in build logs.
+      silent: true,
+      // Source maps: only upload if SENTRY_AUTH_TOKEN is present (optional).
+      // Without it, you still get error reports — stack traces are just minified.
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      // Tunnel through /monitoring to bypass ad blockers (optional but cheap).
+      tunnelRoute: '/monitoring',
+      hideSourceMaps: true,
+      disableLogger: true,
+    })
+  : nextConfig;

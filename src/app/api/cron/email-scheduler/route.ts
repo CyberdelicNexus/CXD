@@ -1,25 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '@/supabase/admin';
 import TrialDay1 from '../../../../../emails/trial-day-1';
 import PaymentFinalWarning from '../../../../../emails/payment-final-warning';
 import { EMAIL_KINDS, sendKindOnce } from '@/lib/email-kinds';
 
 export const dynamic = 'force-dynamic';
 
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
-  );
-}
-
 function unauthorized() {
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 }
 
 async function runTrialDay1Scan(): Promise<{ sent: number; skipped: number }> {
-  const supabase = adminClient();
+  const supabase = getSupabaseAdmin();
   const now = Date.now();
 
   // Window: 24–48 hours after trial_start. Generous so a missed cron run
@@ -81,7 +73,7 @@ async function runTrialDay1Scan(): Promise<{ sent: number; skipped: number }> {
 }
 
 async function runPaymentFinalWarningScan(): Promise<{ sent: number; skipped: number }> {
-  const supabase = adminClient();
+  const supabase = getSupabaseAdmin();
   const now = Date.now();
 
   // Window: 4.5–5.5 days after the payment-failed email was logged.

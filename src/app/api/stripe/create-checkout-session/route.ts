@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { createClient } from '@/supabase/server';
+import { getSupabaseAdmin } from '@/supabase/admin';
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,24 +36,19 @@ export async function POST(request: NextRequest) {
     let customerId = subscription?.stripe_customer_id;
 
     if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: {
-          supabase_user_id: user.id,
+      const customer = await stripe.customers.create(
+        {
+          email: user.email,
+          metadata: {
+            supabase_user_id: user.id,
+          },
         },
-      });
+        { idempotencyKey: `cust:${user.id}` },
+      );
       customerId = customer.id;
 
-      // Save customer ID to subscriptions table
-      // Note: This requires service_role permissions, so we need to use a service client
-      const { createClient: createServiceClient } = await import('@supabase/supabase-js');
-      const supabaseAdmin = createServiceClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        { auth: { persistSession: false } }
-      );
-
-      await supabaseAdmin
+      // Save customer ID to subscriptions table — requires service_role to bypass RLS.
+      await getSupabaseAdmin()
         .from('subscriptions')
         .update({ stripe_customer_id: customerId })
         .eq('user_id', user.id);

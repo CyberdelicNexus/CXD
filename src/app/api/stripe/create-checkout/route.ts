@@ -35,12 +35,15 @@ export async function POST(request: Request) {
 
     if (!customerId) {
       // Create new Stripe customer
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: {
-          user_id: user.id,
+      const customer = await stripe.customers.create(
+        {
+          email: user.email,
+          metadata: {
+            user_id: user.id,
+          },
         },
-      });
+        { idempotencyKey: `cust:${user.id}` },
+      );
       customerId = customer.id;
 
       // Update subscription record with customer ID

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { render } from '@react-email/render';
-import { createClient as createAdminClient, SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '@/supabase/admin';
 import { sendEmail } from '@/lib/email';
 
 /**
@@ -16,14 +16,6 @@ export const EMAIL_KINDS = {
 } as const;
 
 export type EmailKind = typeof EMAIL_KINDS[keyof typeof EMAIL_KINDS];
-
-function adminClient(): SupabaseClient {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
-  );
-}
 
 interface SendKindOnceOptions {
   userId: string;
@@ -42,7 +34,7 @@ interface SendKindOnceOptions {
  * throws — failures are logged and reported via the boolean.
  */
 export async function sendKindOnce(opts: SendKindOnceOptions): Promise<boolean> {
-  const supabase = adminClient();
+  const supabase = getSupabaseAdmin();
 
   // Idempotency check. Either an existing (user, kind) row OR a matching
   // stripe_event_id (when provided) means we already processed this send.

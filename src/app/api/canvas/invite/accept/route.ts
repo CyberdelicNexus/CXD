@@ -1,15 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
-import { createClient as createAdminClient } from '@supabase/supabase-js';
-
-// Admin client for managing collaborators
-function getSupabaseAdmin() {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
-}
+import { getSupabaseAdmin } from '@/supabase/admin';
 
 // GET - Accept invitation with token
 export async function GET(request: Request) {

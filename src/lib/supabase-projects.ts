@@ -292,51 +292,54 @@ export async function updateProjectMetadata(
     return false;
   }
 
-  // Build the column-level update
+  // Atomically merge the JSONB-side patch via patch_project_data RPC so concurrent
+  // metadata edits don't drop each other's fields (the previous read-modify-write
+  // pattern was a last-write-wins race).
+  const jsonPatch: Record<string, any> = {};
+  if (updates.coverImage !== undefined) jsonPatch.coverImage = updates.coverImage;
+  if (updates.name !== undefined) jsonPatch.name = updates.name;
+  if (updates.description !== undefined) jsonPatch.description = updates.description;
+
+  if (Object.keys(jsonPatch).length > 0) {
+    const { error: rpcError } = await supabase.rpc('patch_project_data', {
+      p_id: projectId,
+      p_patch: jsonPatch,
+    });
+
+    if (rpcError) {
+      // If RPC isn't deployed yet, fall back to column-only update — JSONB stays stale
+      // but we don't break the call site.
+      const msg = rpcError.message || '';
+      const code = rpcError.code || '';
+      const isMissing =
+        code === 'PGRST202' || code === 'PGRST205' || code === '42883' ||
+        msg.includes('Could not find') || msg.includes('does not exist');
+      if (!isMissing) {
+        console.error('[updateProjectMetadata] patch_project_data RPC error:', rpcError);
+        return false;
+      }
+      console.warn('[updateProjectMetadata] patch_project_data RPC missing — run migration. Falling back to column-only update.');
+    }
+  }
+
+  // Column-level update for top-level columns (name, description). updated_at is
+  // already touched by the RPC; this UPDATE refreshes it again which is harmless.
   const dbUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
   if (updates.name !== undefined) dbUpdate.name = updates.name;
   if (updates.description !== undefined) dbUpdate.description = updates.description;
 
-  // For coverImage, patch it inside project_data JSONB without replacing the whole object
-  // Use Supabase's jsonb concatenation: project_data || '{"coverImage":"..."}'
-  // We do this as a raw RPC or a two-step read-update. For simplicity, read first.
-  if (updates.coverImage !== undefined) {
-    // Read current project_data, patch coverImage, write back
-    const { data: existing } = await supabase
+  if (Object.keys(dbUpdate).length > 1) {
+    const { error } = await supabase
       .from('cxd_projects')
-      .select('project_data')
-      .eq('id', projectId)
-      .single();
+      .update(dbUpdate)
+      .eq('id', projectId);
 
-    if (existing) {
-      const patchedData = { ...(existing.project_data || {}), coverImage: updates.coverImage };
-      if (updates.name !== undefined) patchedData.name = updates.name;
-      dbUpdate.project_data = patchedData;
-    }
-  } else if (updates.name !== undefined) {
-    // Patch name inside project_data too so they stay in sync
-    const { data: existing } = await supabase
-      .from('cxd_projects')
-      .select('project_data')
-      .eq('id', projectId)
-      .single();
-
-    if (existing) {
-      const patchedData = { ...(existing.project_data || {}), name: updates.name };
-      if (updates.description !== undefined) patchedData.description = updates.description;
-      dbUpdate.project_data = patchedData;
+    if (error) {
+      console.error('[updateProjectMetadata] Error:', error);
+      return false;
     }
   }
 
-  const { error } = await supabase
-    .from('cxd_projects')
-    .update(dbUpdate)
-    .eq('id', projectId);
-
-  if (error) {
-    console.error('[updateProjectMetadata] Error:', error);
-    return false;
-  }
   return true;
 }
 

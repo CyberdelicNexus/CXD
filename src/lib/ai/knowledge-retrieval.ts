@@ -7,7 +7,7 @@
 // - Graceful degradation (empty context on any error)
 // - Non-blocking (failures must never break chat)
 
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '@/supabase/admin';
 
 // ============================================================
 // Types
@@ -41,18 +41,6 @@ export interface RetrievalOptions {
   similarityThreshold?: number; // Default: 0.7
   category?: string; // Optional filter
   tags?: string[]; // Optional filter
-}
-
-// ============================================================
-// Admin Client (Service Role for RPC Access)
-// ============================================================
-
-function getAdminClient() {
-  return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
 }
 
 // ============================================================
@@ -110,7 +98,7 @@ export async function retrieveKnowledge(
     const embedding = await generateQueryEmbedding(query);
 
     // 2. Search knowledge cache via RPC
-    const supabase = getAdminClient();
+    const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.rpc('search_knowledge', {
       query_embedding: embedding,
       match_count: matchCount,

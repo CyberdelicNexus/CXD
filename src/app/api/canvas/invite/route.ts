@@ -1,19 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
-import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '@/supabase/admin';
 import { getPlan } from '@/lib/plans';
 import { sendEmail } from '@/lib/email';
 import { render } from '@react-email/render';
 import CanvasInviteEmail from '../../../../../emails/canvas-invite';
-
-// Admin client for checking subscriptions and sending invites
-function getSupabaseAdmin() {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
-}
 
 // POST - Create new invitation
 export async function POST(request: Request) {

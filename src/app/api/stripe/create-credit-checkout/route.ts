@@ -35,10 +35,13 @@ export async function POST(request: Request) {
     let customerId = subscription?.stripe_customer_id;
 
     if (!customerId) {
-      const customer = await getStripe().customers.create({
-        email: user.email,
-        metadata: { user_id: user.id },
-      });
+      const customer = await getStripe().customers.create(
+        {
+          email: user.email,
+          metadata: { user_id: user.id },
+        },
+        { idempotencyKey: `cust:${user.id}` },
+      );
       customerId = customer.id;
 
       await supabase

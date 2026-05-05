@@ -2,7 +2,7 @@ import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@/supabase/server';
-import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin } from '@/supabase/admin';
 import { sendEmail } from '@/lib/email';
 import { render } from '@react-email/render';
 import { getCreditPack } from '@/lib/credit-packs';
@@ -13,14 +13,6 @@ import TrialEndingSoon from '../../../../../emails/trial-ending-soon';
 import TrialConverted from '../../../../../emails/trial-converted';
 import PaymentFailed from '../../../../../emails/payment-failed';
 import { EMAIL_KINDS, sendKindOnce } from '@/lib/email-kinds';
-
-// Admin client for querying user data
-function getSupabaseAdmin() {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 // Helper to get user email and name
 async function getUserInfo(userId: string): Promise<{ email: string; name: string | null } | null> {
@@ -59,6 +51,37 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error('Webhook signature verification failed:', err);
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+  }
+
+  // Event-level idempotency. Stripe retries on any 5xx (up to 72h, exponential
+  // backoff). Without this, retries cause duplicate subscription updates and
+  // double credit grants. We insert event.id; if the unique constraint fires,
+  // we've already processed this event — return 200 and bail.
+  {
+    const admin = getSupabaseAdmin();
+    const { error: dedupeError } = await admin
+      .from('stripe_events_processed')
+      .insert({ event_id: event.id, event_type: event.type });
+
+    if (dedupeError) {
+      // Unique-violation → already processed, ack and exit.
+      if (dedupeError.code === '23505') {
+        console.log(`[Stripe Webhook] Duplicate event ${event.id} (${event.type}) — skipping.`);
+        return NextResponse.json({ received: true, duplicate: true });
+      }
+      // Table doesn't exist yet (migration not applied) → log and continue
+      // so deploys aren't blocked, but flag loudly.
+      const msg = dedupeError.message || '';
+      const code = dedupeError.code || '';
+      const isMissing =
+        code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache');
+      if (isMissing) {
+        console.warn('[Stripe Webhook] stripe_events_processed table missing — RUN MIGRATION. Idempotency disabled.');
+      } else {
+        console.error('[Stripe Webhook] Idempotency insert failed:', dedupeError);
+        // Don't block — better to risk a duplicate than to drop a real event.
+      }
+    }
   }
 
   const supabase = await createClient();

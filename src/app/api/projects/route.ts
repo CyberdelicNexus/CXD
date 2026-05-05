@@ -1,17 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
+import { getSupabaseAdmin } from '@/supabase/admin';
 
 export const dynamic = 'force-dynamic';
-import { createClient as createAdminClient } from '@supabase/supabase-js';
-
-// Admin client for bypassing RLS
-function getSupabaseAdmin() {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
-}
 
 // GET - Fetch user's projects (owned + collaborated)
 // Supports ?listing=true to exclude heavy project_data column (dashboard only)

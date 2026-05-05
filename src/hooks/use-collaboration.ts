@@ -77,10 +77,17 @@ const PEER_TIMEOUT_MS = 90_000; // 90s
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30s
 // Minimum gap between re-announcing ourselves when a peer announces (ms)
 const REANNOUNCE_DEBOUNCE_MS = 5_000;
-// Cursor staleness window (must match collaborator-cursors.tsx)
-// 33ms = ~30fps — denser updates for smoother follow-camera interpolation
-// without saturating Supabase Realtime bandwidth.
-const CURSOR_THROTTLE_MS = 33;
+// Cursor staleness window (must match collaborator-cursors.tsx).
+// Adaptive: at low collaborator counts we want smooth ~30fps updates; at high
+// counts we throttle to keep the channel from saturating (each user broadcasts
+// to every subscriber, so cost grows quadratically).
+const CURSOR_THROTTLE_MS = 33; // baseline / fallback when count is unknown
+function getCursorThrottleMs(collaboratorCount: number): number {
+  if (collaboratorCount <= 5) return 33;   // ~30fps
+  if (collaboratorCount <= 15) return 66;  // ~15fps
+  if (collaboratorCount <= 30) return 100; // ~10fps
+  return 150;                              // ~7fps
+}
 
 export function useCollaboration(
   canvasId: string | null,
@@ -93,6 +100,9 @@ export function useCollaboration(
   const channelRef = useRef<RealtimeChannel | null>(null);
   const supabaseRef = useRef(createClient());
   const cursorThrottleRef = useRef<NodeJS.Timeout | null>(null);
+  // Live count for adaptive cursor throttle without making the throttle
+  // callback depend on collaborators state (which would re-create the throttle every render).
+  const collaboratorsCountRef = useRef(0);
   const lastCursorRef = useRef<{ x: number; y: number } | null>(null);
   // Debounce for re-announcing ourselves when a new peer announces
   const lastReannounceRef = useRef<number>(0);
@@ -135,6 +145,12 @@ export function useCollaboration(
     }
     getUser();
   }, []);
+
+  // Mirror collaborator count to a ref so updateCursor can adaptively throttle
+  // without re-creating its callback (which would invalidate cursorThrottleRef).
+  useEffect(() => {
+    collaboratorsCountRef.current = collaborators.length;
+  }, [collaborators.length]);
 
   // Set up realtime channel
   useEffect(() => {
@@ -427,7 +443,7 @@ export function useCollaboration(
         });
         lastCursorRef.current = null;
       }
-    }, CURSOR_THROTTLE_MS);
+    }, getCursorThrottleMs(collaboratorsCountRef.current));
   }, [currentUser]);
 
   // Clear cursor when leaving canvas area

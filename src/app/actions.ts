@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient, createSessionClient } from "../../supabase/server";
+import { getSupabaseAdmin } from "../../supabase/admin";
 import { checkRateLimit } from "@/lib/rate-limiter";
 
 export const signUpAction = async (formData: FormData) => {
@@ -240,7 +241,7 @@ export const deleteAccountAction = async () => {
   }
 
   // Need a service role client to delete the user from auth.users
-  const adminClient = await createAdminClient();
+  const adminClient = getSupabaseAdmin();
   const { error } = await adminClient.auth.admin.deleteUser(user.id);
 
   if (error) {
@@ -280,17 +281,3 @@ export const cancelSubscriptionAction = async () => {
   return encodedRedirect("success", "/dashboard/profile", "Subscription cancelled. You are now on the Free tier.");
 };
 
-// Helper to create an admin client
-async function createAdminClient() {
-  const { createClient: createSupabaseClient } = await import('@supabase/supabase-js');
-  return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    }
-  );
-}

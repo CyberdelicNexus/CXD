@@ -72,3 +72,30 @@ if (typeof setInterval !== "undefined") {
     }
   }, 300_000);
 }
+
+// ---------------------------------------------------------------------------
+// Concurrent stream cap (cost-runaway protection)
+// A single scripted user can otherwise hold many streams open in parallel
+// and burn through your AI provider budget. This caps in-flight AI requests
+// per user. In-memory; per Vercel instance — fine at low scale, replace with
+// Redis when autoscaling kicks in.
+// ---------------------------------------------------------------------------
+
+const MAX_CONCURRENT_AI_REQUESTS_PER_USER = 2;
+const concurrentRequests = new Map<string, number>();
+
+export function acquireConcurrencySlot(userId: string): boolean {
+  const current = concurrentRequests.get(userId) || 0;
+  if (current >= MAX_CONCURRENT_AI_REQUESTS_PER_USER) return false;
+  concurrentRequests.set(userId, current + 1);
+  return true;
+}
+
+export function releaseConcurrencySlot(userId: string): void {
+  const current = concurrentRequests.get(userId) || 0;
+  if (current <= 1) {
+    concurrentRequests.delete(userId);
+  } else {
+    concurrentRequests.set(userId, current - 1);
+  }
+}
