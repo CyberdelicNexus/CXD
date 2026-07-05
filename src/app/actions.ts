@@ -163,11 +163,25 @@ export const forgotPasswordAction = async (formData: FormData) => {
 export const resetPasswordAction = async (formData: FormData) => {
   const supabase = await createClient();
 
+  // A valid recovery session must exist (established by the /auth/callback code
+  // exchange). Without it, updateUser would fail with an opaque error — so we
+  // check up front and send the user back to request a fresh link.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return encodedRedirect(
+      "error",
+      "/forgot-password",
+      "Your reset link is invalid or has expired. Please request a new one.",
+    );
+  }
+
   const password = formData.get("password") as string;
   const confirmPassword = formData.get("confirmPassword") as string;
 
   if (!password || !confirmPassword) {
-    encodedRedirect(
+    return encodedRedirect(
       "error",
       "/dashboard/reset-password",
       "Password and confirm password are required",
@@ -175,10 +189,18 @@ export const resetPasswordAction = async (formData: FormData) => {
   }
 
   if (password !== confirmPassword) {
-    encodedRedirect(
+    return encodedRedirect(
       "error",
       "/dashboard/reset-password",
       "Passwords do not match",
+    );
+  }
+
+  if (password.length < 8) {
+    return encodedRedirect(
+      "error",
+      "/dashboard/reset-password",
+      "Password must be at least 8 characters.",
     );
   }
 
@@ -187,14 +209,25 @@ export const resetPasswordAction = async (formData: FormData) => {
   });
 
   if (error) {
-    encodedRedirect(
+    // Surface the real reason (too weak, leaked password, same-as-old, etc.)
+    // instead of a generic message the user can't act on.
+    return encodedRedirect(
       "error",
       "/dashboard/reset-password",
-      "Password update failed",
+      error.message || "Password update failed. Please try again.",
     );
   }
 
-  encodedRedirect("success", "/dashboard/reset-password", "Password updated");
+  // Security: revoke every OTHER session so a password reset boots any attacker
+  // who may already hold a session. The current recovery session is preserved,
+  // so the user stays signed in and lands on their dashboard.
+  await supabase.auth.signOut({ scope: "others" });
+
+  return encodedRedirect(
+    "success",
+    "/dashboard",
+    "Your password has been updated.",
+  );
 };
 
 export const signOutAction = async () => {

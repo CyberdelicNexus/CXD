@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { resetPasswordAction } from "@/app/actions";
 import { FormMessage, Message } from "@/components/form-message";
 import DashboardNavbar from "@/components/dashboard-navbar";
 import { SubmitButton } from "@/components/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createClient } from "../../../supabase/server";
 
 export default async function ResetPassword(props: {
   searchParams: Promise<Message>;
@@ -14,6 +16,39 @@ export default async function ResetPassword(props: {
       <div className="flex h-screen w-full flex-1 items-center justify-center p-4 sm:max-w-md">
         <FormMessage message={searchParams} />
       </div>
+    );
+  }
+
+  // The reset form is only usable with an active recovery session (set by the
+  // /auth/callback code exchange). If it's missing/expired, show a recovery
+  // prompt instead of a form that would fail on submit.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return (
+      <>
+        <DashboardNavbar />
+        <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-8">
+          <div className="w-full max-w-md rounded-lg border border-purple-500/50 bg-card p-6 text-center space-y-4">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Reset link expired
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              This password reset link is invalid or has expired. Reset links
+              can only be used once and are valid for a limited time.
+            </p>
+            <Link
+              href="/forgot-password"
+              className="inline-block w-full rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 transition-colors"
+            >
+              Request a new link
+            </Link>
+          </div>
+        </div>
+      </>
     );
   }
 
