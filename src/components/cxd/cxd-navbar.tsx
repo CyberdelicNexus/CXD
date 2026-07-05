@@ -64,6 +64,7 @@ import { SettingsModal } from "@/components/modals/settings-modal";
 import { TemplatePickerModal } from './template-picker-modal';
 import { ShareSettingsModal } from './share/share-settings-modal';
 import { VersionHistoryPanel } from './version-history-panel';
+import { SaveStatusIndicator } from './save-status-indicator';
 import { Lock } from "lucide-react";
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
@@ -817,6 +818,9 @@ export function CXDNavbar() {
               </linearGradient>
             </defs>
           </svg>
+
+          {/* Save status — always visible while a project is open */}
+          {project && viewMode !== "home" && <SaveStatusIndicator />}
 
           {/* Toggle button for collapsible toolbar — first icon from left */}
           <button

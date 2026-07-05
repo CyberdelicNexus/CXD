@@ -15,6 +15,8 @@ interface BugReportNotificationProps {
   browserInfo?: string;
   timestamp: string;
   type?: 'bug' | 'support';
+  /** Sentry event id logged for this report — search it in Sentry to correlate with crashes */
+  sentryEventId?: string;
 }
 
 function DetailSection({ label, value }: { label: string; value: string }) {
@@ -59,6 +61,7 @@ export default function BugReportNotification({
   browserInfo,
   timestamp,
   type = 'bug',
+  sentryEventId,
 }: BugReportNotificationProps) {
   const formattedTime = new Date(timestamp).toLocaleString('en-US', {
     dateStyle: 'medium',
@@ -157,6 +160,9 @@ export default function BugReportNotification({
 
         {browserInfo && (
           <DetailSection label="Browser / Environment" value={browserInfo} />
+        )}
+        {sentryEventId && (
+          <DetailSection label="Sentry Event ID" value={sentryEventId} />
         )}
       </Section>
     </EmailLayout>

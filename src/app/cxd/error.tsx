@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 
 export default function CXDError({
   error,
@@ -11,6 +12,7 @@ export default function CXDError({
 }) {
   useEffect(() => {
     console.error("CXD error boundary caught:", error);
+    Sentry.captureException(error, { tags: { boundary: "canvas" } });
   }, [error]);
 
   return (

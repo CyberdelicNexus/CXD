@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -2292,8 +2293,9 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                 </div>
               </div>
 
-              {/* Hover Preview */}
-              {hoverPreview?.show && (
+              {/* Hover Preview — portaled to body: cursorX/Y are viewport coords, and an
+                  animated (transformed) ancestor would re-anchor position:fixed */}
+              {hoverPreview?.show && createPortal(
                 <div
                   className="fixed pointer-events-none z-[120]"
                   style={{
@@ -2307,7 +2309,8 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                     <span className="text-xs text-purple-300">Click to schedule</span>
                     <span className="text-[10px] text-purple-200/90">{hoverPreview.snappedDateLabel}</span>
                   </Card>
-                </div>
+                </div>,
+                document.body
               )}
 
               {/* Version Bars - Pipeline markers in dedicated lanes */}

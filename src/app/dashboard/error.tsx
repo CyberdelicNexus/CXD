@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 
 export default function DashboardError({
   error,
@@ -11,6 +12,7 @@ export default function DashboardError({
 }) {
   useEffect(() => {
     console.error("Dashboard error boundary caught:", error);
+    Sentry.captureException(error, { tags: { boundary: "dashboard" } });
   }, [error]);
 
   return (

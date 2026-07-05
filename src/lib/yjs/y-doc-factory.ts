@@ -30,6 +30,10 @@ import {
   canvasEdgeToYMap,
   yMapToCanvasEdge,
 } from './element-serializers';
+import { versionToYMap, okrToYMap, yMapToVersion, yMapToOKR } from './yjs-version-actions';
+import { commentToYMap, yMapToComment } from './yjs-comment-actions';
+import type { Comment } from '@/types/comment-types';
+import type { Version, OKR } from '@/types/version-types';
 
 // ─── Y.Doc Creation ──────────────────────────────────────────────────────────
 
@@ -57,6 +61,9 @@ export function createProjectYDoc(): Y.Doc {
   doc.getMap(YDOC_KEYS.EXPERIENCE_FLOW);
   doc.getArray(YDOC_KEYS.EXPERIENCE_FLOW_STAGES);
   doc.getText(YDOC_KEYS.EXPERIENCE_FLOW_DESCRIPTION);
+  doc.getMap(YDOC_KEYS.COMMENTS);
+  doc.getArray(YDOC_KEYS.VERSIONS);
+  doc.getArray(YDOC_KEYS.OKRS);
 
   return doc;
 }
@@ -209,6 +216,62 @@ export function initializeYDoc(doc: Y.Doc, project: CXDProject): void {
       yDesc.insert(0, project.experienceFlowDescription);
     }
   }, 'initialization'); // origin: SupabaseYjsProvider skips broadcasting this
+
+  // Comments / versions / OKRs are seeded via the union-merge helper so the
+  // same code path covers both fresh docs and docs from the era when these
+  // collections lived only in project_data JSON.
+  seedProjectExtrasIntoYDoc(doc, project);
+}
+
+// ─── Seeding: comments / versions / OKRs (union by id) ──────────────────────
+
+/**
+ * Merge comments, versions, and OKRs from project JSON into the Y.Doc.
+ *
+ * Union semantics: items already present in the Y.Doc win; items that exist
+ * only in project_data are added. This backfills docs created before these
+ * collections were CRDT-managed (they were saved only to project_data JSON,
+ * so an existing yjs_state won't contain them), without duplicating items
+ * that already live in the doc.
+ *
+ * Safe to call on every project load — it's idempotent.
+ */
+export function seedProjectExtrasIntoYDoc(doc: Y.Doc, project: CXDProject): void {
+  const comments = project.comments ?? [];
+  const versions = project.versions ?? [];
+  const okrs = project.okrs ?? [];
+  if (comments.length === 0 && versions.length === 0 && okrs.length === 0) return;
+
+  doc.transact(() => {
+    const yComments = doc.getMap(YDOC_KEYS.COMMENTS);
+    for (const comment of comments) {
+      if (comment?.id && !yComments.has(comment.id)) {
+        yComments.set(comment.id, commentToYMap(comment));
+      }
+    }
+
+    const yVersions = doc.getArray<Y.Map<unknown>>(YDOC_KEYS.VERSIONS);
+    const versionIds = new Set<string>();
+    for (let i = 0; i < yVersions.length; i++) {
+      versionIds.add(yVersions.get(i).get('id') as string);
+    }
+    for (const version of versions) {
+      if (version?.id && !versionIds.has(version.id)) {
+        yVersions.push([versionToYMap(version)]);
+      }
+    }
+
+    const yOKRs = doc.getArray<Y.Map<unknown>>(YDOC_KEYS.OKRS);
+    const okrIds = new Set<string>();
+    for (let i = 0; i < yOKRs.length; i++) {
+      okrIds.add(yOKRs.get(i).get('id') as string);
+    }
+    for (const okr of okrs) {
+      if (okr?.id && !okrIds.has(okr.id)) {
+        yOKRs.push([okrToYMap(okr)]);
+      }
+    }
+  }, 'initialization');
 }
 
 // ─── Conversion: Y.Doc → CXDProject ─────────────────────────────────────────
@@ -330,6 +393,11 @@ export function yDocToProject(doc: Y.Doc): CXDProject {
   const yDesc = doc.getText(YDOC_KEYS.EXPERIENCE_FLOW_DESCRIPTION);
   const experienceFlowDescription = yDesc.toString();
 
+  // ── Comments / Versions / OKRs ──
+  const comments = getYDocComments(doc);
+  const versions = getYDocVersions(doc);
+  const okrs = getYDocOKRs(doc);
+
   // ── Assemble CXDProject ──
   return {
     id: (meta.id as string) ?? '',
@@ -360,12 +428,57 @@ export function yDocToProject(doc: Y.Doc): CXDProject {
     experienceFlowStages,
     experienceFlowDescription,
 
+    comments,
+    versions,
+    okrs,
+
     canvasLayout: {
       elements,
       edges,
       sectionPositions: project_canvasLayoutSectionPositions(doc),
     },
   };
+}
+
+// ─── Collection Readers ──────────────────────────────────────────────────────
+
+/** Read all comments from the Y.Doc, ordered by creation time. */
+export function getYDocComments(doc: Y.Doc): Comment[] {
+  const yComments = doc.getMap(YDOC_KEYS.COMMENTS);
+  const comments: Comment[] = [];
+  yComments.forEach((yComment) => {
+    if (yComment instanceof Y.Map) {
+      comments.push(yMapToComment(yComment));
+    }
+  });
+  comments.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  return comments;
+}
+
+/** Read all versions from the Y.Doc in array order. */
+export function getYDocVersions(doc: Y.Doc): Version[] {
+  const yVersions = doc.getArray<Y.Map<unknown>>(YDOC_KEYS.VERSIONS);
+  const versions: Version[] = [];
+  for (let i = 0; i < yVersions.length; i++) {
+    const yVersion = yVersions.get(i);
+    if (yVersion instanceof Y.Map) {
+      versions.push(yMapToVersion(yVersion));
+    }
+  }
+  return versions;
+}
+
+/** Read all OKRs from the Y.Doc in array order. */
+export function getYDocOKRs(doc: Y.Doc): OKR[] {
+  const yOKRs = doc.getArray<Y.Map<unknown>>(YDOC_KEYS.OKRS);
+  const okrs: OKR[] = [];
+  for (let i = 0; i < yOKRs.length; i++) {
+    const yOKR = yOKRs.get(i);
+    if (yOKR instanceof Y.Map) {
+      okrs.push(yMapToOKR(yOKR));
+    }
+  }
+  return okrs;
 }
 
 // ─── One-time Migration: Deduplicate Reality Planes ──────────────────────────

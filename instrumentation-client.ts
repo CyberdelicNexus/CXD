@@ -12,9 +12,17 @@ if (dsn) {
     // Performance: keep low until we know production volume.
     tracesSampleRate: 0.1,
 
-    // Session replay disabled for now (extra bundle weight + privacy review).
-    replaysOnErrorSampleRate: 0,
+    // Error-only session replay: buffers locally, uploads only when an error
+    // fires. Text is masked and media blocked (privacy). Lower the rate if
+    // replay quota becomes a constraint.
+    replaysOnErrorSampleRate: 1.0,
     replaysSessionSampleRate: 0,
+    integrations: [
+      Sentry.replayIntegration({
+        maskAllText: true,
+        blockAllMedia: true,
+      }),
+    ],
 
     // Dev console noise off.
     debug: false,

@@ -14,8 +14,12 @@
 import * as Y from 'yjs';
 import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 import type { CXDProject } from '@/types/cxd-schema';
+import type { Comment } from '@/types/comment-types';
+import type { Version, OKR } from '@/types/version-types';
 import { YDOC_KEYS, YTEXT_DESIGN_FIELDS, YNUMBER_DESIGN_FIELDS } from './y-doc-types';
 import { yMapToCanvasElement, yMapToCanvasEdge } from './element-serializers';
+import { yMapToVersion, yMapToOKR } from './yjs-version-actions';
+import { yMapToComment } from './yjs-comment-actions';
 import { yTextToString } from './y-text-helpers';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -49,6 +53,12 @@ export interface BridgeCallbacks {
   setExperienceFlowStages: (stages: NonNullable<CXDProject['experienceFlowStages']>) => void;
   /** Set experience flow description */
   setExperienceFlowDescription: (value: string) => void;
+  /** Replace the comments array (remote/CRDT changes) */
+  setComments: (comments: Comment[]) => void;
+  /** Replace the versions array (remote/CRDT changes) */
+  setVersions: (versions: Version[]) => void;
+  /** Replace the OKRs array (remote/CRDT changes) */
+  setOKRs: (okrs: OKR[]) => void;
 }
 
 // ─── Bridge Class ────────────────────────────────────────────────────────────
@@ -87,6 +97,9 @@ export class YjsZustandBridge {
     this.observeExperienceFlowStages();
     this.observeExperienceFlowDescription();
     this.observeMeta();
+    this.observeComments();
+    this.observeVersions();
+    this.observeOKRs();
   }
 
   /**
@@ -304,6 +317,71 @@ export class YjsZustandBridge {
     this.unsubscribers.push(() => yMeta.unobserve(handler));
   }
 
+  // ── Comments / Versions / OKRs Observers ────────────────────────────────
+  // These collections use optimistic direct Zustand updates in store actions
+  // (origin 'local'), so the observers only apply remote/seed/restore changes.
+  // Rebuilding the full array is fine — these collections are small.
+
+  private observeComments(): void {
+    const yComments = this.doc.getMap(YDOC_KEYS.COMMENTS);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = (events: Y.YEvent<any>[]) => {
+      if (events[0]?.transaction?.origin === 'local') return;
+      const comments: Comment[] = [];
+      yComments.forEach((yComment) => {
+        if (yComment instanceof Y.Map) {
+          comments.push(yMapToComment(yComment));
+        }
+      });
+      comments.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      this.callbacks.setComments(comments);
+    };
+
+    yComments.observeDeep(handler);
+    this.unsubscribers.push(() => yComments.unobserveDeep(handler));
+  }
+
+  private observeVersions(): void {
+    const yVersions = this.doc.getArray<Y.Map<unknown>>(YDOC_KEYS.VERSIONS);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = (events: Y.YEvent<any>[]) => {
+      if (events[0]?.transaction?.origin === 'local') return;
+      const versions: Version[] = [];
+      for (let i = 0; i < yVersions.length; i++) {
+        const yVersion = yVersions.get(i);
+        if (yVersion instanceof Y.Map) {
+          versions.push(yMapToVersion(yVersion));
+        }
+      }
+      this.callbacks.setVersions(versions);
+    };
+
+    yVersions.observeDeep(handler);
+    this.unsubscribers.push(() => yVersions.unobserveDeep(handler));
+  }
+
+  private observeOKRs(): void {
+    const yOKRs = this.doc.getArray<Y.Map<unknown>>(YDOC_KEYS.OKRS);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = (events: Y.YEvent<any>[]) => {
+      if (events[0]?.transaction?.origin === 'local') return;
+      const okrs: OKR[] = [];
+      for (let i = 0; i < yOKRs.length; i++) {
+        const yOKR = yOKRs.get(i);
+        if (yOKR instanceof Y.Map) {
+          okrs.push(yMapToOKR(yOKR));
+        }
+      }
+      this.callbacks.setOKRs(okrs);
+    };
+
+    yOKRs.observeDeep(handler);
+    this.unsubscribers.push(() => yOKRs.unobserveDeep(handler));
+  }
+
   /**
    * Force an immediate full sync of all elements and edges from Y.Doc to Zustand.
    * Call this after bridge.start() to ensure initial Y.Doc state (loaded from
@@ -349,6 +427,38 @@ export class YjsZustandBridge {
     }
     if (edges.length > 0) {
       this.callbacks.setEdges(edges);
+    }
+
+    // Comments / versions / OKRs: after union-seeding, the Y.Doc is a superset
+    // of project_data, so replacing the Zustand arrays is safe and surfaces
+    // CRDT-only items (e.g., collaborator changes saved only to yjs_state).
+    const comments: Comment[] = [];
+    this.doc.getMap(YDOC_KEYS.COMMENTS).forEach((yComment) => {
+      if (yComment instanceof Y.Map) comments.push(yMapToComment(yComment));
+    });
+    if (comments.length > 0) {
+      comments.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      this.callbacks.setComments(comments);
+    }
+
+    const yVersions = this.doc.getArray<Y.Map<unknown>>(YDOC_KEYS.VERSIONS);
+    const versions: Version[] = [];
+    for (let i = 0; i < yVersions.length; i++) {
+      const yVersion = yVersions.get(i);
+      if (yVersion instanceof Y.Map) versions.push(yMapToVersion(yVersion));
+    }
+    if (versions.length > 0) {
+      this.callbacks.setVersions(versions);
+    }
+
+    const yOKRs = this.doc.getArray<Y.Map<unknown>>(YDOC_KEYS.OKRS);
+    const okrs: OKR[] = [];
+    for (let i = 0; i < yOKRs.length; i++) {
+      const yOKR = yOKRs.get(i);
+      if (yOKR instanceof Y.Map) okrs.push(yMapToOKR(yOKR));
+    }
+    if (okrs.length > 0) {
+      this.callbacks.setOKRs(okrs);
     }
   }
 

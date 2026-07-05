@@ -13,10 +13,11 @@ import { createSnapshot } from '@/lib/yjs/snapshot-service';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { useCXDStore } from '@/store/cxd-store';
-import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2 } from '@/lib/yjs/y-doc-factory';
+import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2, seedProjectExtrasIntoYDoc } from '@/lib/yjs/y-doc-factory';
 import { YjsZustandBridge, BridgeCallbacks } from '@/lib/yjs/y-zustand-bridge';
 import { LocalPersistence } from '@/lib/yjs/indexeddb-persistence';
 import { SupabasePersistence } from '@/lib/yjs/supabase-persistence';
+import { emitSaveStatus } from '@/lib/save-status';
 import type { CXDProject } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 
@@ -50,13 +51,22 @@ const USE_YJS_CRDT = typeof window !== 'undefined'
 let _activeSupabasePersistence: SupabasePersistence | null = null;
 
 /**
+ * Tracks the previous project's async persistence teardown so the next
+ * project's load can wait for it. Without this, a rapid project switch could
+ * start loading the new project while the old one's final save is in flight.
+ */
+let _pendingDestroy: Promise<void> | null = null;
+
+/**
  * Flush any pending Y.js binary state to Supabase.
  * Call before logout/navigation to prevent data loss.
+ * Returns true if the flush save succeeded (or there was nothing to flush).
  */
-export async function flushYjsPersistence(): Promise<void> {
+export async function flushYjsPersistence(): Promise<boolean> {
   if (_activeSupabasePersistence) {
-    await _activeSupabasePersistence.flush();
+    return _activeSupabasePersistence.flush();
   }
+  return true;
 }
 
 // ─── Provider ────────────────────────────────────────────────────────────────
@@ -130,9 +140,15 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     const localPersist = new LocalPersistence(newDoc, currentProjectId);
     localPersistenceRef.current = localPersist;
 
-    // Set up Supabase persistence (binary Y.Doc state to DB)
+    // Set up Supabase persistence (binary Y.Doc state to DB).
+    // getBaseProject supplies the Zustand snapshot used as the merge base for
+    // the derived project_data JSON — read raw from projects[] (not
+    // getCurrentProject(), which runs in-place migrations).
     const supabasePersist = new SupabasePersistence(newDoc, currentProjectId, {
       onError: (msg) => console.warn('[YjsProject] Persistence warning:', msg),
+      onStatusChange: (status, message) => emitSaveStatus({ status, source: 'yjs', message }),
+      getBaseProject: () =>
+        useCXDStore.getState().projects.find((p) => p.id === currentProjectId) ?? null,
     });
     supabasePersistenceRef.current = supabasePersist;
     _activeSupabasePersistence = supabasePersist;
@@ -162,10 +178,15 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     // elements appear frozen — delete does nothing, drag positions reset on sync.
     // By delaying setYDoc until Y.Doc is populated, the store stays in LWW mode
     // (direct Zustand updates) during loading, so all interactions work correctly.
-    Promise.all([
-      localPersist.whenSynced(),
-      supabasePersist.load(),
-    ]).then(([_, supabaseLoaded]) => {
+    // Sequenced deliberately:
+    // 0. Wait for the PREVIOUS project's persistence teardown — its final save
+    //    must complete before we read this project's state (rapid-switch race).
+    // 1. IndexedDB (local, offline state) applies first.
+    // 2. Supabase (remote, latest shared state) merges on top via CRDT.
+    (_pendingDestroy ?? Promise.resolve())
+      .then(() => localPersist.whenSynced())
+      .then(() => supabasePersist.load())
+      .then((supabaseLoaded) => {
       // Guard: if this provider was cleaned up while loading, bail out
       if (bridgeRef.current !== bridge) return;
 
@@ -180,11 +201,22 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
         }
       } else {
         console.log('[YjsProject] Loaded persisted Yjs state from Supabase');
+        // Backfill comments/versions/OKRs from project_data JSON — docs created
+        // before these collections were CRDT-managed won't have them in yjs_state.
+        // Union by id: existing Y.Doc items win, missing ones are added.
+        const currentProject = useCXDStore.getState().getCurrentProject();
+        if (currentProject) {
+          seedProjectExtrasIntoYDoc(newDoc, currentProject);
+        }
       }
 
       // One-time repair: remove duplicate reality planes that may have accumulated
       // in IndexedDB from a previous bug where initializeYDoc lacked an idempotency guard.
       deduplicateRealityPlanesV2(newDoc);
+
+      // Hydration is complete — the doc now holds the full known state,
+      // so persistence may start writing to the DB.
+      supabasePersist.markReady();
 
       // Force-sync all current Y.Doc state to Zustand immediately.
       // This handles two cases:
@@ -220,6 +252,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
         initializeYDoc(newDoc, currentProject);
       }
       deduplicateRealityPlanesV2(newDoc);
+      supabasePersist.markReady();
       bridge.forceInitialSync();
       setYDoc(newDoc);
       setIsReady(true);
@@ -251,8 +284,15 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
         createSnapshot(pid, 'Project switch').catch(() => {});
       }
       // destroy() is async: it flushes the final save before marking destroyed.
-      // Fire-and-forget is intentional here — we cannot await in a React cleanup.
-      supabasePersistenceRef.current.destroy();
+      // React cleanup can't await it, but we chain the promise into
+      // _pendingDestroy so the NEXT project's load waits for this final save.
+      // Chaining (rather than replacing) also serializes overlapping teardowns.
+      const persistence = supabasePersistenceRef.current;
+      _pendingDestroy = (_pendingDestroy ?? Promise.resolve())
+        .then(() => persistence.destroy())
+        .catch((err) => {
+          console.warn('[YjsProject] Final save on teardown failed:', err);
+        });
       _activeSupabasePersistence = null;
       supabasePersistenceRef.current = null;
     }
@@ -454,6 +494,18 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
 
     setExperienceFlowDescription: (value) => {
       updateProject((p) => ({ ...p, experienceFlowDescription: value }));
+    },
+
+    setComments: (comments) => {
+      updateProject((p) => ({ ...p, comments }));
+    },
+
+    setVersions: (versions) => {
+      updateProject((p) => ({ ...p, versions }));
+    },
+
+    setOKRs: (okrs) => {
+      updateProject((p) => ({ ...p, okrs }));
     },
   };
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@/supabase/server';
 import { enqueueEmail } from '@/lib/email-queue';
 import { getPlan } from '@/lib/plans';
@@ -67,6 +68,26 @@ export async function POST(request: Request) {
     const type: 'bug' | 'support' = title === 'Bug Report' ? 'bug' : 'support';
     const subjectPrefix = type === 'bug' ? 'Bug Report' : 'Support Request';
 
+    // Log every user report to Sentry so it can be correlated with crash
+    // events (same user, same timeframe) instead of living only in email.
+    let sentryEventId: string | undefined;
+    try {
+      sentryEventId = Sentry.captureMessage(`${subjectPrefix}: ${title}`, {
+        level: type === 'bug' ? 'warning' : 'info',
+        tags: { source: 'user-report', reportType: type, plan: plan.name },
+        user: { id: user.id, email: reporterEmail },
+        extra: {
+          description,
+          stepsToReproduce,
+          expectedBehavior,
+          actualBehavior,
+          browserInfo,
+        },
+      });
+    } catch {
+      // Sentry unavailability must never block a user report
+    }
+
     // Queue admin notification + user confirmation through Inngest. Both are
     // delivered durably with retries. The request returns ~50ms instead of
     // holding for two Resend roundtrips.
@@ -87,6 +108,7 @@ export async function POST(request: Request) {
             browserInfo,
             timestamp: new Date().toISOString(),
             type,
+            sentryEventId,
           }),
         }),
         enqueueEmail({
@@ -102,12 +124,14 @@ export async function POST(request: Request) {
       ]);
     } catch (emailErr) {
       console.error('Failed to enqueue support emails:', emailErr);
+      Sentry.captureException(emailErr, { tags: { route: 'support', phase: 'enqueue-email' } });
       return NextResponse.json({ error: 'Failed to submit support request. Please try again.' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, message: `${subjectPrefix} submitted successfully` });
   } catch (error) {
     console.error('Bug report submission error:', error);
+    Sentry.captureException(error, { tags: { route: 'support' } });
     return NextResponse.json(
       { error: 'Failed to submit bug report' },
       { status: 500 }

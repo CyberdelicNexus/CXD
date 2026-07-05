@@ -23,6 +23,10 @@ export const YDOC_KEYS = {
   EXPERIENCE_FLOW: 'experienceFlow',
   EXPERIENCE_FLOW_STAGES: 'experienceFlowStages',
   EXPERIENCE_FLOW_DESCRIPTION: 'experienceFlowDescription',
+  // Collaboration extras — values must match VERSION_YDOC_KEYS / comment actions
+  COMMENTS: 'comments',
+  VERSIONS: 'versions',
+  OKRS: 'okrs',
 } as const;
 
 // Meta fields stored as scalar values in the "meta" Y.Map

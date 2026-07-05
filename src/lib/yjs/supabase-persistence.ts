@@ -20,25 +20,50 @@
 import * as Y from 'yjs';
 import { createClient } from '@/supabase/client';
 import { createSnapshot } from './snapshot-service';
+import { yDocToProject } from './y-doc-factory';
+import type { CXDProject } from '@/types/cxd-schema';
 
 const SAVE_DEBOUNCE_MS = 2000;
 const MAX_RETRIES = 3;
-const CONSECUTIVE_FAILURES_THRESHOLD = 5;
+// Each recorded failure already represents MAX_RETRIES exhausted attempts
+// (or a non-retryable permission error), so surface trouble early.
+const CONSECUTIVE_FAILURES_THRESHOLD = 2;
+
+export type PersistenceSaveStatus = 'saving' | 'saved' | 'error';
 
 export interface SupabasePersistenceOpts {
   onError?: (error: string) => void;
+  /** Fires on every save lifecycle transition — wire this to the UI save indicator. */
+  onStatusChange?: (status: PersistenceSaveStatus, message?: string) => void;
+  /**
+   * Returns the current Zustand project snapshot. When provided, each save
+   * also derives project_data JSON from the SAME Y.Doc snapshot as the binary
+   * (merged over this base for fields that don't live in the Y.Doc) and writes
+   * both columns in one atomic UPDATE — the two representations can no longer
+   * desync.
+   */
+  getBaseProject?: () => CXDProject | null;
 }
 
 export class SupabasePersistence {
   private doc: Y.Doc;
   private projectId: string;
   private destroyed = false;
+  /**
+   * Saves are gated until the provider finishes hydration (IndexedDB +
+   * Supabase load + seeding) and calls markReady(). Without this gate, doc
+   * updates fired DURING loading (e.g., partial IndexedDB state) schedule
+   * saves that can persist incomplete data over the DB's complete state.
+   */
+  private ready = false;
   private saveTimeout: ReturnType<typeof setTimeout> | null = null;
   private updateHandler: (update: Uint8Array, origin: unknown) => void;
   /** Tracks the currently running save promise so destroy() can await it. */
-  private activeSavePromise: Promise<void> | null = null;
+  private activeSavePromise: Promise<boolean> | null = null;
   private consecutiveFailures = 0;
   private onPersistenceError?: (error: string) => void;
+  private onStatusChange?: (status: PersistenceSaveStatus, message?: string) => void;
+  private getBaseProject?: () => CXDProject | null;
   /**
    * Cached state from the last load() or successful save().
    * Used as the merge base in save() to avoid a DB SELECT on every write.
@@ -50,6 +75,8 @@ export class SupabasePersistence {
     this.doc = doc;
     this.projectId = projectId;
     this.onPersistenceError = opts?.onError;
+    this.onStatusChange = opts?.onStatusChange;
+    this.getBaseProject = opts?.getBaseProject;
 
     // Schedule save on every local or remote change
     this.updateHandler = (_update: Uint8Array, _origin: unknown) => {
@@ -105,20 +132,32 @@ export class SupabasePersistence {
    *   2. Encode merged result and write back
    *   3. Update lastLoadedState cache on success
    */
-  async save(retryAttempt = 0): Promise<void> {
-    if (this.destroyed) return;
-    // If a save is already running, don't stack another — the caller
-    // can await activeSavePromise directly if they need to chain.
-    if (this.activeSavePromise) return;
+  /**
+   * Enable saving. Call once hydration is complete and the Y.Doc holds the
+   * full known state. Also kicks a first save so state assembled during
+   * loading (e.g., JSON-initialized docs) reaches the DB.
+   */
+  markReady(): void {
+    if (this.ready || this.destroyed) return;
+    this.ready = true;
+    this.scheduleSave();
+  }
+
+  async save(retryAttempt = 0): Promise<boolean> {
+    if (this.destroyed) return false;
+    if (!this.ready) return true; // nothing to persist yet — loading in progress
+    // If a save is already running, don't stack another — join its result.
+    if (this.activeSavePromise) return this.activeSavePromise;
 
     this.activeSavePromise = this._executeSave(retryAttempt).finally(() => {
       this.activeSavePromise = null;
     });
-    await this.activeSavePromise;
+    return this.activeSavePromise;
   }
 
-  private async _executeSave(retryAttempt = 0): Promise<void> {
+  private async _executeSave(retryAttempt = 0): Promise<boolean> {
     try {
+      if (retryAttempt === 0) this.onStatusChange?.('saving');
       const supabase = createClient();
 
       // Merge local state with cached last-loaded state (no SELECT needed)
@@ -140,11 +179,44 @@ export class SupabasePersistence {
       }
       const base64 = btoa(binary);
 
+      const savedAt = new Date().toISOString();
+
+      // Derive project_data from the SAME Y.Doc snapshot as the binary so the
+      // two columns are written consistently in one atomic UPDATE.
+      const base = this.getBaseProject?.() ?? null;
+      let projectData: CXDProject | null = null;
+      if (base && !(base as unknown as { _listingOnly?: boolean })._listingOnly) {
+        const fromDoc = yDocToProject(this.doc);
+
+        // Wipe guard: if the Y.Doc looks empty while Zustand has content, we're
+        // most likely mid-load — skip the whole save rather than persist a wipe.
+        const baseElementCount = base.canvasLayout?.elements?.length ?? 0;
+        const docElementCount = fromDoc.canvasLayout?.elements?.length ?? 0;
+        if (baseElementCount > 0 && docElementCount === 0) {
+          console.warn(
+            '[SupabasePersistence] Skipping save — Y.Doc has no elements while store has',
+            baseElementCount,
+            '(likely mid-load). Will retry on next change.'
+          );
+          return false;
+        }
+
+        projectData = mergeProjectWithDoc(base, fromDoc, savedAt);
+      }
+
       const { error } = await supabase
         .from('cxd_projects')
         .update({
           yjs_state: base64,
-          updated_at: new Date().toISOString(),
+          updated_at: savedAt,
+          ...(projectData
+            ? {
+                project_data: projectData,
+                name: projectData.name,
+                description: projectData.description,
+                share_token: projectData.shareToken || null,
+              }
+            : {}),
         })
         .eq('id', this.projectId);
 
@@ -162,22 +234,26 @@ export class SupabasePersistence {
           console.error('[SupabasePersistence] Failed to save Y.Doc state:', error);
           this.scheduleRetry(retryAttempt);
         }
-      } else {
-        // Success — reset failure counter and update cache for next save
-        this.consecutiveFailures = 0;
-        this.lastLoadedState = merged;
+        return false;
       }
+
+      // Success — reset failure counter and update cache for next save
+      this.consecutiveFailures = 0;
+      this.lastLoadedState = merged;
+      this.onStatusChange?.('saved');
+      return true;
     } catch (err) {
       const isNetworkError = err instanceof TypeError && err.message.includes('fetch');
 
       if (isNetworkError) {
         console.warn(`[SupabasePersistence] Network error on save (attempt ${retryAttempt + 1}):`, err);
         this.scheduleRetry(retryAttempt);
-        return;
+        return false;
       }
 
       console.error('[SupabasePersistence] Save error:', err);
       this.recordFailure(String(err));
+      return false;
     }
   }
 
@@ -201,6 +277,9 @@ export class SupabasePersistence {
    */
   private recordFailure(message: string): void {
     this.consecutiveFailures++;
+    // A recorded failure means retries are exhausted (or the error is
+    // non-retryable) — the user should see it immediately.
+    this.onStatusChange?.('error', message);
     if (this.consecutiveFailures >= CONSECUTIVE_FAILURES_THRESHOLD) {
       const errMsg = `[SupabasePersistence] ${this.consecutiveFailures} consecutive save failures. Last error: ${message}`;
       console.error(errMsg);
@@ -211,8 +290,9 @@ export class SupabasePersistence {
   /**
    * Cancel any pending debounce and save immediately.
    * Call this on visibilitychange (tab hidden) and beforeunload.
+   * Resolves true when the save reached the database.
    */
-  flush(): Promise<void> {
+  flush(): Promise<boolean> {
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
       this.saveTimeout = null;
@@ -224,6 +304,7 @@ export class SupabasePersistence {
    * Schedule a debounced save.
    */
   private scheduleSave(): void {
+    if (!this.ready) return;
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout);
     }
@@ -257,11 +338,54 @@ export class SupabasePersistence {
       await this.activeSavePromise;
     }
 
-    // Always do a final save — even if a save just finished, the Y.Doc may have
-    // received changes between the moment that save encoded the state and now.
-    await this._executeSave(0);
+    // Final save — but only if hydration completed. Destroying mid-load
+    // (rapid project switch) must NOT write a partially-loaded doc to the DB.
+    if (this.ready) {
+      await this._executeSave(0);
+    }
 
     // Only now mark as destroyed
     this.destroyed = true;
   }
+}
+
+// ─── project_data Derivation ─────────────────────────────────────────────────
+
+/**
+ * Fields where an empty/falsy Y.Doc value must never clobber the base —
+ * they're identity fields seeded into meta; a legacy doc missing them
+ * would otherwise blank the project row.
+ */
+const PROTECTED_META_FIELDS = new Set(['id', 'name', 'ownerId', 'createdAt', 'schemaVersion']);
+
+/**
+ * Merge the Y.Doc projection over the Zustand base project.
+ *
+ * The Y.Doc is authoritative for everything it stores (canvas, design fields,
+ * comments, versions, OKRs, meta). Fields that live only in Zustand
+ * (tourCompleted, share images, canvasLayout.boards, sectionPositions when
+ * absent from meta) ride along from the base — so new CXDProject fields keep
+ * persisting without touching this code.
+ */
+function mergeProjectWithDoc(base: CXDProject, fromDoc: CXDProject, savedAt: string): CXDProject {
+  const merged: Record<string, unknown> = { ...(base as unknown as Record<string, unknown>) };
+
+  for (const [key, value] of Object.entries(fromDoc as unknown as Record<string, unknown>)) {
+    if (key === 'canvasLayout') continue; // merged separately below
+    if (value === undefined) continue;
+    if (PROTECTED_META_FIELDS.has(key) && !value) continue;
+    merged[key] = value;
+  }
+
+  const canvasLayout: Record<string, unknown> = {
+    ...((base.canvasLayout ?? {}) as unknown as Record<string, unknown>),
+  };
+  for (const [key, value] of Object.entries((fromDoc.canvasLayout ?? {}) as unknown as Record<string, unknown>)) {
+    if (value === undefined) continue;
+    canvasLayout[key] = value;
+  }
+  merged.canvasLayout = canvasLayout;
+  merged.updatedAt = savedAt;
+
+  return merged as unknown as CXDProject;
 }

@@ -3,13 +3,18 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useCXDStore } from '@/store/cxd-store';
 import { saveProject } from '@/lib/supabase-projects';
+import { flushYjsPersistence } from '@/contexts/yjs-project-context';
 import { CXDProject } from '@/types/cxd-schema';
+import { emitSaveStatus } from '@/lib/save-status';
 
 // Global state for sync status - accessible from other components
 let pendingSavePromise: Promise<boolean> | null = null;
+// Marker of the last successfully saved state — always the project's updatedAt
+// (bumped by the store on every mutation). Never store a JSON hash here: the
+// two representations previously got mixed, so the unsaved-changes check and
+// the beforeunload warning could never match after a normal autosave.
 let lastSavedHash: string | null = null;
 let consecutiveSaveFailures = 0;
-const MAX_SILENT_FAILURES = 2;
 
 // Backup to localStorage for disaster recovery
 const BACKUP_KEY = 'cxd_project_backup';
@@ -60,11 +65,22 @@ export async function flushPendingSave(): Promise<boolean> {
   // Never flush a listing-only stub — it would overwrite full project_data
   if ((currentProject as any)._listingOnly) return true;
 
-  const projectHash = JSON.stringify(currentProject);
-  if (projectHash === lastSavedHash) return true;
+  if (currentProject.updatedAt === lastSavedHash) return true;
 
   // Backup to localStorage first (synchronous)
   backupToLocalStorage(currentProject);
+
+  // CRDT mode: the unified Yjs writer persists yjs_state + project_data
+  // atomically from the same snapshot — flush it instead of a parallel
+  // JSON write that could diverge.
+  if (useCXDStore.getState().yDoc) {
+    const flushed = await flushYjsPersistence();
+    if (flushed) {
+      lastSavedHash = currentProject.updatedAt;
+      clearLocalBackup();
+    }
+    return flushed;
+  }
 
   // If there's already a save in progress, wait for it
   if (pendingSavePromise) {
@@ -75,10 +91,12 @@ export async function flushPendingSave(): Promise<boolean> {
   console.log('[Sync] Flushing pending save before navigation...');
   const success = await saveProject(currentProject);
   if (success) {
-    lastSavedHash = projectHash;
+    lastSavedHash = currentProject.updatedAt;
     clearLocalBackup();
+    emitSaveStatus({ status: 'saved', source: 'project' });
     console.log('[Sync] Flush successful');
   } else {
+    emitSaveStatus({ status: 'error', source: 'project', message: 'Changes may not be saved. Check your connection.' });
     console.warn('[Sync] Flush failed, localStorage backup retained');
   }
   return success;
@@ -98,6 +116,12 @@ function syncSaveOnUnload(project: CXDProject) {
   // Backup to localStorage (synchronous, reliable)
   backupToLocalStorage(project);
 
+  if (useCXDStore.getState().yDoc) {
+    // CRDT mode: the Yjs provider's own beforeunload handler flushes the
+    // unified writer; a parallel JSON save here would race it.
+    return;
+  }
+
   // Also attempt async save (may complete before page fully unloads)
   saveProject(project).catch(() => {
     // Ignore errors, localStorage backup is the safety net
@@ -115,6 +139,21 @@ export function useProjectSync() {
     // Never save listing-only stubs
     if ((project as any)._listingOnly) return;
 
+    // CRDT mode: delegate to the unified Yjs writer. It derives project_data
+    // from the same Y.Doc snapshot as the binary and writes both atomically —
+    // a parallel JSON save here would race it with divergent content. This
+    // flush also captures Zustand-only fields (tour state, share settings)
+    // via the merge base.
+    if (useCXDStore.getState().yDoc) {
+      backupToLocalStorage(project);
+      const flushed = await flushYjsPersistence();
+      if (flushed) {
+        lastSavedHash = project.updatedAt;
+        clearLocalBackup();
+      }
+      return;
+    }
+
     // If already saving, wait for it then save fresh state
     if (isSavingRef.current) {
       if (pendingSavePromise) {
@@ -130,6 +169,7 @@ export function useProjectSync() {
 
     // Backup to localStorage first (synchronous safety net)
     backupToLocalStorage(project);
+    emitSaveStatus({ status: 'saving', source: 'project' });
 
     try {
       pendingSavePromise = saveProject(project);
@@ -138,24 +178,27 @@ export function useProjectSync() {
         lastSavedHash = project.updatedAt;
         consecutiveSaveFailures = 0;
         clearLocalBackup(); // Clear backup on successful save
+        emitSaveStatus({ status: 'saved', source: 'project' });
         console.log('[Sync] Project saved successfully');
       } else {
         consecutiveSaveFailures++;
         console.warn(`[Sync] Project save failed (${consecutiveSaveFailures} consecutive), localStorage backup retained`);
-        if (consecutiveSaveFailures > MAX_SILENT_FAILURES && typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('cxd-save-error', {
-            detail: { failures: consecutiveSaveFailures, message: 'Changes may not be saved. Check your connection.' },
-          }));
-        }
+        emitSaveStatus({
+          status: 'error',
+          source: 'project',
+          failures: consecutiveSaveFailures,
+          message: 'Changes may not be saved. Check your connection.',
+        });
       }
     } catch (error) {
       consecutiveSaveFailures++;
       console.error('[Sync] Error saving project:', error);
-      if (consecutiveSaveFailures > MAX_SILENT_FAILURES && typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('cxd-save-error', {
-          detail: { failures: consecutiveSaveFailures, message: 'Save error. Your changes are backed up locally.' },
-        }));
-      }
+      emitSaveStatus({
+        status: 'error',
+        source: 'project',
+        failures: consecutiveSaveFailures,
+        message: 'Save error. Your changes are backed up locally.',
+      });
     } finally {
       isSavingRef.current = false;
       pendingSavePromise = null;
@@ -171,9 +214,10 @@ export function useProjectSync() {
     if (backup && backup.project && backup.project.id) {
       const existingProject = projects.find(p => p.id === backup.project.id);
 
-      // If backup exists and is less than 1 hour old, consider restoring it
-      const oneHourAgo = Date.now() - (60 * 60 * 1000);
-      if (backup.timestamp > oneHourAgo) {
+      // If backup exists and is less than 24 hours old, consider restoring it
+      // (a crash last night should still be recoverable this morning)
+      const retentionCutoff = Date.now() - (24 * 60 * 60 * 1000);
+      if (backup.timestamp > retentionCutoff) {
         if (existingProject) {
           const existingUpdated = new Date(existingProject.updatedAt).getTime();
           // If backup is newer than what we have, restore it
@@ -247,8 +291,7 @@ export function useProjectSync() {
       const currentProject = projects.find(p => p.id === currentProjectId);
       if (!currentProject) return;
 
-      const projectHash = JSON.stringify(currentProject);
-      if (projectHash === lastSavedHash) return;
+      if (currentProject.updatedAt === lastSavedHash) return;
 
       // Cancel pending debounce
       if (debounceRef.current) {
@@ -268,8 +311,7 @@ export function useProjectSync() {
       if (document.visibilityState === 'hidden') {
         const currentProject = projects.find(p => p.id === currentProjectId);
         if (currentProject) {
-          const projectHash = JSON.stringify(currentProject);
-          if (projectHash !== lastSavedHash) {
+          if (currentProject.updatedAt !== lastSavedHash) {
             // Cancel debounce and save immediately
             if (debounceRef.current) {
               clearTimeout(debounceRef.current);

@@ -35,6 +35,9 @@ import {
   yjsAddObjective, yjsUpdateObjective, yjsDeleteObjective,
   yjsAddKeyResult, yjsUpdateKeyResult, yjsDeleteKeyResult,
 } from '@/lib/yjs/yjs-version-actions';
+import {
+  yjsSetComment, yjsUpdateComment, yjsUpdateComments, yjsDeleteCommentThread,
+} from '@/lib/yjs/yjs-comment-actions';
 import { saveProject, insertProject, deleteProjectFromDb, updateProjectShareToken } from '@/lib/supabase-projects';
 import type * as Y from 'yjs';
 import {
@@ -2168,9 +2171,14 @@ export const useCXDStore = create<CXDState>()(
           activeCommentId: newComment.id,
         }));
 
-        // Persist to DB
-        const updatedProject = get().projects.find(p => p.id === currentProject.id);
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        // Persist: CRDT write in Yjs mode (unified writer saves it), else direct save
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetComment(yDoc, newComment);
+        } else {
+          const updatedProject = get().projects.find(p => p.id === currentProject.id);
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       updateCommentPosition: (commentId, position) => {
@@ -2188,8 +2196,13 @@ export const useCXDStore = create<CXDState>()(
           ),
         }));
 
-        const updatedProject = get().projects.find(p => p.id === currentProject.id);
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateComment(yDoc, commentId, { position });
+        } else {
+          const updatedProject = get().projects.find(p => p.id === currentProject.id);
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       addReply: (parentId, content) => {
@@ -2225,8 +2238,13 @@ export const useCXDStore = create<CXDState>()(
           ),
         }));
 
-        const updatedProject = get().projects.find(p => p.id === currentProject.id);
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetComment(yDoc, newReply);
+        } else {
+          const updatedProject = get().projects.find(p => p.id === currentProject.id);
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       resolveComment: (commentId) => {
@@ -2236,9 +2254,13 @@ export const useCXDStore = create<CXDState>()(
         const now = Date.now();
         const comments = currentProject.comments || [];
         // Resolve root and all its replies
+        const resolvedBy = currentProject.ownerId || 'anonymous';
+        const affectedIds = comments
+          .filter(c => c.id === commentId || c.parentId === commentId)
+          .map(c => c.id);
         const updatedComments = comments.map(c => {
           if (c.id === commentId || c.parentId === commentId) {
-            return { ...c, resolvedAt: now, resolvedBy: currentProject.ownerId || 'anonymous' };
+            return { ...c, resolvedAt: now, resolvedBy };
           }
           return c;
         });
@@ -2251,8 +2273,13 @@ export const useCXDStore = create<CXDState>()(
           ),
         }));
 
-        const updatedProject = get().projects.find(p => p.id === currentProject.id);
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateComments(yDoc, affectedIds.map(id => ({ id, updates: { resolvedAt: now, resolvedBy } })));
+        } else {
+          const updatedProject = get().projects.find(p => p.id === currentProject.id);
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       unresolveComment: (commentId) => {
@@ -2260,6 +2287,9 @@ export const useCXDStore = create<CXDState>()(
         if (!currentProject) return;
 
         const comments = currentProject.comments || [];
+        const affectedIds = comments
+          .filter(c => c.id === commentId || c.parentId === commentId)
+          .map(c => c.id);
         const updatedComments = comments.map(c => {
           if (c.id === commentId || c.parentId === commentId) {
             return { ...c, resolvedAt: null, resolvedBy: undefined };
@@ -2275,8 +2305,13 @@ export const useCXDStore = create<CXDState>()(
           ),
         }));
 
-        const updatedProject = get().projects.find(p => p.id === currentProject.id);
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateComments(yDoc, affectedIds.map(id => ({ id, updates: { resolvedAt: null, resolvedBy: undefined } })));
+        } else {
+          const updatedProject = get().projects.find(p => p.id === currentProject.id);
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       deleteComment: (commentId) => {
@@ -2296,8 +2331,13 @@ export const useCXDStore = create<CXDState>()(
           activeCommentId: get().activeCommentId === commentId ? null : get().activeCommentId,
         }));
 
-        const updatedProject = get().projects.find(p => p.id === currentProject.id);
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsDeleteCommentThread(yDoc, commentId);
+        } else {
+          const updatedProject = get().projects.find(p => p.id === currentProject.id);
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       toggleReaction: (commentId, emoji) => {
@@ -2331,8 +2371,14 @@ export const useCXDStore = create<CXDState>()(
           ),
         }));
 
-        const updatedProject = get().projects.find(p => p.id === currentProject.id);
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        const { yDoc } = get();
+        if (yDoc) {
+          const toggled = comments.find(c => c.id === commentId);
+          if (toggled) yjsUpdateComment(yDoc, commentId, { reactions: toggled.reactions });
+        } else {
+          const updatedProject = get().projects.find(p => p.id === currentProject.id);
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       toggleShowResolved: () => {
@@ -2414,8 +2460,8 @@ export const useCXDStore = create<CXDState>()(
           updatedAt: new Date().toISOString(),
         };
 
-        // Always use direct Zustand update for versions
-        // (Yjs bridge doesn't sync versions yet)
+        // Optimistic direct Zustand update; in CRDT mode the Y.Doc write below
+        // is the persisted source of truth (bridge skips 'local' origin echoes)
         set((state) => ({
           projects: state.projects.map((p) =>
             p.id === currentProject.id
@@ -2427,8 +2473,14 @@ export const useCXDStore = create<CXDState>()(
               : p
           ),
         }));
-        const updatedProject = get().getCurrentProject();
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsAddVersion(yDoc, newVersion);
+        } else {
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
 
         return versionId;
       },
@@ -2437,8 +2489,7 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
-        // Always use direct Zustand update for versions
-        // (Yjs bridge doesn't sync versions yet)
+        // Optimistic direct Zustand update; CRDT write persists it in Yjs mode
         const versions = (currentProject.versions || []).map((v) =>
           v.id === versionId ? { ...v, ...updates, updatedAt: new Date().toISOString() } : v
         );
@@ -2450,45 +2501,54 @@ export const useCXDStore = create<CXDState>()(
               : p
           ),
         }));
-        const updatedProject = get().getCurrentProject();
-        if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsUpdateVersion(yDoc, versionId, updates);
+        } else {
+          const updatedProject = get().getCurrentProject();
+          if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
+        }
       },
 
       deleteVersion: (versionId) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
+        const versions = (currentProject.versions || []).filter((v) => v.id !== versionId);
+
+        // Also remove versionId from all tasks
+        const elements = (currentProject.canvasLayout?.elements || []).map((el) => {
+          const elWithMeta = el as { taskMetadata?: { versionId?: string } };
+          if (elWithMeta.taskMetadata?.versionId === versionId) {
+            return {
+              ...el,
+              taskMetadata: { ...elWithMeta.taskMetadata, versionId: undefined },
+            };
+          }
+          return el;
+        });
+
+        // Optimistic direct Zustand update (previously the CRDT branch wrote
+        // only to the Y.Doc, which the bridge didn't observe — delete looked
+        // like a no-op in the UI)
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                versions,
+                canvasLayout: { ...(p.canvasLayout || {}), elements },
+                updatedAt: new Date().toISOString(),
+              }
+              : p
+          ),
+        }));
+
         const { yDoc } = get();
-
         if (yDoc) {
-          yjsDeleteVersion(yDoc, versionId);
+          yjsDeleteVersion(yDoc, versionId); // also scrubs taskMetadata.versionId in the doc
         } else {
-          const versions = (currentProject.versions || []).filter((v) => v.id !== versionId);
-
-          // Also remove versionId from all tasks
-          const elements = (currentProject.canvasLayout?.elements || []).map((el) => {
-            const elWithMeta = el as { taskMetadata?: { versionId?: string } };
-            if (elWithMeta.taskMetadata?.versionId === versionId) {
-              return {
-                ...el,
-                taskMetadata: { ...elWithMeta.taskMetadata, versionId: undefined },
-              };
-            }
-            return el;
-          });
-
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? {
-                  ...p,
-                  versions,
-                  canvasLayout: { ...(p.canvasLayout || {}), elements },
-                  updatedAt: new Date().toISOString(),
-                }
-                : p
-            ),
-          }));
           const updatedProject = get().getCurrentProject();
           if (updatedProject) saveProject(updatedProject).catch(err => console.error('Failed to save project:', err));
         }
@@ -2498,26 +2558,26 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
-        const { yDoc } = get();
+        const versionMap = new Map((currentProject.versions || []).map((v) => [v.id, v]));
+        const versions = newOrder
+          .map((id, index) => {
+            const version = versionMap.get(id);
+            return version ? { ...version, order: index } : null;
+          })
+          .filter((v): v is Version => v !== null);
 
+        // Optimistic direct Zustand update; CRDT write persists it in Yjs mode
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, versions, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+
+        const { yDoc } = get();
         if (yDoc) {
           yjsReorderVersions(yDoc, newOrder);
-        } else {
-          const versionMap = new Map((currentProject.versions || []).map((v) => [v.id, v]));
-          const versions = newOrder
-            .map((id, index) => {
-              const version = versionMap.get(id);
-              return version ? { ...version, order: index } : null;
-            })
-            .filter((v): v is Version => v !== null);
-
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { ...p, versions, updatedAt: new Date().toISOString() }
-                : p
-            ),
-          }));
         }
       },
 
@@ -2544,20 +2604,21 @@ export const useCXDStore = create<CXDState>()(
           updates.completed_at = now;
         }
 
+        // Optimistic direct Zustand update; CRDT write persists it in Yjs mode
+        const versions = (currentProject.versions || []).map((v) =>
+          v.id === versionId ? { ...v, ...updates } : v
+        );
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, versions, updatedAt: now }
+              : p
+          ),
+        }));
+
         if (yDoc) {
           yjsSetVersionStatus(yDoc, versionId, status, updates);
-        } else {
-          const versions = (currentProject.versions || []).map((v) =>
-            v.id === versionId ? { ...v, ...updates } : v
-          );
-
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { ...p, versions, updatedAt: now }
-                : p
-            ),
-          }));
         }
       },
 
@@ -2602,10 +2663,8 @@ export const useCXDStore = create<CXDState>()(
           updatedAt: new Date().toISOString(),
         };
 
-        // Always update Zustand directly so the UI reflects the change immediately.
-        // In CRDT mode, yjsAddOKR writes to the Y.Doc but the bridge doesn't observe
-        // the OKRs array, so without this direct set() the selector would see an empty
-        // list and the "Create First OKR" button would never disappear.
+        // Optimistic direct Zustand update for immediate UI feedback; in CRDT
+        // mode yjsAddOKR persists it (bridge skips 'local' origin echoes)
         const okrsWithNew = [...(currentProject.okrs || []), newOKR];
         set((state) => ({
           projects: state.projects.map((p) =>
@@ -2631,7 +2690,7 @@ export const useCXDStore = create<CXDState>()(
 
         const { yDoc } = get();
 
-        // Always update Zustand directly (same reason as addOKR — bridge doesn't observe OKRs)
+        // Optimistic direct Zustand update; CRDT write persists it in Yjs mode
         const okrsUpdated = (currentProject.okrs || []).map((okr) =>
           okr.id === okrId ? { ...okr, ...updates, updatedAt: new Date().toISOString() } : okr
         );
@@ -2657,7 +2716,7 @@ export const useCXDStore = create<CXDState>()(
 
         const { yDoc } = get();
 
-        // Always update Zustand directly (bridge doesn't observe OKRs)
+        // Optimistic direct Zustand update; CRDT write persists it in Yjs mode
         const okrsFiltered = (currentProject.okrs || []).filter((okr) => okr.id !== okrId);
         set((state) => ({
           projects: state.projects.map((p) =>

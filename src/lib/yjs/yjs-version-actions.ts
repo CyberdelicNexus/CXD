@@ -52,7 +52,9 @@ export function yjsUpdateVersion(doc: Y.Doc, versionId: string, updates: Partial
 }
 
 /**
- * Delete a version
+ * Delete a version.
+ * Also clears taskMetadata.versionId from any canvas elements tagged with it,
+ * mirroring the non-CRDT store path so tasks don't point at a dead version.
  */
 export function yjsDeleteVersion(doc: Y.Doc, versionId: string): void {
   doc.transact(() => {
@@ -62,6 +64,17 @@ export function yjsDeleteVersion(doc: Y.Doc, versionId: string): void {
     if (versionIndex >= 0) {
       yVersions.delete(versionIndex, 1);
     }
+
+    // Scrub the deleted version from task metadata on canvas elements
+    const yElements = doc.getMap('elements');
+    yElements.forEach((yEl) => {
+      if (yEl instanceof Y.Map) {
+        const yMeta = yEl.get('taskMetadata');
+        if (yMeta instanceof Y.Map && yMeta.get('versionId') === versionId) {
+          yMeta.delete('versionId');
+        }
+      }
+    });
   }, 'local');
 }
 
@@ -347,7 +360,7 @@ export function yjsDeleteKeyResult(
 /**
  * Convert Version object to Y.Map
  */
-function versionToYMap(version: Version): Y.Map<unknown> {
+export function versionToYMap(version: Version): Y.Map<unknown> {
   const yVersion = new Y.Map<unknown>();
   yVersion.set('id', version.id);
   yVersion.set('name', version.name);
@@ -371,7 +384,7 @@ function versionToYMap(version: Version): Y.Map<unknown> {
 /**
  * Convert OKR object to Y.Map
  */
-function okrToYMap(okr: OKR): Y.Map<unknown> {
+export function okrToYMap(okr: OKR): Y.Map<unknown> {
   const yOKR = new Y.Map<unknown>();
   yOKR.set('id', okr.id);
   yOKR.set('versionId', okr.versionId);
@@ -506,6 +519,68 @@ function applyKeyResultUpdates(yKR: Y.Map<unknown>, updates: Partial<KeyResult>)
       yKR.set(key, value);
     }
   }
+}
+
+// ─── Reverse Converters: Y.Map → plain objects ──────────────────────────────
+
+/**
+ * Convert a version Y.Map back to a plain Version object.
+ * Y.Text fields (description, learnings_content) become strings.
+ */
+export function yMapToVersion(yVersion: Y.Map<unknown>): Version {
+  const obj: Record<string, unknown> = {};
+  yVersion.forEach((value, key) => {
+    obj[key] = value instanceof Y.Text ? value.toString() : value;
+  });
+  return obj as unknown as Version;
+}
+
+/**
+ * Convert an OKR Y.Map back to a plain OKR object,
+ * including nested objectives and key results.
+ */
+export function yMapToOKR(yOKR: Y.Map<unknown>): OKR {
+  const obj: Record<string, unknown> = {};
+  yOKR.forEach((value, key) => {
+    if (key === 'objectives' && value instanceof Y.Array) {
+      const objectives: Objective[] = [];
+      for (let i = 0; i < value.length; i++) {
+        const yObjective = value.get(i);
+        if (yObjective instanceof Y.Map) {
+          objectives.push(yMapToObjective(yObjective));
+        }
+      }
+      obj[key] = objectives;
+    } else {
+      obj[key] = value instanceof Y.Text ? value.toString() : value;
+    }
+  });
+  if (!Array.isArray(obj.objectives)) obj.objectives = [];
+  return obj as unknown as OKR;
+}
+
+function yMapToObjective(yObjective: Y.Map<unknown>): Objective {
+  const obj: Record<string, unknown> = {};
+  yObjective.forEach((value, key) => {
+    if (key === 'keyResults' && value instanceof Y.Array) {
+      const keyResults: KeyResult[] = [];
+      for (let i = 0; i < value.length; i++) {
+        const yKR = value.get(i);
+        if (yKR instanceof Y.Map) {
+          const kr: Record<string, unknown> = {};
+          (yKR as Y.Map<unknown>).forEach((v, k) => {
+            kr[k] = v instanceof Y.Text ? v.toString() : v;
+          });
+          keyResults.push(kr as unknown as KeyResult);
+        }
+      }
+      obj[key] = keyResults;
+    } else {
+      obj[key] = value instanceof Y.Text ? value.toString() : value;
+    }
+  });
+  if (!Array.isArray(obj.keyResults)) obj.keyResults = [];
+  return obj as unknown as Objective;
 }
 
 /**
