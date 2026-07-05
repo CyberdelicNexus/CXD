@@ -7428,16 +7428,22 @@ function BoardCard({
   const selectedIcon = BOARD_ICONS.find((i) => i.id === iconId);
   const IconComponent = selectedIcon?.Icon || LayoutGrid;
 
-  // Count elements in this board using Zustand store
-  const allElements = useCXDStore((state) => state.getCurrentProject()?.canvasLayout?.elements || []);
-  const elementCount = useMemo(() => {
-    return allElements.filter(
-      (el) =>
-        el.boardId === element.childBoardId &&
-        el.type !== "line" &&
-        el.type !== "connector",
-    ).length;
-  }, [allElements, element.childBoardId]);
+  // Count elements in this board using Zustand store.
+  // Return a NUMBER from the selector (not the array) so Zustand's Object.is
+  // comparison is stable. Selecting `... || []` yields a fresh [] on every call
+  // when no project is loaded in the store (e.g. the read-only share view,
+  // which renders from a prop, not the store), which drives React into an
+  // infinite re-render loop — Minified React error #185. Mirrors the container
+  // card's childCount selector above.
+  const elementCount = useCXDStore(
+    (state) =>
+      (state.getCurrentProject()?.canvasLayout?.elements ?? []).filter(
+        (el) =>
+          el.boardId === element.childBoardId &&
+          el.type !== "line" &&
+          el.type !== "connector",
+      ).length,
+  );
 
   return (
     <div
