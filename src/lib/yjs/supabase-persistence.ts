@@ -214,7 +214,16 @@ export class SupabasePersistence {
                 project_data: projectData,
                 name: projectData.name,
                 description: projectData.description,
-                share_token: projectData.shareToken || null,
+                // Never null share_token from the autosave path. It is managed
+                // out-of-band by generateShareToken()/updateProjectShareToken()
+                // and lives in Zustand + this column (not reliably in the
+                // Y.Doc), so writing `shareToken || null` on every debounced
+                // save could silently revoke a freshly created public link.
+                // Only sync a present token; revocation goes through
+                // updateProjectShareToken('') explicitly.
+                ...(projectData.shareToken
+                  ? { share_token: projectData.shareToken }
+                  : {}),
               }
             : {}),
         })
