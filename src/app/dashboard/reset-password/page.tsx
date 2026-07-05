@@ -1,23 +1,54 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 import { resetPasswordAction } from "@/app/actions";
 import { FormMessage, Message } from "@/components/form-message";
-import DashboardNavbar from "@/components/dashboard-navbar";
 import { SubmitButton } from "@/components/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "../../../supabase/server";
+import { AlertTriangle, KeyRound } from "lucide-react";
+
+export const metadata = { title: "Reset Password" };
+
+// Shared auth shell — identical background/logo/card to sign-in and sign-up.
+function AuthShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="min-h-screen bg-black text-white overflow-hidden relative">
+      <ShimmerGrid
+        dotSize={1.5}
+        dotSpacing={24}
+        baseColor="rgba(110, 56, 236, 0.1)"
+        hoverColor="rgba(138, 99, 255, 0.5)"
+        hoverSize={400}
+        smoothing={60}
+      />
+      <div className="fixed inset-0 hero-gradient pointer-events-none" />
+
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-8">
+        <Link href="/" className="mb-8 group">
+          <Image
+            src="/images/CXD Logo 2.png"
+            alt="CXD"
+            width={48}
+            height={48}
+            className="group-hover:scale-110 transition-transform object-contain"
+          />
+        </Link>
+
+        <div className="w-full max-w-md glass-card-glow rounded-2xl p-8">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default async function ResetPassword(props: {
   searchParams: Promise<Message>;
 }) {
   const searchParams = await props.searchParams;
-  if ("message" in searchParams) {
-    return (
-      <div className="flex h-screen w-full flex-1 items-center justify-center p-4 sm:max-w-md">
-        <FormMessage message={searchParams} />
-      </div>
-    );
-  }
 
   // The reset form is only usable with an active recovery session (set by the
   // /auth/callback code exchange). If it's missing/expired, show a recovery
@@ -29,99 +60,89 @@ export default async function ResetPassword(props: {
 
   if (!user) {
     return (
-      <>
-        <DashboardNavbar />
-        <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-8">
-          <div className="w-full max-w-md rounded-lg border border-purple-500/50 bg-card p-6 text-center space-y-4">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Reset link expired
+      <AuthShell>
+        <div className="flex flex-col items-center text-center space-y-6">
+          <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-red-400" />
+          </div>
+
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold">
+              <span className="text-gradient-purple">Reset link expired</span>
             </h1>
-            <p className="text-sm text-muted-foreground">
-              This password reset link is invalid or has expired. Reset links
-              can only be used once and are valid for a limited time.
+            <p className="text-white/60 text-sm leading-relaxed">
+              This password reset link is invalid or has expired. Reset links can
+              only be used once and are valid for a limited time.
             </p>
-            <Link
-              href="/forgot-password"
-              className="inline-block w-full rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 transition-colors"
-            >
-              Request a new link
+          </div>
+
+          <div className="w-full pt-4 border-t border-white/10">
+            <Link href="/forgot-password" className="block w-full">
+              <button className="btn-primary-glow w-full flex items-center justify-center gap-2">
+                Request a new link
+              </button>
             </Link>
           </div>
         </div>
-      </>
+      </AuthShell>
     );
   }
 
   return (
-    <>
-      <DashboardNavbar />
-      <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-8 overflow-hidden">
-        {/* Dot grid background */}
-        <div
-          className="fixed inset-0 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(circle, hsl(270 30% 25% / 0.4) 1px, transparent 1px)`,
-            backgroundSize: '30px 30px',
-            backgroundPosition: '0 0',
-          }}
-        />
-        
-        {/* Purple glowing box */}
-        <div className="w-full max-w-md rounded-lg border border-purple-500/50 bg-card p-6 shadow-sm relative z-10"
-          style={{
-            boxShadow: '0 0 20px rgba(168, 85, 247, 0.4), 0 0 40px rgba(168, 85, 247, 0.2), inset 0 0 10px rgba(168, 85, 247, 0.1)',
-          }}
-        >
-          <form className="flex flex-col space-y-6">
-            <div className="space-y-2 text-center">
-              <h1 className="text-3xl font-semibold tracking-tight">Reset password</h1>
-              <p className="text-sm text-muted-foreground">
-                Please enter your new password below.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-medium">
-                  New password
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  name="password"
-                  placeholder="New password"
-                  required
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword" className="text-sm font-medium">
-                  Confirm password
-                </Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  name="confirmPassword"
-                  placeholder="Confirm password"
-                  required
-                  className="w-full"
-                />
-              </div>
-            </div>
-
-            <SubmitButton
-              formAction={resetPasswordAction}
-              pendingText="Resetting password..."
-              className="w-full"
-            >
-              Reset password
-            </SubmitButton>
-
-            <FormMessage message={searchParams} />
-          </form>
+    <AuthShell>
+      <form className="flex flex-col space-y-6">
+        <div className="space-y-2 text-center">
+          <h1 className="text-3xl font-bold">
+            <span className="text-gradient-purple">Reset Password</span>
+          </h1>
+          <p className="text-sm text-white/50">
+            Choose a new password for your account.
+          </p>
         </div>
-      </div>
-    </>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="password" className="text-sm font-medium text-white/70">
+              New password
+            </Label>
+            <Input
+              id="password"
+              type="password"
+              name="password"
+              placeholder="New password"
+              minLength={8}
+              required
+              className="w-full bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:ring-violet-500/20"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword" className="text-sm font-medium text-white/70">
+              Confirm password
+            </Label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              name="confirmPassword"
+              placeholder="Confirm password"
+              minLength={8}
+              required
+              className="w-full bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:ring-violet-500/20"
+            />
+          </div>
+        </div>
+
+        <SubmitButton
+          formAction={resetPasswordAction}
+          pendingText="Resetting password..."
+          className="btn-primary-glow w-full flex items-center justify-center gap-2"
+        >
+          <KeyRound className="w-4 h-4" />
+          Reset password
+        </SubmitButton>
+
+        <FormMessage message={searchParams} />
+      </form>
+    </AuthShell>
   );
 }
