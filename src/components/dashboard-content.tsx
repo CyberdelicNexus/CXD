@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +23,6 @@ import {
   FolderOpen,
   User,
   HelpCircle,
-  Bug,
   FileText,
   PlayCircle,
   BarChart3,
@@ -61,6 +61,7 @@ import {
 } from "@/lib/user-profile";
 import { useSubscription } from "@/hooks/use-subscription";
 import { UpgradeModal } from "@/components/upgrade-modal";
+import { ProjectDetailPanel } from "@/components/project-detail-panel";
 import { PickFreeCanvasModal } from "@/components/pick-free-canvas-modal";
 import { CollaborationPanel } from "@/components/collaboration";
 import Image from "next/image";
@@ -77,11 +78,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [newProjectName, setNewProjectName] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
-  const [bugDescription, setBugDescription] = useState("");
-  const [bugSteps, setBugSteps] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -173,51 +172,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     } catch (error) {
       console.error('Support submission error:', error);
       setFormError('Failed to submit support request. Please try again or email contact@cyberdelic.design');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Bug report submit handler
-  const handleBugSubmit = async () => {
-    if (!bugDescription.trim()) return;
-    setIsSubmitting(true);
-    setFormError(null);
-
-    try {
-      // Get browser info
-      const browserInfo = `${navigator.userAgent} | Screen: ${window.screen.width}x${window.screen.height}`;
-
-      const response = await fetch('/api/support', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Bug Report',
-          description: bugDescription,
-          stepsToReproduce: bugSteps || undefined,
-          browserInfo,
-        }),
-      });
-
-      if (!response.ok) {
-        setFormError('Failed to submit bug report. Please try again or email contact@cyberdelic.design');
-        return;
-      }
-
-      const data = await response.json();
-
-      if (data.success) {
-        setSubmitSuccess(true);
-        // Close dialog after showing success - state reset handled by onOpenChange
-        setTimeout(() => {
-          setIsBugReportOpen(false);
-        }, 1500);
-      } else {
-        throw new Error(data.error || 'Failed to submit bug report');
-      }
-    } catch (error) {
-      console.error('Bug report submission error:', error);
-      setFormError('Failed to submit bug report. Please try again or email contact@cyberdelic.design');
     } finally {
       setIsSubmitting(false);
     }
@@ -379,6 +333,15 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   };
 
   const totalProjects = projects.length;
+
+  // When a project is selected, pin it to the top-left of the grid — the
+  // rest keep their existing order.
+  const displayProjects = useMemo(() => {
+    if (!selectedProjectId) return projects;
+    const selected = projects.find((p) => p.id === selectedProjectId);
+    if (!selected) return projects;
+    return [selected, ...projects.filter((p) => p.id !== selectedProjectId)];
+  }, [projects, selectedProjectId]);
 
   // Cover image handlers
   const handleCoverImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -644,6 +607,63 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 </div>
               </div>
 
+              {/* Stats & Quick Actions — small equal-size squares, inline in
+                  this same row (statistics are useful but not essential, so
+                  they stay compact rather than taking their own row/column) */}
+              <div className="hidden lg:flex items-center gap-2">
+                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Total Maps">
+                  <Layers className="w-3.5 h-3.5 text-violet-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] font-bold text-white leading-none">{totalProjects}</span>
+                </div>
+                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-cyan-500/10 hover:border-cyan-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Active this week">
+                  <TrendingUp className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] font-bold text-white leading-none">
+                    {projects.filter((p) => new Date(p.updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
+                  </span>
+                </div>
+                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Created this month">
+                  <Calendar className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] font-bold text-white leading-none">
+                    {projects.filter((p) => new Date(p.createdAt).getMonth() === new Date().getMonth()).length}
+                  </span>
+                </div>
+                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Analytics">
+                  <BarChart3 className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] font-bold text-white leading-none">—</span>
+                </div>
+
+                <div className="w-px h-8 bg-white/10 mx-1" />
+
+                <button
+                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 hover:from-violet-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  onClick={() => setIsSupportOpen(true)}
+                  title="Support"
+                >
+                  <HelpCircle className="w-3.5 h-3.5 text-violet-400 group-hover:scale-110 transition-transform" />
+                </button>
+                <button
+                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 hover:from-purple-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  onClick={() => router.push("/dashboard/docs")}
+                  title="Docs"
+                >
+                  <FileText className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
+                </button>
+                <button
+                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 hover:from-emerald-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  onClick={() => router.push("/dashboard/tutorials")}
+                  title="Tutorials"
+                >
+                  <PlayCircle className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                </button>
+                <button
+                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-pink-500/10 hover:border-pink-500/30 hover:from-pink-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  onClick={() => router.push("/changelog")}
+                  title="Changelog"
+                >
+                  <Newspaper className="w-3.5 h-3.5 text-pink-400 group-hover:scale-110 transition-transform" />
+                </button>
+              </div>
+
               {/* Create Button */}
               <div className="flex items-center gap-2 mt-4 md:mt-0">
                 <Dialog open={isDialogOpen} onOpenChange={(open) => {
@@ -707,9 +727,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
           </div>
         </div>
 
-        {/* Main Content - 70/30 Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
-          {/* Left Column - Experience Maps (70%) */}
+        {/* Main Content — Experience Maps */}
+        <div>
+          {/* Experience Maps */}
           <div className="rounded-xl overflow-hidden bg-black/20 border border-white/10 h-fit">
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <h3 className="font-semibold text-white">Your Experience Maps</h3>
@@ -742,24 +762,24 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
               )}
 
               {!isLoading && projects.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {projects.map((project) => {
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {displayProjects.map((project, projectIndex) => {
                     const isOwner = project.ownerId === userId;
                     const tileIsFreePrimary = isFree && freePrimaryCanvasId === project.id;
                     const tileIsLocked = isFree && !tileIsFreePrimary;
                     const coverImage = (project as any).coverImage;
                     const isUploading = uploadingCoverFor === project.id;
+                    const isSelected = selectedProjectId === project.id;
 
                     return (
+                    <React.Fragment key={project.id}>
                       <div
-                        key={project.id}
-                        className="relative aspect-square rounded-xl bg-gradient-to-br from-violet-900/60 via-purple-800/50 to-indigo-900/60 hover:from-violet-800/70 hover:via-purple-700/60 hover:to-indigo-800/70 transition-all cursor-pointer group border border-violet-500/20 hover:border-violet-400/40 overflow-hidden shadow-lg hover:shadow-violet-500/20"
+                        className={cn(
+                          "relative aspect-square rounded-xl bg-gradient-to-br from-violet-900/60 via-purple-800/50 to-indigo-900/60 hover:from-violet-800/70 hover:via-purple-700/60 hover:to-indigo-800/70 transition-all cursor-pointer group border overflow-hidden shadow-lg hover:shadow-violet-500/20",
+                          isSelected ? "border-violet-400 ring-2 ring-violet-400/50" : "border-violet-500/20 hover:border-violet-400/40"
+                        )}
                         onClick={() => {
-                          if (tileIsLocked) {
-                            router.push(`/cxd/overview/${project.id}`);
-                          } else {
-                            handleOpenProject(project.id);
-                          }
+                          setSelectedProjectId((prev) => (prev === project.id ? null : project.id));
                         }}
                       >
                         {/* Cover Image */}
@@ -921,102 +941,31 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                           </div>
                         </div>
                       </div>
+
+                      {/* Detail panel — lives inside the same grid, right after
+                          the selected tile (pinned to index 0), spanning the
+                          area of a 2x2 block of tiles for real room to show
+                          stats/graphs rather than a cramped external sidebar. */}
+                      {projectIndex === 0 && selectedProjectId && (
+                        <ProjectDetailPanel
+                          projectId={selectedProjectId}
+                          onClose={() => setSelectedProjectId(null)}
+                          onEnterProject={(projectId) => {
+                            const isProjectFreePrimary = isFree && freePrimaryCanvasId === projectId;
+                            const isProjectLocked = isFree && !isProjectFreePrimary;
+                            if (isProjectLocked) {
+                              router.push(`/cxd/overview/${projectId}`);
+                            } else {
+                              handleOpenProject(projectId);
+                            }
+                          }}
+                        />
+                      )}
+                    </React.Fragment>
                     );
                   })}
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Right Column - Stats & Quick Actions (30%) */}
-          <div className="space-y-6">
-            {/* Stats Grid - 2x2 */}
-            <div className="p-4 rounded-xl bg-black/20 border border-white/10">
-              <h3 className="text-sm font-medium text-white/70 mb-3">Statistics</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 hover:from-violet-950/20 hover:to-violet-900/30 transition-all cursor-default group">
-                  <div className="flex items-center justify-between mb-1">
-                    <Layers className="w-4 h-4 text-violet-400 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <p className="text-xl font-bold text-white">{totalProjects}</p>
-                  <p className="text-xs text-white/50">Total Maps</p>
-                </div>
-
-                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-cyan-500/10 hover:border-cyan-500/30 hover:from-cyan-950/20 hover:to-cyan-900/30 transition-all cursor-default group">
-                  <div className="flex items-center justify-between mb-1">
-                    <TrendingUp className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <p className="text-xl font-bold text-white">
-                    {projects.filter((p) => new Date(p.updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
-                  </p>
-                  <p className="text-xs text-white/50">Active</p>
-                </div>
-
-                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 hover:from-purple-950/20 hover:to-purple-900/30 transition-all cursor-default group">
-                  <div className="flex items-center justify-between mb-1">
-                    <Calendar className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <p className="text-xl font-bold text-white">
-                    {projects.filter((p) => new Date(p.createdAt).getMonth() === new Date().getMonth()).length}
-                  </p>
-                  <p className="text-xs text-white/50">This Month</p>
-                </div>
-
-                <div className="p-3 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 hover:from-emerald-950/20 hover:to-emerald-900/30 transition-all cursor-default group">
-                  <div className="flex items-center justify-between mb-1">
-                    <BarChart3 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
-                  </div>
-                  <p className="text-xl font-bold text-white">—</p>
-                  <p className="text-xs text-white/50">Analytics</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Actions - 2x2 */}
-            <div className="p-4 rounded-xl bg-black/20 border border-white/10">
-              <h3 className="text-sm font-medium text-white/70 mb-3">Quick Actions</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-violet-950/30 hover:to-violet-900/40 border border-violet-500/10 hover:border-violet-500/30 text-white transition-all group"
-                  onClick={() => setIsSupportOpen(true)}
-                >
-                  <HelpCircle className="w-5 h-5 text-violet-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs">Support</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-cyan-950/30 hover:to-cyan-900/40 border border-cyan-500/10 hover:border-cyan-500/30 text-white transition-all group"
-                  onClick={() => setIsBugReportOpen(true)}
-                >
-                  <Bug className="w-5 h-5 text-cyan-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs">Bug Report</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-purple-950/30 hover:to-purple-900/40 border border-purple-500/10 hover:border-purple-500/30 text-white transition-all group"
-                  onClick={() => router.push("/dashboard/docs")}
-                >
-                  <FileText className="w-5 h-5 text-purple-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs">Docs</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-emerald-950/30 hover:to-emerald-900/40 border border-emerald-500/10 hover:border-emerald-500/30 text-white transition-all group"
-                  onClick={() => router.push("/dashboard/tutorials")}
-                >
-                  <PlayCircle className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs">Tutorials</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-auto py-4 flex-col gap-1 bg-gradient-to-br from-black to-violet-950/50 hover:from-pink-950/30 hover:to-pink-900/40 border border-pink-500/10 hover:border-pink-500/30 text-white transition-all group"
-                  onClick={() => router.push("/changelog")}
-                >
-                  <Newspaper className="w-5 h-5 text-pink-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs">Changelog</span>
-                </Button>
-              </div>
             </div>
           </div>
         </div>
@@ -1094,93 +1043,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   <>
                     <Send className="w-4 h-4 mr-2" />
                     Send Message
-                  </>
-                )}
-              </Button>
-              {formError && (
-                <p className="text-sm text-red-400 mt-2">{formError}</p>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Bug Report Dialog */}
-      <Dialog open={isBugReportOpen} onOpenChange={(open) => {
-        setIsBugReportOpen(open);
-        if (open) {
-          setFormError(null);
-        }
-        if (!open) {
-          // Reset form state when dialog closes
-          setTimeout(() => {
-            setBugDescription('');
-            setBugSteps('');
-            setSubmitSuccess(false);
-            setIsSubmitting(false);
-            setFormError(null);
-          }, 150);
-        }
-      }}>
-        <DialogContent className="bg-zinc-900/95 backdrop-blur-xl border-white/10 text-white max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-xl">
-              <Bug className="w-5 h-5 text-rose-400" />
-              Report a Bug
-            </DialogTitle>
-            <DialogDescription className="text-white/50">
-              Found an issue? Help us improve by reporting it.
-            </DialogDescription>
-          </DialogHeader>
-
-          {submitSuccess ? (
-            <div className="py-8 text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                <Check className="w-8 h-8 text-emerald-400" />
-              </div>
-              <h3 className="text-lg font-semibold text-white mb-2">Bug Reported!</h3>
-              <p className="text-white/50 text-sm">Thank you for helping us improve CXD Canvas.</p>
-            </div>
-          ) : (
-            <div className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="bug-description" className="text-white/70">Bug Description</Label>
-                <Textarea
-                  id="bug-description"
-                  placeholder="What went wrong?"
-                  value={bugDescription}
-                  onChange={(e) => setBugDescription(e.target.value)}
-                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[80px] focus:border-rose-500/50"
-                  maxLength={10000}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="bug-steps" className="text-white/70">Steps to Reproduce (optional)</Label>
-                <Textarea
-                  id="bug-steps"
-                  placeholder="1. Go to...&#10;2. Click on...&#10;3. See error..."
-                  value={bugSteps}
-                  onChange={(e) => setBugSteps(e.target.value)}
-                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[80px] focus:border-rose-500/50"
-                  maxLength={5000}
-                />
-              </div>
-
-              <Button
-                onClick={handleBugSubmit}
-                disabled={!bugDescription.trim() || isSubmitting}
-                className="w-full bg-rose-600 hover:bg-rose-500 text-white"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  <>
-                    <Bug className="w-4 h-4 mr-2" />
-                    Submit Bug Report
                   </>
                 )}
               </Button>
