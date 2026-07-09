@@ -10,9 +10,48 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.0',
+    date: 'July 10, 2026',
+    isLatest: true,
+    changes: [
+      {
+        category: 'feature',
+        description: 'Master Plan Database (Pro) — a cross-project task cockpit with Table, Kanban, List, Timeline, Calendar, and Roadmap views over every task across every canvas you own or collaborate on',
+      },
+      {
+        category: 'feature',
+        description: 'Master Plan tasks are now fully editable — inline status/priority edits, drag-and-drop between Kanban columns, and a task detail panel that opens on click in any view, all writing safely back into the source project',
+      },
+      {
+        category: 'feature',
+        description: 'Master Plan Timeline uses the same Gantt chart as the single-project Plan tab, with drag-to-reschedule and dependencies; Roadmap shows every version across every project with its linked tasks',
+      },
+      {
+        category: 'feature',
+        description: 'AI-drafted canvas elements and AI-suggested Hypercube tags, both reviewed before they touch your canvas',
+      },
+      {
+        category: 'feature',
+        description: 'Wizard answers now populate the canvas as a hub-and-satellite layout of real Experience Block cards, boards, and notes instead of flat text containers, with text boxes that grow to fit their content',
+      },
+      {
+        category: 'improvement',
+        description: 'Dashboard redesign — profile stats and quick actions moved inline as compact squares, Experience Maps grid widened to 4 columns, and selecting a project now opens an in-grid overview panel with progress and a sensory-signature chart',
+      },
+      {
+        category: 'bugfix',
+        description: 'Hypercube Map — corrected the minimap so the selected face lands on the front of the cube, and removed a flicker during rotation',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed a "Maximum update depth exceeded" crash that could occur right after completing the wizard',
+      },
+    ],
+  },
+  {
     version: '1.2.0',
     date: 'April 19, 2026',
-    isLatest: true,
+    isLatest: false,
     changes: [
       {
         category: 'feature',
