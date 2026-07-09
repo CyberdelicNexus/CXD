@@ -3,7 +3,7 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { CXDSectionId } from "@/types/cxd-schema";
-import { HypercubeFaceTag, CanvasElement } from "@/types/canvas-elements";
+import { HypercubeFaceTag, CanvasElement, SECTION_TO_FACE_TAG } from "@/types/canvas-elements";
 import { ChevronRight, Home, Layout, Box, Type, Link2, Image, Layers, ExternalLink } from "lucide-react";
 import dynamic from "next/dynamic";
 import { HexagonDetailPanel } from "./hexagon-detail-panel";
@@ -37,16 +37,8 @@ import { extractCenterColor, hexToRgba } from "@/lib/utils";
 // Feature toggle - set to true to use 3D cube view instead of 2D hexagon
 const USE_3D_CUBE = true;
 
-// Map CXDSectionId to HypercubeFaceTag for semantic tag checking
-const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
-  realityPlanes: 'Reality Planes',
-  sensoryDomains: 'Sensory Domains',
-  presence: 'Presence Types',
-  stateMapping: 'State Mapping',
-  traitMapping: 'Trait Mapping',
-  contextAndMeaning: 'Meaning Architecture',
-  intentionCore: 'Core',
-};
+// Map CXDSectionId to HypercubeFaceTag for semantic tag checking (shared with framing-to-canvas)
+const SECTION_TO_TAG = SECTION_TO_FACE_TAG;
 
 // Element type icons for related elements preview
 const ELEMENT_TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {

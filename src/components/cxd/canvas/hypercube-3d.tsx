@@ -33,6 +33,13 @@ import {
   X,
   Eye,
   MapPin,
+  Radio,
+  Brain,
+  Heart,
+  Globe,
+  Target,
+  Tag,
+  Loader2,
 } from "lucide-react";
 import NextImage from "next/image";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
@@ -42,6 +49,12 @@ import { ERDGenerator } from "./erd-generator";
 import { generateDiagnostics, calculateFaceIntensities } from "@/utils/diagnostic-engine";
 import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 import type { EnrichedDiagnostic } from "@/types/diagnostics";
+import { TagSuggestionPanel } from "./tag-suggestion-panel";
+import {
+  requestTagSuggestions,
+  applyTagSuggestions,
+  type EnrichedSuggestion,
+} from "@/lib/ai/tag-suggestion-service";
 
 // Interaction modes - Two distinct modes per specification
 // DEFAULT MODE: Cube auto-rotates, NOT interactive, face buttons are PRIMARY interaction
@@ -113,7 +126,7 @@ export const CUBE_FACES: CubeFace[] = [
     label: "Reality Planes",
     shortLabel: "Reality",
     index: 0,
-    rotationToFront: { x: 0, y: 0 },
+    rotationToFront: { x: 0, y: 180 },
     shortcut: "1",
     tint: { hue: 280, satBase: 35, lightBase: 28 }, // Purple - technical/digital
     glyph: GLYPHS.reality,
@@ -124,7 +137,7 @@ export const CUBE_FACES: CubeFace[] = [
     label: "Sensory Domains",
     shortLabel: "Sensory",
     index: 1,
-    rotationToFront: { x: 0, y: -90 },
+    rotationToFront: { x: 0, y: 90 },
     shortcut: "2",
     tint: { hue: 45, satBase: 40, lightBase: 30 }, // Amber - warm/physical
     glyph: GLYPHS.sensory,
@@ -135,7 +148,7 @@ export const CUBE_FACES: CubeFace[] = [
     label: "Presence Types",
     shortLabel: "Presence",
     index: 2,
-    rotationToFront: { x: 0, y: 180 },
+    rotationToFront: { x: 0, y: 0 },
     shortcut: "3",
     tint: { hue: 195, satBase: 45, lightBase: 32 }, // Cyan - awareness
     glyph: GLYPHS.presence,
@@ -146,7 +159,7 @@ export const CUBE_FACES: CubeFace[] = [
     label: "State Mapping",
     shortLabel: "States",
     index: 3,
-    rotationToFront: { x: 0, y: 90 },
+    rotationToFront: { x: 0, y: -90 },
     shortcut: "4",
     tint: { hue: 160, satBase: 40, lightBase: 28 }, // Teal - transient
     glyph: GLYPHS.state,
@@ -157,7 +170,7 @@ export const CUBE_FACES: CubeFace[] = [
     label: "Trait Mapping",
     shortLabel: "Traits",
     index: 4,
-    rotationToFront: { x: -90, y: 0 },
+    rotationToFront: { x: 90, y: 0 },
     shortcut: "5",
     tint: { hue: 260, satBase: 38, lightBase: 30 }, // Violet - enduring
     glyph: GLYPHS.trait,
@@ -168,7 +181,7 @@ export const CUBE_FACES: CubeFace[] = [
     label: "Meaning Architecture",
     shortLabel: "Meaning",
     index: 5,
-    rotationToFront: { x: 90, y: 0 },
+    rotationToFront: { x: -90, y: 0 },
     shortcut: "6",
     tint: { hue: 320, satBase: 42, lightBase: 32 }, // Magenta - narrative
     glyph: GLYPHS.meaning,
@@ -450,44 +463,67 @@ function clampRotationX(x: number): number {
 
 // Determine which face is currently facing front based on cube rotation
 // Returns face index 0-5 based on which face normal points most toward camera (positive Z)
+// Icon per face for the compact selector rail (mirrors the Experience
+// inspector's iconography so faces read the same across views).
+const FACE_ICONS: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
+  realityPlanes: Layers,
+  sensoryDomains: Eye,
+  presence: Radio,
+  stateMapping: Brain,
+  traitMapping: Heart,
+  contextAndMeaning: Globe,
+};
+
+// Outward unit normals per CUBE_FACES index, in the cube's local space.
+// 0 Reality (Z+), 1 Sensory (X+), 2 Presence (Z-), 3 States (X-), 4 Traits (Y-), 5 Meaning (Y+)
+const FACE_NORMALS: [number, number, number][] = [
+  [0, 0, 1],
+  [1, 0, 0],
+  [0, 0, -1],
+  [-1, 0, 0],
+  [0, -1, 0],
+  [0, 1, 0],
+];
+
+// Which face is nearest the camera at this rotation?
+// Derived from project3D: z2 = -x·sin(ry) + (y·sin(rx) + z·cos(rx))·cos(ry),
+// and NEGATIVE z2 is toward the viewer (scale = p/(p+z2)). The front face is
+// therefore the one whose rotated normal has the most negative z2 — computed
+// from the same math as the projection, so it can never drift out of sync.
 function getFrontFaceFromRotation(rotX: number, rotY: number): number {
-  // Normalize angles to 0-360 range
-  const normY = ((rotY % 360) + 360) % 360;
-  const normX = ((rotX % 360) + 360) % 360;
-
-  // Check for top/bottom faces first (based on X rotation)
-  if (normX > 45 && normX < 135) {
-    return 5; // Meaning (bottom) - rotated to show bottom
+  const rx = (rotX * Math.PI) / 180;
+  const ry = (rotY * Math.PI) / 180;
+  let best = 0;
+  let bestZ = Infinity;
+  for (let i = 0; i < FACE_NORMALS.length; i++) {
+    const [x, y, z] = FACE_NORMALS[i];
+    const z2 = -x * Math.sin(ry) + (y * Math.sin(rx) + z * Math.cos(rx)) * Math.cos(ry);
+    if (z2 < bestZ) {
+      bestZ = z2;
+      best = i;
+    }
   }
-  if (normX > 225 && normX < 315) {
-    return 4; // Traits (top) - rotated to show top
-  }
-
-  // For side faces, use Y rotation
-  // Face 0 (Reality) at y=0, Face 1 (Sensory) at y=90, Face 2 (Presence) at y=180, Face 3 (States) at y=270
-  if (normY >= 315 || normY < 45) return 0; // Reality (front)
-  if (normY >= 45 && normY < 135) return 3; // States (left becomes front when rotated right)
-  if (normY >= 135 && normY < 225) return 2; // Presence (back)
-  if (normY >= 225 && normY < 315) return 1; // Sensory (right becomes front when rotated left)
-
-  return 0;
+  return best;
 }
 
-// Calculate rotation needed to bring a specific face to front
+// Rotation that brings a face NEAREST the camera (its normal to z2 = -1).
+// NOTE: the previous table was inverted relative to the projection (it sent
+// the chosen face to the BACK) — invisible with the old symmetric wireframe,
+// obvious once faces got depth-correct shading.
 function getRotationForFace(faceIndex: number): { x: number; y: number } {
   switch (faceIndex) {
     case 0:
-      return { x: 0, y: 0 }; // Reality - Front
+      return { x: 0, y: 180 }; // Reality (Z+) — turn around to face viewer
     case 1:
-      return { x: 0, y: -90 }; // Sensory - Right (rotate left to bring to front)
+      return { x: 0, y: 90 }; // Sensory (X+)
     case 2:
-      return { x: 0, y: 180 }; // Presence - Back
+      return { x: 0, y: 0 }; // Presence (Z-) — already toward viewer at rest
     case 3:
-      return { x: 0, y: 90 }; // States - Left (rotate right to bring to front)
+      return { x: 0, y: -90 }; // States (X-)
     case 4:
-      return { x: -90, y: 0 }; // Traits - Top (rotate down to bring to front)
+      return { x: 90, y: 0 }; // Traits (Y-)
     case 5:
-      return { x: 90, y: 0 }; // Meaning - Bottom (rotate up to bring to front)
+      return { x: -90, y: 0 }; // Meaning (Y+)
     default:
       return { x: 0, y: 0 };
   }
@@ -509,6 +545,18 @@ interface Hypercube3DProps {
   onNavigateToElement?: (elementId: string) => void;
   onPreviewElement?: (element: CanvasElement) => void;
 }
+
+// Outer-corner indices for each cube face, indexed by CUBE_FACES order.
+// Single source of truth for both depth-sorting and polygon construction.
+// Corners: 0-3 back (z-), 4-7 front (z+); see outerCorners definition.
+const FACE_CORNER_INDICES: number[][] = [
+  [4, 5, 6, 7], // 0 Reality Planes — Front  (Z+)
+  [1, 5, 6, 2], // 1 Sensory Domains — Right (X+)
+  [0, 1, 2, 3], // 2 Presence — Back        (Z-)
+  [0, 3, 7, 4], // 3 States — Left          (X-)
+  [0, 1, 5, 4], // 4 Traits — Top           (Y-)
+  [3, 2, 6, 7], // 5 Meaning — Bottom       (Y+)
+];
 
 export function Hypercube3D({
   project,
@@ -556,6 +604,45 @@ export function Hypercube3D({
   /** Layer 2: Store enriched chat context instead of just message */
   const [pendingInsightContext, setPendingInsightContext] = useState<EnrichedDiagnostic['chatContext'] | undefined>();
   const [isERDOpen, setIsERDOpen] = useState(false);
+
+  // AI tag suggestion (propose-only) — button lives right of the chat window
+  const [suggesting, setSuggesting] = useState(false);
+  const [tagSuggestions, setTagSuggestions] = useState<EnrichedSuggestion[] | null>(null);
+  const [suggestConsidered, setSuggestConsidered] = useState(0);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
+
+  const handleSuggestTags = useCallback(async () => {
+    if (suggesting) return;
+    setSuggesting(true);
+    setSuggestNote(null);
+    try {
+      const res = await requestTagSuggestions();
+      if (res.success && res.suggestions.length > 0) {
+        setTagSuggestions(res.suggestions);
+        setSuggestConsidered(res.considered);
+      } else {
+        setSuggestNote(
+          res.error ||
+            (res.considered === 0
+              ? "Every element with text is already tagged."
+              : "No confident tag suggestions found.")
+        );
+        setTimeout(() => setSuggestNote(null), 5000);
+      }
+    } finally {
+      setSuggesting(false);
+    }
+  }, [suggesting]);
+
+  const handleApplyTagSuggestions = useCallback(
+    (accepted: Array<{ id: string; tags: HypercubeFaceTag[] }>) => {
+      const n = applyTagSuggestions(accepted);
+      setTagSuggestions(null);
+      setSuggestNote(n > 0 ? `Tagged ${n} element${n !== 1 ? "s" : ""}.` : "No tags applied.");
+      setTimeout(() => setSuggestNote(null), 4000);
+    },
+    []
+  );
 
   // Layer 2: Store previous diagnostics for cooldown/deduplication
   const previousDiagnosticsRef = useRef<EnrichedDiagnostic[]>([]);
@@ -731,12 +818,16 @@ export function Hypercube3D({
     startRotationRef.current = cubeRotation;
     const startTime =
       typeof performance !== "undefined" ? performance.now() : 0;
-    const duration = 600;
+    const duration = 720;
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
+      // easeInOutCubic — graceful acceleration into and settle out of each turn
+      const eased =
+        progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
       const newX =
         startRotationRef.current.x +
@@ -1451,11 +1542,14 @@ export function Hypercube3D({
       >
         {/* SVG for 3D wireframe - Position changes based on mode */}
         <svg
-          className="absolute transition-all duration-500 ease-out left-[1199px] top-[-38px]"
+          className="absolute left-[1199px] top-[-38px]"
           style={{
             left: cubePosition.x,
             top: cubePosition.y,
             transform: `translate(-50%, -50%) scale(${cubePosition.scale})`,
+            // Premium easeOutQuint dock — fast to settle, no jarring stop
+            transition:
+              "left 0.62s cubic-bezier(0.22,1,0.36,1), top 0.62s cubic-bezier(0.22,1,0.36,1), transform 0.62s cubic-bezier(0.22,1,0.36,1)",
             width: "800px",
             height: "800px",
           }}
@@ -1486,6 +1580,43 @@ export function Hypercube3D({
               </feMerge>
             </filter>
 
+            {/* Layered bloom — soft wide halo + tight core, for a premium neon glow */}
+            <filter id="glow-bloom" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur stdDeviation="10" result="halo" />
+              <feGaussianBlur stdDeviation="3.5" result="core" />
+              <feMerge>
+                <feMergeNode in="halo" />
+                <feMergeNode in="core" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+
+            {/* Per-face glass gradients — light falls from the top, deepening toward the base */}
+            {CUBE_FACES.map((face, i) => {
+              const { hue, satBase, lightBase } = face.tint;
+              return (
+                <linearGradient key={`fg-${i}`} id={`faceGrad-${i}`} x1="0" y1="0" x2="0.15" y2="1">
+                  <stop offset="0%" stopColor={`hsl(${hue} ${satBase + 18}% ${lightBase + 24}%)`} stopOpacity="0.95" />
+                  <stop offset="52%" stopColor={`hsl(${hue} ${satBase + 6}% ${lightBase}%)`} stopOpacity="0.82" />
+                  <stop offset="100%" stopColor={`hsl(${hue} ${satBase}% ${Math.max(6, lightBase - 14)}%)`} stopOpacity="0.92" />
+                </linearGradient>
+              );
+            })}
+
+            {/* Specular sheen — a soft top-left highlight that reads as glass */}
+            <radialGradient id="specular-glass" cx="30%" cy="20%" r="75%">
+              <stop offset="0%" stopColor="hsl(0 0% 100%)" stopOpacity="0.30" />
+              <stop offset="42%" stopColor="hsl(0 0% 100%)" stopOpacity="0.06" />
+              <stop offset="100%" stopColor="hsl(0 0% 100%)" stopOpacity="0" />
+            </radialGradient>
+
+            {/* Vertex spark gradient */}
+            <radialGradient id="vertex-spark" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="hsl(280 90% 92%)" stopOpacity="1" />
+              <stop offset="60%" stopColor="hsl(275 80% 72%)" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="hsl(270 70% 60%)" stopOpacity="0" />
+            </radialGradient>
+
             {/* Animation for pulsing glow */}
             <style>
               {`
@@ -1495,6 +1626,13 @@ export function Hypercube3D({
               }
               .glow-pulsing {
                 animation: pulse-glow 2.5s ease-in-out infinite;
+              }
+              @keyframes vertex-twinkle {
+                0%, 100% { opacity: 0.55; }
+                50% { opacity: 0.95; }
+              }
+              .vertex-twinkle {
+                animation: vertex-twinkle 3.4s ease-in-out infinite;
               }
             `}
             </style>
@@ -1625,6 +1763,27 @@ export function Hypercube3D({
             />
           ))}
 
+          {/* Glowing vertices — outer corners spark, nearer ones brighter */}
+          {outerCorners.map((c, i) => {
+            // Nearer corners (smaller z) read brighter; scale radius + opacity by depth
+            const depth = Math.max(0, Math.min(1, 1 - (c.z + 200) / 400));
+            const dim =
+              interactionMode === "explore" && focusedFaceIndex !== null ? 0.45 : 1;
+            return (
+              <circle
+                key={`vertex-${i}`}
+                cx={c.x}
+                cy={c.y}
+                r={2 + depth * 2.4}
+                fill="url(#vertex-spark)"
+                opacity={(0.45 + depth * 0.5) * dim}
+                filter="url(#glow-bloom)"
+                className="vertex-twinkle"
+                style={{ transition: "opacity 0.5s ease" }}
+              />
+            );
+          })}
+
           {/* Core glyph - always visible at center */}
           {isCoreSelected && (
             <g transform="translate(400, 400)">
@@ -1645,8 +1804,15 @@ export function Hypercube3D({
             </g>
           )}
 
-          {/* Face Planes with Identity System */}
-          {CUBE_FACES.map((face, faceIndex) => {
+          {/* Face Planes with Identity System — depth-sorted (far first) for correct occlusion */}
+          {FACE_CORNER_INDICES
+            .map((idxs, faceIndex) => ({
+              faceIndex,
+              avgZ: idxs.reduce((s, i) => s + outerCorners[i].z, 0) / 4,
+            }))
+            .sort((a, b) => b.avgZ - a.avgZ)
+            .map(({ faceIndex }) => {
+            const face = CUBE_FACES[faceIndex];
             const intensity = calculateFaceIntensity(face);
             const { hue, satBase, lightBase } = face.tint;
             const saturation = satBase + intensity.completion * 20;
@@ -1667,31 +1833,8 @@ export function Hypercube3D({
                 ? isFrontFace
                 : false;
 
-            // Calculate face center and corners based on face index
-            // Front (0), Right (1), Back (2), Left (3), Bottom (4), Top (5)
-            let faceCornerIndices: number[] = [];
-            switch (faceIndex) {
-              case 0: // Reality Planes - Front (Z+)
-                faceCornerIndices = [4, 5, 6, 7];
-                break;
-              case 1: // Sensory Domains - Right (X+)
-                faceCornerIndices = [1, 5, 6, 2];
-                break;
-              case 2: // Presence - Back (Z-)
-                faceCornerIndices = [0, 1, 2, 3];
-                break;
-              case 3: // States - Left (X-)
-                faceCornerIndices = [0, 3, 7, 4];
-                break;
-              case 4: // Traits - Top (Y-)
-                faceCornerIndices = [0, 1, 5, 4];
-                break;
-              case 5: // Meaning - Bottom (Y+)
-                faceCornerIndices = [3, 2, 6, 7];
-                break;
-            }
-
-            const faceCorners = faceCornerIndices.map((i) => outerCorners[i]);
+            // Corner indices for this face (shared with the depth sort above)
+            const faceCorners = FACE_CORNER_INDICES[faceIndex].map((i) => outerCorners[i]);
 
             // Calculate face center
             const centerX = faceCorners.reduce((sum, c) => sum + c.x, 0) / 4;
@@ -1707,7 +1850,6 @@ export function Hypercube3D({
                 .join(" ") +
               " Z";
 
-            const baseColor = `hsl(${hue} ${saturation}% ${lightness}%)`;
             const glowColor = `hsl(${hue} ${saturation + 10}% ${lightness + 15}%)`;
 
             // Glow filter based on pattern
@@ -1718,27 +1860,33 @@ export function Hypercube3D({
                   ? "url(#glow-pulsing)"
                   : "url(#glow-fractured)";
 
-            // Front face gets full visibility, others fade based on depth
-            // Use z-position of face center to determine visibility
-            const depthFactor = Math.max(0.3, 1 - (centerZ + 200) / 400);
+            // Depth: near faces (small centerZ) read solid & glassy, far faces fade.
+            const depthFactor = Math.max(0.28, 1 - (centerZ + 200) / 400);
             const faceOpacity = isActive
-              ? 0.5 // Active/front face - strong visibility
+              ? 0.52 // Active/front face — strongest
               : isCoreSelected
-                ? 0.1 // Very dim when Core is selected - inner cube should be focus
+                ? 0.08 // Very dim when Core is selected — inner cube is the focus
                 : isDimmed
-                  ? 0.15 // Non-active when something is focused
-                  : depthFactor * 0.35; // Normal depth-based fading
+                  ? 0.13 // Non-active when something is focused
+                  : 0.16 + depthFactor * 0.3; // translucent glass, weighted by depth
+            // Specular sheen strength — CONTINUOUS (no thresholds) so nothing
+            // pops on/off as the cube rotates. 0 on dim/core faces.
+            const facingStrength = isCoreSelected || isDimmed ? 0 : Math.max(0, depthFactor - 0.45);
+            const specularOpacity = facingStrength * 1.15;
 
             return (
               <g key={`face-${faceIndex}`}>
-                {/* Face plane with flat tint - only front face glows when focused */}
+                {/* Glass gradient plane. Filter only toggles on the SELECTED face
+                    (a deliberate, one-off state change) — never on rotation, to
+                    avoid the flicker a per-frame threshold would cause. */}
                 <path
                   d={pathData}
-                  fill={baseColor}
+                  fill={`url(#faceGrad-${faceIndex})`}
                   fillOpacity={faceOpacity}
                   stroke={glowColor}
-                  strokeWidth={isActive ? "3" : "1"}
-                  strokeOpacity={isActive ? 1 : 0.5}
+                  strokeWidth={isActive ? "3" : "1.25"}
+                  strokeOpacity={isActive ? 1 : 0.6}
+                  strokeLinejoin="round"
                   filter={isActive ? filterUrl : undefined}
                   className={
                     intensity.glowPattern === "pulsing" && isActive
@@ -1746,19 +1894,41 @@ export function Hypercube3D({
                       : ""
                   }
                   style={{
+                    // Only transition selection-driven props. NOT fill-opacity —
+                    // it updates every rotation frame; a transition there makes it
+                    // lag/smear behind the turn. Let it track rotation exactly.
                     transition:
-                      "fill 0.4s ease, fill-opacity 0.4s ease, stroke 0.4s ease, stroke-width 0.4s ease, stroke-opacity 0.4s ease",
+                      "stroke 0.4s ease, stroke-width 0.4s ease, stroke-opacity 0.4s ease",
                     pointerEvents: "none",
                   }}
                 />
-                {/* Glyphs removed - faces show only tint and glow */}
+                {/* Specular sheen — ALWAYS rendered (opacity may be 0) so it never
+                    mounts/unmounts mid-rotation. Sells the glass on front planes. */}
+                <path
+                  d={pathData}
+                  fill="url(#specular-glass)"
+                  fillOpacity={specularOpacity}
+                  style={{ pointerEvents: "none", mixBlendMode: "screen" }}
+                />
               </g>
             );
           })}
         </svg>
 
-        {/* Top Navigation Bar - Upgraded Hypercube Faces Menu */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 items-center p-2 rounded-xl" data-tour-id="map-face-selector">
+        {/* Face selector — compact vertical rail of icon circles that expand
+            on hover (or while selected) to reveal their label. */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30 items-start p-2 transition-[left] duration-300 ease-out max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-visible"
+          style={{
+            // Always visible. Sits just right of the System Insights drawer when
+            // it's open; keeps a small left margin (not flush) when it's hidden.
+            left:
+              isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)
+                ? 336
+                : 20,
+          }}
+          data-tour-id="map-face-selector"
+        >
           {/* General AI Chat button */}
           <button
             data-tour-id="map-cyberdelic-tab"
@@ -1768,10 +1938,10 @@ export function Hypercube3D({
               openGeneralChat();
             }}
             className={cn(
-              "group relative w-[72px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center",
-              isGeneralChatActive && "scale-105 z-10",
-              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-40 scale-95",
-              !isGeneralChatActive && focusedFaceIndex === null && "hover:scale-105 hover:z-10 overflow-visible",
+              "group relative flex items-center h-12 rounded-full border transition-all duration-300",
+              isGeneralChatActive && "z-10",
+              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-50",
+              "hover:opacity-100 hover:z-10",
             )}
             style={{
               background: "linear-gradient(135deg, hsl(220 30% 12%) 0%, hsl(220 25% 8%) 50%, hsl(220 20% 5%) 100%)",
@@ -1784,27 +1954,29 @@ export function Hypercube3D({
             }}
             title="General AI Chat"
           >
-            <div
-              className={cn(
-                "absolute inset-0 opacity-0 transition-opacity duration-300",
-                !isGeneralChatActive && focusedFaceIndex === null && "group-hover:opacity-100",
-              )}
-              style={{
-                background: "radial-gradient(circle at center, hsl(220 60% 60% / 0.12) 0%, transparent 70%)",
-              }}
-            />
-            <div className="relative z-10 flex items-center justify-center">
+            <span className="w-12 h-12 shrink-0 flex items-center justify-center">
               <NextImage
                 src="/images/CXD Logo 2.png"
                 alt="AI"
-                width={32}
-                height={32}
+                width={28}
+                height={28}
                 className={cn(
-                  "w-8 h-8 object-contain transition-all duration-300",
+                  "w-7 h-7 object-contain transition-all duration-300",
                   isGeneralChatActive ? "opacity-100" : "opacity-85",
                 )}
               />
-            </div>
+            </span>
+            <span
+              className={cn(
+                "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
+                isGeneralChatActive
+                  ? "max-w-[160px] pr-4 opacity-100"
+                  : "max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100",
+              )}
+              style={{ color: "hsl(220 60% 72%)" }}
+            >
+              AI Chat
+            </span>
           </button>
 
           {/* Face buttons */}
@@ -1829,6 +2001,8 @@ export function Hypercube3D({
             const glowColor = `hsl(${buttonHue} ${Math.min(saturation + 20, 70)}% ${Math.min(lightness + 30, 65)}%)`;
             const textColor = `hsl(${buttonHue} ${Math.min(saturation + 25, 80)}% ${Math.min(lightness + 35, 75)}%)`;
 
+            const FaceIcon = FACE_ICONS[face.id] || Box;
+
             return (
               <button
                 key={face.id}
@@ -1842,12 +2016,10 @@ export function Hypercube3D({
                   }
                 }}
                 className={cn(
-                  "group relative w-[88px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center",
-                  isFocused && "scale-105 z-10",
-                  isDimmed && "opacity-40 scale-95",
-                  !isFocused &&
-                  !isDimmed &&
-                  "hover:scale-105 hover:z-10 overflow-visible",
+                  "group relative flex items-center h-12 rounded-full border transition-all duration-300",
+                  isFocused && "z-10",
+                  isDimmed && "opacity-50",
+                  "hover:opacity-100 hover:z-10",
                 )}
                 style={{
                   background: `linear-gradient(135deg, ${gradientStart} 0%, ${gradientMid} 50%, ${gradientEnd} 100%)`,
@@ -1862,28 +2034,34 @@ export function Hypercube3D({
                 }}
                 title={`${face.label} - ${face.semanticRole}`}
               >
-                {/* Hover glow overlay */}
-                <div
-                  className={cn(
-                    "absolute inset-0 opacity-0 transition-opacity duration-300",
-                    !isFocused && !isDimmed && "group-hover:opacity-100",
-                  )}
-                  style={{
-                    background: `radial-gradient(circle at center, ${glowColor}20 0%, transparent 70%)`,
-                  }}
-                />
-                {/* Bottom glow accent */}
-                <div
-                  className="absolute inset-x-0 bottom-0 h-1/2 opacity-30"
-                  style={{
-                    background: `linear-gradient(to top, ${glowColor}15, transparent)`,
-                  }}
-                />
-                {/* Text */}
+                {/* Icon zone (fixed circle) */}
+                <span className="relative w-12 h-12 shrink-0 flex items-center justify-center">
+                  <FaceIcon
+                    className="w-5 h-5 transition-transform duration-300 group-hover:scale-110"
+                    style={{ color: isFocused ? glowColor : textColor } as React.CSSProperties}
+                  />
+                  {/* Count badge — anchored to the icon so it doesn't ride the expanding edge */}
+                  {Number.isFinite(intensity.elementCount) &&
+                    intensity.elementCount > 0 && (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-0.5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-lg z-20"
+                        style={{
+                          backgroundColor: glowColor,
+                          color: "#000",
+                          boxShadow: `0 0 10px ${glowColor}`,
+                        }}
+                      >
+                        {intensity.elementCount}
+                      </span>
+                    )}
+                </span>
+                {/* Label — revealed on hover, pinned open while selected */}
                 <span
                   className={cn(
-                    "relative z-10 text-[13px] font-bold uppercase tracking-wide transition-all duration-300",
-                    !isFocused && !isDimmed && "group-hover:scale-110",
+                    "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
+                    isFocused
+                      ? "max-w-[160px] pr-4 opacity-100"
+                      : "max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100",
                   )}
                   style={{
                     color: isFocused ? glowColor : textColor,
@@ -1894,20 +2072,6 @@ export function Hypercube3D({
                 >
                   {face.shortLabel}
                 </span>
-                {/* Count badge */}
-                {Number.isFinite(intensity.elementCount) &&
-                  intensity.elementCount > 0 && (
-                    <div
-                      className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shadow-lg z-20"
-                      style={{
-                        backgroundColor: glowColor,
-                        color: "#000",
-                        boxShadow: `0 0 10px ${glowColor}`,
-                      }}
-                    >
-                      {intensity.elementCount}
-                    </div>
-                  )}
               </button>
             );
           })}
@@ -1920,9 +2084,9 @@ export function Hypercube3D({
               focusCore();
             }}
             className={cn(
-              "group relative w-[88px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center overflow-hidden",
-              isCoreSelected && "scale-105 z-10",
-              !isCoreSelected && "hover:scale-105 hover:z-10",
+              "group relative flex items-center h-12 rounded-full border transition-all duration-300",
+              isCoreSelected && "z-10",
+              "hover:opacity-100 hover:z-10",
             )}
             style={{
               background: isCoreSelected
@@ -1937,29 +2101,18 @@ export function Hypercube3D({
             }}
             title="Focus Core - The inner experience structure"
           >
-            {/* Hover glow overlay */}
-            <div
-              className={cn(
-                "absolute inset-0 opacity-0 transition-opacity duration-300",
-                !isCoreSelected && "group-hover:opacity-100",
-              )}
-              style={{
-                background:
-                  "radial-gradient(circle at center, hsl(270 80% 60% / 0.2) 0%, transparent 70%)",
-              }}
-            />
-            {/* Bottom glow accent */}
-            <div
-              className="absolute inset-x-0 bottom-0 h-1/2 opacity-30"
-              style={{
-                background:
-                  "linear-gradient(to top, hsl(270 80% 60% / 0.15), transparent)",
-              }}
-            />
+            <span className="w-12 h-12 shrink-0 flex items-center justify-center">
+              <Target
+                className="w-5 h-5 transition-transform duration-300 group-hover:scale-110"
+                style={{ color: isCoreSelected ? "hsl(270 80% 75%)" : "hsl(270 60% 70%)" }}
+              />
+            </span>
             <span
               className={cn(
-                "relative z-10 text-[13px] font-bold uppercase tracking-wide transition-all duration-300",
-                !isCoreSelected && "group-hover:scale-110",
+                "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
+                isCoreSelected
+                  ? "max-w-[160px] pr-4 opacity-100"
+                  : "max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100",
               )}
               style={{
                 color: isCoreSelected ? "hsl(270 80% 75%)" : "hsl(270 60% 70%)",
@@ -1976,7 +2129,7 @@ export function Hypercube3D({
           {interactionMode !== "explore" ? (
             <button
               onClick={enterExploreMode}
-              className="group relative w-[88px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center overflow-hidden hover:scale-105 hover:z-10"
+              className="group relative flex items-center h-12 rounded-full border transition-all duration-300 hover:z-10"
               style={{
                 background:
                   "linear-gradient(135deg, hsl(35 40% 12%) 0%, hsl(35 35% 8%) 50%, hsl(35 30% 5%) 100%)",
@@ -1985,39 +2138,23 @@ export function Hypercube3D({
               }}
               title="Enter explore mode to rotate the cube freely"
             >
-              {/* Hover glow overlay */}
-              <div
-                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+              <span className="w-12 h-12 shrink-0 flex items-center justify-center">
+                <Compass className="w-5 h-5 text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 group-hover:scale-110" />
+              </span>
+              <span
+                className="max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 ease-out"
                 style={{
-                  background:
-                    "radial-gradient(circle at center, hsl(35 80% 50% / 0.2) 0%, transparent 70%)",
+                  textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
                 }}
-              />
-              {/* Bottom glow accent */}
-              <div
-                className="absolute inset-x-0 bottom-0 h-1/2 opacity-30"
-                style={{
-                  background:
-                    "linear-gradient(to top, hsl(35 80% 50% / 0.15), transparent)",
-                }}
-              />
-              <div className="relative z-10 flex flex-col items-center gap-1">
-                <Compass className="w-4 h-4 text-amber-400/70 group-hover:text-amber-300 transition-colors" />
-                <span
-                  className="text-[11px] font-bold uppercase tracking-wide text-amber-400/70 group-hover:text-amber-300 group-hover:scale-110 transition-all duration-300"
-                  style={{
-                    textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
-                  }}
-                >
-                  Explore
-                </span>
-              </div>
+              >
+                Explore
+              </span>
             </button>
           ) : (
             <div className="flex items-center gap-1.5">
               <button
                 onClick={exitExploreMode}
-                className="group relative w-[72px] h-[72px] rounded-lg border transition-all duration-300 flex items-center justify-center overflow-hidden hover:scale-105"
+                className="group relative flex items-center h-12 rounded-full border transition-all duration-300"
                 style={{
                   background:
                     "linear-gradient(135deg, hsl(35 50% 15%) 0%, hsl(35 45% 10%) 50%, hsl(35 40% 6%) 100%)",
@@ -2027,12 +2164,12 @@ export function Hypercube3D({
                 }}
                 title="Exit explore mode (Esc)"
               >
-                <div className="relative z-10 flex flex-col items-center gap-1">
-                  <X className="w-4 h-4 text-amber-300" />
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-amber-300">
-                    Exit
-                  </span>
-                </div>
+                <span className="w-12 h-12 shrink-0 flex items-center justify-center">
+                  <X className="w-5 h-5 text-amber-300" />
+                </span>
+                <span className="max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide text-amber-300 transition-all duration-300 ease-out">
+                  Exit
+                </span>
               </button>
 
               {/* Zoom controls */}
@@ -2181,12 +2318,19 @@ export function Hypercube3D({
 
         {/* CENTER PANEL - AI Chatbot + Tagged Elements (bottom-right dock) */}
         {interactionMode === "default" && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
-          <div className="absolute inset-0 flex flex-col justify-center pt-[110px] pb-[64px] pointer-events-none z-20">
-            {/* Main Chat Area */}
+          <div className="absolute inset-0 flex flex-col justify-center pt-[16px] pb-[16px] pointer-events-none z-20">
+            {/* Main Chat Area. Left padding clears the compact icon rail (more
+                when the System Insights drawer is open). Right padding clears
+                the docked minimap cube + its directional arrows, which sit at
+                cubePosition (~180px from the right edge) with the arrow hit-box
+                extending ~120px further — so the right reserve must stay larger
+                than the left. max-w on the inner frame caps the chat's width. */}
             <div
               className={cn(
-                "w-full pointer-events-none overflow-visible px-4 flex justify-center md:pr-[260px] lg:pr-[300px] xl:pr-[340px]",
-                isPanelOpen ? "md:pl-[340px] lg:pl-[360px]" : "md:pl-[84px] lg:pl-[120px]",
+                "w-full pointer-events-none overflow-visible px-4 flex justify-center",
+                isPanelOpen
+                  ? "md:pl-[440px] md:pr-[300px] xl:pl-[460px] xl:pr-[340px]"
+                  : "md:pl-[120px] md:pr-[300px] xl:pl-[160px] xl:pr-[340px]",
               )}
             >
               <div className="relative w-full max-w-[1120px]">
@@ -2231,13 +2375,38 @@ export function Hypercube3D({
                     />
                   </div>
 
+                {/* Right-side rail: Suggest-tags button above the Tagged Elements window */}
+                <div className="absolute left-full bottom-0 ml-3 flex flex-col items-start gap-2 pointer-events-none">
+                  {/* Ephemeral status note */}
+                  {suggestNote && (
+                    <div className="px-3 py-2 rounded-lg bg-card/90 backdrop-blur border border-border text-xs text-muted-foreground shadow-lg max-w-[240px]">
+                      {suggestNote}
+                    </div>
+                  )}
+                  {/* AI Suggest Tags — circle that expands on hover, like the face rail */}
+                  {!tagSuggestions && (
+                    <button
+                      onClick={handleSuggestTags}
+                      disabled={suggesting}
+                      className="group pointer-events-auto flex items-center h-11 rounded-full bg-card/85 backdrop-blur border border-fuchsia-500/30 text-fuchsia-300 hover:text-fuchsia-200 hover:bg-fuchsia-500/15 hover:border-fuchsia-500/50 transition-colors duration-300 disabled:opacity-70 disabled:cursor-wait shadow-lg"
+                      title="Suggest hypercube tags for untagged canvas elements"
+                    >
+                      <span className="w-11 h-11 shrink-0 flex items-center justify-center">
+                        {suggesting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Tag className="w-5 h-5" />}
+                      </span>
+                      <span className="max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-sm font-medium transition-all duration-300 ease-out">
+                        {suggesting ? "Analyzing…" : "Suggest tags"}
+                      </span>
+                    </button>
+                  )}
+
                 {/* Tagged Elements outside chat on center-right */}
                 {(focusedFace || isCoreSelected) && focusedElementPreviews.length > 0 && (() => {
                   const railHue = focusedFace ? focusedFace.tint.hue : 270; // Purple for core
                   return (
                   <aside
                     className={cn(
-                      "pointer-events-auto absolute left-full bottom-0 ml-3 rounded-2xl border backdrop-blur-sm bg-black/10 overflow-hidden transition-all duration-300",
+                      "pointer-events-auto rounded-2xl border backdrop-blur-sm bg-black/10 overflow-hidden transition-all duration-300",
                       isTaggedRailCollapsed ? "w-[36px]" : "w-[240px]",
                     )}
                     style={{
@@ -2355,6 +2524,7 @@ export function Hypercube3D({
                   </aside>
                   );
                 })()}
+                </div>
               </div>
             </div>
             </div>
@@ -2364,6 +2534,16 @@ export function Hypercube3D({
         )}
 
       </div>
+
+      {/* Tag suggestion review panel (propose-only) */}
+      {tagSuggestions && (
+        <TagSuggestionPanel
+          suggestions={tagSuggestions}
+          considered={suggestConsidered}
+          onApply={handleApplyTagSuggestions}
+          onClose={() => setTagSuggestions(null)}
+        />
+      )}
 
       {/* ERD Generator Modal */}
       <ERDGenerator
