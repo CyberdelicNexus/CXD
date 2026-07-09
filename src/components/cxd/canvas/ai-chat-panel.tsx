@@ -554,7 +554,7 @@ export function AIChatPanel({
                       </div>
 
                       {/* AI Action Bar for assistant messages with actionable content */}
-                      {msg.role === "assistant" && actionableContent && (actionableContent.tasks.length > 0 || actionableContent.noteContent.length > 0) && (
+                      {msg.role === "assistant" && actionableContent && (actionableContent.tasks.length > 0 || actionableContent.noteContent.length > 0 || msg.content.trim().length > 120) && (
                         <div className="flex justify-start">
                           <div className="max-w-[80%]">
                             <AIActionBar
@@ -562,6 +562,11 @@ export function AIChatPanel({
                               noteContent={actionableContent.noteContent}
                               sourceFaces={actionableContent.sourceFaces}
                               chatMessageId={msg.id}
+                              messageContent={msg.content.trim().length > 120 ? msg.content : undefined}
+                              provider={typeof provider === 'string' ? provider : undefined}
+                              onElementsPlaced={(count) => {
+                                console.log(`[AIChatPanel] ${count} AI-drafted elements placed on canvas`);
+                              }}
                               onTasksAdded={() => {
                                 // Optional: Could add toast notification here
                                 console.log('[AIChatPanel] Tasks added to Plan tab');
@@ -726,7 +731,9 @@ export function AIChatPanel({
       style={{
         "--chat-scrollbar-hue": accentHue,
         borderColor: `hsl(${accentHue} 40% 40% / 0.5)`,
-        height: "64vh",
+        // Taller now that the map's face selector no longer occupies the top bar;
+        // the calc guard keeps it fully on-screen on short viewports.
+        height: "min(76vh, calc(100vh - 140px))",
         transition: "box-shadow 260ms ease, border-color 260ms ease",
         boxShadow: isFocused
           ? `0 24px 50px -24px rgba(0,0,0,0.9), 0 0 0 1px hsl(${accentHue} 60% 60% / 0.35), 0 0 14px 3px hsl(${accentHue} 70% 58% / 0.45)`

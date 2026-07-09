@@ -163,11 +163,12 @@ export interface CreditTransaction {
   createdAt: string;
 }
 
-export type CreditAction = 'chat' | 'suggestion' | 'analyze' | 'erd';
+export type CreditAction = 'chat' | 'suggestion' | 'analyze' | 'erd' | 'generateElements';
 
 export const CREDIT_COSTS: Record<CreditAction, Record<AIProviderKey, number>> = {
   chat: { claude: 2, gemini: 1, kimi: 1 },
   suggestion: { claude: 2, gemini: 1, kimi: 1 },
   analyze: { claude: 8, gemini: 4, kimi: 5 },
   erd: { claude: 20, gemini: 12, kimi: 15 },
+  generateElements: { claude: 10, gemini: 5, kimi: 6 },
 };
