@@ -51,6 +51,7 @@ export interface UseSubscriptionReturn {
   hasTemplates: boolean;
   hasUnlimitedCanvases: boolean;
   hasCollaboration: boolean;
+  hasMasterPlan: boolean;
   maxCollaborators: number;
   canCreateCanvas: (currentCount: number) => boolean;
   canAddCollaborator: (currentCount: number) => boolean;
@@ -156,6 +157,7 @@ export function useSubscription(): UseSubscriptionReturn {
   const hasTemplates = hasFeatureAccess(planId, 'templates');
   const hasUnlimitedCanvases = hasFeatureAccess(planId, 'unlimitedCanvases');
   const hasCollaboration = hasFeatureAccess(planId, 'collaboration');
+  const hasMasterPlan = hasFeatureAccess(planId, 'masterPlan');
   const maxCollaborators = getMaxCollaborators(planId);
 
   const checkCanCreateCanvas = useCallback(
@@ -185,6 +187,7 @@ export function useSubscription(): UseSubscriptionReturn {
     hasTemplates,
     hasUnlimitedCanvases,
     hasCollaboration,
+    hasMasterPlan,
     maxCollaborators,
     canCreateCanvas: checkCanCreateCanvas,
     canAddCollaborator: checkCanAddCollaborator,

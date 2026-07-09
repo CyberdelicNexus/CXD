@@ -22,6 +22,7 @@ export const PLANS = {
       hasTemplates: false,
       hasCollaboration: false,
       maxCollaborators: 0,
+      hasMasterPlan: false,
     },
   },
   PRO: {
@@ -49,6 +50,7 @@ export const PLANS = {
       hasTemplates: true,
       hasCollaboration: true,
       maxCollaborators: 3,
+      hasMasterPlan: true,
     },
   },
   LIFETIME: {
@@ -76,6 +78,7 @@ export const PLANS = {
       hasTemplates: true,
       hasCollaboration: true,
       maxCollaborators: 3,
+      hasMasterPlan: true,
     },
   },
   BETA_TESTER: {
@@ -96,6 +99,7 @@ export const PLANS = {
       hasTemplates: true,
       hasCollaboration: true,
       maxCollaborators: 3,
+      hasMasterPlan: true,
     },
   },
 } as const;
@@ -112,7 +116,7 @@ export function getPlan(planId: string): Plan {
 // Check if user has access to a feature
 export function hasFeatureAccess(
   planId: string,
-  feature: 'ai' | 'planView' | 'templates' | 'unlimitedCanvases' | 'collaboration'
+  feature: 'ai' | 'planView' | 'templates' | 'unlimitedCanvases' | 'collaboration' | 'masterPlan'
 ): boolean {
   const plan = getPlan(planId);
 
@@ -127,6 +131,8 @@ export function hasFeatureAccess(
       return plan.limits.maxCanvases === Infinity;
     case 'collaboration':
       return plan.limits.hasCollaboration;
+    case 'masterPlan':
+      return plan.limits.hasMasterPlan;
     default:
       return false;
   }

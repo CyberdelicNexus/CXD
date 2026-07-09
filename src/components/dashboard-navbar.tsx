@@ -48,11 +48,15 @@ import {
   Info,
   Check,
   UserPlus,
-  Loader2
+  Loader2,
+  ClipboardList,
+  Lock
 } from 'lucide-react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useNotifications } from '@/hooks/use-notifications'
 import { NotificationType, Notification } from '@/lib/notifications'
+import { useSubscription } from '@/hooks/use-subscription'
+import { UpgradeModal } from '@/components/modals/upgrade-modal'
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
   info: <Info className="w-4 h-4 text-blue-400" />,
@@ -80,8 +84,10 @@ export default function DashboardNavbar() {
   const router = useRouter()
   const pathname = usePathname()
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll, refresh } = useNotifications()
+  const { hasMasterPlan } = useSubscription()
   const [acceptingInvite, setAcceptingInvite] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
+  const [showMasterPlanUpgrade, setShowMasterPlanUpgrade] = useState(false)
   const [showBugModal, setShowBugModal] = useState(false)
   const [supportMessage, setSupportMessage] = useState('')
   const [bugDescription, setBugDescription] = useState('')
@@ -261,6 +267,37 @@ export default function DashboardNavbar() {
               })}
 
               {/* Templates nav link — hidden until templates are production-ready */}
+
+              {/* Master Plan — Pro feature, clickable for everyone but blocked
+                  behind an upgrade modal (not a permanent "coming soon") */}
+              {(() => {
+                const isActive = pathname === '/dashboard/master-plan';
+                return (
+                  <div
+                    onClick={() => {
+                      if (!hasMasterPlan) {
+                        setShowMasterPlanUpgrade(true);
+                        return;
+                      }
+                      router.push('/dashboard/master-plan');
+                    }}
+                    className={`relative flex items-center px-4 py-2 group rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 overflow-visible cursor-pointer
+                      ${isActive
+                        ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+                        : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+                      }
+                      ${!hasMasterPlan ? 'opacity-70' : ''}`}
+                  >
+                    {!hasMasterPlan && (
+                      <Lock className="w-3 h-3 absolute -top-1 -right-1 text-orange-400 z-10" />
+                    )}
+                    <ClipboardList className={`w-4 h-4 mr-2 transition-colors ${isActive ? 'text-violet-200' : 'text-white/60 group-hover:text-violet-200'}`} />
+                    <span className="text-xs font-medium">Master Plan</span>
+                    <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </div>
+                );
+              })()}
 
               {/* Locked Links */}
               {[
@@ -621,6 +658,12 @@ export default function DashboardNavbar() {
           )}
         </DialogContent>
       </Dialog>
+
+      <UpgradeModal
+        isOpen={showMasterPlanUpgrade}
+        onClose={() => setShowMasterPlanUpgrade(false)}
+        feature="master-plan"
+      />
     </>
   )
 }

@@ -15,7 +15,7 @@ import {
 interface UpgradeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  feature: 'plan-view' | 'tasks' | 'premium-ai' | 'templates' | 'collaboration' | 'canvases';
+  feature: 'plan-view' | 'tasks' | 'premium-ai' | 'templates' | 'collaboration' | 'canvases' | 'master-plan';
   onUpgrade?: () => void;
 }
 
@@ -115,6 +115,19 @@ export function UpgradeModal({ isOpen, onClose, feature, onUpgrade }: UpgradeMod
           'Never delete progress',
         ],
         cta: 'Get Unlimited Canvases',
+      },
+      'master-plan': {
+        title: 'Master Plan is a Pro Feature',
+        description: 'A single cockpit for every task across every canvas in your account.',
+        benefits: [
+          'Every project\'s tasks in one place',
+          'Table, Kanban, List, Timeline & Calendar views',
+          'Manage tasks without opening each canvas',
+          'Jump straight to the source project',
+        ],
+        cta: isTrialing
+          ? `Upgrade now (${trialDaysRemaining} days left in trial)`
+          : 'Start Pro Trial',
       },
     };
     return contexts[feature as keyof typeof contexts];
