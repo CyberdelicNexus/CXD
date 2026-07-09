@@ -479,6 +479,8 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
         if (field === 'canvasBackground') return { ...p, canvasBackground: value as string };
         if (field === 'wizardCompleted') return { ...p, wizardCompleted: value as boolean };
         if (field === 'currentWizardStep') return { ...p, currentWizardStep: value as number };
+        if (field === 'framingCanvasPopulated') return { ...p, framingCanvasPopulated: value as boolean };
+        if (field === 'framingType') return { ...p, framingType: value as string };
         if (field === 'shareToken') return { ...p, shareToken: value as string };
         return p;
       });

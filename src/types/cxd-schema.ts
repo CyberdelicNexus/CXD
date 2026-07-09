@@ -323,6 +323,8 @@ export interface CXDProject {
   // Wizard progress
   wizardCompleted: boolean;
   currentWizardStep: number;
+  framingCanvasPopulated?: boolean; // true once framingToCanvas seeded the canvas (populate-once guard)
+  framingType?: string; // FramingTypeId from framing-types.ts; undefined = not chosen yet (defaults to 'experience')
 }
 
 // Default project factory

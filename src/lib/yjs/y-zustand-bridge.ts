@@ -167,6 +167,15 @@ export class YjsZustandBridge {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (events: Y.YEvent<any>[]) => {
+      // 'template-batch' transactions (addCanvasEdges) already wrote directly
+      // to Zustand before touching Yjs — skipping the flush here avoids a
+      // redundant setState with identical data, mirroring the same guard on
+      // the element observer above (see its comment: this is exactly the
+      // mechanism that previously caused "Maximum update depth exceeded" for
+      // large batches before it was skipped there).
+      const origin = events[0]?.transaction?.origin;
+      if (origin === 'drag-commit' || origin === 'template-batch') return;
+
       for (const event of events) {
         if (event.target === yEdges) {
           event.changes.keys.forEach((change, key) => {

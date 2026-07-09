@@ -118,6 +118,18 @@ export const HYPERCUBE_FACE_TAGS: HypercubeFaceTag[] = [
   'Core',
 ];
 
+// Map CXDSectionId to HypercubeFaceTag for semantic tag checking.
+// Sections without a cube face (desiredChange, humanContext, experienceFlow) are absent.
+export const SECTION_TO_FACE_TAG: Record<string, HypercubeFaceTag> = {
+  realityPlanes: 'Reality Planes',
+  sensoryDomains: 'Sensory Domains',
+  presence: 'Presence Types',
+  stateMapping: 'State Mapping',
+  traitMapping: 'Trait Mapping',
+  contextAndMeaning: 'Meaning Architecture',
+  intentionCore: 'Core',
+};
+
 // Base interface for all canvas elements
 export interface CanvasElementBase {
   id: string;

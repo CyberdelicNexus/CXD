@@ -52,6 +52,7 @@ import {
   yjsToggleExperienceFlowStageRealityPlane,
 } from '@/lib/yjs/yjs-store-actions';
 import { createCanvasUndoManager, createDesignUndoManager } from '@/lib/yjs/undo-manager';
+import { framingToCanvas, framingInsertionOrigin, elementsBoundingBox } from '@/lib/framing-to-canvas';
 
 export type ViewMode = 'home' | 'wizard' | 'canvas' | 'focus' | 'share';
 
@@ -93,6 +94,13 @@ interface CXDState {
   // Canvas state
   canvasPosition: { x: number; y: number };
   canvasZoom: number;
+  /**
+   * World-space bounding box of content just inserted by a generator (e.g.
+   * the framing wizard), consumed once by the canvas view to auto-fit the
+   * viewport onto it — so the user never has to manually pan/zoom to find
+   * newly generated content. Cleared back to null after being consumed.
+   */
+  pendingCanvasFitBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
 
   // Per-canvas viewport persistence (keyed by canvasId: "root" or boardId)
   viewportByCanvasId: Record<string, Viewport>;
@@ -147,6 +155,7 @@ interface CXDState {
   // Actions - Canvas
   setCanvasPosition: (position: { x: number; y: number }) => void;
   setCanvasZoom: (zoom: number) => void;
+  setPendingCanvasFitBounds: (bounds: { minX: number; minY: number; maxX: number; maxY: number } | null) => void;
 
   // Actions - Viewport persistence
   saveCurrentViewport: () => void;
@@ -156,7 +165,9 @@ interface CXDState {
 
   // Actions - Wizard
   setWizardStep: (step: number) => void;
-  completeWizard: () => void;
+  /** startMode 'populate' (default) seeds Experience blocks; 'blank' skips generation */
+  completeWizard: (startMode?: 'populate' | 'blank') => void;
+  setFramingType: (framingType: string) => void;
 
   // Actions - Reality Planes (Legacy percentage-based)
   updateRealityPlane: (code: RealityPlaneCode, value: number) => void;
@@ -245,6 +256,8 @@ interface CXDState {
 
   // Actions - Canvas Edges (Connectors)
   addCanvasEdge: (edge: CanvasEdge) => void;
+  /** Batched, freeze-proof insert for many edges at once (template/generator paths) — mirrors addCanvasElements. */
+  addCanvasEdges: (edges: CanvasEdge[]) => void;
   updateCanvasEdge: (edgeId: string, updates: Partial<CanvasEdge>) => void;
   removeCanvasEdge: (edgeId: string) => void;
   getCanvasEdges: () => CanvasEdge[];
@@ -353,6 +366,7 @@ export const useCXDStore = create<CXDState>()(
       currentProjectId: null,
       canvasPosition: { x: 0, y: 0 },
       canvasZoom: 0.8,
+      pendingCanvasFitBounds: null,
       viewportByCanvasId: {},
       activeBoardId: null,
       currentBoardId: null, // backward compatibility alias
@@ -581,6 +595,9 @@ export const useCXDStore = create<CXDState>()(
           get().saveCurrentViewport();
         }
       },
+      setPendingCanvasFitBounds: (bounds) => {
+        set({ pendingCanvasFitBounds: bounds });
+      },
 
       // Viewport persistence actions
       getCanvasId: () => {
@@ -643,17 +660,64 @@ export const useCXDStore = create<CXDState>()(
         }
       },
 
-      completeWizard: () => {
+      setFramingType: (framingType) => {
         const currentProject = get().getCurrentProject();
-        if (currentProject) {
-          set((state) => ({
-            projects: state.projects.map((p) =>
-              p.id === currentProject.id
-                ? { ...p, wizardCompleted: true, updatedAt: new Date().toISOString() }
-                : p
-            ),
-            viewMode: 'canvas',
-          }));
+        if (!currentProject) return;
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, framingType, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetMetaField(yDoc, 'framingType', framingType);
+        }
+      },
+
+      completeWizard: (startMode = 'populate') => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+
+        // Populate the canvas from framing answers exactly once per project.
+        // 'blank' start mode skips generation (and leaves the populate-once
+        // guard unset, so a later wizard completion can still seed blocks).
+        const framingGraph =
+          startMode !== 'populate' || currentProject.framingCanvasPopulated
+            ? { elements: [], edges: [] }
+            : framingToCanvas(currentProject, framingInsertionOrigin(currentProject));
+        const populated = framingGraph.elements.length > 0;
+
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                wizardCompleted: true,
+                ...(populated ? { framingCanvasPopulated: true } : {}),
+                updatedAt: new Date().toISOString(),
+              }
+              : p
+          ),
+          viewMode: 'canvas',
+        }));
+
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetMetaField(yDoc, 'wizardCompleted', true);
+          if (populated) yjsSetMetaField(yDoc, 'framingCanvasPopulated', true);
+        }
+
+        if (populated) {
+          get().addCanvasElements(framingGraph.elements);
+          get().addCanvasEdges(framingGraph.edges);
+          // Ask the canvas view to auto-fit its viewport onto the new content
+          // next time it's shown — otherwise the user has to manually pan/zoom
+          // to find it, especially now that a full framing graph spans several
+          // thousand px. Consumed once by cxd-canvas.tsx, then cleared.
+          const bbox = elementsBoundingBox(framingGraph.elements);
+          if (bbox) get().setPendingCanvasFitBounds(bbox);
         }
       },
 
@@ -1526,6 +1590,56 @@ export const useCXDStore = create<CXDState>()(
           yDoc.transact(() => {
             prepared.forEach(el => {
               yjsAddElement(yDoc, el);
+            });
+          }, 'template-batch');
+        }
+      },
+
+      addCanvasEdges: (edges) => {
+        // Deliberately does NOT call pushCanvasHistory: this is meant to be
+        // called immediately after addCanvasElements (which already snapshots
+        // pre-insert state), so the two writes share ONE undo entry — undo
+        // removes the generated elements and their edges together, atomically.
+        // If you add a standalone caller that isn't paired with an elements
+        // insert, call get().pushCanvasHistory() before it yourself.
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+        if (edges.length === 0) return;
+
+        const activeBoardId = get().activeBoardId;
+        const activeSurface = get().activeSurface;
+
+        const prepared = edges.map(e => ({
+          ...e,
+          boardId: e.boardId !== undefined ? e.boardId : activeBoardId,
+          surface: e.surface !== undefined ? e.surface : activeSurface,
+        }));
+
+        // Direct Zustand update (single setState — no Yjs observer cascade)
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  edges: [...(p.canvasLayout?.edges || []), ...prepared]
+                },
+                updatedAt: new Date().toISOString()
+              }
+              : p
+          ),
+        }));
+
+        // Write to Yjs synchronously with 'template-batch' origin (nested inside
+        // this transact, yjsAddEdge's own 'local' transact is a no-op reuse of
+        // the already-open one, so the whole batch keeps the outer origin —
+        // same mechanism addCanvasElements relies on for its element batch).
+        const { yDoc } = get();
+        if (yDoc) {
+          yDoc.transact(() => {
+            prepared.forEach(e => {
+              yjsAddEdge(yDoc, e);
             });
           }, 'template-batch');
         }

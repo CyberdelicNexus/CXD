@@ -7695,6 +7695,16 @@ function ExperienceBlockCard({
     element.style?.bgColor ||
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
 
+  // Grows a textarea to fit its content instead of clipping/scrolling
+  // internally. Called on mount (ref) and on every keystroke (onChange) so
+  // both user typing and pre-filled content (e.g. from the framing
+  // generator) size correctly. Idempotent — safe to call on every render.
+  const autoGrowTextarea = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
   // Compact view (default)
   if (viewMode === "compact") {
     return (
@@ -7803,9 +7813,10 @@ function ExperienceBlockCard({
                   id="mainConcept"
                   placeholder="What is the central idea or concept?"
                   value={liMainConcept}
-                  onChange={(e) => setLiMainConcept(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
+                  onChange={(e) => { setLiMainConcept(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[80px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7819,9 +7830,10 @@ function ExperienceBlockCard({
                   id="coreMessage"
                   placeholder="What is the core message or takeaway?"
                   value={liCoreMessage}
-                  onChange={(e) => setLiCoreMessage(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
+                  onChange={(e) => { setLiCoreMessage(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[80px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
             </>
@@ -7840,9 +7852,10 @@ function ExperienceBlockCard({
                   id="insights"
                   placeholder="What insights should users gain?"
                   value={liInsights}
-                  onChange={(e) => setLiInsights(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
+                  onChange={(e) => { setLiInsights(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[60px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7856,9 +7869,10 @@ function ExperienceBlockCard({
                   id="feelings"
                   placeholder="What feelings should they experience?"
                   value={liFeelings}
-                  onChange={(e) => setLiFeelings(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
+                  onChange={(e) => { setLiFeelings(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[60px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7872,9 +7886,10 @@ function ExperienceBlockCard({
                   id="states"
                   placeholder="What states should emerge?"
                   value={liStates}
-                  onChange={(e) => setLiStates(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
+                  onChange={(e) => { setLiStates(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[60px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7888,9 +7903,10 @@ function ExperienceBlockCard({
                   id="knowledge"
                   placeholder="What knowledge should they acquire?"
                   value={liKnowledge}
-                  onChange={(e) => setLiKnowledge(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[60px]"
+                  onChange={(e) => { setLiKnowledge(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[60px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
             </>
@@ -7909,9 +7925,10 @@ function ExperienceBlockCard({
                   id="audienceNeeds"
                   placeholder="What are the audience's needs?"
                   value={liAudienceNeeds}
-                  onChange={(e) => setLiAudienceNeeds(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
+                  onChange={(e) => { setLiAudienceNeeds(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[80px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7925,9 +7942,10 @@ function ExperienceBlockCard({
                   id="audienceDesires"
                   placeholder="What do they desire?"
                   value={liAudienceDesires}
-                  onChange={(e) => setLiAudienceDesires(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
+                  onChange={(e) => { setLiAudienceDesires(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[80px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7962,9 +7980,10 @@ function ExperienceBlockCard({
                   id="world"
                   placeholder="Describe the world..."
                   value={liWorld}
-                  onChange={(e) => setLiWorld(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
+                  onChange={(e) => { setLiWorld(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[80px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7978,9 +7997,10 @@ function ExperienceBlockCard({
                   id="story"
                   placeholder="What is the narrative?"
                   value={liStory}
-                  onChange={(e) => setLiStory(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
+                  onChange={(e) => { setLiStory(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[80px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
               <div className="space-y-2">
@@ -7994,9 +8014,10 @@ function ExperienceBlockCard({
                   id="magic"
                   placeholder="How does the magic work?"
                   value={liMagic}
-                  onChange={(e) => setLiMagic(e.target.value)}
-                  className="bg-secondary/50 border-border/50 text-white min-h-[80px]"
+                  onChange={(e) => { setLiMagic(e.target.value); autoGrowTextarea(e.target); }}
+                  className="bg-secondary/50 border-border/50 text-white min-h-[80px] resize-none overflow-hidden"
                   data-no-drag
+                  ref={autoGrowTextarea}
                 />
               </div>
             </>
@@ -8145,11 +8166,13 @@ function ExperienceBlockCard({
                     <Textarea
                       placeholder={`${quadrant} state...`}
                       value={(project.stateMapping as any)?.[quadrant] || ""}
-                      onChange={(e) =>
-                        updateStateMapping(quadrant as any, e.target.value)
-                      }
-                      className="bg-secondary/50 border-border/50 text-white min-h-[60px] text-xs"
+                      onChange={(e) => {
+                        updateStateMapping(quadrant as any, e.target.value);
+                        autoGrowTextarea(e.target);
+                      }}
+                      className="bg-secondary/50 border-border/50 text-white min-h-[60px] text-xs resize-none overflow-hidden"
                       data-no-drag
+                      ref={autoGrowTextarea}
                     />
                   </div>
                 ),
@@ -8169,11 +8192,13 @@ function ExperienceBlockCard({
                   <Textarea
                     placeholder={`${quadrant} trait...`}
                     value={project.traitMapping?.[quadrant] || ""}
-                    onChange={(e) =>
-                      updateTraitMapping(quadrant, e.target.value)
-                    }
-                    className="bg-secondary/50 border-border/50 text-white min-h-[60px] text-xs"
+                    onChange={(e) => {
+                      updateTraitMapping(quadrant, e.target.value);
+                      autoGrowTextarea(e.target);
+                    }}
+                    className="bg-secondary/50 border-border/50 text-white min-h-[60px] text-xs resize-none overflow-hidden"
                     data-no-drag
+                    ref={autoGrowTextarea}
                   />
                 </div>
               ))}

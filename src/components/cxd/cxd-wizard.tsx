@@ -54,7 +54,10 @@ import {
   Maximize2,
   X,
   Palette,
+  LayoutGrid,
+  Square,
 } from "lucide-react";
+import { FRAMING_TYPES, getFramingType, type FramingStartMode } from "@/types/framing-types";
 import { createPortal } from "react-dom";
 import { NoteRichTextEditor } from "@/components/cxd/canvas/note-rich-text-editor";
 
@@ -216,6 +219,7 @@ export function CXDWizard() {
     getCurrentProject,
     setWizardStep,
     completeWizard,
+    setFramingType,
     updateContextWorld,
     updateContextStory,
     updateContextMagic,
@@ -279,6 +283,30 @@ export function CXDWizard() {
 
   const currentStepData = WIZARD_STEPS[currentStep];
 
+  // ── Framing type theming ─────────────────────────────────────────
+  // The chosen framing type re-words steps (labels/questions) without
+  // changing the underlying schema. 'experience' has no overrides.
+  const framingTypeDef = getFramingType(project?.framingType);
+  const needsTypePick = !!project && !project.framingType && !project.wizardCompleted;
+  const [startMode, setStartMode] = useState<FramingStartMode>('populate');
+
+  const sectionSteps = WIZARD_STEPS.filter((s) => s.sectionId === currentStepData.sectionId);
+  const stepIdxInSection = sectionSteps.findIndex((s) => s.id === currentStepData.id);
+  const stepTheme = framingTypeDef.sectionThemes[currentStepData.sectionId];
+  // Multi-step sections (World/Story/Magic) keep their per-step titles under a
+  // themed prefix and draw per-step questions from the theme's subQuestions.
+  const themedTitle = stepTheme
+    ? sectionSteps.length > 1
+      ? `${stepTheme.label}: ${currentStepData.title}`
+      : stepTheme.label
+    : currentStepData.title;
+  const themedQuestion = stepTheme
+    ? sectionSteps.length > 1
+      ? stepTheme.subQuestions?.[stepIdxInSection] ?? currentStepData.question
+      : stepTheme.question
+    : currentStepData.question;
+  const themedIntent = stepTheme?.intent ?? currentStepData.intent;
+
   // Progress starts at 0% for first step and reaches 100% on last step
   // Map steps 0-10 to 0%-100% progress
   const progress = currentStep === WIZARD_STEPS.length - 1
@@ -297,7 +325,7 @@ export function CXDWizard() {
   };
 
   const handleComplete = (destination: 'canvas' | 'hexagon' | 'plan') => {
-    completeWizard();
+    completeWizard(startMode);
     setCanvasViewMode(destination);
   };
 
@@ -501,7 +529,10 @@ export function CXDWizard() {
                 Consider:
               </p>
               <ul className="space-y-1 w-full">
-                {step.subQuestions.map((q, i) => (
+                {(stepTheme && sectionSteps.length === 1
+                  ? stepTheme.subQuestions ?? step.subQuestions
+                  : step.subQuestions
+                ).map((q, i) => (
                   <li
                     key={i}
                     className="text-sm text-muted-foreground flex items-start gap-2"
@@ -900,17 +931,17 @@ export function CXDWizard() {
                   </div>
                   <div className="flex-1">
                     <CardTitle className="text-xl">
-                      {currentStepData.title}
+                      {themedTitle}
                     </CardTitle>
-                    <CardDescription>{currentStepData.question}</CardDescription>
+                    <CardDescription>{themedQuestion}</CardDescription>
                   </div>
                 </div>
                 {/* Step Intent - explains why this step matters */}
-                {currentStepData.intent && (
+                {themedIntent && (
                   <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/10">
                     <p className="text-sm text-muted-foreground italic">
                       <span className="text-primary font-medium">Intent:</span>{" "}
-                      {currentStepData.intent}
+                      {themedIntent}
                     </p>
                   </div>
                 )}
@@ -991,6 +1022,50 @@ export function CXDWizard() {
         </div>
       </div>
 
+      {/* Framing Type Picker — shown once, before the first step */}
+      {needsTypePick && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div
+            className="max-w-3xl w-full mx-4 rounded-2xl border border-border/50 p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-300"
+            style={{ backgroundColor: cardBgColor }}
+          >
+            <h2 className="text-2xl font-bold text-center mb-2">
+              What are you framing?
+            </h2>
+            <p className="text-center text-muted-foreground mb-8 max-w-lg mx-auto">
+              The hypercube methodology adapts its language to your practice —
+              same backbone, different lens. Pick the frame that fits.
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-3">
+              {FRAMING_TYPES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setFramingType(t.id)}
+                  className="group p-4 rounded-xl border border-border/50 bg-secondary/40 hover:bg-secondary/70 hover:border-violet-500/40 text-left transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl leading-none mt-0.5">{t.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-foreground group-hover:text-violet-300 transition-colors">
+                        {t.name}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-0.5">{t.tagline}</p>
+                      <p className="text-[11px] text-muted-foreground/60 mt-1.5">{t.audience}</p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-violet-400 group-hover:translate-x-0.5 transition-all mt-1" />
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <p className="text-center text-[11px] text-muted-foreground/50 mt-6">
+              Custom framings — building your own hypercube from a dimension library — are coming later.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Completion Screen Overlay */}
       {showCompletion && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -1012,6 +1087,58 @@ export function CXDWizard() {
             <p className="text-center text-muted-foreground mb-8 max-w-md mx-auto">
               You've defined the foundation of your experience. Now it's time to bring your vision to life.
             </p>
+
+            {/* Start Mode — how the canvas begins */}
+            <div className="space-y-3 mb-6">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                How should your canvas start?
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    {
+                      id: 'populate' as FramingStartMode,
+                      icon: LayoutGrid,
+                      label: 'Framing blocks',
+                      desc: 'Your framing as a connected board — live cards, personas, and prompts',
+                      badge: 'Recommended',
+                    },
+                    {
+                      id: 'blank' as FramingStartMode,
+                      icon: Square,
+                      label: 'Blank',
+                      desc: 'Start empty; drag blocks in anytime',
+                    },
+                  ]
+                ).map((opt) => {
+                  const OptIcon = opt.icon;
+                  const selected = startMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => setStartMode(opt.id)}
+                      className={cn(
+                        "relative p-3 rounded-xl border text-left transition-all duration-200",
+                        selected
+                          ? "border-violet-500/60 bg-violet-500/10 shadow-[0_0_16px_rgba(139,92,246,0.15)]"
+                          : "border-border/50 bg-secondary/40 hover:bg-secondary/70 hover:border-border",
+                      )}
+                    >
+                      {opt.badge && (
+                        <span className="absolute -top-2 right-2 px-1.5 py-0.5 text-[9px] font-medium bg-violet-500/80 text-white rounded-full">
+                          {opt.badge}
+                        </span>
+                      )}
+                      <OptIcon className={cn("w-4 h-4 mb-1.5", selected ? "text-violet-400" : "text-muted-foreground")} />
+                      <div className={cn("text-xs font-semibold", selected ? "text-foreground" : "text-foreground/80")}>
+                        {opt.label}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{opt.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* What's Next Section */}
             <div className="space-y-4 mb-8">

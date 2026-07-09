@@ -20,11 +20,14 @@ export function yTextToString(ytext: Y.Text): string {
  * No-ops if the value is already identical (avoids unnecessary CRDT operations).
  */
 export function setYText(ytext: Y.Text, value: string): void {
+  // Coerce null/undefined/non-string to '' — legacy docs may carry undefined
+  // for fields added after the record was first serialized.
+  const next = typeof value === 'string' ? value : '';
   const current = ytext.toString();
-  if (current === value) return;
+  if (current === next) return;
   ytext.delete(0, ytext.length);
-  if (value.length > 0) {
-    ytext.insert(0, value);
+  if (next.length > 0) {
+    ytext.insert(0, next);
   }
 }
 
@@ -49,8 +52,11 @@ export function observeYText(
  */
 export function createYText(value: string): Y.Text {
   const ytext = new Y.Text();
-  if (value.length > 0) {
-    ytext.insert(0, value);
+  // Coerce null/undefined/non-string to '' — legacy records (e.g. versions/OKRs
+  // stored before a text field existed) can deserialize with undefined here.
+  const text = typeof value === 'string' ? value : '';
+  if (text.length > 0) {
+    ytext.insert(0, text);
   }
   return ytext;
 }

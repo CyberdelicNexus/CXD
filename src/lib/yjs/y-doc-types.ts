@@ -36,6 +36,8 @@ export const META_SCALAR_FIELDS = [
   'canvasBackground',
   'wizardCompleted',
   'currentWizardStep',
+  'framingCanvasPopulated',
+  'framingType',
   'schemaVersion',
   'ownerId',
   'shareToken',

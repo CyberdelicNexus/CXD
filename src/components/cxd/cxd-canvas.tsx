@@ -270,6 +270,8 @@ export function CXDCanvas() {
     setCanvasPosition,
     canvasZoom,
     setCanvasZoom,
+    pendingCanvasFitBounds,
+    setPendingCanvasFitBounds,
     setFocusedSection,
     getCurrentProject,
     updateCanvasLayout,
@@ -3440,6 +3442,58 @@ export function CXDCanvas() {
     setCanvasZoom(zoom);
     setCanvasPosition({ x: posX, y: posY });
   };
+
+  // Auto-fit the viewport onto content a generator (e.g. the framing wizard)
+  // just inserted, so the user isn't left looking at an empty/unrelated part
+  // of the canvas. Same bounding-box-to-viewport math as handleFitAll, but
+  // scoped to the provided bounds instead of every element on the canvas —
+  // this fires regardless of whether the canvas already had other content
+  // (only the NEW cluster is framed), and regardless of which view the
+  // wizard navigated to first, since it just waits for this component to be
+  // mounted with a pending request.
+  useEffect(() => {
+    if (!pendingCanvasFitBounds) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const { minX: bMinX, minY: bMinY, maxX: bMaxX, maxY: bMaxY } = pendingCanvasFitBounds;
+    const padding = 100;
+    const contentW = bMaxX - bMinX + padding * 2;
+    const contentH = bMaxY - bMinY + padding * 2;
+    if (contentW <= 0 || contentH <= 0) {
+      setPendingCanvasFitBounds(null);
+      return;
+    }
+
+    const cx = (bMinX + bMaxX) / 2;
+    const cy = (bMinY + bMaxY) / 2;
+
+    const UI_TOP = 80, UI_BOTTOM = 50, UI_LEFT = 70, UI_RIGHT = 70;
+    const vw = rect.width - UI_LEFT - UI_RIGHT;
+    const vh = rect.height - UI_TOP - UI_BOTTOM;
+    if (vw <= 0 || vh <= 0) return;
+
+    const zoom = Math.max(MIN_ZOOM, Math.min(vw / contentW, vh / contentH, MAX_ZOOM));
+    if (!isFinite(zoom)) {
+      setPendingCanvasFitBounds(null);
+      return;
+    }
+
+    const screenCenterX = UI_LEFT + vw / 2;
+    const screenCenterY = UI_TOP + vh / 2;
+    const posX = screenCenterX - cx * zoom;
+    const posY = screenCenterY - cy * zoom;
+    if (!isFinite(posX) || !isFinite(posY)) {
+      setPendingCanvasFitBounds(null);
+      return;
+    }
+
+    setCanvasZoom(zoom);
+    setCanvasPosition({ x: posX, y: posY });
+    setPendingCanvasFitBounds(null);
+  }, [pendingCanvasFitBounds, setCanvasZoom, setCanvasPosition, setPendingCanvasFitBounds]);
 
   // Section drag handlers
   const handleSectionMouseDown = useCallback(
