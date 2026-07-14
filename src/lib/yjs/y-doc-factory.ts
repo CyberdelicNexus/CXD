@@ -274,6 +274,71 @@ export function seedProjectExtrasIntoYDoc(doc: Y.Doc, project: CXDProject): void
   }, 'initialization');
 }
 
+/**
+ * Reconcile canvas data from project_data into an already-hydrated Y.Doc.
+ *
+ * Root cause this closes (July 2026 data-loss incident): when a row has BOTH
+ * yjs_state and project_data, load trusted yjs_state unconditionally. Any
+ * element that existed only in project_data (written by a legacy/LWW-mode
+ * saveProject, a localStorage-backup restore, or a session with the CRDT flag
+ * off) was silently dropped from the doc — then the first post-ready save
+ * derived project_data from that stale doc and persisted the loss. The wipe
+ * guard only catches the zero-element case, not partial staleness.
+ *
+ * This union-merges BY ID: elements/edges the doc already knows stay untouched
+ * (the CRDT remains authoritative for everything it contains); only ids the
+ * doc has never seen are seeded. Trade-off, documented deliberately: an
+ * element deleted in the doc universe while project_data still carried it is
+ * resurrected. With the unified writer both columns update atomically within
+ * one save, so that window is seconds wide and only reachable via legacy
+ * paths — resurrecting a rare deleted element is the right failure direction
+ * for a tool whose core promise is never losing user work.
+ *
+ * Also reconciles meta name/description from project_data: dashboard renames
+ * write project_data only, so for these two fields project_data is always
+ * at-least-as-fresh as doc meta (canvas renames write both).
+ *
+ * Returns seed counts so the caller can emit telemetry — divergence should be
+ * visible in Sentry, not silent.
+ */
+export function reconcileCanvasIntoYDoc(
+  doc: Y.Doc,
+  project: CXDProject
+): { seededElements: number; seededEdges: number } {
+  const elements = project.canvasLayout?.elements ?? [];
+  const edges = project.canvasLayout?.edges ?? [];
+  let seededElements = 0;
+  let seededEdges = 0;
+
+  doc.transact(() => {
+    const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
+    for (const element of elements) {
+      if (element?.id && !yElements.has(element.id)) {
+        yElements.set(element.id, canvasElementToYMap(element));
+        seededElements++;
+      }
+    }
+
+    const yEdges = doc.getMap(YDOC_KEYS.EDGES);
+    for (const edge of edges) {
+      if (edge?.id && !yEdges.has(edge.id)) {
+        yEdges.set(edge.id, canvasEdgeToYMap(edge));
+        seededEdges++;
+      }
+    }
+
+    const yMeta = doc.getMap(YDOC_KEYS.META);
+    for (const field of ['name', 'description'] as const) {
+      const value = project[field];
+      if (typeof value === 'string' && value.length > 0 && yMeta.get(field) !== value) {
+        yMeta.set(field, value);
+      }
+    }
+  }, 'initialization');
+
+  return { seededElements, seededEdges };
+}
+
 // ─── Conversion: Y.Doc → CXDProject ─────────────────────────────────────────
 
 /**

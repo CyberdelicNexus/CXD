@@ -13,7 +13,8 @@ import { createSnapshot } from '@/lib/yjs/snapshot-service';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { useCXDStore } from '@/store/cxd-store';
-import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2, seedProjectExtrasIntoYDoc } from '@/lib/yjs/y-doc-factory';
+import * as Sentry from '@sentry/nextjs';
+import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2, seedProjectExtrasIntoYDoc, reconcileCanvasIntoYDoc } from '@/lib/yjs/y-doc-factory';
 import { YjsZustandBridge, BridgeCallbacks } from '@/lib/yjs/y-zustand-bridge';
 import { LocalPersistence } from '@/lib/yjs/indexeddb-persistence';
 import { SupabasePersistence } from '@/lib/yjs/supabase-persistence';
@@ -207,6 +208,26 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
         const currentProject = useCXDStore.getState().getCurrentProject();
         if (currentProject) {
           seedProjectExtrasIntoYDoc(newDoc, currentProject);
+
+          // Reconcile elements/edges too: a stale yjs_state must never win over
+          // elements that exist in project_data (July 2026 data-loss root cause —
+          // trusted-doc load dropped project_data-only elements, then the first
+          // post-ready save persisted the loss to both columns).
+          const { seededElements, seededEdges } = reconcileCanvasIntoYDoc(newDoc, currentProject);
+          if (seededElements > 0 || seededEdges > 0) {
+            console.warn(
+              `[YjsProject] Divergence repaired: seeded ${seededElements} element(s) and ${seededEdges} edge(s) present in project_data but missing from yjs_state`
+            );
+            // Preserve the pre-repair yjs_state before the debounced save
+            // overwrites it, and make the divergence visible in Sentry —
+            // this failure mode is silent by nature (no exception is thrown).
+            createAutoSnapshot('Pre-reconcile backup', 0); // bypass min-interval — must not be skipped
+            Sentry.captureMessage('cxd-yjs-divergence-repaired', {
+              level: 'warning',
+              tags: { projectId: currentProjectId },
+              extra: { seededElements, seededEdges },
+            });
+          }
         }
       }
 

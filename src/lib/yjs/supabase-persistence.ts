@@ -18,6 +18,7 @@
  */
 
 import * as Y from 'yjs';
+import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@/supabase/client';
 import { createSnapshot } from './snapshot-service';
 import { yDocToProject } from './y-doc-factory';
@@ -70,6 +71,9 @@ export class SupabasePersistence {
    * null means no state has been loaded yet — first save just writes local state.
    */
   private lastLoadedState: Uint8Array | null = null;
+
+  /** Element count at the last successful save — feeds large-drop telemetry. */
+  private lastSavedElementCount: number | null = null;
 
   constructor(doc: Y.Doc, projectId: string, opts?: SupabasePersistenceOpts) {
     this.doc = doc;
@@ -198,8 +202,30 @@ export class SupabasePersistence {
             baseElementCount,
             '(likely mid-load). Will retry on next change.'
           );
+          Sentry.captureMessage('cxd-save-wipe-guard-tripped', {
+            level: 'warning',
+            tags: { projectId: this.projectId },
+            extra: { baseElementCount },
+          });
           return false;
         }
+
+        // Drop telemetry: a legitimate mass-delete exists (select-all + delete),
+        // so never block here — but a large drop between two consecutive saves
+        // is the fingerprint of the silent stale-state failure mode, so make it
+        // loud. The July 2026 incident produced zero Sentry events precisely
+        // because nothing ever threw.
+        if (
+          this.lastSavedElementCount !== null &&
+          docElementCount < this.lastSavedElementCount - Math.max(10, this.lastSavedElementCount * 0.5)
+        ) {
+          Sentry.captureMessage('cxd-large-element-drop', {
+            level: 'warning',
+            tags: { projectId: this.projectId },
+            extra: { previous: this.lastSavedElementCount, current: docElementCount },
+          });
+        }
+        this.lastSavedElementCount = docElementCount;
 
         projectData = mergeProjectWithDoc(base, fromDoc, savedAt);
       }

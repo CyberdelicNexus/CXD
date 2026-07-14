@@ -76,6 +76,17 @@ Zustand, is what persists and syncs. Key conventions:
   to `''`. Legacy records (versions/OKRs serialized before a text field existed) can
   deserialize with `undefined`; the element serializer guards with
   `typeof value === 'string'`, so new element text fields should follow that pattern.
+- **Load-time reconciliation is mandatory** (`reconcileCanvasIntoYDoc`, called in
+  `yjs-project-context.tsx` whenever a persisted `yjs_state` is loaded). A stale
+  `yjs_state` must never win over elements that exist in `project_data`: in July 2026
+  this exact hole silently emptied a real user's boards — load trusted the doc
+  unconditionally, `forceInitialSync` replaced Zustand with the stale projection, and
+  the first post-ready save persisted the loss to BOTH columns with no exception ever
+  thrown. The reconciler union-merges by id (doc wins for known ids; project_data-only
+  ids are seeded) and reports seeded counts to Sentry (`cxd-yjs-divergence-repaired`).
+  If you add a new doc collection, add it to the reconciler too. Never add a writer
+  that updates `project_data` without `yjs_state` for canvas-bearing fields — that is
+  how the two universes diverge in the first place.
 
 ## React stability traps (have caused infinite-loop crashes)
 
