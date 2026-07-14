@@ -576,7 +576,7 @@ export function CXDWizard() {
       return (
         <div className="space-y-8 w-full">
           {SENSORY_DOMAINS.map((domain) => {
-            const currentValue = getClosestLevel(project.sensoryDomains[domain.code]);
+            const currentValue = getClosestLevel(project.sensoryDomains?.[domain.code] ?? 3);
             const meta = SENSORY_METADATA[domain.code];
             return (
               <div key={domain.code} className="space-y-4">
@@ -718,7 +718,7 @@ export function CXDWizard() {
               </p>
               <ExpandableTextarea
                 placeholder={stateExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} states...`}
-                value={project.stateMapping[quadrant.code]}
+                value={project.stateMapping?.[quadrant.code] ?? ''}
                 onChange={(v) => updateStateMapping(quadrant.code, v)}
                 label={`State Mapping — ${quadrant.label}`}
                 className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
@@ -748,7 +748,7 @@ export function CXDWizard() {
               </p>
               <ExpandableTextarea
                 placeholder={traitExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} traits...`}
-                value={project.traitMapping[quadrant.code]}
+                value={project.traitMapping?.[quadrant.code] ?? ''}
                 onChange={(v) => updateTraitMapping(quadrant.code, v)}
                 label={`Trait Mapping — ${quadrant.label}`}
                 className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
