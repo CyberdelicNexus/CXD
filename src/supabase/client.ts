@@ -11,10 +11,19 @@ const isProbablyTempoPreview = () => {
 
 // Singleton browser client — prevents auth token lock contention
 // caused by multiple client instances competing for the same Web Lock.
-let browserClient: ReturnType<typeof createBrowserClient> | null = null;
+//
+// Stored on globalThis, not module scope: in dev, Fast Refresh re-evaluates
+// this module, and a module-level singleton would mint a NEW GoTrueClient per
+// HMR cycle while the previous one still holds the navigator.locks auth lock.
+// The new instance then steals it and the old one's in-flight call rejects
+// with "AbortError: Lock broken by another request with the 'steal' option".
+// globalThis survives HMR, so every reload reuses the same client.
+const globalStore = globalThis as unknown as {
+  __cxdBrowserClient?: ReturnType<typeof createBrowserClient>;
+};
 
 export const createClient = () => {
-  if (browserClient) return browserClient;
+  if (globalStore.__cxdBrowserClient) return globalStore.__cxdBrowserClient;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -47,6 +56,6 @@ export const createClient = () => {
     supabase.auth.getSession = wrap(supabase.auth.getSession.bind(supabase.auth));
   }
 
-  browserClient = supabase;
+  globalStore.__cxdBrowserClient = supabase;
   return supabase;
 };
