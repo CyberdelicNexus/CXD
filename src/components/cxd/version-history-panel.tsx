@@ -31,6 +31,9 @@ function timeAgo(dateStr: string): string {
 
 function getLabelColor(label: string): string {
   if (label.startsWith('Manual')) return 'text-purple-400 bg-purple-500/10 border-purple-500/20';
+  if (label.startsWith('Server guard')) return 'text-red-400 bg-red-500/10 border-red-500/20';
+  if (label.startsWith('Pre-restore')) return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+  if (label.startsWith('Pre-reconcile')) return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
   if (label.startsWith('Pre-load')) return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
   if (label.startsWith('Auto-save')) return 'text-blue-400 bg-blue-500/10 border-blue-500/20';
   if (label.startsWith('Tab close')) return 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20';
@@ -41,6 +44,9 @@ function getLabelColor(label: string): string {
 function getLabelTag(label: string): string {
   if (label.startsWith('Manual:')) return 'Manual';
   if (label.startsWith('Manual checkpoint')) return 'Manual';
+  if (label.startsWith('Server guard')) return 'Safety archive';
+  if (label.startsWith('Pre-restore')) return 'Pre-restore';
+  if (label.startsWith('Pre-reconcile')) return 'Pre-repair';
   if (label.startsWith('Pre-load')) return 'Pre-load';
   if (label.startsWith('Auto-save')) return 'Auto';
   if (label.startsWith('Tab close')) return 'Tab close';
@@ -104,6 +110,17 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
     let success = false;
     let caughtErr: unknown = null;
     try {
+      // Flush pending changes BEFORE restoring: the pre-restore backup inside
+      // restoreSnapshot reads the DB row, and up to ~2s of edits may still be
+      // sitting in the save debounce — push them down first so the automatic
+      // backup captures the true current state.
+      try {
+        const { flushYjsPersistence } = await import('@/contexts/yjs-project-context');
+        await flushYjsPersistence();
+      } catch (e) {
+        console.warn('[VersionHistory] Pre-restore flush failed (continuing):', e);
+      }
+
       success = await restoreSnapshot(snapshotId, liveDoc);
       console.log('[VersionHistory] restoreSnapshot returned', success);
       if (success) {
@@ -273,6 +290,9 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
                           title={new Date(snap.created_at).toLocaleString()}
                         >
                           {timeAgo(snap.created_at)} · {new Date(snap.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {typeof snap.element_count === 'number' && (
+                            <span className="text-white/50"> · {snap.element_count} element{snap.element_count === 1 ? '' : 's'}{typeof snap.edge_count === 'number' && snap.edge_count > 0 ? `, ${snap.edge_count} edge${snap.edge_count === 1 ? '' : 's'}` : ''}</span>
+                          )}
                         </p>
                       </div>
 
@@ -326,7 +346,8 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
 
                     {confirmRestoreId === snap.id && (
                       <p className="text-[10px] text-amber-400/70 mt-2 leading-relaxed">
-                        This will overwrite the current canvas state for all collaborators. This cannot be undone.
+                        This replaces the current canvas for all collaborators. Your current state is backed up
+                        automatically first, so you can restore back if this was the wrong point.
                       </p>
                     )}
                   </div>
@@ -338,7 +359,7 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
           {/* Footer */}
           <div className="px-5 py-3 border-t border-white/10 flex-shrink-0">
             <p className="text-[10px] text-white/25 text-center">
-              Snapshots are stored in Supabase · Up to 20 per project
+              Full history for 24h · Daily for 14 days · Manual checkpoints &amp; safety archives kept 90 days
             </p>
           </div>
         </div>
