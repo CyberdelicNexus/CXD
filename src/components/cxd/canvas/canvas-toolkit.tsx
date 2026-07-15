@@ -213,11 +213,6 @@ export function CanvasToolkit({
   useEffect(() => {
     if (!activeTool || activeTool === "line" || !canvasRef.current) return;
 
-    const isCanvasBackground = (target: HTMLElement) =>
-      target.classList.contains("canvas-background") ||
-      target.classList.contains("dot-grid") ||
-      target === canvasRef.current;
-
     const toCanvasCoords = (clientX: number, clientY: number) => {
       const rect = canvasRef.current!.getBoundingClientRect();
       return {
@@ -240,14 +235,30 @@ export function CanvasToolkit({
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
       const target = e.target as HTMLElement;
-      if (!isCanvasBackground(target)) return;
+      // Let clicks on floating UI chrome (toolbars, panels, menus) behave normally —
+      // only intercept clicks on the canvas surface itself: empty background/grid, or
+      // a rendered canvas element (identified by data-node-id, e.g. a container). This
+      // must include existing elements so placement mode can never fall through to that
+      // element's own selection handler.
+      const isCanvasSurface =
+        target.classList.contains("canvas-background") ||
+        target.classList.contains("dot-grid") ||
+        target === canvasRef.current ||
+        !!target.closest("[data-node-id]");
+      if (!isCanvasSurface) return;
+
+      // Placement mode must always place, even when the click lands on an existing
+      // element (e.g. a container) — never let it fall through to that element's own
+      // mousedown handler (selection, drag-start). Registered on capture below and
+      // stopped here so it wins regardless of what's under the cursor.
+      e.preventDefault();
+      e.stopPropagation();
 
       const { x, y } = toCanvasCoords(e.clientX, e.clientY);
       setShapeCreationDrag({
         startX: x, startY: y, currentX: x, currentY: y,
         tool: activeToolRef.current!,
       });
-      e.preventDefault();
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -286,11 +297,13 @@ export function CanvasToolkit({
     };
 
     const canvas = canvasRef.current;
-    canvas.addEventListener("mousedown", handleMouseDown);
+    // Capture phase: intercept before the click reaches (and gets stopped by) an
+    // underlying element's own bubble-phase mousedown handler.
+    canvas.addEventListener("mousedown", handleMouseDown, true);
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => {
-      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("mousedown", handleMouseDown, true);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };

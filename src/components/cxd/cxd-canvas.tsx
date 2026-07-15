@@ -59,6 +59,37 @@ const DEFAULT_SECTION_POSITIONS: Record<string, { x: number; y: number }> = {
 // Filter out experienceFlow from sections displayed as cards (it's in the timeline now)
 const CANVAS_SECTIONS = CXD_SECTIONS.filter((s) => s.id !== "experienceFlow");
 
+// Walk containerId (nesting) and childBoardId (board-opens-into) chains to collect every
+// descendant of rootId, plus rootId itself. Used to exclude a dragged container (and anything
+// inside it, including elements living on a board it opens into) from drop-target hit tests —
+// without this, a container can be nested into its own descendant, creating a containerId cycle.
+function getDescendantElementIds(rootId: string, elements: CanvasElement[]): Set<string> {
+  const result = new Set<string>([rootId]);
+  const queue: string[] = [rootId];
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    const currentEl = elements.find((el) => el.id === currentId);
+    // Direct children nested via containerId
+    for (const el of elements) {
+      if (el.containerId === currentId && !result.has(el.id)) {
+        result.add(el.id);
+        queue.push(el.id);
+      }
+    }
+    // If this is a board node, also walk everything living on the board it opens into
+    const childBoardId = (currentEl as any)?.childBoardId as string | undefined;
+    if (childBoardId) {
+      for (const el of elements) {
+        if (el.boardId === childBoardId && !result.has(el.id)) {
+          result.add(el.id);
+          queue.push(el.id);
+        }
+      }
+    }
+  }
+  return result;
+}
+
 // Canvas Context Menu Component
 function CanvasContextMenu({
   position,
@@ -1076,11 +1107,27 @@ export function CXDCanvas() {
           const mouseCanvasX = (e.clientX - rect.left - canvasPosition.x) / canvasZoom;
           const mouseCanvasY = (e.clientY - rect.top - canvasPosition.y) / canvasZoom;
 
+          // Exclude the dragged element(s) AND all of their descendants (nested children via
+          // containerId, plus anything living on a board they open into) so a container can
+          // never be dropped inside itself or one of its own descendants.
+          const excludedTargetIds = new Set<string>();
+          if (draggingElement) {
+            const dragRootIds =
+              selectedElementIds.size > 1 && selectedElementIds.has(draggingElement)
+                ? Array.from(selectedElementIds)
+                : [draggingElement];
+            for (const rootId of dragRootIds) {
+              Array.from(getDescendantElementIds(rootId, canvasElements)).forEach((id) =>
+                excludedTargetIds.add(id),
+              );
+            }
+          }
+
           const boardTarget = canvasElements.find(
             (el) =>
               el.type === "board" &&
               !selectedElementIds.has(el.id) &&
-              el.id !== draggingElement &&
+              !excludedTargetIds.has(el.id) &&
               mouseCanvasX >= el.x && mouseCanvasX <= el.x + el.width &&
               mouseCanvasY >= el.y && mouseCanvasY <= el.y + el.height,
           );
@@ -1091,7 +1138,7 @@ export function CXDCanvas() {
               el.type === "container" &&
               !(el as ContainerElement).collapsed &&
               !selectedElementIds.has(el.id) &&
-              el.id !== draggingElement &&
+              !excludedTargetIds.has(el.id) &&
               mouseCanvasX >= el.x && mouseCanvasX <= el.x + el.width &&
               mouseCanvasY >= el.y && mouseCanvasY <= el.y + el.height,
           );
@@ -4101,7 +4148,7 @@ export function CXDCanvas() {
   return (
     <div
       ref={containerRef}
-      className={`fixed inset-0 top-16 overflow-hidden select-none transition-[right] duration-300 ${isPanning
+      className={`fixed inset-0 top-16 overflow-hidden select-none transition-[right] duration-300 w-full h-full ${isPanning
         ? "cursor-grabbing"
         : isSpacePressed
           ? "cursor-grab"
@@ -4109,7 +4156,7 @@ export function CXDCanvas() {
             ? "cursor-move"
             : commentMode && !activeTool
               ? "cursor-crosshair"
-              : "cursor-default w-full h-full"
+              : "cursor-default"
         }`}
       style={{ right: canvasRightMargin, background: canvasBackground }}
       onMouseDown={handleCanvasMouseDown}
