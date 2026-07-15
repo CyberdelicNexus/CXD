@@ -15,6 +15,14 @@ import { YDOC_KEYS } from './y-doc-types';
 
 const CAPTURE_TIMEOUT_MS = 500;
 const LOCAL_ORIGIN = 'local';
+// Final drag positions are committed by yjsBatchUpdatePositions under the 'drag-commit'
+// origin (one transaction per drag). These must be undoable exactly like 'local' edits —
+// otherwise a move (including a container + its children moved together, or a drop that
+// re-parents a child and repositions it) falls outside the undo scope and Ctrl+Z skips
+// past it to an earlier edit. That gap is what surfaced as "undo doesn't apply to
+// containers". The bridge still skips its own 'drag-commit' echo; the UndoManager's later
+// undo runs under its own origin, so the revert flushes back to Zustand normally.
+const DRAG_COMMIT_ORIGIN = 'drag-commit';
 
 /**
  * Creates an UndoManager that tracks canvas elements and edges.
@@ -26,7 +34,7 @@ export function createCanvasUndoManager(doc: Y.Doc): Y.UndoManager {
 
   return new Y.UndoManager([yElements, yEdges], {
     captureTimeout: CAPTURE_TIMEOUT_MS,
-    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    trackedOrigins: new Set([LOCAL_ORIGIN, DRAG_COMMIT_ORIGIN]),
   });
 }
 

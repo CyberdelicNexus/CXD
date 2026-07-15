@@ -706,7 +706,16 @@ export function CXDCanvas() {
       });
     }
 
-    // ── Phase 2: Container auto-resize — expand to fit children, contract to user-set minimum ──
+    // ── Phase 2: Container auto-resize — grow to fit children; never move the origin ──
+    // Previous version was unstable: it measured the children's full left→right / top→bottom
+    // SPAN and shifted the container origin to wrap them. A single child far from the others
+    // (or briefly mis-positioned during a drop) made the container jump to an unreasonable size,
+    // and the origin shift compounded that with a visible reposition. This version measures only
+    // from the container's FIXED origin to the children's right/bottom edge, so the size stays
+    // bounded and the origin never moves. Expand-only past the user floor (minWidth/minHeight,
+    // written on manual resize; current size otherwise) so nudging a child inside the container
+    // doesn't cause it to shrink-jitter; a manual shrink lowers the floor and lets it contract.
+    // Skipped entirely while dragging (guard at top of effect), so it only settles between drags.
     const containers = canvasElements.filter((el) => el.type === 'container' && !(el as ContainerElement).collapsed);
 
     for (const container of containers) {
@@ -714,7 +723,6 @@ export function CXDCanvas() {
       if (children.length === 0) continue;
 
       const cont = container as ContainerElement;
-      // User-set minimum (from manual resize or creation). Fallback to current size.
       const userMinW = cont.minWidth ?? container.width;
       const userMinH = cont.minHeight ?? container.height;
 
@@ -723,34 +731,23 @@ export function CXDCanvas() {
 
       const maxChildRight = Math.max(...children.map((c) => c.x + c.width));
       const maxChildBottom = Math.max(...children.map((c) => getChildY(c) + c.height));
-      const minChildLeft = Math.min(...children.map((c) => c.x));
-      const minChildTop = Math.min(...children.map((c) => getChildY(c)));
 
-      // Tight-fit bounds around children + padding
-      const fitX = minChildLeft - GAP;
-      const fitY = minChildTop - GAP;
-      const fitW = maxChildRight + GAP - fitX;
-      const fitH = maxChildBottom + GAP - fitY;
+      // Fit from the fixed origin to the far edge of the children + padding.
+      const fitW = maxChildRight + GAP - container.x;
+      const fitH = maxChildBottom + GAP - container.y;
 
-      // Final bounds: expand beyond user-set minimum if children need it,
-      // but never shrink below the user-set minimum
       const newWidth = Math.max(userMinW, fitW);
       const newHeight = Math.max(userMinH, fitH);
-      // Only shift origin if children actually extend past the container edge
-      const newX = fitX < container.x ? fitX : container.x;
-      const newY = fitY < container.y ? fitY : container.y;
 
-      const fingerprint = `${Math.round(newX)},${Math.round(newY)},${Math.round(newWidth)},${Math.round(newHeight)}`;
+      const fingerprint = `${Math.round(newWidth)},${Math.round(newHeight)}`;
       if (containerAutoResizeFingerprintRef.current.get(container.id) === fingerprint) continue;
 
       if (
-        Math.abs(container.x - newX) > 1 ||
-        Math.abs(container.y - newY) > 1 ||
         Math.abs(container.width - newWidth) > 1 ||
         Math.abs(container.height - newHeight) > 1
       ) {
         containerAutoResizeFingerprintRef.current.set(container.id, fingerprint);
-        syncUpdateElement(container.id, { x: newX, y: newY, width: newWidth, height: newHeight });
+        syncUpdateElement(container.id, { width: newWidth, height: newHeight });
       } else {
         containerAutoResizeFingerprintRef.current.delete(container.id);
       }

@@ -853,9 +853,16 @@ export function CanvasElementRenderer({
               ? "100px"
               : "300px"
             : undefined,
-        zIndex: isSelected
-          ? 2000000000  // Selected element always on top so toolbar/menus aren't hidden by other elements
-          : Number.isFinite(element.zIndex) ? element.zIndex : 0,
+        zIndex:
+          isSelected && element.type !== "container"
+            ? 2000000000  // Selected element always on top so toolbar/menus aren't hidden by other elements
+            // Containers are excluded from the pop-to-top: elements render as flat DOM siblings,
+            // so paint order (zIndex) — not nesting — decides which element a click hits. Forcing a
+            // selected container above its children made clicks in the body select the container
+            // instead of the child. Keeping it at its own zIndex leaves children (higher z) clickable;
+            // the container is still selectable via its header/border and empty areas where no child
+            // paints on top.
+            : Number.isFinite(element.zIndex) ? element.zIndex : 0,
         transform: element.rotation
           ? `rotate(${element.rotation}deg)`
           : undefined,
