@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -17,22 +17,15 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
-  Copy,
-  Check,
-  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
 import { queryTasks } from "@/utils/task-engine";
 import { ERDGenerator } from "./canvas/erd-generator";
+import { CalendarSyncDialog } from "@/components/calendar-sync-dialog";
 import { ROLE_BUNDLES, buildRoleBriefMarkdown } from "@/lib/exports/role-briefs";
 import { buildFacilitationMarkdown } from "@/lib/exports/facilitation-sheet";
 import { buildPitchHTML } from "@/lib/exports/pitch-one-pager";
-import {
-  fetchCalendarFeed,
-  rotateCalendarFeed,
-  type CalendarFeedInfo,
-} from "@/lib/exports/calendar-feed";
 import type { CXDProject } from "@/types/cxd-schema";
 import { HYPERCUBE_FACE_TAGS, type HypercubeFaceTag } from "@/types/canvas-elements";
 import type { CanvasElement } from "@/types/canvas-elements";
@@ -398,12 +391,6 @@ interface ExportHubProps {
   onOpenShare?: () => void;
 }
 
-type CalendarFeedState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "ready"; info: CalendarFeedInfo }
-  | { status: "error"; message: string };
-
 export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
   const getCurrentProject = useCXDStore((s) => s.getCurrentProject);
   const getExperienceFlowStages = useCXDStore((s) => s.getExperienceFlowStages);
@@ -411,10 +398,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
 
   const [erdOpen, setErdOpen] = useState(false);
   const [briefsOpen, setBriefsOpen] = useState(false);
-  const [calOpen, setCalOpen] = useState(false);
-  const [calFeed, setCalFeed] = useState<CalendarFeedState>({ status: "idle" });
-  const [calCopied, setCalCopied] = useState(false);
-  const calCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [calSyncOpen, setCalSyncOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
@@ -465,57 +449,6 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     if (!proj) return;
     const html = buildPitchHTML(proj);
     downloadTextFile(html, `Pitch-One-Pager-${slug(proj.name)}.html`, "text/html");
-  }, []);
-
-  const loadCalendarFeed = useCallback(async () => {
-    setCalFeed({ status: "loading" });
-    try {
-      const info = await fetchCalendarFeed();
-      setCalFeed({ status: "ready", info });
-    } catch (e) {
-      setCalFeed({ status: "error", message: e instanceof Error ? e.message : "Something went wrong." });
-    }
-  }, []);
-
-  const handleCalToggle = useCallback(() => {
-    setCalOpen((open) => {
-      const next = !open;
-      if (next) {
-        setCalFeed((s) => {
-          if (s.status === "idle" || s.status === "error") {
-            void loadCalendarFeed();
-            return { status: "loading" };
-          }
-          return s;
-        });
-      }
-      return next;
-    });
-  }, [loadCalendarFeed]);
-
-  const handleCalCopy = useCallback(async (feedUrl: string) => {
-    try {
-      await navigator.clipboard.writeText(feedUrl);
-      setCalCopied(true);
-      if (calCopyTimer.current) clearTimeout(calCopyTimer.current);
-      calCopyTimer.current = setTimeout(() => setCalCopied(false), 1800);
-    } catch {
-      // Clipboard unavailable — the URL is still visible and selectable.
-    }
-  }, []);
-
-  const handleCalRegenerate = useCallback(async () => {
-    const confirmed = window.confirm(
-      "Regenerate the calendar feed URL?\n\nThe current URL will stop working immediately — anyone subscribed with it will need the new one.",
-    );
-    if (!confirmed) return;
-    setCalFeed({ status: "loading" });
-    try {
-      const info = await rotateCalendarFeed();
-      setCalFeed({ status: "ready", info });
-    } catch (e) {
-      setCalFeed({ status: "error", message: e instanceof Error ? e.message : "Something went wrong." });
-    }
   }, []);
 
   // Close on Escape while open
@@ -700,64 +633,9 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   description="Subscribe to task due dates and milestones as an ICS feed in your calendar."
                   accent="text-emerald-300"
                   actions={[
-                    {
-                      label: calOpen ? "Hide feed" : "Get feed URL",
-                      icon: calOpen ? ChevronUp : ChevronDown,
-                      onClick: handleCalToggle,
-                    },
+                    { label: "Sync to calendar", icon: CalendarDays, onClick: () => setCalSyncOpen(true) },
                   ]}
-                >
-                  {calOpen && (
-                    <div className="mt-3 space-y-2 border-t border-white/[0.06] pt-3">
-                      {calFeed.status === "loading" && (
-                        <p className="text-xs text-white/40">Fetching your feed URL…</p>
-                      )}
-                      {calFeed.status === "error" && (
-                        <div className="space-y-2">
-                          <p className="text-xs leading-relaxed text-amber-300/80">{calFeed.message}</p>
-                          <button
-                            onClick={() => void loadCalendarFeed()}
-                            className="flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/10"
-                          >
-                            <RefreshCw className="h-3 w-3" />
-                            Retry
-                          </button>
-                        </div>
-                      )}
-                      {calFeed.status === "ready" && (
-                        <>
-                          <div className="flex items-center gap-1.5">
-                            <code className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-[11px] text-white/70">
-                              {calFeed.info.feedUrl}
-                            </code>
-                            <button
-                              onClick={() => void handleCalCopy(calFeed.info.feedUrl)}
-                              title="Copy feed URL"
-                              className="flex-shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
-                            >
-                              {calCopied ? (
-                                <Check className="h-3.5 w-3.5 text-emerald-300" />
-                              ) : (
-                                <Copy className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                            <button
-                              onClick={() => void handleCalRegenerate()}
-                              title="Regenerate — the old URL stops working"
-                              className="flex-shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                          <p className="text-[11px] leading-relaxed text-white/40">
-                            Subscribe in Google, Apple or Outlook calendar via &ldquo;Add calendar
-                            from URL&rdquo;.
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </ArtifactCard>
+                />
               </div>
             </section>
           </div>
@@ -770,6 +648,9 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
         isOpen={erdOpen}
         onClose={() => setErdOpen(false)}
       />
+
+      {/* Calendar sync — shared dialog, also used by Master Plan and Profile */}
+      <CalendarSyncDialog open={calSyncOpen} onClose={() => setCalSyncOpen(false)} />
     </>,
     document.body
   );

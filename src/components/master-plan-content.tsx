@@ -13,9 +13,11 @@ import {
   Lock,
   Sparkles,
   AlertTriangle,
+  CalendarPlus,
 } from "lucide-react";
 import { useSubscription } from "@/hooks/use-subscription";
 import { UpgradeModal } from "@/components/modals/upgrade-modal";
+import { CalendarSyncDialog } from "@/components/calendar-sync-dialog";
 import { cn } from "@/lib/utils";
 import { ProjectFilterBar } from "@/components/master-plan/project-filter-bar";
 import { MasterPlanTableView } from "@/components/master-plan/table-view";
@@ -56,6 +58,7 @@ export function MasterPlanContent() {
   const [hiddenProjectIds, setHiddenProjectIds] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<{ projectId: string; taskId: string } | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [calSyncOpen, setCalSyncOpen] = useState(false);
 
   useEffect(() => {
     if (subLoading || !hasMasterPlan) return;
@@ -189,6 +192,15 @@ export function MasterPlanContent() {
               : `${visibleItems.length} task${visibleItems.length === 1 ? "" : "s"} across ${projects.length - hiddenProjectIds.size} project${projects.length - hiddenProjectIds.size === 1 ? "" : "s"}`}
           </p>
         </div>
+        {!subLoading && hasMasterPlan && !isLoading && !error && items.length > 0 && (
+          <button
+            onClick={() => setCalSyncOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 border border-white/10 transition-all"
+          >
+            <CalendarPlus className="w-4 h-4" />
+            Sync to Calendar
+          </button>
+        )}
       </div>
 
       {!isLoading && !error && items.length > 0 && (
@@ -275,6 +287,8 @@ export function MasterPlanContent() {
           </div>
         )}
       </div>
+
+      <CalendarSyncDialog open={calSyncOpen} onClose={() => setCalSyncOpen(false)} />
     </div>
   );
 }

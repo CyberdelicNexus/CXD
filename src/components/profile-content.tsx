@@ -22,12 +22,14 @@ import {
   Camera,
   Upload,
   Pencil,
+  CalendarPlus,
 } from 'lucide-react';
 import { useSubscription } from '@/hooks/use-subscription';
 import { useAICredits } from '@/hooks/use-ai-credits';
 import { AI_MODELS } from '@/lib/ai-credit-config';
 import { UpgradeModal } from '@/components/upgrade-modal';
 import { CreditTopUpModal } from '@/components/cxd/credit-topup-modal';
+import { CalendarSyncDialog } from '@/components/calendar-sync-dialog';
 import {
   updateNameAction,
   deleteAccountAction,
@@ -64,6 +66,7 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isCancellingSub, setIsCancellingSub] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
+  const [showCalendarSync, setShowCalendarSync] = useState(false);
 
   const {
     subscription,
@@ -527,6 +530,21 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
                 </div>
 
                 <div className="pt-4 border-t border-white/5">
+                  <p className="text-xs text-white/40 mb-2">Calendar Sync</p>
+                  <p className="text-xs text-white/30 mb-2">
+                    See your CXD tasks in Google, Apple, or Outlook calendar.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start bg-white/5 hover:bg-white/10 text-white/80"
+                    onClick={() => setShowCalendarSync(true)}
+                  >
+                    <CalendarPlus className="w-4 h-4 mr-2" />
+                    Sync to Calendar
+                  </Button>
+                </div>
+
+                <div className="pt-4 border-t border-white/5">
                   <p className="text-xs text-white/40 mb-2">Danger Zone</p>
                   {!isDeletingAccount ? (
                     <Button
@@ -578,6 +596,12 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
       <CreditTopUpModal
         isOpen={showTopUp}
         onClose={() => setShowTopUp(false)}
+      />
+
+      {/* Calendar Sync Dialog */}
+      <CalendarSyncDialog
+        open={showCalendarSync}
+        onClose={() => setShowCalendarSync(false)}
       />
     </main>
   );
