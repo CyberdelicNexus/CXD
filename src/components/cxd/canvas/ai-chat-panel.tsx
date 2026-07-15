@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { useAIChat } from "@/hooks/use-ai-chat";
 import { useAICredits } from "@/hooks/use-ai-credits";
 import { AIChatHistory } from "./ai-chat-history";
-import { ChatMarkdown } from "./ai-chat-markdown";
+import { StreamingMarkdown } from "./ai-chat-markdown";
 import type { AIProviderKey } from "@/types/ai-types";
 import type { ModelId } from "@/lib/ai-credit-config";
 import { formatCompletion, clampToUnit } from "@/lib/display-utils";
@@ -304,6 +304,11 @@ export function AIChatPanel({
   const isGeneral = faceKey === "general";
   const isAssistantInline = sizeVariant === "assistant" && !isExpanded;
 
+  // Only the last assistant message is actively streaming; used to drive the reveal.
+  const lastMessage = messages[messages.length - 1];
+  const streamingMessageId =
+    isStreaming && lastMessage?.role === "assistant" ? lastMessage.id : null;
+
   // ─── Panel content (shared between normal + expanded) ─────────────
 
   const panelContent = (
@@ -529,7 +534,10 @@ export function AIChatPanel({
                             }
                           >
                             {msg.role === "assistant" ? (
-                              <ChatMarkdown content={msg.content} />
+                              <StreamingMarkdown
+                                content={msg.content}
+                                streaming={msg.id === streamingMessageId}
+                              />
                             ) : (
                               msg.content
                             )}
@@ -706,14 +714,19 @@ export function AIChatPanel({
         {/* Expanded panel */}
         <div className="fixed inset-x-0 bottom-0 top-[76px] z-[121] flex items-center justify-center pointer-events-none animate-[scaleIn_300ms_cubic-bezier(0.16,1,0.3,1)_forwards] px-4 py-4">
           <div
-            className="pointer-events-auto backdrop-blur-xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col"
+            className={cn(
+              "pointer-events-auto backdrop-blur-xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col",
+              isStreaming && "ai-chat-streaming-glow",
+            )}
             style={{
               "--chat-scrollbar-hue": accentHue,
               borderColor: `hsl(${accentHue} 40% 40% / 0.5)`,
               width: "min(75vw, 800px)",
               height: "min(calc(100vh - 140px), 900px)",
               background: "hsl(var(--card) / 0.98)",
-              boxShadow: `0 40px 80px -20px rgba(0,0,0,0.8), 0 0 0 1px hsl(${accentHue} 60% 60% / 0.3), 0 0 30px 8px hsl(${accentHue} 70% 58% / 0.15)`,
+              boxShadow: isStreaming
+                ? undefined
+                : `0 40px 80px -20px rgba(0,0,0,0.8), 0 0 0 1px hsl(${accentHue} 60% 60% / 0.3), 0 0 30px 8px hsl(${accentHue} 70% 58% / 0.15)`,
             } as React.CSSProperties}
           >
             {panelContent}
@@ -727,7 +740,10 @@ export function AIChatPanel({
 
   return (
     <div
-      className="bg-card/95 backdrop-blur-xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col"
+      className={cn(
+        "bg-card/95 backdrop-blur-xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col",
+        isStreaming && "ai-chat-streaming-glow",
+      )}
       style={{
         "--chat-scrollbar-hue": accentHue,
         borderColor: `hsl(${accentHue} 40% 40% / 0.5)`,
@@ -735,9 +751,11 @@ export function AIChatPanel({
         // the calc guard keeps it fully on-screen on short viewports.
         height: "min(76vh, calc(100vh - 140px))",
         transition: "box-shadow 260ms ease, border-color 260ms ease",
-        boxShadow: isFocused
-          ? `0 24px 50px -24px rgba(0,0,0,0.9), 0 0 0 1px hsl(${accentHue} 60% 60% / 0.35), 0 0 14px 3px hsl(${accentHue} 70% 58% / 0.45)`
-          : undefined,
+        boxShadow: isStreaming
+          ? undefined
+          : isFocused
+            ? `0 24px 50px -24px rgba(0,0,0,0.9), 0 0 0 1px hsl(${accentHue} 60% 60% / 0.35), 0 0 14px 3px hsl(${accentHue} 70% 58% / 0.45)`
+            : undefined,
       } as React.CSSProperties}
     >
       {panelContent}

@@ -960,6 +960,27 @@
     100% { box-shadow: 0 0 0 rgba(167,139,250,0); }
   }
 
+  /* Soft violet glow while the AI chat is thinking / streaming. The constant
+     drop shadow keeps the panel elevated; the ring + halo pulse. */
+  .ai-chat-streaming-glow {
+    animation: ai-chat-streaming-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes ai-chat-streaming-glow {
+    0%, 100% {
+      box-shadow:
+        0 24px 50px -24px rgba(0,0,0,0.85),
+        0 0 0 1px hsl(265 70% 62% / 0.28),
+        0 0 16px 2px hsl(265 70% 62% / 0.30);
+    }
+    50% {
+      box-shadow:
+        0 24px 50px -24px rgba(0,0,0,0.85),
+        0 0 0 1px hsl(265 70% 62% / 0.45),
+        0 0 34px 8px hsl(265 70% 62% / 0.55);
+    }
+  }
+
   /* Custom scrollbar for Versions view - matches UI colors */
   .custom-scrollbar {
     scrollbar-width: thin;

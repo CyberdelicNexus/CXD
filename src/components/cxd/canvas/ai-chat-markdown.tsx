@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -96,5 +97,69 @@ export function ChatMarkdown({ content }: ChatMarkdownProps) {
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
       {content}
     </ReactMarkdown>
+  );
+}
+
+interface StreamingMarkdownProps {
+  content: string;
+  /** True only for the message currently being streamed. */
+  streaming: boolean;
+}
+
+// Reveals streamed text at a steady rAF-driven rate so appended chunks
+// materialize smoothly instead of jumping. The reveal accelerates as the
+// buffer grows so it never lags far behind, and snaps to the full string the
+// moment streaming stops — the final content is always shown exactly.
+export function StreamingMarkdown({ content, streaming }: StreamingMarkdownProps) {
+  const [revealed, setRevealed] = useState(streaming ? 0 : content.length);
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const revealedRef = useRef(revealed);
+  revealedRef.current = revealed;
+
+  useEffect(() => {
+    if (!streaming) {
+      setRevealed(contentRef.current.length);
+      return;
+    }
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const full = contentRef.current.length;
+      const cur = revealedRef.current;
+      if (cur < full) {
+        const behind = full - cur;
+        // ~40 chars/s floor, accelerating with the backlog so it stays close.
+        const perMs = Math.max(0.04, behind / 220);
+        const next = Math.min(full, cur + Math.max(1, Math.ceil(perMs * (now - last))));
+        revealedRef.current = next;
+        setRevealed(next);
+      }
+      last = now;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [streaming]);
+
+  const catchingUp = streaming && revealed < content.length;
+  const text = streaming ? content.slice(0, revealed) : content;
+
+  return (
+    <div
+      style={
+        catchingUp
+          ? {
+              // Soften the growing bottom edge so new text eases in.
+              WebkitMaskImage:
+                "linear-gradient(to bottom, #000 calc(100% - 1em), rgba(0,0,0,0.45) 100%)",
+              maskImage:
+                "linear-gradient(to bottom, #000 calc(100% - 1em), rgba(0,0,0,0.45) 100%)",
+            }
+          : undefined
+      }
+    >
+      <ChatMarkdown content={text} />
+    </div>
   );
 }
