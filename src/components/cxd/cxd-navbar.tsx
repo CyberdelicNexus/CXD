@@ -35,6 +35,7 @@ import {
   Home,
   ChevronsLeft,
   ChevronsRight,
+  Package,
 } from "lucide-react";
 import { Link } from "lucide-react";
 import NextLink from "next/link";
@@ -63,6 +64,7 @@ import { UpgradeModal } from "@/components/modals/upgrade-modal";
 import { SettingsModal } from "@/components/modals/settings-modal";
 import { TemplatePickerModal } from './template-picker-modal';
 import { ShareSettingsModal } from './share/share-settings-modal';
+import { ExportHub } from './export-hub';
 import { VersionHistoryPanel } from './version-history-panel';
 import { SaveStatusIndicator } from './save-status-indicator';
 import { Lock } from "lucide-react";
@@ -378,6 +380,7 @@ export function CXDNavbar() {
   const [showCollaborationPanel, setShowCollaborationPanel] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showExportHub, setShowExportHub] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const { collaborators, isConnected, currentUser, followingCollaboratorId, setFollowingCollaboratorId } = useCollaborationContext();
   const { role: canvasRole } = useCanvasPermissions(project?.id || null);
@@ -869,8 +872,18 @@ export function CXDNavbar() {
                 <div
                   className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
                   onClick={() => setShowShareModal(true)}
+                  title="Share"
                 >
                   <Share2 className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                </div>
+
+                {/* Export & Deliverables hub */}
+                <div
+                  className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
+                  onClick={() => setShowExportHub(true)}
+                  title="Export &amp; Deliverables"
+                >
+                  <Package className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
                 </div>
 
                 <DropdownMenu>
@@ -1125,6 +1138,18 @@ export function CXDNavbar() {
         open={showShareModal}
         onClose={() => setShowShareModal(false)}
       />
+
+      {/* Export & Deliverables Hub */}
+      {project && viewMode !== "home" && (
+        <ExportHub
+          isOpen={showExportHub}
+          onClose={() => setShowExportHub(false)}
+          onOpenShare={() => {
+            setShowExportHub(false);
+            setShowShareModal(true);
+          }}
+        />
+      )}
     </nav>
   );
 }
