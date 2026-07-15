@@ -501,7 +501,7 @@ export function AIChatPanel({
                     <div key={msg.id}>
                       <div
                         className={cn(
-                          "flex group",
+                          "flex group animate-in fade-in slide-in-from-bottom-1 duration-500",
                           msg.role === "user" ? "justify-end" : "justify-start",
                         )}
                       >

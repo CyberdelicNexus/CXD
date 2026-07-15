@@ -1808,11 +1808,15 @@ export const useCXDStore = create<CXDState>()(
           const element = currentProject.canvasLayout?.elements?.find(el => el.id === elementId);
           if (element) {
             get().pushCanvasHistory();
+            // Copy must render above the original (same-zIndex copies sit
+            // underneath, so users end up dragging the original)
+            const maxZ = Math.max(0, ...(currentProject.canvasLayout?.elements || []).map((el) => el.zIndex || 0));
             const newElement = {
               ...element,
               id: uuidv4(),
               x: element.x + 20,
               y: element.y + 20,
+              zIndex: maxZ + 1,
             };
             set((state) => ({
               projects: state.projects.map((p) =>

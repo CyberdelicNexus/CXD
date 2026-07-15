@@ -74,6 +74,16 @@ export function yjsDuplicateElement(doc: Y.Doc, elementId: string): string | nul
 
   const newId = uuidv4();
   doc.transact(() => {
+    // The copy must render ABOVE the original — with an equal zIndex the copy
+    // sits underneath and users end up dragging the original instead.
+    let maxZ = 0;
+    yElements.forEach((el) => {
+      if (el instanceof Y.Map) {
+        const z = (el.get('zIndex') as number) || 0;
+        if (z > maxZ) maxZ = z;
+      }
+    });
+
     // Read original properties and create a copy with offset position
     const newYEl = new Y.Map<unknown>();
     (yEl as Y.Map<unknown>).forEach((value, key) => {
@@ -83,6 +93,8 @@ export function yjsDuplicateElement(doc: Y.Doc, elementId: string): string | nul
         newYEl.set('x', ((value as number) || 0) + 20);
       } else if (key === 'y') {
         newYEl.set('y', ((value as number) || 0) + 20);
+      } else if (key === 'zIndex') {
+        newYEl.set('zIndex', maxZ + 1);
       } else if (value instanceof Y.Text) {
         newYEl.set(key, createYText(value.toString()));
       } else if (value instanceof Y.Map) {
@@ -100,6 +112,8 @@ export function yjsDuplicateElement(doc: Y.Doc, elementId: string): string | nul
         newYEl.set(key, value);
       }
     });
+    // Original may predate zIndex — the copy still needs to land on top
+    if (!newYEl.has('zIndex')) newYEl.set('zIndex', maxZ + 1);
     yElements.set(newId, newYEl);
   }, 'local');
 

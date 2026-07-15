@@ -1918,7 +1918,9 @@ export function Hypercube3D({
         {/* Face selector — compact vertical rail of icon circles that expand
             on hover (or while selected) to reveal their label. */}
         <div
-          className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30 items-start p-2 transition-[left] duration-300 ease-out max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-visible"
+          // overflow must be fully visible: with overflow-y-auto the browser
+          // forces overflow-x to auto too, clipping the Wizard button's glow.
+          className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30 items-start p-2 transition-[left] duration-300 ease-out overflow-visible"
           style={{
             // Always visible. Sits just right of the System Insights drawer when
             // it's open; keeps a small left margin (not flush) when it's hidden.
@@ -1952,7 +1954,7 @@ export function Hypercube3D({
                 ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
                 : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
             }}
-            title="General AI Chat"
+            title="Wizard"
           >
             <span className="w-12 h-12 shrink-0 flex items-center justify-center">
               <NextImage
@@ -1975,7 +1977,7 @@ export function Hypercube3D({
               )}
               style={{ color: "hsl(220 60% 72%)" }}
             >
-              AI Chat
+              Wizard
             </span>
           </button>
 
