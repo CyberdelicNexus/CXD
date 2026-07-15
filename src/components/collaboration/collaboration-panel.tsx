@@ -8,8 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CollaboratorPresence, generateUserColor } from '@/hooks/use-collaboration';
 import { useSubscription } from '@/hooks/use-subscription';
-import { useCXDStore } from '@/store/cxd-store';
-import { saveProject } from '@/lib/supabase-projects';
+import { flushYjsPersistence } from '@/contexts/yjs-project-context';
 
 interface Collaborator {
   id: string;
@@ -94,9 +93,6 @@ export function CollaborationPanel({
     fetchData();
   }, [canvasId, isOwner]);
 
-  // Get current project from store for syncing
-  const getCurrentProject = useCXDStore((state) => state.getCurrentProject);
-
   // Send invitation
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,11 +103,12 @@ export function CollaborationPanel({
     setInviteSuccess(null);
 
     try {
-      // Ensure project is synced to database before inviting
-      const project = getCurrentProject();
-      if (project && project.id === canvasId) {
-        await saveProject(project);
-      }
+      // Ensure the latest canvas state is persisted before inviting. Flush the
+      // Yjs unified writer (which keeps yjs_state + project_data current) rather
+      // than calling saveProject(): saveProject writes share_token unconditionally
+      // and, if this tab's in-memory shareToken is stale, would silently revoke a
+      // freshly created public link. The invite route only needs the row to exist.
+      await flushYjsPersistence();
 
       const response = await fetch('/api/canvas/invite', {
         method: 'POST',

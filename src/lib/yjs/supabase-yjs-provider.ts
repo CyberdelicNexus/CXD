@@ -38,6 +38,16 @@ export class SupabaseYjsProvider {
   private doc: Y.Doc;
   private channel: RealtimeChannel;
   private userId: string;
+  /**
+   * Per-TAB sender identity for echo suppression. Two tabs of the SAME user
+   * share a userId, so keying self-echo on userId made every tab ignore every
+   * other tab of that user — they silently diverged and the second tab's save
+   * could roll back the first tab's persisted work (P0 multi-tab clobber).
+   * A per-tab UUID makes the self-check drop only THIS tab's own echoes, so
+   * two tabs of one user now exchange CRDT updates and converge. (Display/
+   * presence identity is still keyed by userId elsewhere — see use-collaboration.)
+   */
+  private senderId: string;
   private pendingUpdates: Uint8Array[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private synced = false;
@@ -53,6 +63,9 @@ export class SupabaseYjsProvider {
     this.doc = doc;
     this.channel = channel;
     this.userId = userId;
+    // Unique per provider instance (i.e. per tab/session). Keep userId as a
+    // prefix for log/debug readability; uniqueness comes from the UUID.
+    this.senderId = `${userId}:${crypto.randomUUID()}`;
 
     // Listen for local Y.Doc updates and broadcast them.
     // Only queue user-generated edits — skip persistence loads and initialization
@@ -98,7 +111,7 @@ export class SupabaseYjsProvider {
       payload: {
         msgType: 'sync1',
         data: uint8ArrayToBase64(data),
-        sender: this.userId,
+        sender: this.senderId,
       } satisfies YjsSyncMessage,
     });
   }
@@ -108,8 +121,10 @@ export class SupabaseYjsProvider {
    */
   private handleMessage(msg: YjsSyncMessage): void {
     console.log('[YjsProvider] Received message:', msg.msgType, 'from:', msg.sender);
-    // Ignore our own messages
-    if (msg.sender === this.userId) {
+    // Ignore only THIS tab's own echoes (per-tab senderId). Messages from other
+    // tabs of the same user carry a different senderId and are processed — that
+    // is what makes same-user multi-tab sync work.
+    if (msg.sender === this.senderId) {
       console.log('[YjsProvider] Ignoring own message');
       return;
     }
@@ -169,7 +184,7 @@ export class SupabaseYjsProvider {
                 payload: {
                   msgType: 'sync2',
                   data: uint8ArrayToBase64(response),
-                  sender: this.userId,
+                  sender: this.senderId,
                 } satisfies YjsSyncMessage,
               });
             } else if (response.byteLength > MAX_BROADCAST_BYTES) {
@@ -287,7 +302,7 @@ export class SupabaseYjsProvider {
       payload: {
         msgType: 'update',
         data: uint8ArrayToBase64(merged),
-        sender: this.userId,
+        sender: this.senderId,
       } satisfies YjsSyncMessage,
     });
   }

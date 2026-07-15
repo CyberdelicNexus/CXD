@@ -213,9 +213,12 @@ export function CollaborationProvider({ children, onRemoteUpdate }: Collaboratio
     if (!useCXDStore.getState().yDoc) broadcastUpdate({ type: 'field_update', path: ['experienceFlow', code, 'designIntent'], value });
   }, [updateExperienceFlowIntent, broadcastUpdate]);
 
-  // Comment sync wrappers. Comments live outside Yjs, so every mutation broadcasts
-  // a full comments-array snapshot. Peers apply it via `applyRemoteComments` which
-  // updates local Zustand but does NOT re-save (the sender already persisted).
+  // Comment sync wrappers. NOTE: comments ARE CRDT-managed — addComment/etc. write
+  // to the Y.Doc `comments` map (yjsSetComment), which the bridge observes and
+  // SupabasePersistence persists in yjs_state, so they already sync via Yjs like
+  // everything else. This LWW `comments_sync` snapshot is a redundant fallback
+  // (kept for now; retiring it is tracked as P2-3 in the collab audit). Peers apply
+  // it via `applyRemoteComments`, which updates local Zustand but does NOT re-save.
   const broadcastCommentsSnapshot = useCallback(() => {
     const comments = useCXDStore.getState().getCurrentProject()?.comments ?? [];
     broadcastUpdate({ type: 'comments_sync', comments });

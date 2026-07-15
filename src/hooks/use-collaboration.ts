@@ -63,6 +63,13 @@ export interface CanvasUpdate {
   comments?: unknown[];
   timestamp: number;
   userId: string;
+  /**
+   * Per-TAB sender id for echo suppression on the data channel. Two tabs of the
+   * same user share `userId`, so suppressing by userId made same-user tabs ignore
+   * each other's LWW updates (part of the P0 multi-tab clobber). Keying self-echo
+   * by tabId lets same-user tabs exchange updates while still dropping our own.
+   */
+  senderTabId?: string;
 }
 
 interface UseCollaborationOptions {
@@ -106,6 +113,10 @@ export function useCollaboration(
   const lastCursorRef = useRef<{ x: number; y: number } | null>(null);
   // Debounce for re-announcing ourselves when a new peer announces
   const lastReannounceRef = useRef<number>(0);
+  // Per-tab id for data-channel echo suppression. Presence/cursor display stays
+  // keyed by userId (so two tabs of one user don't render as duplicate cursors
+  // to others); only the canvas_update DATA channel keys self-echo by tabId.
+  const tabIdRef = useRef<string>(typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
   // Stable refs for callbacks — updated every render without causing channel reconnection.
   const onRemoteUpdateRef = useRef(options.onRemoteUpdate);
@@ -321,9 +332,16 @@ export function useCollaboration(
     // ─── Canvas updates ────────────────────────────────────────────────────
     channel.on('broadcast', { event: 'canvas_update' }, ({ payload }) => {
       const update = payload as CanvasUpdate;
-      if (update.userId !== currentUser.id) {
-        onRemoteUpdateRef.current?.(update);
+      // Suppress only THIS tab's own echoes. Prefer the per-tab id; fall back to
+      // userId-level suppression for messages from a client that predates
+      // senderTabId (safe during a rolling deploy). Same-user OTHER tabs carry a
+      // different tabId and are processed — this is the multi-tab clobber fix.
+      if (update.senderTabId) {
+        if (update.senderTabId === tabIdRef.current) return;
+      } else if (update.userId === currentUser.id) {
+        return;
       }
+      onRemoteUpdateRef.current?.(update);
     });
 
     // ─── Subscribe ─────────────────────────────────────────────────────────
@@ -481,6 +499,7 @@ export function useCollaboration(
       ...update,
       timestamp: Date.now(),
       userId: currentUser.id,
+      senderTabId: tabIdRef.current,
     };
 
     channelRef.current.send({

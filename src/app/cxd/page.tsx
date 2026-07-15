@@ -126,14 +126,22 @@ export default function CXDPage() {
 
   const { access: canvasAccess, isLoading: accessLoading } = useCanvasPermissions(currentProjectId);
 
-  // Route guard: if the currently-loaded canvas is locked (owner on Free, not
-  // the chosen one), send the user to the read-only overview instead of the
-  // editor. Keep the user in the overview's "?locked=1" state so the page
-  // shows the lock banner.
+  // Route guard: keep non-editors out of the editor and in the read-only
+  // overview.
+  //  - Locked canvas (owner on Free, not the chosen one) → "?locked=1" banner.
+  //  - Any known participant (owner/collaborator) who resolves to canEdit:false
+  //    without being locked → read-only overview. This closes the enforcement
+  //    gap where a collaborator of a downgraded (non-editable-tier) owner has
+  //    isLocked:false but canEdit:false and previously landed in the full editor
+  //    with their CRDT writes still persisting. role 'none' is intentionally NOT
+  //    redirected here (e.g. a freshly created project not yet in the DB), which
+  //    preserves the previous behavior for those flows.
   useEffect(() => {
-    if (accessLoading || !canvasAccess) return;
-    if (canvasAccess.isLocked && currentProjectId) {
+    if (accessLoading || !canvasAccess || !currentProjectId) return;
+    if (canvasAccess.isLocked) {
       router.replace(`/cxd/overview/${currentProjectId}?locked=1`);
+    } else if (!canvasAccess.canEdit && canvasAccess.role !== 'none') {
+      router.replace(`/cxd/overview/${currentProjectId}?readonly=1`);
     }
   }, [accessLoading, canvasAccess, currentProjectId, router]);
 

@@ -73,9 +73,6 @@ export default function SharePage({ params }: { params: { token: string } }) {
     const join = searchParams.get('join');
     if (join !== 'true' || !project) return;
 
-    // Capture project in a const so TypeScript narrows the type inside the async fn
-    const currentProject = project;
-
     async function handleJoin() {
       try {
         const supabase = createClient();
@@ -86,68 +83,20 @@ export default function SharePage({ params }: { params: { token: string } }) {
           return;
         }
 
-        // Check if user is already a collaborator
-        const { data: existingCollab } = await supabase
-          .from('canvas_collaborators')
-          .select('id')
-          .eq('canvas_id', currentProject.id)
-          .eq('user_id', user.id)
-          .single();
+        // Insert happens server-side: RLS only lets the OWNER insert into
+        // canvas_collaborators, so a browser-side insert by the joining user
+        // always fails. /api/canvas/join validates the share token and inserts
+        // via the service-role client, enforcing the owner's collaborator cap.
+        const res = await fetch('/api/canvas/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
 
-        if (existingCollab) {
-          // Already a collaborator, just redirect
-          router.replace('/cxd');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          console.error('Error joining as collaborator:', data?.error || res.status);
           return;
-        }
-
-        // Insert new collaborator record
-        const { error: collabError } = await supabase
-          .from('canvas_collaborators')
-          .insert({
-            canvas_id: currentProject.id,
-            user_id: user.id,
-            role: 'collaborator',
-            added_by: currentProject.ownerId,
-          });
-
-        if (collabError) {
-          console.error('Error joining as collaborator:', collabError);
-          return;
-        }
-
-        // Get current user's name for notification
-        const { data: userProfile, error: profileError } = await supabase
-          .from('users')
-          .select('name, email')
-          .eq('id', user.id)
-          .single();
-
-        if (profileError) {
-          console.error('Error fetching user profile:', profileError);
-        }
-
-        const userName = userProfile?.name || userProfile?.email?.split('@')[0] || 'Someone';
-
-        // Notify the project owner
-        if (currentProject.ownerId) {
-          const { error: notifError } = await supabase
-            .from('notifications')
-            .insert({
-              user_id: currentProject.ownerId,
-              title: 'New Collaborator',
-              message: `${userName} joined your project "${currentProject.name}" via share link`,
-              type: 'success',
-              is_global: false,
-              metadata: {
-                canvasId: currentProject.id,
-                canvasName: currentProject.name,
-                collaboratorId: user.id,
-                collaboratorName: userName,
-              },
-            });
-          if (notifError) {
-            console.error('Error sending notification to project owner:', notifError);
-          }
         }
 
         // Redirect to CXD dashboard
@@ -158,7 +107,7 @@ export default function SharePage({ params }: { params: { token: string } }) {
     }
 
     handleJoin();
-  }, [searchParams, project, router]);
+  }, [searchParams, project, router, token]);
 
   const handleViewFraming = useCallback(() => setViewMode('framing'), []);
   const handleViewCanvas = useCallback(() => setViewMode('canvas'), []);

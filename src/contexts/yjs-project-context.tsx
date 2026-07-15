@@ -159,6 +159,12 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       if (document.visibilityState === 'hidden') {
         supabasePersistenceRef.current?.flush();
         createAutoSnapshot('Tab close');
+      } else if (document.visibilityState === 'visible') {
+        // A resuming tab may have slept through another tab's realtime updates,
+        // so its cached merge base is stale. Force the next save to re-read the
+        // live DB row first, preventing a stale full-state write from clobbering
+        // work another same-user tab persisted while this one was backgrounded.
+        supabasePersistenceRef.current?.requestDbRemerge();
       }
     };
     const handleBeforeUnload = () => {

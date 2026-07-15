@@ -72,6 +72,17 @@ export class SupabasePersistence {
    */
   private lastLoadedState: Uint8Array | null = null;
 
+  /**
+   * When true, the NEXT save re-SELECTs the live yjs_state row and union-merges
+   * it into the doc before encoding. Set on the first save after markReady() and
+   * whenever a tab resumes (requestDbRemerge). This closes the same-user multi-tab
+   * overwrite window: a tab that slept through another tab's realtime updates
+   * (its cached lastLoadedState is stale) would otherwise encode its full local
+   * state over the DB and roll back the other tab's persisted ops. We do NOT
+   * SELECT on every save — only when this flag is set — to keep writes cheap.
+   */
+  private needsDbRemerge = false;
+
   /** Element count at the last successful save — feeds large-drop telemetry. */
   private lastSavedElementCount: number | null = null;
 
@@ -144,6 +155,20 @@ export class SupabasePersistence {
   markReady(): void {
     if (this.ready || this.destroyed) return;
     this.ready = true;
+    // The first save after ready must re-merge the live DB row (see needsDbRemerge).
+    this.needsDbRemerge = true;
+    this.scheduleSave();
+  }
+
+  /**
+   * Request that the next save re-merge the live DB state first. Call this when
+   * a tab resumes from the background — it may have missed realtime updates that
+   * another tab of the same user persisted, so its cached merge base is stale.
+   * Cheap: sets a flag and schedules a debounced save (no SELECT here).
+   */
+  requestDbRemerge(): void {
+    if (this.destroyed || !this.ready) return;
+    this.needsDbRemerge = true;
     this.scheduleSave();
   }
 
@@ -163,6 +188,32 @@ export class SupabasePersistence {
     try {
       if (retryAttempt === 0) this.onStatusChange?.('saving');
       const supabase = createClient();
+
+      // First-save (or resume) DB re-merge: re-read the live yjs_state and union
+      // it into the LOCAL doc before we encode. Without this, a stale second tab
+      // encodes its full local state over the DB and silently rolls back ops that
+      // another tab of the same user already persisted (P0 multi-tab clobber).
+      // We apply into this.doc (origin 'persistence' — not rebroadcast, but does
+      // flow to Zustand via the bridge) so BOTH the yjs_state binary AND the
+      // derived project_data below reflect the merged reality and stay consistent.
+      if (this.needsDbRemerge) {
+        this.needsDbRemerge = false;
+        try {
+          const { data: liveRow } = await supabase
+            .from('cxd_projects')
+            .select('yjs_state')
+            .eq('id', this.projectId)
+            .single();
+          if (liveRow?.yjs_state) {
+            const dbState = Uint8Array.from(atob(liveRow.yjs_state), (c) => c.charCodeAt(0));
+            Y.applyUpdate(this.doc, dbState, 'persistence');
+          }
+        } catch (remergeErr) {
+          // Non-fatal: fall back to the cached merge base. A failed re-read must
+          // not block the save; the cache-merge path still runs below.
+          console.warn('[SupabasePersistence] First-save DB re-merge failed, using cached base:', remergeErr);
+        }
+      }
 
       // Merge local state with cached last-loaded state (no SELECT needed)
       const mergeDoc = new Y.Doc();
