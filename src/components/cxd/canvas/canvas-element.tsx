@@ -6795,6 +6795,9 @@ function LinkCard({
   useEffect(() => {
     if (!isSelected && isActive) setIsActive(false);
   }, [isSelected, isActive]);
+  // Pointer-down position for the embed activation overlay, so a click-AND-drag
+  // (drag-to-move from the body) never gets mistaken for a click-to-interact.
+  const activatePointerDown = useRef<{ x: number; y: number } | null>(null);
   const [urlError, setUrlError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -7427,11 +7430,25 @@ function LinkCard({
             {!isActive && (
               <div
                 className="absolute inset-0 flex items-center justify-center"
+                onMouseDown={(e) => {
+                  // Record where the press began; let it bubble so the element still drags.
+                  activatePointerDown.current = { x: e.clientX, y: e.clientY };
+                }}
                 onClick={(e) => {
-                  if (isSelected && !isReadOnly) {
-                    e.stopPropagation();
-                    setIsActive(true);
-                  }
+                  if (!isSelected || isReadOnly) return; // 1st click selects (let it bubble)
+                  const start = activatePointerDown.current;
+                  activatePointerDown.current = null;
+                  // Suppress activation if the pointer moved — that was a drag-to-move,
+                  // not a click-to-interact (mirrors the 5px click/drag threshold used
+                  // elsewhere in the canvas).
+                  const moved = start
+                    ? Math.sqrt(
+                        (e.clientX - start.x) ** 2 + (e.clientY - start.y) ** 2,
+                      )
+                    : 0;
+                  if (moved > 5) return;
+                  e.stopPropagation();
+                  setIsActive(true);
                 }}
               >
                 {isSelected && !isReadOnly && (
