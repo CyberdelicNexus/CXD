@@ -117,6 +117,7 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  MousePointerClick,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
@@ -676,6 +677,7 @@ export function CanvasElementRenderer({
             onUpdate={onUpdate}
             isSelected={isSelected}
             isReadOnly={isReadOnly}
+            isDragging={isDragging}
           />
         );
       case "line":
@@ -6769,11 +6771,13 @@ function LinkCard({
   onUpdate,
   isSelected,
   isReadOnly = false,
+  isDragging = false,
 }: {
   element: LinkElement;
   onUpdate: (updates: Partial<LinkElement>) => void;
   isSelected: boolean;
   isReadOnly?: boolean;
+  isDragging?: boolean;
 }) {
   // Local draft state to prevent element from disappearing during edits
   const [draftUrl, setDraftUrl] = useState(element.url || "");
@@ -6783,6 +6787,14 @@ function LinkCard({
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [embedError, setEmbedError] = useState(false);
+  // Embed interaction gate: the iframe is inert (pointer-events:none) until the user
+  // explicitly activates it. This keeps the whole surface draggable/selectable like every
+  // other element, and lets outside clicks fall through to the canvas so the element
+  // deselects normally. Interaction auto-deactivates the moment the element is deselected.
+  const [isActive, setIsActive] = useState(false);
+  useEffect(() => {
+    if (!isSelected && isActive) setIsActive(false);
+  }, [isSelected, isActive]);
   const [urlError, setUrlError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -7333,30 +7345,48 @@ function LinkCard({
     );
   }
 
-  // Embed mode
+  // Embed mode — window-like chrome. A live iframe swallows every pointer event, so by
+  // default we keep it inert and drive selection/drag through the element chrome; the user
+  // opts into interaction explicitly (click-to-select, click-again-to-interact).
   return (
     <div className="w-full h-full rounded-lg border border-border bg-card/80 backdrop-blur overflow-hidden flex flex-col">
-      {/* Header bar for dragging in embed mode */}
-      <div className="px-3 py-2 bg-card/80 border-b border-border/50 flex items-center gap-2 flex-shrink-0">
-        {element.favicon && (
+      {/* Persistent slim title bar — always a drag handle + identity + actions */}
+      <div className="px-2.5 py-1.5 bg-card/90 border-b border-border/50 flex items-center gap-2 flex-shrink-0 cursor-grab active:cursor-grabbing select-none">
+        <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
+        {element.favicon ? (
           <NextImage
             src={element.favicon}
             alt=""
             width={16}
             height={16}
-            className="w-4 h-4"
+            className="w-4 h-4 flex-shrink-0"
             draggable={false}
             unoptimized
           />
+        ) : (
+          <Globe className="w-4 h-4 text-muted-foreground/70 flex-shrink-0" />
         )}
         <span className="text-xs text-muted-foreground truncate flex-1">
-          {element.domain}
+          {element.domain || element.url}
         </span>
+        {isActive && !isReadOnly && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsActive(false);
+            }}
+            className="text-[10px] uppercase tracking-wide text-primary/90 hover:text-primary transition-colors px-1.5 py-0.5 rounded border border-primary/30 bg-primary/10 flex-shrink-0"
+            data-no-drag
+            title="Stop interacting"
+          >
+            Done
+          </button>
+        )}
         <a
           href={element.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-muted-foreground hover:text-primary transition-colors"
+          className="text-muted-foreground hover:text-primary transition-colors flex-shrink-0"
           data-no-drag
           title="Open in new tab"
         >
@@ -7382,18 +7412,47 @@ function LinkCard({
             </a>
           </div>
         ) : (
-          <iframe
-            src={element.url}
-            className="w-full h-full border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms"
-            onError={() => setEmbedError(true)}
-            data-no-drag
-          />
+          <>
+            <iframe
+              src={element.url}
+              className="w-full h-full border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms"
+              onError={() => setEmbedError(true)}
+              style={{ pointerEvents: isActive ? "auto" : "none" }}
+              data-no-drag
+            />
+            {/* Inactive: transparent overlay keeps the whole surface draggable and offers
+                activation. First click selects (bubbles to the wrapper); a second click while
+                selected activates interaction. Not a drag-exempt target, so drag-to-move works. */}
+            {!isActive && (
+              <div
+                className="absolute inset-0 flex items-center justify-center"
+                onClick={(e) => {
+                  if (isSelected && !isReadOnly) {
+                    e.stopPropagation();
+                    setIsActive(true);
+                  }
+                }}
+              >
+                {isSelected && !isReadOnly && (
+                  <div className="pointer-events-none flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-sm text-[11px] font-medium text-white/90 border border-white/15 shadow-lg">
+                    <MousePointerClick className="w-3.5 h-3.5" />
+                    Click to interact
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Drag trap: an active iframe eats mousemove mid-drag, so shield it while any
+                drag is in progress so the canvas' document-level move listeners keep firing. */}
+            {isActive && isDragging && (
+              <div className="absolute inset-0 z-30" />
+            )}
+          </>
         )}
       </div>
       {/* Edit button - only shown when selected */}
       {isSelected && !isReadOnly && (
-        <div className="px-3 py-2 border-t border-border bg-card/80">
+        <div className="px-3 py-1.5 border-t border-border bg-card/80 flex-shrink-0">
           <button
             onClick={(e) => {
               e.stopPropagation();
