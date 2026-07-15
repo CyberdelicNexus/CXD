@@ -278,6 +278,13 @@ export async function POST(request: Request) {
       request.signal.addEventListener("abort", onAbort, { once: true });
     }
 
+    // streamText delivers provider/stream failures to onError (they fire AFTER
+    // the HTTP 200 status line is committed) rather than throwing — so a bad
+    // model ID or provider outage yields an EMPTY stream, which the UI shows as
+    // a blank assistant bubble with no error. Track the error and append a
+    // visible message to the text stream so the user actually sees a failure.
+    let streamError: unknown = null;
+
     const result = streamText({
       model,
       system: systemPrompt,
@@ -291,9 +298,8 @@ export async function POST(request: Request) {
       onError: ({ error }) => {
         clearTimeout(timeoutId);
         releaseConcurrency();
-        // streamText errors fire AFTER HTTP 200, so the outer try/catch never
-        // sees them. Capture here so provider outages and bad model IDs
-        // (which produce empty streams, not throws) actually surface in Sentry.
+        streamError = error;
+        // Capture so provider outages and bad model IDs surface in Sentry.
         Sentry.captureException(error, {
           tags: { route: "ai/chat", phase: "streamText" },
           extra: { provider: resolvedProvider, model: selectedModel },
@@ -301,8 +307,34 @@ export async function POST(request: Request) {
       },
     });
 
-    return result.toTextStreamResponse({
+    // Pipe text deltas through manually. TextStreamChatTransport (client) reads
+    // the body as raw UTF-8 text, so plain concatenated deltas are compatible.
+    // On error (delivered to onError, not thrown) append a user-visible notice.
+    const modelLabel = getModelConfig(resolvedProvider, "chat").displayName;
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const delta of result.textStream) {
+            controller.enqueue(encoder.encode(delta));
+          }
+        } catch (err) {
+          streamError = streamError ?? err;
+        }
+        if (streamError) {
+          controller.enqueue(
+            encoder.encode(
+              `\n\nThe selected AI model (${modelLabel}) is currently unavailable. Please switch to another model or try again shortly.`,
+            ),
+          );
+        }
+        controller.close();
+      },
+    });
+
+    return new Response(readable, {
       headers: {
+        "Content-Type": "text/plain; charset=utf-8",
         "x-ai-provider": resolvedProvider,
         "x-ai-model": apiModelId,
         "x-byok-enabled": userApiKey ? "true" : "false",
