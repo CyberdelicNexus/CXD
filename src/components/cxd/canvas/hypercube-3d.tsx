@@ -623,9 +623,9 @@ export function Hypercube3D({
       } else {
         setSuggestNote(
           res.error ||
-            (res.considered === 0
-              ? "Every element with text is already tagged."
-              : "No confident tag suggestions found.")
+          (res.considered === 0
+            ? "Every element with text is already tagged."
+            : "No confident tag suggestions found.")
         );
         setTimeout(() => setSuggestNote(null), 5000);
       }
@@ -1812,107 +1812,107 @@ export function Hypercube3D({
             }))
             .sort((a, b) => b.avgZ - a.avgZ)
             .map(({ faceIndex }) => {
-            const face = CUBE_FACES[faceIndex];
-            const intensity = calculateFaceIntensity(face);
-            const { hue, satBase, lightBase } = face.tint;
-            const saturation = satBase + intensity.completion * 20;
-            const lightness = lightBase + intensity.glowIntensity * 15;
+              const face = CUBE_FACES[faceIndex];
+              const intensity = calculateFaceIntensity(face);
+              const { hue, satBase, lightBase } = face.tint;
+              const saturation = satBase + intensity.completion * 20;
+              const lightness = lightBase + intensity.glowIntensity * 15;
 
-            // A face is "front" if it's the one actually facing the camera
-            const isFrontFace = currentFrontFaceIndex === faceIndex;
-            // A face is "focused" if it's selected in the UI
-            const isFocused = focusedFaceIndex === faceIndex;
-            const isHovered = hoveredFace === faceIndex;
-            // Dim non-front faces when we have a focused face
-            const isDimmed =
-              focusedFaceIndex !== null && !isFocused && !isFrontFace;
-            // In default mode with selection, only highlight the front-facing face
-            // When Core is selected, no faces should be active/highlighted
-            const isActive =
-              !isCoreSelected && focusedFaceIndex !== null
-                ? isFrontFace
-                : false;
+              // A face is "front" if it's the one actually facing the camera
+              const isFrontFace = currentFrontFaceIndex === faceIndex;
+              // A face is "focused" if it's selected in the UI
+              const isFocused = focusedFaceIndex === faceIndex;
+              const isHovered = hoveredFace === faceIndex;
+              // Dim non-front faces when we have a focused face
+              const isDimmed =
+                focusedFaceIndex !== null && !isFocused && !isFrontFace;
+              // In default mode with selection, only highlight the front-facing face
+              // When Core is selected, no faces should be active/highlighted
+              const isActive =
+                !isCoreSelected && focusedFaceIndex !== null
+                  ? isFrontFace
+                  : false;
 
-            // Corner indices for this face (shared with the depth sort above)
-            const faceCorners = FACE_CORNER_INDICES[faceIndex].map((i) => outerCorners[i]);
+              // Corner indices for this face (shared with the depth sort above)
+              const faceCorners = FACE_CORNER_INDICES[faceIndex].map((i) => outerCorners[i]);
 
-            // Calculate face center
-            const centerX = faceCorners.reduce((sum, c) => sum + c.x, 0) / 4;
-            const centerY = faceCorners.reduce((sum, c) => sum + c.y, 0) / 4;
-            const centerZ = faceCorners.reduce((sum, c) => sum + c.z, 0) / 4;
+              // Calculate face center
+              const centerX = faceCorners.reduce((sum, c) => sum + c.x, 0) / 4;
+              const centerY = faceCorners.reduce((sum, c) => sum + c.y, 0) / 4;
+              const centerZ = faceCorners.reduce((sum, c) => sum + c.z, 0) / 4;
 
-            // Create SVG path for face polygon
-            const pathData =
-              `M ${faceCorners[0].x} ${faceCorners[0].y} ` +
-              faceCorners
-                .slice(1)
-                .map((c) => `L ${c.x} ${c.y}`)
-                .join(" ") +
-              " Z";
+              // Create SVG path for face polygon
+              const pathData =
+                `M ${faceCorners[0].x} ${faceCorners[0].y} ` +
+                faceCorners
+                  .slice(1)
+                  .map((c) => `L ${c.x} ${c.y}`)
+                  .join(" ") +
+                " Z";
 
-            const glowColor = `hsl(${hue} ${saturation + 10}% ${lightness + 15}%)`;
+              const glowColor = `hsl(${hue} ${saturation + 10}% ${lightness + 15}%)`;
 
-            // Glow filter based on pattern
-            const filterUrl =
-              intensity.glowPattern === "stable"
-                ? "url(#glow-stable)"
-                : intensity.glowPattern === "pulsing"
-                  ? "url(#glow-pulsing)"
-                  : "url(#glow-fractured)";
+              // Glow filter based on pattern
+              const filterUrl =
+                intensity.glowPattern === "stable"
+                  ? "url(#glow-stable)"
+                  : intensity.glowPattern === "pulsing"
+                    ? "url(#glow-pulsing)"
+                    : "url(#glow-fractured)";
 
-            // Depth: near faces (small centerZ) read solid & glassy, far faces fade.
-            const depthFactor = Math.max(0.28, 1 - (centerZ + 200) / 400);
-            const faceOpacity = isActive
-              ? 0.52 // Active/front face — strongest
-              : isCoreSelected
-                ? 0.08 // Very dim when Core is selected — inner cube is the focus
-                : isDimmed
-                  ? 0.13 // Non-active when something is focused
-                  : 0.16 + depthFactor * 0.3; // translucent glass, weighted by depth
-            // Specular sheen strength — CONTINUOUS (no thresholds) so nothing
-            // pops on/off as the cube rotates. 0 on dim/core faces.
-            const facingStrength = isCoreSelected || isDimmed ? 0 : Math.max(0, depthFactor - 0.45);
-            const specularOpacity = facingStrength * 1.15;
+              // Depth: near faces (small centerZ) read solid & glassy, far faces fade.
+              const depthFactor = Math.max(0.28, 1 - (centerZ + 200) / 400);
+              const faceOpacity = isActive
+                ? 0.52 // Active/front face — strongest
+                : isCoreSelected
+                  ? 0.08 // Very dim when Core is selected — inner cube is the focus
+                  : isDimmed
+                    ? 0.13 // Non-active when something is focused
+                    : 0.16 + depthFactor * 0.3; // translucent glass, weighted by depth
+              // Specular sheen strength — CONTINUOUS (no thresholds) so nothing
+              // pops on/off as the cube rotates. 0 on dim/core faces.
+              const facingStrength = isCoreSelected || isDimmed ? 0 : Math.max(0, depthFactor - 0.45);
+              const specularOpacity = facingStrength * 1.15;
 
-            return (
-              <g key={`face-${faceIndex}`}>
-                {/* Glass gradient plane. Filter only toggles on the SELECTED face
+              return (
+                <g key={`face-${faceIndex}`}>
+                  {/* Glass gradient plane. Filter only toggles on the SELECTED face
                     (a deliberate, one-off state change) — never on rotation, to
                     avoid the flicker a per-frame threshold would cause. */}
-                <path
-                  d={pathData}
-                  fill={`url(#faceGrad-${faceIndex})`}
-                  fillOpacity={faceOpacity}
-                  stroke={glowColor}
-                  strokeWidth={isActive ? "3" : "1.25"}
-                  strokeOpacity={isActive ? 1 : 0.6}
-                  strokeLinejoin="round"
-                  filter={isActive ? filterUrl : undefined}
-                  className={
-                    intensity.glowPattern === "pulsing" && isActive
-                      ? "glow-pulsing"
-                      : ""
-                  }
-                  style={{
-                    // Only transition selection-driven props. NOT fill-opacity —
-                    // it updates every rotation frame; a transition there makes it
-                    // lag/smear behind the turn. Let it track rotation exactly.
-                    transition:
-                      "stroke 0.4s ease, stroke-width 0.4s ease, stroke-opacity 0.4s ease",
-                    pointerEvents: "none",
-                  }}
-                />
-                {/* Specular sheen — ALWAYS rendered (opacity may be 0) so it never
+                  <path
+                    d={pathData}
+                    fill={`url(#faceGrad-${faceIndex})`}
+                    fillOpacity={faceOpacity}
+                    stroke={glowColor}
+                    strokeWidth={isActive ? "3" : "1.25"}
+                    strokeOpacity={isActive ? 1 : 0.6}
+                    strokeLinejoin="round"
+                    filter={isActive ? filterUrl : undefined}
+                    className={
+                      intensity.glowPattern === "pulsing" && isActive
+                        ? "glow-pulsing"
+                        : ""
+                    }
+                    style={{
+                      // Only transition selection-driven props. NOT fill-opacity —
+                      // it updates every rotation frame; a transition there makes it
+                      // lag/smear behind the turn. Let it track rotation exactly.
+                      transition:
+                        "stroke 0.4s ease, stroke-width 0.4s ease, stroke-opacity 0.4s ease",
+                      pointerEvents: "none",
+                    }}
+                  />
+                  {/* Specular sheen — ALWAYS rendered (opacity may be 0) so it never
                     mounts/unmounts mid-rotation. Sells the glass on front planes. */}
-                <path
-                  d={pathData}
-                  fill="url(#specular-glass)"
-                  fillOpacity={specularOpacity}
-                  style={{ pointerEvents: "none", mixBlendMode: "screen" }}
-                />
-              </g>
-            );
-          })}
+                  <path
+                    d={pathData}
+                    fill="url(#specular-glass)"
+                    fillOpacity={specularOpacity}
+                    style={{ pointerEvents: "none", mixBlendMode: "screen" }}
+                  />
+                </g>
+              );
+            })}
         </svg>
 
         {/* Face selector — compact vertical rail of icon circles that expand
@@ -1954,7 +1954,7 @@ export function Hypercube3D({
                 ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
                 : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
             }}
-            title="Wizard"
+            title="Hypercube"
           >
             <span className="w-12 h-12 shrink-0 flex items-center justify-center">
               <NextImage
@@ -1977,7 +1977,7 @@ export function Hypercube3D({
               )}
               style={{ color: "hsl(220 60% 72%)" }}
             >
-              Wizard
+              Hypercube
             </span>
           </button>
 
@@ -2349,7 +2349,7 @@ export function Hypercube3D({
                       faceKey={currentChatKey}
                       projectId={project?.id || ""}
                       accentHue={chatAccentHue}
-                      faceName={focusedFace ? focusedFace.label : isCoreSelected ? "Core" : "Cyberdelic Wizard"}
+                      faceName={focusedFace ? focusedFace.label : isCoreSelected ? "Core" : "Hypercube Intelligence"}
                       semanticRole={focusedFace ? focusedFace.semanticRole : isCoreSelected ? "Holistic integration across all dimensions" : "General experience design guidance"}
                       faceGlyph={focusedFace ? focusedFace.glyph : isCoreSelected ? GLYPHS.core : null}
                       faceSummary={focusedFace ? faceSummary : undefined}
@@ -2377,158 +2377,158 @@ export function Hypercube3D({
                     />
                   </div>
 
-                {/* Right-side rail: Suggest-tags button above the Tagged Elements window */}
-                <div className="absolute left-full bottom-0 ml-3 flex flex-col items-start gap-2 pointer-events-none">
-                  {/* Ephemeral status note */}
-                  {suggestNote && (
-                    <div className="px-3 py-2 rounded-lg bg-card/90 backdrop-blur border border-border text-xs text-muted-foreground shadow-lg max-w-[240px]">
-                      {suggestNote}
-                    </div>
-                  )}
-                  {/* AI Suggest Tags — circle that expands on hover, like the face rail */}
-                  {!tagSuggestions && (
-                    <button
-                      onClick={handleSuggestTags}
-                      disabled={suggesting}
-                      className="group pointer-events-auto flex items-center h-11 rounded-full bg-card/85 backdrop-blur border border-fuchsia-500/30 text-fuchsia-300 hover:text-fuchsia-200 hover:bg-fuchsia-500/15 hover:border-fuchsia-500/50 transition-colors duration-300 disabled:opacity-70 disabled:cursor-wait shadow-lg"
-                      title="Suggest hypercube tags for untagged canvas elements"
-                    >
-                      <span className="w-11 h-11 shrink-0 flex items-center justify-center">
-                        {suggesting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Tag className="w-5 h-5" />}
-                      </span>
-                      <span className="max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-sm font-medium transition-all duration-300 ease-out">
-                        {suggesting ? "Analyzing…" : "Suggest tags"}
-                      </span>
-                    </button>
-                  )}
-
-                {/* Tagged Elements outside chat on center-right */}
-                {(focusedFace || isCoreSelected) && focusedElementPreviews.length > 0 && (() => {
-                  const railHue = focusedFace ? focusedFace.tint.hue : 270; // Purple for core
-                  return (
-                  <aside
-                    className={cn(
-                      "pointer-events-auto rounded-2xl border backdrop-blur-sm bg-black/10 overflow-hidden transition-all duration-300",
-                      isTaggedRailCollapsed ? "w-[36px]" : "w-[240px]",
+                  {/* Right-side rail: Suggest-tags button above the Tagged Elements window */}
+                  <div className="absolute left-full bottom-0 ml-3 flex flex-col items-start gap-2 pointer-events-none">
+                    {/* Ephemeral status note */}
+                    {suggestNote && (
+                      <div className="px-3 py-2 rounded-lg bg-card/90 backdrop-blur border border-border text-xs text-muted-foreground shadow-lg max-w-[240px]">
+                        {suggestNote}
+                      </div>
                     )}
-                    style={{
-                      borderColor: `hsl(${railHue} 40% 45% / 0.35)`,
-                      boxShadow: `0 0 0 1px hsl(${railHue} 55% 55% / 0.18) inset`,
-                    }}
-                  >
-                    <div
-                      className={cn(
-                        "py-2 border-b border-white/10 flex items-center",
-                        isTaggedRailCollapsed
-                          ? "px-1.5 justify-center"
-                          : "px-3 justify-between",
-                      )}
-                    >
-                      {!isTaggedRailCollapsed && (
-                        <h3
-                          className="text-[10px] uppercase tracking-wider font-semibold"
-                          style={{ color: `hsl(${railHue} 45% 62%)` }}
-                        >
-                          Tagged Elements
-                        </h3>
-                      )}
-
-                      <div className="flex items-center gap-2">
-                        {!isTaggedRailCollapsed && (
-                          <span className="text-[10px] text-muted-foreground/60">
-                            {focusedElementPreviews.length}
-                          </span>
-                        )}
-                        <button
-                          onClick={() =>
-                            setIsTaggedRailCollapsed((prev) => !prev)
-                          }
-                          className="p-1 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
-                          title={
-                            isTaggedRailCollapsed
-                              ? "Expand tagged elements"
-                              : "Collapse tagged elements"
-                          }
-                          aria-label={
-                            isTaggedRailCollapsed
-                              ? "Expand tagged elements"
-                              : "Collapse tagged elements"
-                          }
-                        >
-                          {isTaggedRailCollapsed ? (
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          ) : (
-                            <ChevronLeft className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {isTaggedRailCollapsed ? (
-                      <div className="flex justify-center py-2">
-                        <span
-                          className="text-[10px] font-medium rounded-full px-1.5 py-0.5 border border-white/20 text-muted-foreground/80"
-                          title={`${focusedElementPreviews.length} tagged elements`}
-                        >
-                          {focusedElementPreviews.length}
-                        </span>
-                      </div>
-                    ) : (
-                        <div
-                          className="chat-scrollbar max-h-[44vh] overflow-y-auto p-2 space-y-2"
-                          style={{
-                            "--chat-scrollbar-hue": railHue,
-                          } as React.CSSProperties}
+                    {/* AI Suggest Tags — circle that expands on hover, like the face rail */}
+                    {!tagSuggestions && (
+                      <button
+                        onClick={handleSuggestTags}
+                        disabled={suggesting}
+                        className="group pointer-events-auto flex items-center h-11 rounded-full bg-card/85 backdrop-blur border border-fuchsia-500/30 text-fuchsia-300 hover:text-fuchsia-200 hover:bg-fuchsia-500/15 hover:border-fuchsia-500/50 transition-colors duration-300 disabled:opacity-70 disabled:cursor-wait shadow-lg"
+                        title="Suggest hypercube tags for untagged canvas elements"
                       >
-                        {focusedElementPreviews.map((preview: ElementPreview) => {
-                          const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
-                          const element = activeTaggedElements.find(
-                            (el: CanvasElement) => el.id === preview.id,
-                          );
-                          return (
-                            <div
-                              key={preview.id}
-                              className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-white/15 bg-transparent hover:border-white/30 transition-all group"
-                              style={{
-                                borderLeftColor: `hsl(${railHue} 45% 52%)`,
-                                borderLeftWidth: "2px",
-                              }}
-                            >
-                              <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                              <span className="text-xs text-foreground truncate">
-                                {preview.title}
-                              </span>
-                              <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                                {element && onPreviewElement && (
-                                  <button
-                                    onClick={() => onPreviewElement(element)}
-                                    className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
-                                    title="Quick View"
-                                  >
-                                    <Eye className="w-3 h-3" />
-                                  </button>
-                                )}
-                                {onNavigateToElement && (
-                                  <button
-                                    onClick={() => onNavigateToElement(preview.id)}
-                                    className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
-                                    title="View on Canvas"
-                                  >
-                                    <MapPin className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                        <span className="w-11 h-11 shrink-0 flex items-center justify-center">
+                          {suggesting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Tag className="w-5 h-5" />}
+                        </span>
+                        <span className="max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-sm font-medium transition-all duration-300 ease-out">
+                          {suggesting ? "Analyzing…" : "Suggest tags"}
+                        </span>
+                      </button>
                     )}
-                  </aside>
-                  );
-                })()}
+
+                    {/* Tagged Elements outside chat on center-right */}
+                    {(focusedFace || isCoreSelected) && focusedElementPreviews.length > 0 && (() => {
+                      const railHue = focusedFace ? focusedFace.tint.hue : 270; // Purple for core
+                      return (
+                        <aside
+                          className={cn(
+                            "pointer-events-auto rounded-2xl border backdrop-blur-sm bg-black/10 overflow-hidden transition-all duration-300",
+                            isTaggedRailCollapsed ? "w-[36px]" : "w-[240px]",
+                          )}
+                          style={{
+                            borderColor: `hsl(${railHue} 40% 45% / 0.35)`,
+                            boxShadow: `0 0 0 1px hsl(${railHue} 55% 55% / 0.18) inset`,
+                          }}
+                        >
+                          <div
+                            className={cn(
+                              "py-2 border-b border-white/10 flex items-center",
+                              isTaggedRailCollapsed
+                                ? "px-1.5 justify-center"
+                                : "px-3 justify-between",
+                            )}
+                          >
+                            {!isTaggedRailCollapsed && (
+                              <h3
+                                className="text-[10px] uppercase tracking-wider font-semibold"
+                                style={{ color: `hsl(${railHue} 45% 62%)` }}
+                              >
+                                Tagged Elements
+                              </h3>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                              {!isTaggedRailCollapsed && (
+                                <span className="text-[10px] text-muted-foreground/60">
+                                  {focusedElementPreviews.length}
+                                </span>
+                              )}
+                              <button
+                                onClick={() =>
+                                  setIsTaggedRailCollapsed((prev) => !prev)
+                                }
+                                className="p-1 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                title={
+                                  isTaggedRailCollapsed
+                                    ? "Expand tagged elements"
+                                    : "Collapse tagged elements"
+                                }
+                                aria-label={
+                                  isTaggedRailCollapsed
+                                    ? "Expand tagged elements"
+                                    : "Collapse tagged elements"
+                                }
+                              >
+                                {isTaggedRailCollapsed ? (
+                                  <ChevronRight className="w-3.5 h-3.5" />
+                                ) : (
+                                  <ChevronLeft className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+
+                          {isTaggedRailCollapsed ? (
+                            <div className="flex justify-center py-2">
+                              <span
+                                className="text-[10px] font-medium rounded-full px-1.5 py-0.5 border border-white/20 text-muted-foreground/80"
+                                title={`${focusedElementPreviews.length} tagged elements`}
+                              >
+                                {focusedElementPreviews.length}
+                              </span>
+                            </div>
+                          ) : (
+                            <div
+                              className="chat-scrollbar max-h-[44vh] overflow-y-auto p-2 space-y-2"
+                              style={{
+                                "--chat-scrollbar-hue": railHue,
+                              } as React.CSSProperties}
+                            >
+                              {focusedElementPreviews.map((preview: ElementPreview) => {
+                                const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
+                                const element = activeTaggedElements.find(
+                                  (el: CanvasElement) => el.id === preview.id,
+                                );
+                                return (
+                                  <div
+                                    key={preview.id}
+                                    className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-white/15 bg-transparent hover:border-white/30 transition-all group"
+                                    style={{
+                                      borderLeftColor: `hsl(${railHue} 45% 52%)`,
+                                      borderLeftWidth: "2px",
+                                    }}
+                                  >
+                                    <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                                    <span className="text-xs text-foreground truncate">
+                                      {preview.title}
+                                    </span>
+                                    <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                                      {element && onPreviewElement && (
+                                        <button
+                                          onClick={() => onPreviewElement(element)}
+                                          className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                          title="Quick View"
+                                        >
+                                          <Eye className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                      {onNavigateToElement && (
+                                        <button
+                                          onClick={() => onNavigateToElement(preview.id)}
+                                          className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                          title="View on Canvas"
+                                        >
+                                          <MapPin className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </aside>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
-            </div>
             </div>
 
 
