@@ -1513,9 +1513,13 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     const task = flattenedTasks[taskIndex];
     if (task.startDate && task.dueDate) return;
 
+    // contentRect belongs to the div INSIDE the scroll container, so its
+    // .left already shifts with scrolling — clientX - contentRect.left IS
+    // content-relative. Adding scrollLeft on top double-counted the scroll
+    // and placed hover/click dates ~a week+ right of the cursor.
     const contentRect = timelineContentRef.current.getBoundingClientRect();
     const contentWidth = timelineContentRef.current.scrollWidth;
-    const mouseX = Math.max(0, Math.min(contentWidth, e.clientX - contentRect.left + timelineRef.current.scrollLeft));
+    const mouseX = Math.max(0, Math.min(contentWidth, e.clientX - contentRect.left));
     const totalDuration = endDate.getTime() - startDate.getTime();
     const clickedTime = startDate.getTime() + (mouseX / contentWidth) * totalDuration;
     const snappedDate = new Date(clickedTime);
@@ -1547,9 +1551,11 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     const task = flattenedTasks[taskIndex];
     if (task.startDate && task.dueDate) return;
 
+    // Same scroll-double-count fix as handleTimelineHover above — the click
+    // must land on the exact date under the cursor, matching the preview.
     const contentRect = timelineContentRef.current.getBoundingClientRect();
     const contentWidth = timelineContentRef.current.scrollWidth;
-    const mouseX = Math.max(0, Math.min(contentWidth, e.clientX - contentRect.left + timelineRef.current.scrollLeft));
+    const mouseX = Math.max(0, Math.min(contentWidth, e.clientX - contentRect.left));
     const totalDuration = endDate.getTime() - startDate.getTime();
     const clickedTime = startDate.getTime() + (mouseX / contentWidth) * totalDuration;
 
