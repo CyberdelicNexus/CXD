@@ -13,6 +13,7 @@ import {
   CanvasElement,
   BoardElement,
   elementMatchesFace,
+  getEffectiveHypercubeTags,
 } from "@/types/canvas-elements";
 import {
   ChevronRight,
@@ -41,6 +42,8 @@ import {
   Target,
   Tag,
   Loader2,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 import NextImage from "next/image";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
@@ -559,6 +562,37 @@ const FACE_CORNER_INDICES: number[][] = [
   [3, 2, 6, 7], // 5 Meaning — Bottom       (Y+)
 ];
 
+// ─── Geometric Resonance ────────────────────────────────────────────────
+// The 12 cube edges as outer-corner index pairs. This is the single source of
+// truth the render loop maps over, so edge idx aligns with EDGE_ADJACENT_FACES.
+const CUBE_EDGE_CORNERS: [number, number][] = [
+  [0, 1], [1, 2], [2, 3], [3, 0], // back face (Z-)
+  [4, 5], [5, 6], [6, 7], [7, 4], // front face (Z+)
+  [0, 4], [1, 5], [2, 6], [3, 7], // connecting edges
+];
+
+// Each edge IS the relationship between its two adjacent faces. Derived from
+// FACE_CORNER_INDICES (the two faces whose quad contains BOTH endpoints) so it
+// can never drift from the geometry. Values are CUBE_FACES indices.
+const EDGE_ADJACENT_FACES: [number, number][] = CUBE_EDGE_CORNERS.map(([a, b]) => {
+  const faces = FACE_CORNER_INDICES.reduce<number[]>((acc, corners, faceIndex) => {
+    if (corners.includes(a) && corners.includes(b)) acc.push(faceIndex);
+    return acc;
+  }, []);
+  return [faces[0], faces[1]] as [number, number];
+});
+
+// Circular mean of two hues (degrees) — a blended tint that doesn't wrap ugly
+// across the 360→0 seam (e.g. amber 45 + magenta 320 blends through red, not cyan).
+function blendHue(a: number, b: number): number {
+  const ra = (a * Math.PI) / 180;
+  const rb = (b * Math.PI) / 180;
+  const x = Math.cos(ra) + Math.cos(rb);
+  const y = Math.sin(ra) + Math.sin(rb);
+  const deg = (Math.atan2(y, x) * 180) / Math.PI;
+  return (deg + 360) % 360;
+}
+
 export function Hypercube3D({
   project,
   onSelectSection,
@@ -596,6 +630,8 @@ export function Hypercube3D({
     useState<InteractionMode>("default");
   const [hoveredArrowFace, setHoveredArrowFace] = useState<number | null>(null);
   const [hoveredFace, setHoveredFace] = useState<number | null>(null);
+  // Geometric Resonance: which cube edge (0-11) has its relationship panel open.
+  const [selectedEdgeIndex, setSelectedEdgeIndex] = useState<number | null>(null);
 
   // Zoom level for explore mode (1.0 = default, can zoom in/out)
   const [exploreZoom, setExploreZoom] = useState(DEFAULT_ZOOM);
@@ -796,21 +832,9 @@ export function Hypercube3D({
     ].map(([x, y, z]) => project3D(x, y, z));
   }, [innerSize, project3D]);
 
-  // Define edges (pairs of corner indices)
-  const cubeEdges: [number, number][] = [
-    [0, 1],
-    [1, 2],
-    [2, 3],
-    [3, 0], // Back face
-    [4, 5],
-    [5, 6],
-    [6, 7],
-    [7, 4], // Front face
-    [0, 4],
-    [1, 5],
-    [2, 6],
-    [3, 7], // Connecting edges
-  ];
+  // Define edges (pairs of corner indices). Shared with the resonance model so
+  // the render idx lines up with EDGE_ADJACENT_FACES / edgeResonance.
+  const cubeEdges: [number, number][] = CUBE_EDGE_CORNERS;
 
   // Animation
   useEffect(() => {
@@ -1015,6 +1039,30 @@ export function Hypercube3D({
     } as any); // Cast to any since we're adding userQuestion field
   }, [openGeneralChat]);
 
+  // Geometric Resonance: from a zero-resonance edge, open the Wizard chat
+  // pre-seeded with a bridge question naming both faces. Reuses the same
+  // insightContext/openGeneralChat mechanism the diagnostic questions use —
+  // NO new AI route. Switches to default mode because the chat only mounts there.
+  const openBridgeChat = useCallback(
+    (faceA: number, faceB: number) => {
+      const a = CUBE_FACES[faceA];
+      const b = CUBE_FACES[faceB];
+      if (!a || !b) return;
+      const question = `Nothing connects ${a.label} to ${b.label} yet. Suggest a bridge — a single element or idea that ties ${a.label} (${a.semanticRole.toLowerCase()}) to ${b.label} (${b.semanticRole.toLowerCase()}) together in this experience.`;
+      setSelectedEdgeIndex(null);
+      setInteractionMode("default");
+      openGeneralChat();
+      setPendingInsightContext({
+        issueSummary: `No elements bridge ${a.label} and ${b.label}.`,
+        dataPoints: {},
+        suggestedQuestions: [question],
+        relatedFaceIds: [a.id, b.id],
+        userQuestion: question,
+      } as EnrichedDiagnostic["chatContext"]);
+    },
+    [openGeneralChat],
+  );
+
   function getFaceName(faceKey: string): string {
     const names: Record<string, string> = {
       realityPlanes: "Reality Planes",
@@ -1050,6 +1098,7 @@ export function Hypercube3D({
     setFocusedFaceIndex(null);
     setIsCoreSelected(false);
     setIsGeneralChatActive(false);
+    setSelectedEdgeIndex(null);
   }, []);
 
   const exitExploreMode = useCallback(() => {
@@ -1058,6 +1107,7 @@ export function Hypercube3D({
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
     setExploreZoom(1.0); // Reset zoom when exiting explore mode
+    setSelectedEdgeIndex(null); // close any open edge-resonance panel
   }, []);
 
   // Wheel handler for zoom in explore mode
@@ -1245,6 +1295,52 @@ export function Hypercube3D({
     };
   }, [project?.canvasLayout?.elements]);
 
+  // ─── Geometric Resonance ──────────────────────────────────────────────
+  // Each of the 12 cube edges is the relationship between its two adjacent
+  // faces. resonance = elements whose EFFECTIVE tags (own + inherited from any
+  // ancestor container, so container contents count through their parent)
+  // include BOTH faces' tags. Same element pool the face views use (all canvas
+  // elements incl. board nodes). Memoized on the element list, NOT per frame —
+  // effective tag sets are computed once, then reused across all 12 edges.
+  const resonance = useMemo(() => {
+    const allElements: CanvasElement[] = project?.canvasLayout?.elements || [];
+    const byId = new Map<string, CanvasElement>(
+      allElements.map((el) => [el.id, el] as [string, CanvasElement]),
+    );
+    // One effective-tag Set per element (walks container inheritance once).
+    const effTags = allElements.map(
+      (el) => new Set<HypercubeFaceTag>(getEffectiveHypercubeTags(el, byId)),
+    );
+    // How many elements sit on each face (drives the "unexamined" dashed hint).
+    const faceCount = CUBE_FACES.map((face) => {
+      const tag = SECTION_TO_TAG[face.id];
+      return effTags.reduce((n, t) => (t.has(tag) ? n + 1 : n), 0);
+    });
+
+    const edges = EDGE_ADJACENT_FACES.map(([faceA, faceB]) => {
+      const tagA = SECTION_TO_TAG[CUBE_FACES[faceA].id];
+      const tagB = SECTION_TO_TAG[CUBE_FACES[faceB].id];
+      const shared: CanvasElement[] = [];
+      allElements.forEach((el, i) => {
+        const t = effTags[i];
+        if (t.has(tagA) && t.has(tagB)) shared.push(el);
+      });
+      return {
+        faceA,
+        faceB,
+        count: shared.length,
+        shared,
+        aCount: faceCount[faceA],
+        bCount: faceCount[faceB],
+        bothNonEmpty: faceCount[faceA] > 0 && faceCount[faceB] > 0,
+        hue: blendHue(CUBE_FACES[faceA].tint.hue, CUBE_FACES[faceB].tint.hue),
+      };
+    });
+
+    const maxCount = edges.reduce((m, e) => Math.max(m, e.count), 0);
+    return { edges, maxCount };
+  }, [project?.canvasLayout?.elements]);
+
   // Sensemaking Mode - Calculate face intensity and coherence
   // Returns visual parameters based on domain state without requiring interaction
   const calculateFaceIntensity = useCallback(
@@ -1420,6 +1516,9 @@ export function Hypercube3D({
 
   const focusedFace =
     focusedFaceIndex !== null ? CUBE_FACES[focusedFaceIndex] : null;
+  // Geometric Resonance: the edge whose panel is open (null-safe index access).
+  const selectedEdge =
+    selectedEdgeIndex !== null ? resonance.edges[selectedEdgeIndex] : null;
   const chatAccentHue = focusedFace?.tint.hue ?? (isCoreSelected ? 195 : 220);
   const focusedFaceTag = focusedFace ? SECTION_TO_TAG[focusedFace.id] : null;
   const coreFaceTag: HypercubeFaceTag = "Core";
@@ -1609,6 +1708,31 @@ export function Hypercube3D({
               );
             })}
 
+            {/* Geometric Resonance: per-edge gradients that blend the two
+                adjacent faces' tints along the edge (userSpaceOnUse follows the
+                projected endpoints, so the blend rotates with the cube). */}
+            {interactionMode === "explore" &&
+              resonance.edges.map((edge, idx) => {
+                if (edge.count <= 0) return null;
+                const [ci, cj] = CUBE_EDGE_CORNERS[idx];
+                const a = CUBE_FACES[edge.faceA].tint;
+                const b = CUBE_FACES[edge.faceB].tint;
+                return (
+                  <linearGradient
+                    key={`edgeGrad-${idx}`}
+                    id={`edgeGrad-${idx}`}
+                    gradientUnits="userSpaceOnUse"
+                    x1={outerCorners[ci].x}
+                    y1={outerCorners[ci].y}
+                    x2={outerCorners[cj].x}
+                    y2={outerCorners[cj].y}
+                  >
+                    <stop offset="0%" stopColor={`hsl(${a.hue} ${a.satBase + 30}% ${a.lightBase + 38}%)`} />
+                    <stop offset="100%" stopColor={`hsl(${b.hue} ${b.satBase + 30}% ${b.lightBase + 38}%)`} />
+                  </linearGradient>
+                );
+              })}
+
             {/* Specular sheen — a soft top-left highlight that reads as glass */}
             <radialGradient id="specular-glass" cx="30%" cy="20%" r="75%">
               <stop offset="0%" stopColor="hsl(0 0% 100%)" stopOpacity="0.30" />
@@ -1667,24 +1791,83 @@ export function Hypercube3D({
               faceHue = 320; // Top face - Meaning Architecture
             else if (midPoint.y > 50) faceHue = 195; // Bottom face - Presence
 
+            // ── Geometric Resonance overlay (Explore mode only) ──
+            // The edge's stroke encodes the relationship between its two faces:
+            //  • resonance > 0 → glows in the blended tint, thicker/brighter with count
+            //  • resonance = 0 but both faces populated → faint dashed "unexamined
+            //    relationship" hint
+            //  • either face empty → plain wireframe (unchanged)
+            const exploring = interactionMode === "explore";
+            const edge = resonance.edges[idx];
+            const isSelectedEdge = exploring && selectedEdgeIndex === idx;
+
+            // Defaults preserve the original wireframe appearance.
+            let stroke = `hsl(${faceHue} 30% 50%)`;
+            let strokeWidth = 2.5;
+            let dash: string | undefined = undefined;
+            let filterId = "glow-stable";
+            let opacity =
+              exploring && focusedFaceIndex !== null ? 0.4 : 0.7;
+
+            if (exploring && edge) {
+              if (edge.count > 0) {
+                const ratio =
+                  resonance.maxCount > 0 ? edge.count / resonance.maxCount : 0;
+                stroke = `url(#edgeGrad-${idx})`;
+                strokeWidth = 3 + ratio * 4.5;
+                opacity = 0.6 + ratio * 0.35;
+                filterId = "glow-bloom";
+              } else if (edge.bothNonEmpty) {
+                stroke = `hsl(${Math.round(edge.hue)} 55% 62%)`;
+                strokeWidth = 2;
+                dash = "3 7";
+                opacity = 0.32;
+              }
+            }
+            if (isSelectedEdge) {
+              opacity = 1;
+              strokeWidth += 1.5;
+              filterId = "glow-bloom";
+            }
+
             return (
-              <line
-                key={`outer-${idx}`}
-                x1={outerCorners[i].x}
-                y1={outerCorners[i].y}
-                x2={outerCorners[j].x}
-                y2={outerCorners[j].y}
-                stroke={`hsl(${faceHue} 30% 50%)`}
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                filter="url(#glow-stable)"
-                opacity={
-                  interactionMode === "explore" && focusedFaceIndex !== null
-                    ? 0.4
-                    : 0.7
-                }
-                style={{ transition: "opacity 0.5s ease" }}
-              />
+              <g key={`outer-${idx}`}>
+                <line
+                  x1={outerCorners[i].x}
+                  y1={outerCorners[i].y}
+                  x2={outerCorners[j].x}
+                  y2={outerCorners[j].y}
+                  stroke={stroke}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={dash}
+                  strokeLinecap="round"
+                  filter={`url(#${filterId})`}
+                  opacity={opacity}
+                  style={{
+                    transition:
+                      "opacity 0.5s ease, stroke-width 0.3s ease",
+                  }}
+                />
+                {exploring && (
+                  // Invisible fat hit-target so the thin edge is easy to click.
+                  <line
+                    x1={outerCorners[i].x}
+                    y1={outerCorners[i].y}
+                    x2={outerCorners[j].x}
+                    y2={outerCorners[j].y}
+                    stroke="transparent"
+                    strokeWidth={16}
+                    strokeLinecap="round"
+                    style={{ cursor: "pointer", pointerEvents: "stroke" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedEdgeIndex((prev) =>
+                        prev === idx ? null : idx,
+                      );
+                    }}
+                  />
+                )}
+              </g>
             );
           })}
 
@@ -2323,6 +2506,190 @@ export function Hypercube3D({
             )}
           </div>
         </div>
+
+        {/* EDGE RESONANCE PANEL — Geometric Resonance. Opens when a cube edge is
+            clicked in Explore mode: names the two adjacent faces, lists the
+            elements that resonate across both, or (when both faces are populated
+            yet nothing bridges them) offers a bridge prompt + Wizard hand-off. */}
+        {interactionMode === "explore" &&
+          selectedEdge &&
+          (() => {
+            const edge = selectedEdge;
+            const fa = CUBE_FACES[edge.faceA];
+            const fb = CUBE_FACES[edge.faceB];
+            const hue = Math.round(edge.hue);
+            const faceChip = (face: CubeFace) => (
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border"
+                style={{
+                  borderColor: `hsl(${face.tint.hue} 45% 50% / 0.4)`,
+                  background: `hsl(${face.tint.hue} 45% 22% / 0.3)`,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 40 40" className="flex-shrink-0">
+                  <path
+                    d={face.glyph}
+                    fill="none"
+                    stroke={`hsl(${face.tint.hue} 60% 70%)`}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span
+                  className="text-[11px] font-medium whitespace-nowrap"
+                  style={{ color: `hsl(${face.tint.hue} 45% 72%)` }}
+                >
+                  {face.shortLabel}
+                </span>
+              </span>
+            );
+            const emptyFace = edge.aCount === 0 ? fa : fb;
+            return (
+              <aside
+                className="hypercube-ui-panel pointer-events-auto absolute right-4 top-1/2 -translate-y-1/2 z-30 w-[320px] max-h-[76vh] flex flex-col rounded-2xl border backdrop-blur-md bg-black/30 overflow-hidden shadow-2xl"
+                style={{
+                  borderColor: `hsl(${hue} 45% 50% / 0.4)`,
+                  boxShadow: `0 0 0 1px hsl(${hue} 55% 55% / 0.18) inset, 0 8px 40px hsl(${hue} 60% 20% / 0.4)`,
+                }}
+              >
+                {/* Header — the relationship */}
+                <div className="px-4 py-3 border-b border-white/10 flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1.5"
+                      style={{ color: `hsl(${hue} 45% 65%)` }}
+                    >
+                      <Zap className="w-3 h-3" /> Edge Resonance
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      {faceChip(fa)}
+                      <span className="text-muted-foreground/50 text-xs">×</span>
+                      {faceChip(fb)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedEdgeIndex(null)}
+                    className="p-1 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                    title="Close"
+                    aria-label="Close edge panel"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Resonance summary */}
+                <div className="px-4 py-2.5 border-b border-white/10 text-xs">
+                  {edge.count > 0 ? (
+                    <span className="text-foreground/90">
+                      <span className="font-semibold" style={{ color: `hsl(${hue} 55% 68%)` }}>
+                        {edge.count}
+                      </span>{" "}
+                      shared element{edge.count !== 1 ? "s" : ""} resonate across these faces.
+                    </span>
+                  ) : edge.bothNonEmpty ? (
+                    <span className="text-muted-foreground">
+                      No elements connect these faces yet.
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {emptyFace.label} has no elements yet.
+                    </span>
+                  )}
+                </div>
+
+                {/* Body */}
+                {edge.count > 0 ? (
+                  <div
+                    className="chat-scrollbar overflow-y-auto p-2 space-y-2"
+                    style={{ "--chat-scrollbar-hue": hue } as React.CSSProperties}
+                  >
+                    {edge.shared.map((el: CanvasElement) => {
+                      const preview = getElementPreview(el, project);
+                      const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
+                      return (
+                        <div
+                          key={el.id}
+                          className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-white/15 hover:border-white/30 transition-all group"
+                          style={{
+                            borderLeftColor: `hsl(${hue} 45% 52%)`,
+                            borderLeftWidth: "2px",
+                          }}
+                        >
+                          <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                          <span className="text-xs text-foreground truncate">
+                            {preview.title}
+                          </span>
+                          <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                            {onPreviewElement && (
+                              <button
+                                onClick={() => onPreviewElement(el)}
+                                className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                title="Quick View"
+                              >
+                                <Eye className="w-3 h-3" />
+                              </button>
+                            )}
+                            {onNavigateToElement && (
+                              <button
+                                onClick={() => onNavigateToElement(el.id)}
+                                className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                title="View on Canvas"
+                              >
+                                <MapPin className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : edge.bothNonEmpty ? (
+                  <div className="p-3">
+                    <div
+                      className="rounded-xl border p-3"
+                      style={{
+                        borderColor: `hsl(${hue} 45% 45% / 0.35)`,
+                        background: `hsl(${hue} 45% 20% / 0.15)`,
+                      }}
+                    >
+                      <p className="text-xs text-foreground/85 leading-relaxed">
+                        Nothing connects{" "}
+                        <span className="font-semibold" style={{ color: `hsl(${fa.tint.hue} 55% 70%)` }}>
+                          {fa.label}
+                        </span>{" "}
+                        to{" "}
+                        <span className="font-semibold" style={{ color: `hsl(${fb.tint.hue} 55% 70%)` }}>
+                          {fb.label}
+                        </span>{" "}
+                        yet — create a bridge card that ties them together.
+                      </p>
+                      <button
+                        onClick={() => openBridgeChat(edge.faceA, edge.faceB)}
+                        className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors"
+                        style={{
+                          borderColor: `hsl(${hue} 55% 55% / 0.5)`,
+                          background: `hsl(${hue} 55% 45% / 0.18)`,
+                          color: `hsl(${hue} 55% 80%)`,
+                        }}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> Ask the Wizard to bridge them
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Tag elements to{" "}
+                      <span className="font-medium text-foreground/80">{emptyFace.label}</span>{" "}
+                      to reveal how it relates to {emptyFace === fa ? fb.label : fa.label}. Once
+                      both sides have elements, this edge will surface a bridge prompt.
+                    </p>
+                  </div>
+                )}
+              </aside>
+            );
+          })()}
 
         {/* CENTER PANEL - AI Chatbot + Tagged Elements (bottom-right dock) */}
         {interactionMode === "default" && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
