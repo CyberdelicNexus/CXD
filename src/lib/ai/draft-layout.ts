@@ -29,7 +29,7 @@
  * a flow-grid, same spirit as framing-to-canvas's CELL_W/COLS grid, sized
  * to real content instead of a fixed cell.
  */
-import type { CanvasElement, ContainerElement, TextElement, ShapeElement } from '@/types/canvas-elements';
+import type { CanvasElement, ContainerElement, TextElement, ShapeElement, CanvasEdge } from '@/types/canvas-elements';
 
 // ─── Tunables ──────────────────────────────────────────────────────────
 // Kept in the ranges CANVAS_GENERATION_GUIDE (element-generation.ts) already
@@ -59,6 +59,8 @@ const SHAPE_SIZE_MAX = 80;
 const GROUP_GAP = 64; // between top-level groups — within the requested 40-90px range
 const MAX_ROW_WIDTH = 1700; // wrap point for the shelf-packed flow-grid (~3 containers wide)
 
+const MINDMAP_GAP = 90; // clearance between mind-map node bounding circles
+
 const clamp = (v: number, min: number, max: number) =>
   Number.isFinite(v) ? Math.min(Math.max(v, min), max) : min;
 
@@ -86,6 +88,10 @@ interface LayoutGroup {
   members: CanvasElement[];
   width: number;
   height: number;
+  /** Element id that represents this group (container id, or the loose element's id). */
+  repId: string;
+  /** Ids of every element in this group (used to map edge endpoints to groups). */
+  memberIds: string[];
 }
 
 /** Container + its children, laid out as one stacked column inside the container. */
@@ -93,7 +99,13 @@ function layoutContainerGroup(container: ContainerElement, children: CanvasEleme
   if (children.length === 0) {
     const width = clamp(container.width, MIN_CONTAINER_W, MAX_CONTAINER_W);
     const height = clamp(container.height, MIN_CONTAINER_H, MAX_EMPTY_CONTAINER_H);
-    return { members: [{ ...container, x: 0, y: 0, width, height }], width, height };
+    return {
+      members: [{ ...container, x: 0, y: 0, width, height }],
+      width,
+      height,
+      repId: container.id,
+      memberIds: [container.id],
+    };
   }
 
   // Content width: wide enough for the widest child, within the container's sane range.
@@ -160,7 +172,13 @@ function layoutContainerGroup(container: ContainerElement, children: CanvasEleme
   const height = Math.max(MIN_CONTAINER_H, contentHeight);
   const localContainer: ContainerElement = { ...container, x: 0, y: 0, width, height };
 
-  return { members: [localContainer, ...localMembers], width, height };
+  return {
+    members: [localContainer, ...localMembers],
+    width,
+    height,
+    repId: container.id,
+    memberIds: [container.id, ...localMembers.map((m) => m.id)],
+  };
 }
 
 /** A top-level text/shape with no container — its own single-element group. */
@@ -168,14 +186,150 @@ function layoutLooseElement(el: CanvasElement): LayoutGroup {
   if (el.type === 'shape') {
     const width = clamp(el.width, SHAPE_SIZE_MIN, SHAPE_SIZE_MAX);
     const height = clamp(el.height, SHAPE_SIZE_MIN, SHAPE_SIZE_MAX);
-    return { members: [{ ...el, x: 0, y: 0, width, height }], width, height };
+    return { members: [{ ...el, x: 0, y: 0, width, height }], width, height, repId: el.id, memberIds: [el.id] };
   }
   const width = clamp(el.width, MIN_TEXT_W, MAX_TEXT_W);
   const height = Math.max(
     clamp(el.height, MIN_TEXT_H, MAX_TEXT_H),
     estimateTextHeight((el as ShapeElement | TextElement).content || '', width)
   );
-  return { members: [{ ...el, x: 0, y: 0, width, height }], width, height };
+  return { members: [{ ...el, x: 0, y: 0, width, height }], width, height, repId: el.id, memberIds: [el.id] };
+}
+
+/** Radius of the circle that circumscribes a w×h box (box is inscribed). */
+function boundingRadius(w: number, h: number): number {
+  return 0.5 * Math.sqrt(w * w + h * h);
+}
+
+/**
+ * Lay a connected batch out as a radial mind map: the most-connected group is
+ * the hub at the origin, and every other group is placed on a ring by its BFS
+ * depth from the hub, ordered so children fan out near their parent's angle.
+ *
+ * Non-overlap is guaranteed geometrically: each group is modeled as the circle
+ * that circumscribes its bounding box, and both the ring radii (radial
+ * clearance from the previous ring) and the angular spacing within a ring are
+ * sized so those circles are always disjoint — disjoint circles ⇒ disjoint
+ * boxes. Container groups keep their internal stacked layout untouched (real
+ * size rules from layoutContainerGroup); only the whole group is translated.
+ *
+ * Returns null when the edges express no usable connectivity, so the caller
+ * can fall back to the shelf-packed grid.
+ */
+function layoutMindMap(
+  groups: LayoutGroup[],
+  edges: CanvasEdge[],
+  groupIdByElementId: Map<string, string>,
+): CanvasElement[] | null {
+  const groupByRep = new Map(groups.map((g) => [g.repId, g]));
+
+  // Group-level adjacency (undirected structure; out-degree breaks hub ties).
+  const adj = new Map<string, Set<string>>();
+  for (const g of groups) adj.set(g.repId, new Set());
+  const outDeg = new Map<string, number>();
+  for (const e of edges) {
+    const fr = groupIdByElementId.get(e.fromNodeId);
+    const to = groupIdByElementId.get(e.toNodeId);
+    if (!fr || !to || fr === to) continue;
+    adj.get(fr)!.add(to);
+    adj.get(to)!.add(fr);
+    outDeg.set(fr, (outDeg.get(fr) || 0) + 1);
+  }
+
+  // Hub = most-connected group (tie → highest out-degree, then first seen).
+  let hub = groups[0].repId;
+  let bestDeg = -1;
+  let bestOut = -1;
+  for (const g of groups) {
+    const deg = adj.get(g.repId)!.size;
+    const out = outDeg.get(g.repId) || 0;
+    if (deg > bestDeg || (deg === bestDeg && out > bestOut)) {
+      bestDeg = deg;
+      bestOut = out;
+      hub = g.repId;
+    }
+  }
+  if (bestDeg <= 0) return null; // no connectivity → let the grid handle it
+
+  // BFS depth from the hub.
+  const depth = new Map<string, number>([[hub, 0]]);
+  const queue = [hub];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const nb of Array.from(adj.get(cur)!)) {
+      if (!depth.has(nb)) {
+        depth.set(nb, depth.get(cur)! + 1);
+        queue.push(nb);
+      }
+    }
+  }
+  // Attach any disconnected groups as extra depth-1 branches so none are lost.
+  for (const g of groups) {
+    if (!depth.has(g.repId)) {
+      depth.set(g.repId, 1);
+      adj.get(hub)!.add(g.repId);
+      adj.get(g.repId)!.add(hub);
+    }
+  }
+
+  const maxDepth = Math.max(...Array.from(depth.values()));
+  const byDepth: string[][] = Array.from({ length: maxDepth + 1 }, () => []);
+  for (const [rep, d] of Array.from(depth.entries())) byDepth[d].push(rep);
+
+  const maxRadiusAt = (reps: string[]) =>
+    reps.reduce((m, r) => {
+      const g = groupByRep.get(r)!;
+      return Math.max(m, boundingRadius(g.width, g.height));
+    }, 0);
+
+  const angleOf = new Map<string, number>([[hub, 0]]);
+  // Angle of the shallowest already-placed neighbor, so a node sits near its parent.
+  const parentAngle = (rep: string): number => {
+    const d = depth.get(rep)!;
+    if (d === 0) return 0;
+    let best = 0;
+    let bestD = Infinity;
+    for (const nb of Array.from(adj.get(rep)!)) {
+      const nd = depth.get(nb) ?? Infinity;
+      if (nd < d && nd < bestD && angleOf.has(nb)) {
+        bestD = nd;
+        best = angleOf.get(nb)!;
+      }
+    }
+    return best;
+  };
+
+  const ringR: number[] = [0];
+  for (let d = 1; d <= maxDepth; d++) {
+    const reps = byDepth[d];
+    const n = reps.length;
+    const maxRThis = maxRadiusAt(reps);
+    const maxRPrev = maxRadiusAt(byDepth[d - 1]);
+    // Radial clearance from the previous ring.
+    const rRadial = ringR[d - 1] + maxRPrev + maxRThis + MINDMAP_GAP;
+    // Angular clearance so same-ring neighbors' circles never touch.
+    const rWithin = n > 1 ? (2 * maxRThis + MINDMAP_GAP) / (2 * Math.sin(Math.PI / n)) : 0;
+    ringR[d] = Math.max(rRadial, rWithin);
+    // Cluster children near their parent, then spread evenly around the ring.
+    reps.sort((a, b) => parentAngle(a) - parentAngle(b));
+    for (let i = 0; i < n; i++) {
+      angleOf.set(reps[i], (2 * Math.PI * i) / n);
+    }
+  }
+
+  const placed: CanvasElement[] = [];
+  for (const g of groups) {
+    const d = depth.get(g.repId)!;
+    const theta = angleOf.get(g.repId) ?? 0;
+    const cx = ringR[d] * Math.cos(theta);
+    const cy = ringR[d] * Math.sin(theta);
+    const offX = cx - g.width / 2;
+    const offY = cy - g.height / 2;
+    for (const m of g.members) {
+      placed.push({ ...m, x: m.x + offX, y: m.y + offY });
+    }
+  }
+  return placed;
 }
 
 /**
@@ -190,7 +344,7 @@ function layoutLooseElement(el: CanvasElement): LayoutGroup {
  * elementsBoundingBox + findClearGroupOrigin below and
  * element-generation-service.ts).
  */
-export function layoutDraftElements(elements: CanvasElement[]): CanvasElement[] {
+export function layoutDraftElements(elements: CanvasElement[], edges?: CanvasEdge[]): CanvasElement[] {
   if (elements.length === 0) return [];
 
   const containerIds = new Set(elements.filter((e) => e.type === 'container').map((e) => e.id));
@@ -213,6 +367,16 @@ export function layoutDraftElements(elements: CanvasElement[]): CanvasElement[] 
     } else if (!consumed.has(el.id)) {
       groups.push(layoutLooseElement(el));
     }
+  }
+
+  // Connected content → radial mind map (hub center, branches fanned out on
+  // rings). Falls back to the shelf-packed flow-grid below when there is no
+  // usable connectivity (returns null).
+  if (edges && edges.length > 0 && groups.length >= 2) {
+    const groupIdByElementId = new Map<string, string>();
+    for (const g of groups) for (const mid of g.memberIds) groupIdByElementId.set(mid, g.repId);
+    const mind = layoutMindMap(groups, edges, groupIdByElementId);
+    if (mind) return mind;
   }
 
   // Shelf-pack groups into a flow-grid: left to right, wrapping to a new row

@@ -366,6 +366,57 @@ export type CanvasElement =
   | BoardElement
   | ExperienceBlockElement;
 
+// ─── Hypercube tag inheritance ──────────────────────────────────────────
+// Children inside a container do NOT carry their own hypercubeTags (see the
+// generation sanitizer + framing-to-canvas): only top-level elements and the
+// containers themselves are tagged. So for any face membership / count in the
+// Map (Hypercube) views, a child must INHERIT the tags of its parent
+// container, computed at query time. Nothing is written back onto the child —
+// untagging the container therefore untags its whole subtree automatically.
+
+/**
+ * Effective face tags for an element: its own tags plus every ancestor
+ * container's tags (walking `containerId` up the chain). Pass either the full
+ * element array or a prebuilt id→element Map — pass a Map when calling this in
+ * a hot filter loop to avoid repeated linear scans.
+ */
+export function getEffectiveHypercubeTags(
+  element: CanvasElement,
+  elements: CanvasElement[] | ReadonlyMap<string, CanvasElement>,
+): HypercubeFaceTag[] {
+  const own = element.hypercubeTags ?? [];
+  if (!element.containerId) return own;
+
+  const getById = (id: string): CanvasElement | undefined =>
+    elements instanceof Map ? elements.get(id) : (elements as CanvasElement[]).find((e) => e.id === id);
+
+  const tags = new Set<HypercubeFaceTag>(own);
+  const seen = new Set<string>();
+  let parentId: string | undefined = element.containerId;
+  // v1 has a single nesting level, but walk defensively and guard cycles.
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = getById(parentId);
+    if (!parent) break;
+    (parent.hypercubeTags ?? []).forEach((t) => tags.add(t));
+    parentId = parent.containerId;
+  }
+  return Array.from(tags);
+}
+
+/**
+ * Does an element belong to `faceTag`, counting tags inherited from its parent
+ * container? Use this everywhere the Map views collect face-tagged elements so
+ * a tagged container surfaces its (untagged) children under that face.
+ */
+export function elementMatchesFace(
+  element: CanvasElement,
+  faceTag: HypercubeFaceTag,
+  elements: CanvasElement[] | ReadonlyMap<string, CanvasElement>,
+): boolean {
+  return getEffectiveHypercubeTags(element, elements).includes(faceTag);
+}
+
 // Connector endpoint styles
 export type ConnectorEndStyle = 'none' | 'arrow' | 'dot' | 'diamond' | 'square';
 

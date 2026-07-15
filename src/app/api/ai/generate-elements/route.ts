@@ -8,7 +8,7 @@ import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurren
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
 import {
   generateElementsSchema,
-  generatedToCanvasElements,
+  generatedToCanvas,
   CANVAS_GENERATION_GUIDE,
 } from "@/lib/ai/element-generation";
 import type { AIProviderKey, AIProjectContext } from "@/types/ai-types";
@@ -180,8 +180,8 @@ export async function POST(request: Request) {
       releaseConcurrency();
     }
 
-    // 8. Server-side validation + conversion to real CanvasElement[]
-    const elements = generatedToCanvasElements(result.object.elements);
+    // 8. Server-side validation + conversion to real CanvasElement[] + edges
+    const { elements, edges } = generatedToCanvas(result.object.elements, result.object.edges);
     if (elements.length === 0) {
       return NextResponse.json(
         { error: "The model produced no usable elements. Try rephrasing the request." },
@@ -192,6 +192,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       title: result.object.title,
       elements,
+      edges,
       usage: result.usage,
     });
   } catch (error) {

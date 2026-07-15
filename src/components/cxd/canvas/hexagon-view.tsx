@@ -3,7 +3,7 @@
 import React, { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useCXDStore } from "@/store/cxd-store";
 import { CXDSectionId } from "@/types/cxd-schema";
-import { HypercubeFaceTag, CanvasElement, SECTION_TO_FACE_TAG } from "@/types/canvas-elements";
+import { HypercubeFaceTag, CanvasElement, SECTION_TO_FACE_TAG, elementMatchesFace } from "@/types/canvas-elements";
 import { ChevronRight, Home, Layout, Box, Type, Link2, Image, Layers, ExternalLink } from "lucide-react";
 import dynamic from "next/dynamic";
 import { HexagonDetailPanel } from "./hexagon-detail-panel";
@@ -430,8 +430,12 @@ export function HexagonView() {
   // Get elements tagged to a specific face
   const getTaggedElementsForFace = useMemo(() => {
     const allElements = project.canvasLayout?.elements || [];
+    // Prebuilt id→element index so container-tag inheritance is O(1) per lookup.
+    const byId = new Map<string, CanvasElement>(
+      allElements.map((el: CanvasElement) => [el.id, el] as [string, CanvasElement]),
+    );
     return (faceTag: HypercubeFaceTag) => {
-      return allElements.filter((el) => el.hypercubeTags?.includes(faceTag));
+      return allElements.filter((el) => elementMatchesFace(el, faceTag, byId));
     };
   }, [project.canvasLayout?.elements]);
 

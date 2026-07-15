@@ -7,7 +7,7 @@
  * transaction, which also persists and broadcasts to collaborators).
  */
 
-import type { CanvasElement, HypercubeFaceTag } from '@/types/canvas-elements';
+import type { CanvasElement, CanvasEdge, HypercubeFaceTag } from '@/types/canvas-elements';
 import { useCXDStore } from '@/store/cxd-store';
 import { elementsBoundingBox } from '@/lib/framing-to-canvas';
 import { layoutDraftElements, findClearGroupOrigin, type BoundingBox } from '@/lib/ai/draft-layout';
@@ -67,6 +67,7 @@ export async function generateElementsFromPrompt(
     }
 
     const elements = (data as { elements?: CanvasElement[] }).elements || [];
+    const edges = (data as { edges?: CanvasEdge[] }).edges || [];
     if (elements.length === 0) {
       return { success: false, count: 0, error: 'No elements generated' };
     }
@@ -80,8 +81,9 @@ export async function generateElementsFromPrompt(
     // The model's own x/y are not spatially reliable (see draft-layout.ts
     // header) — recompute a real, non-overlapping structure first: each
     // container + its children becomes a grouped column, loose elements
-    // flow into a grid, all shelf-packed with generous gaps.
-    const laidOut = layoutDraftElements(elements);
+    // flow into a grid, all shelf-packed with generous gaps. When the model
+    // emitted connectors, this becomes a radial mind map instead.
+    const laidOut = layoutDraftElements(elements, edges);
     const bbox = elementsBoundingBox(laidOut);
 
     // Then place that group in free space near the current viewport
@@ -114,14 +116,25 @@ export async function generateElementsFromPrompt(
       .map((face) => FACE_DISPLAY_NAMES[face] as HypercubeFaceTag)
       .filter(Boolean);
 
-    const placed = laidOut.map((el) => ({
-      ...el,
-      x: el.x + dx,
-      y: el.y + dy,
-      ...(hypercubeTags.length > 0 ? { hypercubeTags } : {}),
-    }));
+    const placed = laidOut.map((el) => {
+      const shifted = { ...el, x: el.x + dx, y: el.y + dy };
+      // Tag hygiene: only top-level elements and containers carry face tags.
+      // Children inside a container inherit their parent's tags at query time
+      // in the Map views, so tagging each child would just be chip spam.
+      if (hypercubeTags.length > 0 && !el.containerId) {
+        const merged = Array.from(new Set([...(el.hypercubeTags || []), ...hypercubeTags]));
+        return { ...shifted, hypercubeTags: merged } as CanvasElement;
+      }
+      return shifted;
+    });
 
     store.addCanvasElements(placed);
+    // Insert connectors right after the elements so they share one undo entry
+    // (addCanvasEdges is batched + freeze-proof and deliberately skips its own
+    // history snapshot — see cxd-store.ts). Ids are preserved through layout.
+    if (edges.length > 0) {
+      store.addCanvasEdges(edges);
+    }
 
     // Frame the camera on the freshly placed group, same UX as the wizard's
     // canvas handoff (completeWizard → setPendingCanvasFitBounds).

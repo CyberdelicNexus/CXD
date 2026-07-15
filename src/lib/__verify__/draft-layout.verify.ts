@@ -11,7 +11,7 @@
  * provided obstacle box (and is a no-op when nothing is in the way).
  */
 import { layoutDraftElements, findClearGroupOrigin } from '../ai/draft-layout';
-import type { CanvasElement, ContainerElement, TextElement, ShapeElement } from '@/types/canvas-elements';
+import type { CanvasElement, ContainerElement, TextElement, ShapeElement, CanvasEdge } from '@/types/canvas-elements';
 
 let failures = 0;
 function check(cond: boolean, msg: string) {
@@ -60,6 +60,12 @@ function makeShape(x: number, y: number, w: number, h: number, containerId?: str
   return {
     id: id(), type: 'shape', x, y, width: w, height: h, zIndex: 1, locked: false,
     boardId: null, surface: 'canvas', shapeType: 'circle', content: '✨', containerId,
+  };
+}
+function makeEdge(fromId: string, toId: string): CanvasEdge {
+  return {
+    id: id(), fromNodeId: fromId, toNodeId: toId, fromAnchor: 'right', toAnchor: 'left',
+    boardId: null, surface: 'canvas',
   };
 }
 
@@ -149,6 +155,72 @@ console.log('Many groups (shelf-pack wrapping):');
 // ── Scenario 3: empty input ──
 console.log('Empty input:');
 check(layoutDraftElements([]).length === 0, 'empty array in, empty array out');
+
+// ── Scenario 4: mind map — edges present → radial layout, no overlaps. A
+// central hub with six branches, two of which have two sub-branches (a
+// three-ring tree). ──
+console.log('Mind map (radial hub-and-branch):');
+{
+  ref = 0;
+  const hub = makeText(0, 0, 300, 60, 'Central idea');
+  const branches: TextElement[] = [];
+  for (let i = 0; i < 6; i++) branches.push(makeText(0, 0, 280, 50, `Branch ${i}`));
+  const sub: TextElement[] = [];
+  for (let i = 0; i < 4; i++) sub.push(makeText(0, 0, 260, 50, `Sub ${i}`));
+  const elements: CanvasElement[] = [hub, ...branches, ...sub];
+  const edges: CanvasEdge[] = [
+    ...branches.map((b) => makeEdge(hub.id, b.id)),
+    makeEdge(branches[0].id, sub[0].id),
+    makeEdge(branches[0].id, sub[1].id),
+    makeEdge(branches[1].id, sub[2].id),
+    makeEdge(branches[1].id, sub[3].id),
+  ];
+
+  const laidOut = layoutDraftElements(elements, edges);
+  check(laidOut.length === elements.length, `element count preserved (${laidOut.length}/${elements.length})`);
+  check(new Set(laidOut.map((e) => e.id)).size === laidOut.length, 'no duplicate ids introduced');
+  checkNoOverlaps(laidOut, 'Mind map (radial)');
+
+  // Edges reference valid ids that survive into the laid-out batch.
+  const ids = new Set(laidOut.map((e) => e.id));
+  check(
+    edges.every((e) => ids.has(e.fromNodeId) && ids.has(e.toNodeId)),
+    'every edge references two laid-out element ids'
+  );
+
+  // Radially fanned — every node lands at a distinct position (nothing stacked).
+  const positions = new Set(laidOut.map((e) => `${Math.round(e.x)},${Math.round(e.y)}`));
+  check(positions.size === laidOut.length, 'all nodes at distinct radial positions');
+
+  // Hub sits at the centre of the bounding box (branches surround it).
+  const minX = Math.min(...laidOut.map((e) => e.x));
+  const maxX = Math.max(...laidOut.map((e) => e.x + e.width));
+  const minY = Math.min(...laidOut.map((e) => e.y));
+  const maxY = Math.max(...laidOut.map((e) => e.y + e.height));
+  const placedHub = laidOut.find((e) => e.id === hub.id)!;
+  const hubCx = placedHub.x + placedHub.width / 2;
+  const hubCy = placedHub.y + placedHub.height / 2;
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  check(
+    Math.abs(hubCx - (minX + maxX) / 2) < spanX * 0.15 &&
+      Math.abs(hubCy - (minY + maxY) / 2) < spanY * 0.15,
+    'hub is centered within the mind map'
+  );
+}
+
+// ── Scenario 5: edges present but reference missing ids → no connectivity,
+// falls back to the shelf-packed grid without crashing. ──
+console.log('Mind map fallback (edges reference nothing):');
+{
+  ref = 0;
+  const a = makeText(0, 0, 300, 60, 'Island A');
+  const b = makeText(0, 0, 300, 60, 'Island B');
+  const edges: CanvasEdge[] = [makeEdge('missing-1', 'missing-2')];
+  const laidOut = layoutDraftElements([a, b], edges);
+  check(laidOut.length === 2, 'both elements preserved on grid fallback');
+  checkNoOverlaps(laidOut, 'Fallback grid');
+}
 
 // ── findClearGroupOrigin ────────────────────────────────────────────
 console.log('findClearGroupOrigin:');

@@ -11,7 +11,7 @@ import {
   STATE_QUADRANTS,
   TRAIT_QUADRANTS,
 } from "@/types/cxd-schema";
-import { HypercubeFaceTag, CanvasElement } from "@/types/canvas-elements";
+import { HypercubeFaceTag, CanvasElement, elementMatchesFace } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { Button } from "@/components/ui/button";
@@ -151,8 +151,10 @@ export function HexagonDetailPanel({
   // Get tagged elements for this face
   const faceTag = SECTION_TO_TAG[sectionId];
   const allElements = project.canvasLayout?.elements || [];
+  // Children inherit their parent container's face tags (computed, never
+  // written back) — a tagged container surfaces its untagged children here.
   const taggedElements = faceTag
-    ? allElements.filter((el) => el.hypercubeTags?.includes(faceTag))
+    ? allElements.filter((el) => elementMatchesFace(el, faceTag, allElements))
     : [];
   const groupedElements = groupElementsByType(taggedElements);
   const hasTaggedElements = taggedElements.length > 0;

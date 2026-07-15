@@ -1,6 +1,6 @@
 import { Diagnostic, DiagnosticCategory, DiagnosticSeverity, EnrichedDiagnostic, ProjectPhase } from "@/types/diagnostics";
 import { CXDProject } from "@/types/cxd-schema";
-import { CanvasElement, HypercubeFaceTag } from "@/types/canvas-elements";
+import { CanvasElement, HypercubeFaceTag, elementMatchesFace } from "@/types/canvas-elements";
 import { getFaceDisplayName, clampToUnit } from "@/lib/display-utils";
 
 // Map section IDs to hypercube face tags
@@ -42,7 +42,10 @@ export interface FaceIntensity {
 // ─── Helper Functions ───────────────────────────────────────────────────────
 
 function getTaggedElementsForFace(elements: CanvasElement[], faceTag: HypercubeFaceTag): CanvasElement[] {
-  return elements.filter((el: CanvasElement) => el.hypercubeTags?.includes(faceTag));
+  // Count container-tag inheritance: children of a tagged container belong to
+  // the face even though they carry no tags of their own.
+  const byId = new Map<string, CanvasElement>(elements.map((el) => [el.id, el] as [string, CanvasElement]));
+  return elements.filter((el: CanvasElement) => elementMatchesFace(el, faceTag, byId));
 }
 
 /**

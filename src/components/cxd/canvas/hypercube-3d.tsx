@@ -12,6 +12,7 @@ import {
   HypercubeFaceTag,
   CanvasElement,
   BoardElement,
+  elementMatchesFace,
 } from "@/types/canvas-elements";
 import {
   ChevronRight,
@@ -1232,9 +1233,14 @@ export function Hypercube3D({
 
   const getTaggedElementsForFace = useMemo(() => {
     const allElements = project?.canvasLayout?.elements || [];
+    // Prebuilt id→element index so container-tag inheritance is O(1) per lookup:
+    // a tagged container surfaces its (untagged) children under the face.
+    const byId = new Map<string, CanvasElement>(
+      allElements.map((el: CanvasElement) => [el.id, el] as [string, CanvasElement]),
+    );
     return (faceTag: HypercubeFaceTag) => {
       return allElements.filter((el: CanvasElement) =>
-        el.hypercubeTags?.includes(faceTag),
+        elementMatchesFace(el, faceTag, byId),
       );
     };
   }, [project?.canvasLayout?.elements]);
