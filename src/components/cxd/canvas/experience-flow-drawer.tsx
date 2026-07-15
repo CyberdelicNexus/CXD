@@ -239,15 +239,30 @@ export function ExperienceFlowDrawer() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-      <div className="pointer-events-auto">
-        {/* Collapsed bar */}
+      {/* Thin connector line - spans the full screen, flush with the trigger's bottom edge.
+          Only visible when collapsed; fades out once the drawer expands to a full-width bar. */}
+      <div
+        aria-hidden="true"
+        className={cn(
+          "absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-400/50 to-transparent shadow-[0_0_8px_rgba(139,92,246,0.35)] pointer-events-none transition-opacity duration-300",
+          isExpanded ? "opacity-0" : "opacity-100",
+        )}
+      />
+
+      <div className="relative z-10 pointer-events-auto flex flex-col items-center">
+        {/* Trigger - a compact centered pill when collapsed, a full-width bar when expanded */}
         <div
           role="button"
           tabIndex={0}
           data-tour-id="canvas-experience-flow"
           onClick={() => setIsExpanded(!isExpanded)}
           onKeyDown={(e) => e.key === 'Enter' && setIsExpanded(!isExpanded)}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 backdrop-blur-xl border-t border-border hover:brightness-110 transition-colors cursor-pointer"
+          className={cn(
+            "flex items-center justify-center gap-2 backdrop-blur-xl hover:brightness-110 transition-all duration-300 ease-out cursor-pointer",
+            isExpanded
+              ? "w-full py-2.5 px-4 border-t border-border"
+              : "py-2 px-5 rounded-t-2xl border border-b-0 border-violet-500/30 shadow-[0_-4px_24px_rgba(139,92,246,0.2)]",
+          )}
           style={{ backgroundColor: drawerBgColor }}
         >
           <Activity className="w-4 h-4 text-primary" />
@@ -359,7 +374,7 @@ export function ExperienceFlowDrawer() {
 
         {/* Expanded drawer */}
         <div
-          className={`backdrop-blur-xl border-t border-border transition-all duration-300 ease-out overflow-hidden ${isExpanded ? "max-h-[520px]" : "max-h-0"
+          className={`w-full backdrop-blur-xl border-t border-border transition-all duration-300 ease-out overflow-hidden ${isExpanded ? "max-h-[520px]" : "max-h-0"
             }`}
           style={{ backgroundColor: drawerBgColor }}
         >

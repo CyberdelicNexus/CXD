@@ -48,3 +48,4 @@ thin line running across the screen.
 - [ ] Click outside doesn't deselect them
 - [ ] Embedded websites capture clicks — need a drag handle/window chrome so the element can
       be moved without interacting with the iframe; redesign interaction model
+- [ ] File-preview iframe (linkMode 'file', canvas-element.tsx ~7065) has the same drag-trap as embeds had — apply the same inert/shield pattern
