@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X, FileText, Download, RefreshCw, Plus, StickyNote, FileUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
@@ -52,6 +53,9 @@ export function ERDGenerator({
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showPlaceMenu, setShowPlaceMenu] = useState(false);
   const placeMenuRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   // Use the globally selected model from the credit meter, falling back to prop/default
   const { selectedModel } = useAICredits();
@@ -281,18 +285,31 @@ export function ERDGenerator({
     }
   }, [showPlaceMenu]);
 
-  if (!isOpen) return null;
+  // Close on Escape while open
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center pt-20">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+  if (!mounted || !isOpen) return null;
 
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      aria-modal="true"
+      role="dialog"
+      aria-label="Experience Requirement Document"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
       {/* Modal */}
-      <div className="relative w-full max-w-4xl max-h-[calc(85vh-5rem)] mx-4 bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div
+        className="relative w-full max-w-4xl max-h-[85vh] mx-4 bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="px-6 py-4 border-b border-border flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -461,6 +478,7 @@ export function ERDGenerator({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

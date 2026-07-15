@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Download,
@@ -414,6 +415,9 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
   const [calFeed, setCalFeed] = useState<CalendarFeedState>({ status: "idle" });
   const [calCopied, setCalCopied] = useState(false);
   const calCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   const projectName = project?.name || project?.intentionCore?.projectName || "Untitled";
 
@@ -514,16 +518,32 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     }
   }, []);
 
-  if (!isOpen) return null;
+  // Close on Escape while open
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
-  return (
+  if (!mounted || !isOpen) return null;
+
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center pt-20">
-        {/* Backdrop */}
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-
+      <div
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        aria-modal="true"
+        role="dialog"
+        aria-label="Export & Deliverables"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
         {/* Panel */}
-        <div className="relative mx-4 flex max-h-[calc(88vh-5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/95 shadow-2xl backdrop-blur-xl">
+        <div
+          className="relative mx-4 flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/95 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200"
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Glass top hairline */}
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
 
@@ -750,6 +770,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
         isOpen={erdOpen}
         onClose={() => setErdOpen(false)}
       />
-    </>
+    </>,
+    document.body
   );
 }
