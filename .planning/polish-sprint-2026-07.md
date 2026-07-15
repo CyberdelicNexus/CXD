@@ -52,3 +52,5 @@ thin line running across the screen.
 
 ## Explore mode decision (2026-07-15)
 User picked Concept 1 'Geometric Resonance' (edge-resonance): cube edges lit by count of elements sharing both adjacent faces' tags; click edge -> panel with shared elements or bridge prompt. Build AFTER current regression fixes + Export hub.
+
+## Sprint status 2026-07-15 EOD: ALL implementation items shipped (chat, containers, embeds+CSP, duplicates, Draft v2 + mind maps + tag inheritance, AI model revival, flow pill, Export hub phase 1, Geometric Resonance). Open: ICS feed, collab review + QA gate, templates (awaiting exemplars), file-preview drag-trap, Export hub phase 2 artifacts, MOONSHOT_API_KEY rotation (user), merge to main (user gate).
