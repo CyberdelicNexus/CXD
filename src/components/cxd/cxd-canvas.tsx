@@ -934,11 +934,15 @@ export function CXDCanvas() {
     (line: LineElement) => {
       pushCanvasHistory();
       const offset = 20;
+      // Copy must render above everything else on the canvas — an
+      // unbumped (equal) zIndex leaves it buried under other elements.
+      const lineDupMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
       const newLine: LineElement = {
         ...line,
         id: uuidv4(),
         x: line.x + offset,
         y: line.y + offset,
+        zIndex: lineDupMaxZ + 1,
         start: line.start ? { x: line.start.x + offset, y: line.start.y + offset } : line.start,
         end: line.end ? { x: line.end.x + offset, y: line.end.y + offset } : line.end,
         bend: line.bend ? { x: line.bend.x + offset, y: line.bend.y + offset } : line.bend,
@@ -947,7 +951,7 @@ export function CXDCanvas() {
       setSelectedElementId(newLine.id);
       setSelectedElementIds(new Set([newLine.id]));
     },
-    [pushCanvasHistory, syncAddElement],
+    [pushCanvasHistory, syncAddElement, canvasElements],
   );
 
   // Merge project's saved canvas layout with defaults
@@ -1866,11 +1870,15 @@ export function CXDCanvas() {
       // Alt-drag to duplicate
       if (e.altKey && element) {
         pushCanvasHistory();
+        // Copy must render above everything else on the canvas — an
+        // unbumped (equal) zIndex leaves it buried under other elements.
+        const altDragMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
         const newElement: CanvasElement = {
           ...element,
           id: uuidv4(),
           x: element.x,
           y: element.y,
+          zIndex: altDragMaxZ + 1,
         };
 
         // For line elements, also copy start/end/bend with a small offset
@@ -3090,6 +3098,9 @@ export function CXDCanvas() {
         // the destination). Batch-add via addCanvasElements so all N elements
         // land in one store update / one re-render, instead of N sequential
         // renders that intermittently tripped React's render-limit (error #310).
+        // Pasted copies must render above everything else on the canvas — an
+        // unbumped (equal) zIndex leaves them buried under other elements.
+        let pasteMaxZ = Math.max(0, ...getCanvasElements().map((el) => el.zIndex || 0));
         const prepared: CanvasElement[] = clipboard.map((element) => {
           const cloned =
             typeof structuredClone === "function"
@@ -3097,11 +3108,13 @@ export function CXDCanvas() {
               : (JSON.parse(JSON.stringify(element)) as CanvasElement);
           const offsetX = element.x - minX;
           const offsetY = element.y - minY;
+          pasteMaxZ += 1;
           return {
             ...cloned,
             id: uuidv4(),
             x: canvasX + offsetX,
             y: canvasY + offsetY,
+            zIndex: pasteMaxZ,
             boardId: activeBoardId,
             containerId: undefined,
             groupId: undefined,
@@ -3128,15 +3141,20 @@ export function CXDCanvas() {
         pushCanvasHistory(); // Save state before duplicate
 
         const newIds = new Set<string>();
+        const elements = getCanvasElements();
+        // Copies must render above everything else on the canvas — an
+        // unbumped (equal) zIndex leaves them buried under other elements.
+        let ctrlDMaxZ = Math.max(0, ...elements.map((el) => el.zIndex || 0));
         selectedElementIds.forEach((id) => {
-          const elements = getCanvasElements();
           const element = elements.find((el) => el.id === id);
           if (element) {
+            ctrlDMaxZ += 1;
             const newElement: CanvasElement = {
               ...element,
               id: uuidv4(),
               x: element.x + 20,
               y: element.y + 20,
+              zIndex: ctrlDMaxZ,
             };
             syncAddElement(newElement);
             newIds.add(newElement.id);
@@ -3716,14 +3734,19 @@ export function CXDCanvas() {
   const handleMultiSelectDuplicateElements = useCallback(() => {
     pushCanvasHistory();
     const newIds = new Set<string>();
+    // Copies must render above everything else on the canvas — an
+    // unbumped (equal) zIndex leaves them buried under other elements.
+    let multiDupMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
     selectedElementIds.forEach((id) => {
       const element = canvasElements.find((el) => el.id === id);
       if (element) {
+        multiDupMaxZ += 1;
         const newElement: CanvasElement = {
           ...element,
           id: uuidv4(),
           x: element.x + 20,
           y: element.y + 20,
+          zIndex: multiDupMaxZ,
           groupId: undefined, // Don't copy group assignment
         };
         syncAddElement(newElement);
@@ -5538,12 +5561,18 @@ export function CXDCanvas() {
               const pasteX = (contextMenuPos.x - rect.left - canvasPosition.x) / canvasZoom;
               const pasteY = (contextMenuPos.y - rect.top - canvasPosition.y) / canvasZoom;
 
+              // Pasted copies must render above everything else on the
+              // canvas — an unbumped (equal) zIndex leaves them buried
+              // under other elements.
+              let ctxPasteMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
               const newIds = clipboard.map((el, i) => {
+                ctxPasteMaxZ += 1;
                 const newElement = {
                   ...el,
                   id: uuidv4(),
                   x: pasteX + i * 20,
                   y: pasteY + i * 20,
+                  zIndex: ctxPasteMaxZ,
                 };
                 syncAddElement(newElement);
                 return newElement.id;
@@ -5558,6 +5587,9 @@ export function CXDCanvas() {
             setContextMenuTarget(null);
           }}
           onDuplicate={() => {
+            // Copies must render above everything else on the canvas — an
+            // unbumped (equal) zIndex leaves them buried under other elements.
+            let ctxDupMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
             if (selectedElementId) {
               const element = canvasElements.find(el => el.id === selectedElementId);
               if (element) {
@@ -5566,6 +5598,7 @@ export function CXDCanvas() {
                   id: uuidv4(),
                   x: element.x + 20,
                   y: element.y + 20,
+                  zIndex: ctxDupMaxZ + 1,
                 };
                 syncAddElement(newElement);
                 setSelectedElementId(newElement.id);
@@ -5575,11 +5608,13 @@ export function CXDCanvas() {
               selectedElementIds.forEach(id => {
                 const element = canvasElements.find(el => el.id === id);
                 if (element) {
+                  ctxDupMaxZ += 1;
                   const newElement = {
                     ...element,
                     id: uuidv4(),
                     x: element.x + 20,
                     y: element.y + 20,
+                    zIndex: ctxDupMaxZ,
                   };
                   syncAddElement(newElement);
                   newIds.push(newElement.id);
