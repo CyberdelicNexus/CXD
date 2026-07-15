@@ -49,3 +49,6 @@ thin line running across the screen.
 - [ ] Embedded websites capture clicks — need a drag handle/window chrome so the element can
       be moved without interacting with the iframe; redesign interaction model
 - [ ] File-preview iframe (linkMode 'file', canvas-element.tsx ~7065) has the same drag-trap as embeds had — apply the same inert/shield pattern
+
+## Explore mode decision (2026-07-15)
+User picked Concept 1 'Geometric Resonance' (edge-resonance): cube edges lit by count of elements sharing both adjacent faces' tags; click edge -> panel with shared elements or bridge prompt. Build AFTER current regression fixes + Export hub.
