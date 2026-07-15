@@ -9,7 +9,8 @@
 
 import type { CanvasElement, HypercubeFaceTag } from '@/types/canvas-elements';
 import { useCXDStore } from '@/store/cxd-store';
-import { framingInsertionOrigin } from '@/lib/framing-to-canvas';
+import { elementsBoundingBox } from '@/lib/framing-to-canvas';
+import { layoutDraftElements, findClearGroupOrigin, type BoundingBox } from '@/lib/ai/draft-layout';
 import { FACE_DISPLAY_NAMES } from '@/lib/display-utils';
 
 export interface ElementGenerationOptions {
@@ -76,19 +77,44 @@ export async function generateElementsFromPrompt(
       return { success: false, count: 0, error: 'No active project' };
     }
 
-    // Shift the batch so its bounding box lands clear of existing content
-    const origin = framingInsertionOrigin(project);
-    const minX = Math.min(...elements.map((el) => el.x));
-    const minY = Math.min(...elements.map((el) => el.y));
-    const dx = origin.x - minX;
-    const dy = origin.y - minY;
+    // The model's own x/y are not spatially reliable (see draft-layout.ts
+    // header) — recompute a real, non-overlapping structure first: each
+    // container + its children becomes a grouped column, loose elements
+    // flow into a grid, all shelf-packed with generous gaps.
+    const laidOut = layoutDraftElements(elements);
+    const bbox = elementsBoundingBox(laidOut);
+
+    // Then place that group in free space near the current viewport
+    // center, offsetting clear of existing content when it would land on
+    // top of it, instead of trusting the model's suggested coordinates.
+    let dx = 0;
+    let dy = 0;
+    if (bbox) {
+      const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+      const viewportH = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
+      const center = {
+        x: (viewportW / 2 - store.canvasPosition.x) / store.canvasZoom,
+        y: (viewportH / 2 - store.canvasPosition.y) / store.canvasZoom,
+      };
+      const obstacles: BoundingBox[] = (project.canvasLayout?.elements || [])
+        .filter(
+          (el) =>
+            !el.inInbox && !el.boardId && el.surface !== 'hypercube' && el.type !== 'line' &&
+            el.width > 0 && el.height > 0
+        )
+        .map((el) => ({ minX: el.x, minY: el.y, maxX: el.x + el.width, maxY: el.y + el.height }));
+      const groupSize = { width: bbox.maxX - bbox.minX, height: bbox.maxY - bbox.minY };
+      const clearOrigin = findClearGroupOrigin(groupSize, center, obstacles);
+      dx = clearOrigin.x - bbox.minX;
+      dy = clearOrigin.y - bbox.minY;
+    }
 
     const hypercubeTags: HypercubeFaceTag[] = (options.sourceFaces || [])
       .filter((face) => TAGGABLE_FACES.includes(face))
       .map((face) => FACE_DISPLAY_NAMES[face] as HypercubeFaceTag)
       .filter(Boolean);
 
-    const placed = elements.map((el) => ({
+    const placed = laidOut.map((el) => ({
       ...el,
       x: el.x + dx,
       y: el.y + dy,
@@ -96,6 +122,11 @@ export async function generateElementsFromPrompt(
     }));
 
     store.addCanvasElements(placed);
+
+    // Frame the camera on the freshly placed group, same UX as the wizard's
+    // canvas handoff (completeWizard → setPendingCanvasFitBounds).
+    const placedBbox = elementsBoundingBox(placed);
+    if (placedBbox) store.setPendingCanvasFitBounds(placedBbox);
 
     return {
       success: true,
