@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   X,
   Download,
@@ -14,12 +14,26 @@ import {
   Clapperboard,
   Share2,
   CalendarDays,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Check,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
 import { queryTasks } from "@/utils/task-engine";
 import { ERDGenerator } from "./canvas/erd-generator";
+import { ROLE_BUNDLES, buildRoleBriefMarkdown } from "@/lib/exports/role-briefs";
+import { buildFacilitationMarkdown } from "@/lib/exports/facilitation-sheet";
+import { buildPitchHTML } from "@/lib/exports/pitch-one-pager";
+import {
+  fetchCalendarFeed,
+  rotateCalendarFeed,
+  type CalendarFeedInfo,
+} from "@/lib/exports/calendar-feed";
 import type { CXDProject } from "@/types/cxd-schema";
+import { HYPERCUBE_FACE_TAGS, type HypercubeFaceTag } from "@/types/canvas-elements";
 import type { CanvasElement } from "@/types/canvas-elements";
 import type { TaskQuery, TaskProjection } from "@/types/plan-types";
 import type { ExperienceFlowStageV2, EngagementDistribution } from "@/types/cxd-schema";
@@ -277,7 +291,11 @@ function buildVersionsMarkdown(project: CXDProject, tasks: TaskProjection[]): st
 // ---------------------------------------------------------------------------
 // Card + group presentation
 // ---------------------------------------------------------------------------
-type CardAction = { label: string; onClick: () => void };
+type CardAction = {
+  label: string;
+  onClick: () => void;
+  icon?: React.ComponentType<{ className?: string }>;
+};
 
 interface ArtifactCardProps {
   icon: React.ComponentType<{ className?: string }>;
@@ -286,6 +304,7 @@ interface ArtifactCardProps {
   accent: string; // tailwind text color class for icon
   actions?: CardAction[];
   comingSoon?: boolean;
+  children?: React.ReactNode; // expanded content below the actions row
 }
 
 function ArtifactCard({
@@ -295,6 +314,7 @@ function ArtifactCard({
   accent,
   actions,
   comingSoon,
+  children,
 }: ArtifactCardProps) {
   return (
     <div
@@ -329,18 +349,23 @@ function ArtifactCard({
 
       {actions && actions.length > 0 && !comingSoon && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              onClick={action.onClick}
-              className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
-            >
-              <Download className="h-3 w-3" />
-              {action.label}
-            </button>
-          ))}
+          {actions.map((action) => {
+            const ActionIcon = action.icon || Download;
+            return (
+              <button
+                key={action.label}
+                onClick={action.onClick}
+                className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
+              >
+                <ActionIcon className="h-3 w-3" />
+                {action.label}
+              </button>
+            );
+          })}
         </div>
       )}
+
+      {!comingSoon && children}
     </div>
   );
 }
@@ -372,12 +397,23 @@ interface ExportHubProps {
   onOpenShare?: () => void;
 }
 
+type CalendarFeedState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; info: CalendarFeedInfo }
+  | { status: "error"; message: string };
+
 export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
   const getCurrentProject = useCXDStore((s) => s.getCurrentProject);
   const getExperienceFlowStages = useCXDStore((s) => s.getExperienceFlowStages);
   const project = getCurrentProject();
 
   const [erdOpen, setErdOpen] = useState(false);
+  const [briefsOpen, setBriefsOpen] = useState(false);
+  const [calOpen, setCalOpen] = useState(false);
+  const [calFeed, setCalFeed] = useState<CalendarFeedState>({ status: "idle" });
+  const [calCopied, setCalCopied] = useState(false);
+  const calCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const projectName = project?.name || project?.intentionCore?.projectName || "Untitled";
 
@@ -403,6 +439,79 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     const tasks = getProjectTasks(proj);
     const md = buildVersionsMarkdown(proj, tasks);
     downloadTextFile(md, `Production-Pack-Versions-${slug(proj.name)}.md`, "text/markdown");
+  }, []);
+
+  const handleRoleBrief = useCallback((faces: HypercubeFaceTag[], label: string) => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return;
+    const md = buildRoleBriefMarkdown(proj, faces, label);
+    downloadTextFile(md, `Brief-${slug(label)}-${slug(proj.name)}.md`, "text/markdown");
+  }, []);
+
+  const handleFacilitation = useCallback(() => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return;
+    const stages = useCXDStore.getState().getExperienceFlowStages();
+    const md = buildFacilitationMarkdown(proj, stages);
+    downloadTextFile(md, `Facilitation-State-Care-${slug(proj.name)}.md`, "text/markdown");
+  }, []);
+
+  const handlePitch = useCallback(() => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return;
+    const html = buildPitchHTML(proj);
+    downloadTextFile(html, `Pitch-One-Pager-${slug(proj.name)}.html`, "text/html");
+  }, []);
+
+  const loadCalendarFeed = useCallback(async () => {
+    setCalFeed({ status: "loading" });
+    try {
+      const info = await fetchCalendarFeed();
+      setCalFeed({ status: "ready", info });
+    } catch (e) {
+      setCalFeed({ status: "error", message: e instanceof Error ? e.message : "Something went wrong." });
+    }
+  }, []);
+
+  const handleCalToggle = useCallback(() => {
+    setCalOpen((open) => {
+      const next = !open;
+      if (next) {
+        setCalFeed((s) => {
+          if (s.status === "idle" || s.status === "error") {
+            void loadCalendarFeed();
+            return { status: "loading" };
+          }
+          return s;
+        });
+      }
+      return next;
+    });
+  }, [loadCalendarFeed]);
+
+  const handleCalCopy = useCallback(async (feedUrl: string) => {
+    try {
+      await navigator.clipboard.writeText(feedUrl);
+      setCalCopied(true);
+      if (calCopyTimer.current) clearTimeout(calCopyTimer.current);
+      calCopyTimer.current = setTimeout(() => setCalCopied(false), 1800);
+    } catch {
+      // Clipboard unavailable — the URL is still visible and selectable.
+    }
+  }, []);
+
+  const handleCalRegenerate = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Regenerate the calendar feed URL?\n\nThe current URL will stop working immediately — anyone subscribed with it will need the new one.",
+    );
+    if (!confirmed) return;
+    setCalFeed({ status: "loading" });
+    try {
+      const info = await rotateCalendarFeed();
+      setCalFeed({ status: "ready", info });
+    } catch (e) {
+      setCalFeed({ status: "error", message: e instanceof Error ? e.message : "Something went wrong." });
+    }
   }, []);
 
   if (!isOpen) return null;
@@ -446,9 +555,9 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                 <ArtifactCard
                   icon={Presentation}
                   title="Pitch One-Pager"
-                  description="A concise concept sell: intention, desired change, personas and imagery on a single page."
+                  description="A print-ready concept page: intention, desired change, personas and sensory signature. Opens in the browser — print to PDF from there."
                   accent="text-rose-300"
-                  comingSoon
+                  actions={[{ label: "Download .html", onClick: handlePitch }]}
                 />
               </div>
             </section>
@@ -479,8 +588,53 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   title="Role-Scoped Briefs"
                   description="Per-discipline exports filtered by hypercube face — each collaborator gets only what they own."
                   accent="text-violet-300"
-                  comingSoon
-                />
+                  actions={[
+                    {
+                      label: briefsOpen ? "Hide roles" : "Choose role",
+                      icon: briefsOpen ? ChevronUp : ChevronDown,
+                      onClick: () => setBriefsOpen((v) => !v),
+                    },
+                  ]}
+                >
+                  {briefsOpen && (
+                    <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
+                      <div>
+                        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/35">
+                          Role bundles
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {ROLE_BUNDLES.map((bundle) => (
+                            <button
+                              key={bundle.id}
+                              onClick={() => handleRoleBrief(bundle.faces, bundle.label)}
+                              title={bundle.faces.join(" + ")}
+                              className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
+                            >
+                              <Download className="h-3 w-3" />
+                              {bundle.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/35">
+                          Single face
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {HYPERCUBE_FACE_TAGS.map((face) => (
+                            <button
+                              key={face}
+                              onClick={() => handleRoleBrief([face], face)}
+                              className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-white/60 transition-colors hover:border-violet-400/40 hover:bg-violet-500/15 hover:text-violet-200"
+                            >
+                              {face}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </ArtifactCard>
               </div>
             </section>
 
@@ -500,7 +654,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   title="Facilitation & State-Care Sheet"
                   description="State/trait intensity curve with consent and integration notes for the facilitator."
                   accent="text-cyan-300"
-                  comingSoon
+                  actions={[{ label: "Download .md", onClick: handleFacilitation }]}
                 />
               </div>
             </section>
@@ -525,8 +679,65 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   title="Calendar Feed"
                   description="Subscribe to task due dates and milestones as an ICS feed in your calendar."
                   accent="text-emerald-300"
-                  comingSoon
-                />
+                  actions={[
+                    {
+                      label: calOpen ? "Hide feed" : "Get feed URL",
+                      icon: calOpen ? ChevronUp : ChevronDown,
+                      onClick: handleCalToggle,
+                    },
+                  ]}
+                >
+                  {calOpen && (
+                    <div className="mt-3 space-y-2 border-t border-white/[0.06] pt-3">
+                      {calFeed.status === "loading" && (
+                        <p className="text-xs text-white/40">Fetching your feed URL…</p>
+                      )}
+                      {calFeed.status === "error" && (
+                        <div className="space-y-2">
+                          <p className="text-xs leading-relaxed text-amber-300/80">{calFeed.message}</p>
+                          <button
+                            onClick={() => void loadCalendarFeed()}
+                            className="flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/10"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            Retry
+                          </button>
+                        </div>
+                      )}
+                      {calFeed.status === "ready" && (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <code className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-[11px] text-white/70">
+                              {calFeed.info.feedUrl}
+                            </code>
+                            <button
+                              onClick={() => void handleCalCopy(calFeed.info.feedUrl)}
+                              title="Copy feed URL"
+                              className="flex-shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                            >
+                              {calCopied ? (
+                                <Check className="h-3.5 w-3.5 text-emerald-300" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => void handleCalRegenerate()}
+                              title="Regenerate — the old URL stops working"
+                              className="flex-shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <p className="text-[11px] leading-relaxed text-white/40">
+                            Subscribe in Google, Apple or Outlook calendar via &ldquo;Add calendar
+                            from URL&rdquo;.
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </ArtifactCard>
               </div>
             </section>
           </div>
