@@ -43,6 +43,21 @@ import { CommentThreadPanel } from './canvas/comment-thread';
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
 
+/**
+ * Duplicate-copy placement: spawn the copy beside the original (to the right,
+ * using its width) instead of diagonally overlapping it, so the copy is
+ * immediately visible without relying on z-index/selection state to
+ * disambiguate. Falls back to the old +20/+20 diagonal offset when width is
+ * missing/unusable (e.g. 0).
+ */
+function getDuplicateOffset(element: { width?: number }): { dx: number; dy: number } {
+  const w = element.width;
+  if (typeof w === "number" && w > 0) {
+    return { dx: w + 24, dy: 0 };
+  }
+  return { dx: 20, dy: 20 };
+}
+
 // Default section positions (used when no stored positions exist)
 const DEFAULT_SECTION_POSITIONS: Record<string, { x: number; y: number }> = {
   intentionCore: { x: 600, y: 100 },
@@ -933,19 +948,21 @@ export function CXDCanvas() {
   const handleDuplicateLine = useCallback(
     (line: LineElement) => {
       pushCanvasHistory();
-      const offset = 20;
       // Copy must render above everything else on the canvas — an
       // unbumped (equal) zIndex leaves it buried under other elements.
       const lineDupMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
+      // Spawn beside the original instead of diagonally overlapping it;
+      // translate the whole line (x/y and start/end/bend) by the same delta.
+      const { dx, dy } = getDuplicateOffset(line);
       const newLine: LineElement = {
         ...line,
         id: uuidv4(),
-        x: line.x + offset,
-        y: line.y + offset,
+        x: line.x + dx,
+        y: line.y + dy,
         zIndex: lineDupMaxZ + 1,
-        start: line.start ? { x: line.start.x + offset, y: line.start.y + offset } : line.start,
-        end: line.end ? { x: line.end.x + offset, y: line.end.y + offset } : line.end,
-        bend: line.bend ? { x: line.bend.x + offset, y: line.bend.y + offset } : line.bend,
+        start: line.start ? { x: line.start.x + dx, y: line.start.y + dy } : line.start,
+        end: line.end ? { x: line.end.x + dx, y: line.end.y + dy } : line.end,
+        bend: line.bend ? { x: line.bend.x + dx, y: line.bend.y + dy } : line.bend,
       };
       syncAddElement(newLine);
       setSelectedElementId(newLine.id);
@@ -3130,7 +3147,11 @@ export function CXDCanvas() {
           broadcastUpdate({ type: "element_add", element: el }),
         );
 
+        // Replace both selection pieces of state — leaving `selectedElementId`
+        // pointing at a pre-paste element keeps it at the forced top
+        // z-index alongside the pasted copies.
         setSelectedElementIds(new Set(prepared.map((el) => el.id)));
+        setSelectedElementId(prepared.length > 0 ? prepared[0].id : null);
         return;
       }
 
@@ -3149,11 +3170,12 @@ export function CXDCanvas() {
           const element = elements.find((el) => el.id === id);
           if (element) {
             ctrlDMaxZ += 1;
+            const { dx, dy } = getDuplicateOffset(element);
             const newElement: CanvasElement = {
               ...element,
               id: uuidv4(),
-              x: element.x + 20,
-              y: element.y + 20,
+              x: element.x + dx,
+              y: element.y + dy,
               zIndex: ctrlDMaxZ,
             };
             syncAddElement(newElement);
@@ -3161,8 +3183,12 @@ export function CXDCanvas() {
           }
         });
 
-        // Select duplicated elements
+        // Select duplicated elements — replace BOTH selection pieces of
+        // state. `selectedElementId` (the single/"primary" selection) is
+        // otherwise left pointing at an original, which keeps it at the
+        // forced top z-index and ties with (or beats) the new copies.
         setSelectedElementIds(newIds);
+        setSelectedElementId(newIds.size > 0 ? Array.from(newIds)[0] : null);
         return;
       }
 
@@ -3741,11 +3767,12 @@ export function CXDCanvas() {
       const element = canvasElements.find((el) => el.id === id);
       if (element) {
         multiDupMaxZ += 1;
+        const { dx, dy } = getDuplicateOffset(element);
         const newElement: CanvasElement = {
           ...element,
           id: uuidv4(),
-          x: element.x + 20,
-          y: element.y + 20,
+          x: element.x + dx,
+          y: element.y + dy,
           zIndex: multiDupMaxZ,
           groupId: undefined, // Don't copy group assignment
         };
@@ -3753,7 +3780,11 @@ export function CXDCanvas() {
         newIds.add(newElement.id);
       }
     });
+    // Replace both selection pieces of state — leaving `selectedElementId`
+    // pointing at an original keeps it at the forced top z-index, tying
+    // with (or beating) the new copies.
     setSelectedElementIds(newIds);
+    setSelectedElementId(newIds.size > 0 ? Array.from(newIds)[0] : null);
   }, [pushCanvasHistory, selectedElementIds, canvasElements, syncAddElement]);
 
   const handleMultiSelectCreateGroup = useCallback(() => {
@@ -4290,7 +4321,17 @@ export function CXDCanvas() {
                 tourId={_elIdx === 0 ? "canvas-element-sample" : undefined}
                 onUpdate={(updates) => syncUpdateElement(element.id, updates)}
                 onDelete={() => syncRemoveElement(element.id)}
-                onDuplicate={() => duplicateCanvasElement(element.id)}
+                onDuplicate={() => {
+                  const newId = duplicateCanvasElement(element.id);
+                  // Move selection to the new copy — leaving the original
+                  // selected keeps its 2e9 selection z-index boost active,
+                  // which ties with (or beats) the copy's z-index and makes
+                  // the copy appear to render behind the original.
+                  if (newId) {
+                    setSelectedElementId(newId);
+                    setSelectedElementIds(new Set([newId]));
+                  }
+                }}
                 onDragStart={(e) => {
                   // Prevent dragging while connecting
                   if (!isConnecting) {
@@ -5593,15 +5634,23 @@ export function CXDCanvas() {
             if (selectedElementId) {
               const element = canvasElements.find(el => el.id === selectedElementId);
               if (element) {
+                const { dx, dy } = getDuplicateOffset(element);
                 const newElement = {
                   ...element,
                   id: uuidv4(),
-                  x: element.x + 20,
-                  y: element.y + 20,
+                  x: element.x + dx,
+                  y: element.y + dy,
                   zIndex: ctxDupMaxZ + 1,
                 };
                 syncAddElement(newElement);
+                // Move selection to the new copy on BOTH selection pieces of
+                // state. The right-click handler that opened this menu seeds
+                // `selectedElementIds` with the original's id; leaving that
+                // stale after duplicating keeps the original "isSelected" too
+                // (via selectedElementIds.has), so both original and copy tie
+                // at the forced top z-index and the copy can render behind it.
                 setSelectedElementId(newElement.id);
+                setSelectedElementIds(new Set([newElement.id]));
               }
             } else if (selectedElementIds.size > 0) {
               const newIds: string[] = [];
@@ -5609,11 +5658,12 @@ export function CXDCanvas() {
                 const element = canvasElements.find(el => el.id === id);
                 if (element) {
                   ctxDupMaxZ += 1;
+                  const { dx, dy } = getDuplicateOffset(element);
                   const newElement = {
                     ...element,
                     id: uuidv4(),
-                    x: element.x + 20,
-                    y: element.y + 20,
+                    x: element.x + dx,
+                    y: element.y + dy,
                     zIndex: ctxDupMaxZ,
                   };
                   syncAddElement(newElement);

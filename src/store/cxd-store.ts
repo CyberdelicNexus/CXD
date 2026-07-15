@@ -252,7 +252,7 @@ interface CXDState {
   commitDragPositionsToYjs: (updates: Array<{ id: string; x: number; y: number; start?: { x: number; y: number }; end?: { x: number; y: number }; bend?: { x: number; y: number } }>) => void;
   getCanvasElements: () => CanvasElement[];
   getAllInboxItems: () => CanvasElement[]; // Get all inbox items across all boards
-  duplicateCanvasElement: (elementId: string) => void;
+  duplicateCanvasElement: (elementId: string) => string | null;
 
   // Actions - Canvas Edges (Connectors)
   addCanvasEdge: (edge: CanvasEdge) => void;
@@ -1799,11 +1799,11 @@ export const useCXDStore = create<CXDState>()(
 
       duplicateCanvasElement: (elementId) => {
         const currentProject = get().getCurrentProject();
-        if (!currentProject) return;
+        if (!currentProject) return null;
 
         const { yDoc } = get();
         if (yDoc) {
-          yjsDuplicateElement(yDoc, elementId);
+          return yjsDuplicateElement(yDoc, elementId);
         } else {
           const element = currentProject.canvasLayout?.elements?.find(el => el.id === elementId);
           if (element) {
@@ -1811,11 +1811,16 @@ export const useCXDStore = create<CXDState>()(
             // Copy must render above the original (same-zIndex copies sit
             // underneath, so users end up dragging the original)
             const maxZ = Math.max(0, ...(currentProject.canvasLayout?.elements || []).map((el) => el.zIndex || 0));
+            // Spawn beside the original (using its width) instead of
+            // diagonally overlapping it; fall back to +20/+20 if width is
+            // missing/unusable.
+            const dx = typeof element.width === 'number' && element.width > 0 ? element.width + 24 : 20;
+            const dy = typeof element.width === 'number' && element.width > 0 ? 0 : 20;
             const newElement = {
               ...element,
               id: uuidv4(),
-              x: element.x + 20,
-              y: element.y + 20,
+              x: element.x + dx,
+              y: element.y + dy,
               zIndex: maxZ + 1,
             };
             set((state) => ({
@@ -1832,7 +1837,9 @@ export const useCXDStore = create<CXDState>()(
                   : p
               ),
             }));
+            return newElement.id;
           }
+          return null;
         }
       },
 

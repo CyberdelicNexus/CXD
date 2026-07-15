@@ -84,15 +84,22 @@ export function yjsDuplicateElement(doc: Y.Doc, elementId: string): string | nul
       }
     });
 
+    // Spawn the copy beside the original (using its width) instead of
+    // diagonally overlapping it — falls back to the old +20/+20 offset when
+    // width is missing/unusable.
+    const origWidth = yEl.get('width') as number | undefined;
+    const dx = typeof origWidth === 'number' && origWidth > 0 ? origWidth + 24 : 20;
+    const dy = typeof origWidth === 'number' && origWidth > 0 ? 0 : 20;
+
     // Read original properties and create a copy with offset position
     const newYEl = new Y.Map<unknown>();
     (yEl as Y.Map<unknown>).forEach((value, key) => {
       if (key === 'id') {
         newYEl.set('id', newId);
       } else if (key === 'x') {
-        newYEl.set('x', ((value as number) || 0) + 20);
+        newYEl.set('x', ((value as number) || 0) + dx);
       } else if (key === 'y') {
-        newYEl.set('y', ((value as number) || 0) + 20);
+        newYEl.set('y', ((value as number) || 0) + dy);
       } else if (key === 'zIndex') {
         newYEl.set('zIndex', maxZ + 1);
       } else if (value instanceof Y.Text) {
