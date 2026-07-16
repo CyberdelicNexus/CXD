@@ -80,14 +80,14 @@ function renderSection(project: CXDProject, sectionId: string): string[] {
             const meta = REALITY_PLANES.find((r) => r.code === p.code);
             const modality = p.interfaceModality?.trim();
             lines.push(
-              `- **${meta?.label || p.code}** (${p.code})${modality ? ` — ${modality}` : ""}`,
+              `- **${meta?.label || p.code}** (${p.code})${modality ? `: ${modality}` : ""}`,
             );
           });
         }
       } else {
         REALITY_PLANES.forEach((r) => {
           const pct = project.realityPlanes?.[r.code] ?? 0;
-          if (pct > 0) lines.push(`- **${r.label}** (${r.code}) — ${pct}%`);
+          if (pct > 0) lines.push(`- **${r.label}** (${r.code}): ${pct}%`);
         });
         if (lines.length === 2) lines.push("_No reality planes weighted._");
       }
@@ -102,7 +102,7 @@ function renderSection(project: CXDProject, sectionId: string): string[] {
 
     case "presence":
       PRESENCE_TYPES.forEach((p) => {
-        lines.push(`- **${p.label}:** ${project.presenceTypes?.[p.code] ?? 0}/100 — ${p.description}`);
+        lines.push(`- **${p.label}:** ${project.presenceTypes?.[p.code] ?? 0}/100. ${p.description}`);
       });
       break;
 
@@ -236,7 +236,7 @@ export function buildRoleBriefMarkdown(
 
   // ---- assemble ----
   const lines: string[] = [];
-  lines.push(`# Role Brief — ${briefLabel} — ${projectName}`);
+  lines.push(`# Role Brief: ${briefLabel} (${projectName})`);
   lines.push("");
   lines.push(`_Generated ${generated}_`);
   lines.push("");
@@ -271,7 +271,7 @@ export function buildRoleBriefMarkdown(
       lines.push(`### ${group.label}`);
       lines.push("");
       if (group.items.length === 0) {
-        lines.push("_Container tagged for this role — no cards inside yet._");
+        lines.push("_Container tagged for this role. No cards inside yet._");
       } else {
         for (const el of group.items) {
           const title = elementTitle(el);

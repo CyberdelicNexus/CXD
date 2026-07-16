@@ -7,7 +7,12 @@ import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
 import { useAICredits } from "@/hooks/use-ai-credits";
 import { getFullProjectContext } from "@/utils/ai-context-aggregator";
-import { getERDPrompt } from "@/lib/ai/erd-prompt";
+import {
+  getERDPrompt,
+  ERD_SECTIONS,
+  type ERDAudience,
+  type ERDDetail,
+} from "@/lib/ai/erd-prompt";
 import { formatERDMarkdown } from "@/lib/ai/erd-formatter";
 import { exportToMarkdown, exportToPDF, exportToDOCX } from "@/lib/document-export";
 import { ERDMarkdown } from "./erd-markdown";
@@ -33,6 +38,28 @@ function getStageLabel(progress: number): string {
   return PROGRESS_STAGES[0].label;
 }
 
+const AUDIENCE_CHOICES: { value: ERDAudience; label: string }[] = [
+  { value: "technical", label: "Technical team" },
+  { value: "creative", label: "Creative team" },
+  { value: "stakeholders", label: "Stakeholders" },
+];
+
+const DETAIL_CHOICES: { value: ERDDetail; label: string }[] = [
+  { value: "concise", label: "Concise" },
+  { value: "standard", label: "Standard" },
+  { value: "comprehensive", label: "Comprehensive" },
+];
+
+const TONE_MAX_LENGTH = 200;
+
+const paramPillCls = (active: boolean) =>
+  cn(
+    "rounded-full border px-3 py-1 text-[11px] transition-colors",
+    active
+      ? "border-violet-400/50 bg-violet-500/20 text-violet-200"
+      : "border-white/10 bg-white/[0.04] text-white/55 hover:border-white/25 hover:text-white/80",
+  );
+
 interface ERDGeneratorProps {
   projectId: string;
   isOpen: boolean;
@@ -54,6 +81,19 @@ export function ERDGenerator({
   const [showPlaceMenu, setShowPlaceMenu] = useState(false);
   const placeMenuRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
+
+  // Generation parameters. Defaults reproduce the original behavior:
+  // no audience emphasis, standard detail, all sections, no tone note.
+  const [audience, setAudience] = useState<ERDAudience | "">("");
+  const [detail, setDetail] = useState<ERDDetail>("standard");
+  const [sectionIds, setSectionIds] = useState<string[]>(() => ERD_SECTIONS.map((s) => s.id));
+  const [tone, setTone] = useState("");
+
+  const toggleSection = useCallback((id: string) => {
+    setSectionIds((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
+    );
+  }, []);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -99,7 +139,13 @@ export function ERDGenerator({
       const elements = project.canvasLayout?.elements || [];
       const edges = project.canvasLayout?.edges || [];
       const fullContext = getFullProjectContext(project, elements, edges);
-      const erdPrompt = getERDPrompt(fullContext);
+      const allSelected = sectionIds.length === ERD_SECTIONS.length;
+      const erdPrompt = getERDPrompt(fullContext, {
+        audience,
+        detail,
+        sections: allSelected ? undefined : sectionIds,
+        tone: tone.trim().slice(0, TONE_MAX_LENGTH),
+      });
 
       const response = await fetch("/api/ai/analyze", {
         method: "POST",
@@ -183,7 +229,7 @@ export function ERDGenerator({
       progressRef.current = null;
       setIsGenerating(false);
     }
-  }, [project, provider, projectId]);
+  }, [project, provider, projectId, audience, detail, sectionIds, tone]);
 
   const handleExport = useCallback(
     async (format: "md" | "pdf" | "docx") => {
@@ -407,23 +453,123 @@ export function ERDGenerator({
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-4" style={{ scrollbarWidth: "thin" }}>
           {!content && !isGenerating && !error && (
-            <div className="flex flex-col items-center justify-center h-full text-center py-12">
+            <div className="flex flex-col items-center py-8">
               <FileText className="w-12 h-12 text-muted-foreground/30 mb-4" />
               <h3 className="text-lg font-medium text-foreground mb-2">
                 Generate Your ERD
               </h3>
-              <p className="text-sm text-muted-foreground max-w-md mb-6 leading-relaxed">
+              <p className="text-sm text-muted-foreground max-w-md mb-6 leading-relaxed text-center">
                 This will analyze your entire project across all six dimensions
-                and produce a comprehensive Experience Requirement Document
-                with 14 structured sections.
+                and produce a structured Experience Requirement Document.
+                Tune the parameters below or generate with the defaults.
               </p>
+
+              {/* Generation parameters */}
+              <div className="w-full max-w-xl mb-6 rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-4 text-left">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Audience
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {AUDIENCE_CHOICES.map((choice) => (
+                        <button
+                          key={choice.value}
+                          type="button"
+                          onClick={() =>
+                            setAudience((a) => (a === choice.value ? "" : choice.value))
+                          }
+                          className={paramPillCls(audience === choice.value)}
+                        >
+                          {choice.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Detail level
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DETAIL_CHOICES.map((choice) => (
+                        <button
+                          key={choice.value}
+                          type="button"
+                          onClick={() => setDetail(choice.value)}
+                          className={paramPillCls(detail === choice.value)}
+                        >
+                          {choice.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Sections ({sectionIds.length}/{ERD_SECTIONS.length})
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSectionIds(
+                          sectionIds.length === ERD_SECTIONS.length
+                            ? []
+                            : ERD_SECTIONS.map((s) => s.id),
+                        )
+                      }
+                      className="text-[10px] text-violet-300/80 hover:text-violet-200 transition-colors"
+                    >
+                      {sectionIds.length === ERD_SECTIONS.length ? "Clear all" : "Select all"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
+                    {ERD_SECTIONS.map((section) => (
+                      <label
+                        key={section.id}
+                        className="flex cursor-pointer items-center gap-2 text-xs text-foreground/70 hover:text-foreground transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sectionIds.includes(section.id)}
+                          onChange={() => toggleSection(section.id)}
+                          className="h-3 w-3 accent-violet-500"
+                        />
+                        {section.title}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Tone note (optional)
+                  </p>
+                  <input
+                    type="text"
+                    value={tone}
+                    onChange={(e) => setTone(e.target.value.slice(0, TONE_MAX_LENGTH))}
+                    maxLength={TONE_MAX_LENGTH}
+                    placeholder="e.g. warm and plainspoken, or formal for a funding board"
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50 outline-none transition-colors focus:border-violet-400/50"
+                  />
+                </div>
+              </div>
+
               <button
                 onClick={generate}
-                className="px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium text-sm flex items-center gap-2"
+                disabled={sectionIds.length === 0}
+                className="px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium text-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <FileText className="w-4 h-4" />
                 Generate ERD
               </button>
+              {sectionIds.length === 0 && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Select at least one section to generate.
+                </p>
+              )}
             </div>
           )}
 

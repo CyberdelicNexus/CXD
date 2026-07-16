@@ -45,16 +45,16 @@ function intensityBar(score: number): string {
 }
 
 function engagementMix(dist?: EngagementDistribution): string {
-  if (!dist) return "—";
+  if (!dist) return "Not set";
   const parts = (Object.entries(dist) as [keyof EngagementDistribution, number][])
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => `${ENGAGEMENT_LABELS[k]} ${v}%`);
-  return parts.length > 0 ? parts.join(" · ") : "—";
+  return parts.length > 0 ? parts.join(" · ") : "Not set";
 }
 
 function presenceEmphasis(presence?: StagePresenceTypes): string {
-  if (!presence) return "—";
+  if (!presence) return "Not set";
   const top = (Object.entries(presence) as [keyof StagePresenceTypes, number][])
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
@@ -63,7 +63,7 @@ function presenceEmphasis(presence?: StagePresenceTypes): string {
       const label = STAGE_PRESENCE_TYPES.find((p) => p.code === k)?.label || k;
       return `${label} ${v}`;
     });
-  return top.length > 0 ? top.join(" · ") : "—";
+  return top.length > 0 ? top.join(" · ") : "Not set";
 }
 
 function quadrantLines(
@@ -85,7 +85,7 @@ export function buildFacilitationMarkdown(
   const totalMinutes = stages.reduce((s, st) => s + (st.estimatedMinutes || 0), 0);
 
   const lines: string[] = [];
-  lines.push(`# Facilitation & State-Care Sheet — ${projectName}`);
+  lines.push(`# Facilitation & State-Care Sheet: ${projectName}`);
   lines.push("");
   lines.push(`_Generated ${generated}_`);
   lines.push("");
@@ -97,13 +97,13 @@ export function buildFacilitationMarkdown(
   lines.push("");
 
   // Designed states
-  lines.push("## Designed states (transient — during the experience)");
+  lines.push("## Designed states (transient, during the experience)");
   lines.push("");
   lines.push(...quadrantLines(STATE_QUADRANTS, project.stateMapping));
   lines.push("");
 
   // Intended traits
-  lines.push("## Intended traits (lasting — after the experience)");
+  lines.push("## Intended traits (lasting, after the experience)");
   lines.push("");
   lines.push(...quadrantLines(TRAIT_QUADRANTS, project.traitMapping));
   lines.push("");
@@ -112,7 +112,7 @@ export function buildFacilitationMarkdown(
   lines.push("## Intensity & engagement curve");
   lines.push("");
   lines.push(
-    "Intensity is derived from the engagement mix — the more agency participants hold, the more attention the facilitator gives to pacing and consent.",
+    "Intensity is derived from the engagement mix: the more agency participants hold, the more attention the facilitator gives to pacing and consent.",
   );
   lines.push("");
   if (totalMinutes > 0) {
@@ -125,7 +125,7 @@ export function buildFacilitationMarkdown(
     const score = intensityScore(st.engagementDistribution);
     lines.push(
       `| ${i + 1} | ${st.name || `Stage ${i + 1}`} | ${
-        st.estimatedMinutes != null ? `${st.estimatedMinutes} min` : "—"
+        st.estimatedMinutes != null ? `${st.estimatedMinutes} min` : "flex"
       } | \`${intensityBar(score)}\` | ${engagementMix(st.engagementDistribution)} | ${presenceEmphasis(st.presenceTypes)} |`,
     );
   });
@@ -149,7 +149,7 @@ export function buildFacilitationMarkdown(
   lines.push("");
   PRESENCE_TYPES.forEach((p) => {
     lines.push(
-      `- **${p.label}:** ${project.presenceTypes?.[p.code] ?? 0}/100 — ${p.description}`,
+      `- **${p.label}:** ${project.presenceTypes?.[p.code] ?? 0}/100. ${p.description}`,
     );
   });
   lines.push("");
@@ -162,7 +162,7 @@ export function buildFacilitationMarkdown(
   lines.push("- Brief every participant before the experience begins: what will happen, how long it lasts, what sensory and emotional territory it may enter.");
   lines.push("- Agree an explicit opt-out signal (verbal and non-verbal) before starting. Honour it immediately and without discussion.");
   lines.push("- Leaving is always allowed, at any point, no explanation required. Make the physical exit path known and keep it unobstructed.");
-  lines.push("- If the experience involves touch or close proximity, obtain specific consent for it separately — general participation is not consent to touch.");
+  lines.push("- If the experience involves touch or close proximity, obtain specific consent for it separately. General participation is not consent to touch.");
   lines.push("- Re-entry after stepping out is welcome but never pressured. Check in privately before a participant rejoins.");
   lines.push("- Note any contraindications shared during briefing (e.g. photosensitivity, cardiovascular conditions, recent crisis) and adapt or advise accordingly.");
   lines.push("");
@@ -173,13 +173,13 @@ export function buildFacilitationMarkdown(
   lines.push("- Orientation: invite the participant to name five things they can see, four they can hear, three they can touch. Speak slowly and concretely.");
   lines.push("- Breath pacing: longer exhale than inhale (e.g. in for 4, out for 6). Breathe with them rather than instructing at them.");
   lines.push("- Body anchoring: feet flat on the floor, hands pressing together or onto the thighs, feeling the weight of the body on the chair or ground.");
-  lines.push("- Reduce input before adding reassurance — turn stimulation down first, then talk. Use the participant's name and normal, everyday language.");
+  lines.push("- Reduce input before adding reassurance: turn stimulation down first, then talk. Use the participant's name and normal, everyday language.");
   lines.push("- Stay with a destabilised participant until they are clearly settled; hand over explicitly to another team member if you must step away.");
   lines.push("");
 
   lines.push("## Integration prompts");
   lines.push("");
-  lines.push("Offer these after the experience — in a closing circle, a quiet journaling moment, or a follow-up message within 72 hours:");
+  lines.push("Offer these after the experience, in a closing circle, a quiet journaling moment, or a follow-up message within 72 hours:");
   lines.push("");
   lines.push("- What moment stays with you most vividly, and what was happening in your body then?");
   lines.push("- Did anything surprise you about how you responded?");

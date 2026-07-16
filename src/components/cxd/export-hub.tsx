@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -8,8 +8,6 @@ import {
   Lock,
   FileText,
   FileSpreadsheet,
-  Layers,
-  ScrollText,
   Presentation,
   Users,
   Clapperboard,
@@ -17,6 +15,10 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
+  GanttChartSquare,
+  ImagePlus,
+  Printer,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
@@ -25,7 +27,13 @@ import { ERDGenerator } from "./canvas/erd-generator";
 import { CalendarSyncDialog } from "@/components/calendar-sync-dialog";
 import { ROLE_BUNDLES, buildRoleBriefMarkdown } from "@/lib/exports/role-briefs";
 import { buildFacilitationMarkdown } from "@/lib/exports/facilitation-sheet";
-import { buildPitchHTML } from "@/lib/exports/pitch-one-pager";
+import {
+  buildPitchHTML,
+  defaultPitchHighlights,
+  type PitchOptions,
+} from "@/lib/exports/pitch-one-pager";
+import { buildHtmlDoc, markdownToHtml } from "@/lib/exports/html-doc";
+import { buildExperienceFlowTimelineHTML } from "@/lib/exports/experience-flow-timeline";
 import type { CXDProject } from "@/types/cxd-schema";
 import { HYPERCUBE_FACE_TAGS, type HypercubeFaceTag } from "@/types/canvas-elements";
 import type { CanvasElement } from "@/types/canvas-elements";
@@ -33,7 +41,7 @@ import type { TaskQuery, TaskProjection } from "@/types/plan-types";
 import type { ExperienceFlowStageV2, EngagementDistribution } from "@/types/cxd-schema";
 
 // ---------------------------------------------------------------------------
-// Download helper — client-side Blob + anchor
+// Download helpers (client-side Blob + anchor)
 // ---------------------------------------------------------------------------
 function downloadTextFile(content: string, filename: string, mime: string) {
   const blob = new Blob([content], { type: `${mime};charset=utf-8` });
@@ -45,6 +53,43 @@ function downloadTextFile(content: string, filename: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Render a markdown artifact through the shared styled-HTML doc wrapper and download it. */
+function downloadMarkdownAsHtmlDoc(
+  md: string,
+  projectName: string,
+  artifactTitle: string,
+  filename: string,
+) {
+  const html = buildHtmlDoc({
+    projectName,
+    artifactTitle,
+    bodyHtml: markdownToHtml(md),
+  });
+  downloadTextFile(html, filename, "text/html");
+}
+
+/** Open a generated HTML document in a new window and trigger the print dialog. */
+function openAndPrintHtml(html: string, fallbackFilename: string) {
+  const win = window.open("", "_blank");
+  if (!win) {
+    // Popup blocked: fall back to downloading the file so nothing is lost.
+    downloadTextFile(html, fallbackFilename, "text/html");
+    return;
+  }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  // Give the new document a beat to lay out before printing.
+  setTimeout(() => {
+    try {
+      win.print();
+    } catch {
+      // The user can still print from the opened page.
+    }
+  }, 600);
+}
+
 function slug(name: string): string {
   return (name || "Untitled").replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-]/g, "");
 }
@@ -54,7 +99,7 @@ function todayISO(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Data gathering — every task element, boards included (mirrors use-plan-tasks)
+// Data gathering: every task element, boards included (mirrors use-plan-tasks)
 // ---------------------------------------------------------------------------
 function gatherAllElements(project: CXDProject): CanvasElement[] {
   const elements: CanvasElement[] = [...(project.canvasLayout?.elements || [])];
@@ -83,7 +128,7 @@ function getProjectTasks(project: CXDProject): TaskProjection[] {
 }
 
 // ---------------------------------------------------------------------------
-// Run-of-Show Script (.md)
+// Experience Flow Timeline (markdown fallback for power users)
 // ---------------------------------------------------------------------------
 const ENGAGEMENT_LABELS: Record<keyof EngagementDistribution, string> = {
   observer: "Observer",
@@ -93,21 +138,24 @@ const ENGAGEMENT_LABELS: Record<keyof EngagementDistribution, string> = {
 };
 
 function dominantEngagement(dist?: EngagementDistribution): string {
-  if (!dist) return "—";
+  if (!dist) return "Not set";
   const entries = Object.entries(dist) as [keyof EngagementDistribution, number][];
   entries.sort((a, b) => b[1] - a[1]);
   const [key, val] = entries[0];
-  if (!val) return "—";
+  if (!val) return "Not set";
   return `${ENGAGEMENT_LABELS[key]} (${val}%)`;
 }
 
-function buildRunOfShowMarkdown(project: CXDProject, stages: ExperienceFlowStageV2[]): string {
+function buildExperienceFlowMarkdown(
+  project: CXDProject,
+  stages: ExperienceFlowStageV2[],
+): string {
   const projectName = project.name || project.intentionCore?.projectName || "Untitled";
   const lines: string[] = [];
 
   const totalMinutes = stages.reduce((sum, s) => sum + (s.estimatedMinutes || 0), 0);
 
-  lines.push(`# Run-of-Show — ${projectName}`);
+  lines.push(`# Experience Flow Timeline: ${projectName}`);
   lines.push("");
   lines.push(`_Generated ${todayISO()}_`);
   lines.push("");
@@ -124,7 +172,7 @@ function buildRunOfShowMarkdown(project: CXDProject, stages: ExperienceFlowStage
     lines.push(`## ${i + 1}. ${stage.name || `Stage ${i + 1}`}`);
     lines.push("");
     lines.push(
-      `- **Duration:** ${stage.estimatedMinutes != null ? `${stage.estimatedMinutes} min` : "—"}`,
+      `- **Duration:** ${stage.estimatedMinutes != null ? `${stage.estimatedMinutes} min` : "Not set"}`,
     );
     lines.push(`- **Engagement:** ${dominantEngagement(stage.engagementDistribution)}`);
     lines.push("");
@@ -144,7 +192,7 @@ function buildRunOfShowMarkdown(project: CXDProject, stages: ExperienceFlowStage
 }
 
 // ---------------------------------------------------------------------------
-// Production Pack — Task CSV
+// Production Pack: Task CSV
 // ---------------------------------------------------------------------------
 function escapeCSV(value: string | number | undefined | null): string {
   const s = value == null ? "" : String(value);
@@ -206,7 +254,7 @@ function buildTasksCSV(project: CXDProject, tasks: TaskProjection[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Production Pack — Versions / Milestones summary (.md)
+// Production Pack: Versions / Milestones summary (markdown source)
 // ---------------------------------------------------------------------------
 function buildVersionsMarkdown(project: CXDProject, tasks: TaskProjection[]): string {
   const projectName = project.name || project.intentionCore?.projectName || "Untitled";
@@ -214,7 +262,7 @@ function buildVersionsMarkdown(project: CXDProject, tasks: TaskProjection[]): st
   const okrs = project.okrs || [];
 
   const lines: string[] = [];
-  lines.push(`# Versions & Milestones — ${projectName}`);
+  lines.push(`# Versions & Milestones: ${projectName}`);
   lines.push("");
   lines.push(`_Generated ${todayISO()}_`);
   lines.push("");
@@ -289,6 +337,8 @@ type CardAction = {
   label: string;
   onClick: () => void;
   icon?: React.ComponentType<{ className?: string }>;
+  /** "ghost" renders a subdued secondary action (e.g. the Markdown fallback). */
+  variant?: "primary" | "ghost";
 };
 
 interface ArtifactCardProps {
@@ -342,14 +392,20 @@ function ArtifactCard({
       </div>
 
       {actions && actions.length > 0 && !comingSoon && (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {actions.map((action) => {
             const ActionIcon = action.icon || Download;
+            const ghost = action.variant === "ghost";
             return (
               <button
                 key={action.label}
                 onClick={action.onClick}
-                className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                  ghost
+                    ? "bg-white/[0.04] text-white/45 hover:bg-white/[0.08] hover:text-white/70"
+                    : "bg-violet-500/15 text-violet-200 hover:bg-violet-500/25",
+                )}
               >
                 <ActionIcon className="h-3 w-3" />
                 {action.label}
@@ -383,6 +439,45 @@ function GroupHeader({ group }: { group: keyof typeof GROUP_STYLES }) {
 }
 
 // ---------------------------------------------------------------------------
+// Pitch personalization
+// ---------------------------------------------------------------------------
+const PITCH_ACCENT_PRESETS: { hex: string; name: string }[] = [
+  { hex: "#8b5cf6", name: "Violet" },
+  { hex: "#f43f5e", name: "Rose" },
+  { hex: "#06b6d4", name: "Cyan" },
+  { hex: "#10b981", name: "Emerald" },
+  { hex: "#f59e0b", name: "Amber" },
+];
+
+const PITCH_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+interface PitchFormState {
+  title: string;
+  tagline: string;
+  highlights: [string, string, string];
+  contact: string;
+  accent: string;
+  imageDataUri: string | null;
+  imageError: string | null;
+}
+
+function pitchFormFromProject(project: CXDProject): PitchFormState {
+  const highlights = defaultPitchHighlights(project);
+  return {
+    title: project.name || project.intentionCore?.projectName || "Untitled Experience",
+    tagline: project.intentionCore?.mainConcept?.trim() || "",
+    highlights: [highlights[0] || "", highlights[1] || "", highlights[2] || ""],
+    contact: "",
+    accent: PITCH_ACCENT_PRESETS[0].hex,
+    imageDataUri: null,
+    imageError: null,
+  };
+}
+
+const pitchInputCls =
+  "w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white placeholder:text-white/25 outline-none transition-colors focus:border-violet-400/50";
+
+// ---------------------------------------------------------------------------
 // Export Hub
 // ---------------------------------------------------------------------------
 interface ExportHubProps {
@@ -393,24 +488,37 @@ interface ExportHubProps {
 
 export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
   const getCurrentProject = useCXDStore((s) => s.getCurrentProject);
-  const getExperienceFlowStages = useCXDStore((s) => s.getExperienceFlowStages);
   const project = getCurrentProject();
 
   const [erdOpen, setErdOpen] = useState(false);
   const [briefsOpen, setBriefsOpen] = useState(false);
+  const [briefsAsMarkdown, setBriefsAsMarkdown] = useState(false);
   const [calSyncOpen, setCalSyncOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Pitch personalization
+  const [pitchOpen, setPitchOpen] = useState(false);
+  const [pitchForm, setPitchForm] = useState<PitchFormState | null>(null);
+  const pitchImageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
   const projectName = project?.name || project?.intentionCore?.projectName || "Untitled";
 
-  const handleRunOfShow = useCallback(() => {
+  const handleFlowTimelineHTML = useCallback(() => {
     const proj = useCXDStore.getState().getCurrentProject();
     if (!proj) return;
     const stages = useCXDStore.getState().getExperienceFlowStages();
-    const md = buildRunOfShowMarkdown(proj, stages);
-    downloadTextFile(md, `Run-of-Show-${slug(proj.name)}.md`, "text/markdown");
+    const html = buildExperienceFlowTimelineHTML(proj, stages);
+    downloadTextFile(html, `Experience-Flow-Timeline-${slug(proj.name)}.html`, "text/html");
+  }, []);
+
+  const handleFlowTimelineMD = useCallback(() => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return;
+    const stages = useCXDStore.getState().getExperienceFlowStages();
+    const md = buildExperienceFlowMarkdown(proj, stages);
+    downloadTextFile(md, `Experience-Flow-Timeline-${slug(proj.name)}.md`, "text/markdown");
   }, []);
 
   const handleTasksCSV = useCallback(() => {
@@ -421,6 +529,20 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     downloadTextFile(csv, `Production-Pack-Tasks-${slug(proj.name)}.csv`, "text/csv");
   }, []);
 
+  const handleVersionsHTML = useCallback(() => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return;
+    const tasks = getProjectTasks(proj);
+    const md = buildVersionsMarkdown(proj, tasks);
+    const name = proj.name || proj.intentionCore?.projectName || "Untitled";
+    downloadMarkdownAsHtmlDoc(
+      md,
+      name,
+      "Versions & Milestones",
+      `Production-Pack-Versions-${slug(proj.name)}.html`,
+    );
+  }, []);
+
   const handleVersionsMD = useCallback(() => {
     const proj = useCXDStore.getState().getCurrentProject();
     if (!proj) return;
@@ -429,14 +551,41 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     downloadTextFile(md, `Production-Pack-Versions-${slug(proj.name)}.md`, "text/markdown");
   }, []);
 
-  const handleRoleBrief = useCallback((faces: HypercubeFaceTag[], label: string) => {
+  const handleRoleBrief = useCallback(
+    (faces: HypercubeFaceTag[], label: string) => {
+      const proj = useCXDStore.getState().getCurrentProject();
+      if (!proj) return;
+      const md = buildRoleBriefMarkdown(proj, faces, label);
+      if (briefsAsMarkdown) {
+        downloadTextFile(md, `Brief-${slug(label)}-${slug(proj.name)}.md`, "text/markdown");
+        return;
+      }
+      const name = proj.name || proj.intentionCore?.projectName || "Untitled";
+      downloadMarkdownAsHtmlDoc(
+        md,
+        name,
+        `Role Brief: ${label}`,
+        `Brief-${slug(label)}-${slug(proj.name)}.html`,
+      );
+    },
+    [briefsAsMarkdown],
+  );
+
+  const handleFacilitationHTML = useCallback(() => {
     const proj = useCXDStore.getState().getCurrentProject();
     if (!proj) return;
-    const md = buildRoleBriefMarkdown(proj, faces, label);
-    downloadTextFile(md, `Brief-${slug(label)}-${slug(proj.name)}.md`, "text/markdown");
+    const stages = useCXDStore.getState().getExperienceFlowStages();
+    const md = buildFacilitationMarkdown(proj, stages);
+    const name = proj.name || proj.intentionCore?.projectName || "Untitled";
+    downloadMarkdownAsHtmlDoc(
+      md,
+      name,
+      "Facilitation & State-Care Sheet",
+      `Facilitation-State-Care-${slug(proj.name)}.html`,
+    );
   }, []);
 
-  const handleFacilitation = useCallback(() => {
+  const handleFacilitationMD = useCallback(() => {
     const proj = useCXDStore.getState().getCurrentProject();
     if (!proj) return;
     const stages = useCXDStore.getState().getExperienceFlowStages();
@@ -444,12 +593,72 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     downloadTextFile(md, `Facilitation-State-Care-${slug(proj.name)}.md`, "text/markdown");
   }, []);
 
-  const handlePitch = useCallback(() => {
+  // --- Pitch one-pager -----------------------------------------------------
+  const togglePitchForm = useCallback(() => {
+    setPitchOpen((open) => {
+      if (!open) {
+        const proj = useCXDStore.getState().getCurrentProject();
+        if (proj) setPitchForm((f) => f ?? pitchFormFromProject(proj));
+      }
+      return !open;
+    });
+  }, []);
+
+  const pitchOptionsFromForm = useCallback((form: PitchFormState): PitchOptions => {
+    return {
+      title: form.title,
+      tagline: form.tagline,
+      highlights: form.highlights.filter((h) => h.trim()),
+      contact: form.contact,
+      accent: form.accent,
+      imageDataUri: form.imageDataUri,
+    };
+  }, []);
+
+  const handlePitchDownload = useCallback(() => {
     const proj = useCXDStore.getState().getCurrentProject();
     if (!proj) return;
-    const html = buildPitchHTML(proj);
+    const html = buildPitchHTML(proj, pitchForm ? pitchOptionsFromForm(pitchForm) : {});
     downloadTextFile(html, `Pitch-One-Pager-${slug(proj.name)}.html`, "text/html");
+  }, [pitchForm, pitchOptionsFromForm]);
+
+  const handlePitchPrint = useCallback(() => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return;
+    const html = buildPitchHTML(proj, pitchForm ? pitchOptionsFromForm(pitchForm) : {});
+    openAndPrintHtml(html, `Pitch-One-Pager-${slug(proj.name)}.html`);
+  }, [pitchForm, pitchOptionsFromForm]);
+
+  const handlePitchImage = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > PITCH_IMAGE_MAX_BYTES) {
+      setPitchForm((f) =>
+        f ? { ...f, imageError: "That image is over 2 MB. Please pick a smaller one." } : f,
+      );
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPitchForm((f) =>
+        f ? { ...f, imageDataUri: String(reader.result || ""), imageError: null } : f,
+      );
+    };
+    reader.onerror = () => {
+      setPitchForm((f) =>
+        f ? { ...f, imageError: "Could not read that file. Please try another image." } : f,
+      );
+    };
+    reader.readAsDataURL(file);
   }, []);
+
+  const updatePitchField = useCallback(
+    (patch: Partial<PitchFormState>) => {
+      setPitchForm((f) => (f ? { ...f, ...patch } : f));
+    },
+    [],
+  );
 
   // Close on Escape while open
   useEffect(() => {
@@ -472,9 +681,9 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
         aria-label="Export & Deliverables"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
-        {/* Panel */}
+        {/* Panel: frosted glass */}
         <div
-          className="relative mx-4 flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/95 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200"
+          className="relative mx-4 flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/80 shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Glass top hairline */}
@@ -504,14 +713,170 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
             {/* Sell */}
             <section className="mb-6">
               <GroupHeader group="Sell" />
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3">
                 <ArtifactCard
                   icon={Presentation}
                   title="Pitch One-Pager"
-                  description="A print-ready concept page: intention, desired change, personas and sensory signature. Opens in the browser — print to PDF from there."
+                  description="A print-ready concept page: intention, desired change, personas and sensory signature. Personalize it, then download or save it as a PDF."
                   accent="text-rose-300"
-                  actions={[{ label: "Download .html", onClick: handlePitch }]}
-                />
+                  actions={[
+                    {
+                      label: pitchOpen ? "Hide options" : "Personalize & download",
+                      icon: pitchOpen ? ChevronUp : ChevronDown,
+                      onClick: togglePitchForm,
+                    },
+                  ]}
+                >
+                  {pitchOpen && pitchForm && (
+                    <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
+                            Title
+                          </label>
+                          <input
+                            className={pitchInputCls}
+                            value={pitchForm.title}
+                            onChange={(e) => updatePitchField({ title: e.target.value })}
+                            maxLength={120}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
+                            Contact line
+                          </label>
+                          <input
+                            className={pitchInputCls}
+                            value={pitchForm.contact}
+                            onChange={(e) => updatePitchField({ contact: e.target.value })}
+                            placeholder="name@studio.com · +00 000 000"
+                            maxLength={120}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
+                          Tagline / concept line
+                        </label>
+                        <input
+                          className={pitchInputCls}
+                          value={pitchForm.tagline}
+                          onChange={(e) => updatePitchField({ tagline: e.target.value })}
+                          maxLength={200}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
+                          Highlights (up to 3)
+                        </label>
+                        <div className="space-y-1.5">
+                          {pitchForm.highlights.map((h, i) => (
+                            <input
+                              key={i}
+                              className={pitchInputCls}
+                              value={h}
+                              onChange={(e) => {
+                                const next = [...pitchForm.highlights] as [string, string, string];
+                                next[i] = e.target.value;
+                                updatePitchField({ highlights: next });
+                              }}
+                              placeholder={`Highlight ${i + 1}`}
+                              maxLength={160}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-end gap-4">
+                        <div>
+                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
+                            Accent color
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            {PITCH_ACCENT_PRESETS.map((preset) => (
+                              <button
+                                key={preset.hex}
+                                type="button"
+                                title={preset.name}
+                                onClick={() => updatePitchField({ accent: preset.hex })}
+                                className={cn(
+                                  "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
+                                  pitchForm.accent === preset.hex
+                                    ? "border-white"
+                                    : "border-transparent",
+                                )}
+                                style={{ backgroundColor: preset.hex }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
+                            Image (optional, max 2 MB)
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => pitchImageInputRef.current?.click()}
+                              className="flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/10"
+                            >
+                              <ImagePlus className="h-3 w-3" />
+                              {pitchForm.imageDataUri ? "Replace image" : "Add image"}
+                            </button>
+                            {pitchForm.imageDataUri && (
+                              <>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={pitchForm.imageDataUri}
+                                  alt="Pitch preview"
+                                  className="h-8 w-12 rounded-md border border-white/10 object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  title="Remove image"
+                                  onClick={() => updatePitchField({ imageDataUri: null, imageError: null })}
+                                  className="rounded-md p-1 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                          <input
+                            ref={pitchImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handlePitchImage}
+                          />
+                          {pitchForm.imageError && (
+                            <p className="mt-1 text-[11px] text-rose-300">{pitchForm.imageError}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-3">
+                        <button
+                          onClick={handlePitchDownload}
+                          className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
+                        >
+                          <Download className="h-3 w-3" />
+                          Download HTML
+                        </button>
+                        <button
+                          onClick={handlePitchPrint}
+                          className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
+                        >
+                          <Printer className="h-3 w-3" />
+                          Save as PDF
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </ArtifactCard>
               </div>
             </section>
 
@@ -522,24 +887,25 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                 <ArtifactCard
                   icon={FileText}
                   title="Experience Requirement Document"
-                  description="Full ERD across all six dimensions — the authoritative spec for whoever builds this."
+                  description="Full ERD across all six dimensions. The authoritative spec for whoever builds this."
                   accent="text-violet-300"
                   actions={[{ label: "Open generator", onClick: () => setErdOpen(true) }]}
                 />
                 <ArtifactCard
                   icon={FileSpreadsheet}
                   title="Production Pack"
-                  description="Every task as a spreadsheet plus a versions & milestones summary — the plan, ready to work."
+                  description="Every task as a spreadsheet plus a versions and milestones summary: the plan, ready to work."
                   accent="text-violet-300"
                   actions={[
                     { label: "Tasks .csv", onClick: handleTasksCSV },
-                    { label: "Versions .md", onClick: handleVersionsMD },
+                    { label: "Versions summary", onClick: handleVersionsHTML },
+                    { label: "Markdown", onClick: handleVersionsMD, variant: "ghost" },
                   ]}
                 />
                 <ArtifactCard
                   icon={Users}
                   title="Role-Scoped Briefs"
-                  description="Per-discipline exports filtered by hypercube face — each collaborator gets only what they own."
+                  description="Per-discipline exports filtered by hypercube face. Each collaborator gets only what they own."
                   accent="text-violet-300"
                   actions={[
                     {
@@ -585,6 +951,15 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                           ))}
                         </div>
                       </div>
+                      <label className="flex cursor-pointer items-center gap-2 text-[11px] text-white/40">
+                        <input
+                          type="checkbox"
+                          checked={briefsAsMarkdown}
+                          onChange={(e) => setBriefsAsMarkdown(e.target.checked)}
+                          className="h-3 w-3 accent-violet-500"
+                        />
+                        Download as Markdown (for power users)
+                      </label>
                     </div>
                   )}
                 </ArtifactCard>
@@ -596,18 +971,24 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
               <GroupHeader group="Run" />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <ArtifactCard
-                  icon={ScrollText}
-                  title="Run-of-Show Script"
-                  description="Ordered flow stages with timing, engagement and notes — the minute-by-minute for the day."
+                  icon={GanttChartSquare}
+                  title="Experience Flow Timeline"
+                  description="A visual timeline of the flow stages with timing, engagement and notes: the minute-by-minute for the day."
                   accent="text-cyan-300"
-                  actions={[{ label: "Download .md", onClick: handleRunOfShow }]}
+                  actions={[
+                    { label: "Download timeline", onClick: handleFlowTimelineHTML },
+                    { label: "Markdown", onClick: handleFlowTimelineMD, variant: "ghost" },
+                  ]}
                 />
                 <ArtifactCard
                   icon={Clapperboard}
                   title="Facilitation & State-Care Sheet"
                   description="State/trait intensity curve with consent and integration notes for the facilitator."
                   accent="text-cyan-300"
-                  actions={[{ label: "Download .md", onClick: handleFacilitation }]}
+                  actions={[
+                    { label: "Download sheet", onClick: handleFacilitationHTML },
+                    { label: "Markdown", onClick: handleFacilitationMD, variant: "ghost" },
+                  ]}
                 />
               </div>
             </section>
@@ -619,7 +1000,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                 <ArtifactCard
                   icon={Share2}
                   title="Share Link"
-                  description="A read-only live view of this canvas — always reflects the latest state."
+                  description="A read-only live view of this canvas. It always reflects the latest state."
                   accent="text-emerald-300"
                   actions={
                     onOpenShare
@@ -642,14 +1023,14 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
         </div>
       </div>
 
-      {/* ERD generator — relocated here as an additional door (Map view keeps its own) */}
+      {/* ERD generator, relocated here as an additional door (Map view keeps its own) */}
       <ERDGenerator
         projectId={project?.id || ""}
         isOpen={erdOpen}
         onClose={() => setErdOpen(false)}
       />
 
-      {/* Calendar sync — shared dialog, also used by Master Plan and Profile */}
+      {/* Calendar sync: shared dialog, also used by Master Plan and Profile */}
       <CalendarSyncDialog open={calSyncOpen} onClose={() => setCalSyncOpen(false)} />
     </>,
     document.body
