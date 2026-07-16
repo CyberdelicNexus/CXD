@@ -154,7 +154,7 @@ export function AIActionBar({
             <span>
               {taskButtonState === 'idle' && taskLabel}
               {taskButtonState === 'success' && '✓ Added to Plan'}
-              {taskButtonState === 'error' && '✗ Failed — try again'}
+              {taskButtonState === 'error' && '✗ Failed, try again'}
             </span>
           </button>
         )}
@@ -186,7 +186,7 @@ export function AIActionBar({
             <span>
               {noteButtonState === 'idle' && 'Place note on Canvas'}
               {noteButtonState === 'success' && '✓ Saved to Inbox'}
-              {noteButtonState === 'error' && '✗ Failed — try again'}
+              {noteButtonState === 'error' && '✗ Failed, try again'}
             </span>
           </button>
         )}
@@ -225,7 +225,7 @@ export function AIActionBar({
               {draftButtonState === 'idle' && 'Draft on Canvas'}
               {draftButtonState === 'loading' && 'Generating layout…'}
               {draftButtonState === 'success' && '✓ Placed on Canvas'}
-              {draftButtonState === 'error' && '✗ Failed — try again'}
+              {draftButtonState === 'error' && '✗ Failed, try again'}
             </span>
           </button>
         )}

@@ -255,7 +255,7 @@ export function VersionHistoryPanel({ open, onClose, projectId, yDoc, userId }: 
                 </div>
                 <p className="text-sm text-white/50 font-medium">No snapshots yet</p>
                 <p className="text-xs text-white/25 mt-1.5 leading-relaxed">
-                  Snapshots are created automatically as you work — or save a manual checkpoint above.
+                  Snapshots are created automatically as you work, or save a manual checkpoint above.
                 </p>
               </div>
             ) : (

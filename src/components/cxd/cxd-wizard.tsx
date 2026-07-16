@@ -720,7 +720,7 @@ export function CXDWizard() {
                 placeholder={stateExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} states...`}
                 value={project.stateMapping?.[quadrant.code] ?? ''}
                 onChange={(v) => updateStateMapping(quadrant.code, v)}
-                label={`State Mapping — ${quadrant.label}`}
+                label={`State Mapping: ${quadrant.label}`}
                 className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
               />
             </div>
@@ -750,7 +750,7 @@ export function CXDWizard() {
                 placeholder={traitExamples[quadrant.code] || `Describe ${quadrant.label.toLowerCase()} traits...`}
                 value={project.traitMapping?.[quadrant.code] ?? ''}
                 onChange={(v) => updateTraitMapping(quadrant.code, v)}
-                label={`Trait Mapping — ${quadrant.label}`}
+                label={`Trait Mapping: ${quadrant.label}`}
                 className="min-h-[100px] bg-input border-border text-sm focus:ring-2 focus:ring-primary/50"
               />
             </div>
@@ -1033,8 +1033,8 @@ export function CXDWizard() {
               What are you framing?
             </h2>
             <p className="text-center text-muted-foreground mb-8 max-w-lg mx-auto">
-              The hypercube methodology adapts its language to your practice —
-              same backbone, different lens. Pick the frame that fits.
+              The hypercube methodology adapts its language to your practice.
+              Same backbone, different lens. Pick the frame that fits.
             </p>
 
             <div className="grid sm:grid-cols-2 gap-3">
@@ -1060,7 +1060,7 @@ export function CXDWizard() {
             </div>
 
             <p className="text-center text-[11px] text-muted-foreground/50 mt-6">
-              Custom framings — building your own hypercube from a dimension library — are coming later.
+              Custom framings, building your own hypercube from a dimension library, are coming later.
             </p>
           </div>
         </div>
@@ -1100,7 +1100,7 @@ export function CXDWizard() {
                       id: 'populate' as FramingStartMode,
                       icon: LayoutGrid,
                       label: 'Framing blocks',
-                      desc: 'Your framing as a connected board — live cards, personas, and prompts',
+                      desc: 'Your framing as a connected board: live cards, personas, and prompts',
                       badge: 'Recommended',
                     },
                     {

@@ -124,7 +124,7 @@ export function PickFreeCanvasModal({
 
         <div className="px-6 py-4 border-t border-white/10 flex items-center justify-between gap-4">
           <p className="text-xs text-white/40">
-            This choice is permanent — pick carefully. Others stay read-only.
+            This choice is permanent. Pick carefully. Others stay read-only.
           </p>
           <button
             onClick={onUpgrade}

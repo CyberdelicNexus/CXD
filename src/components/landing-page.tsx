@@ -55,7 +55,7 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     label: 'Framing',
     headline: 'Start with',
     highlight: 'Intent',
-    description: 'A guided 11-step framework that structures your experience design from audience and context to transformation goals — before you touch the canvas.',
+    description: 'A guided 11-step framework that structures your experience design from audience and context to transformation goals, before you touch the canvas.',
     video: '/images/Gifs/V2/Dashboard%20%26%20Framing.mp4',
     poster: '/images/Screenshot/0_canvas-screeshot.png',
     details: [
@@ -73,7 +73,7 @@ const FEATURE_SECTIONS: FeatureSection[] = [
     details: [
       { title: 'Notes & Tasks', description: 'Create rich note cards and actionable task cards with subtasks, tags, and metadata.', video: '/images/Gifs/V2/Notes%20%26%20Tasks.mp4' },
       { title: 'Smart Connectors', description: 'Link elements with gradient connectors that auto-inherit tags and create visual relationships.', video: '/images/Gifs/V2/Smart%20Connectors.mp4' },
-      { title: 'Nested Boards', description: 'Organize complex projects with boards inside boards — zoom into any level of detail.', video: '/images/Gifs/V2/Nested%20Boards%20-%20V2.mp4' },
+      { title: 'Nested Boards', description: 'Organize complex projects with boards inside boards. Zoom into any level of detail.', video: '/images/Gifs/V2/Nested%20Boards%20-%20V2.mp4' },
     ],
   },
   {

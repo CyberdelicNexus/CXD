@@ -47,7 +47,7 @@ function getOverviewText(activeFaces: FaceCompletion[], allFaces: FaceCompletion
     , activeFaces[0]);
     const weakestName = getFaceName(weakestActive.faceId);
     const weakestPct = Math.round(weakestActive.completion * 100);
-    return `Strong progress — ${activeCount} of 6 faces are active. Consider deepening ${weakestName} (${weakestPct}%) to round out your design.`;
+    return `Strong progress: ${activeCount} of 6 faces are active. Consider deepening ${weakestName} (${weakestPct}%) to round out your design.`;
   } else {
     return "All 6 faces are active! Focus on coherence and cross-face connections to elevate your design.";
   }

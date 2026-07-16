@@ -135,7 +135,7 @@ export function CalendarSyncDialog({ open, onClose }: CalendarSyncDialogProps) {
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
           <p className="text-xs leading-relaxed text-white/45">
-            Subscribe with a private ICS feed URL — your calendar app checks it
+            Subscribe with a private ICS feed URL. Your calendar app checks it
             periodically, so new and updated tasks show up automatically.
           </p>
 
@@ -180,7 +180,7 @@ export function CalendarSyncDialog({ open, onClose }: CalendarSyncDialogProps) {
                   </button>
                   <button
                     onClick={() => setConfirmingRegenerate(true)}
-                    title="Regenerate — the old URL stops working"
+                    title="Regenerate: the old URL stops working"
                     className="flex-shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-2 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -190,8 +190,8 @@ export function CalendarSyncDialog({ open, onClose }: CalendarSyncDialogProps) {
                 {confirmingRegenerate && (
                   <div className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
                     <p className="text-[11px] leading-relaxed text-amber-300/80">
-                      Regenerating stops the current URL from working immediately —
-                      anyone subscribed with it will need the new one.
+                      Regenerating stops the current URL from working immediately.
+                      Anyone subscribed with it will need the new one.
                     </p>
                     <div className="flex items-center gap-1.5">
                       <button

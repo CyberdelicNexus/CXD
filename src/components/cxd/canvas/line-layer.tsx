@@ -1270,7 +1270,7 @@ function LineRadialMenu({
             cursor: 'grab',
             zIndex: 1,
           }}
-          title={thicknessExpanded ? `Thickness: ${currentThickness}px — drag node on ring to adjust` : 'Click: thickness ring · Drag: curve line'}
+          title={thicknessExpanded ? `Thickness: ${currentThickness}px, drag node on ring to adjust` : 'Click: thickness ring · Drag: curve line'}
           onMouseDown={handleCenterMouseDown}
         >
           <div style={{ width: 5, height: 5, borderRadius: '50%', background: accentColor, opacity: 0.9 }} />

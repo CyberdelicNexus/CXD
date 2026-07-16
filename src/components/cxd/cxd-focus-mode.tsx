@@ -262,7 +262,7 @@ export function CXDFocusMode({ sectionId }: CXDFocusModeProps) {
         return (
           <div className="space-y-8">
             <p className="text-sm text-muted-foreground">
-              Adjust the emphasis of each reality plane. These values are descriptive, not prescriptive—there is no requirement for them to sum to 100%.
+              Adjust the emphasis of each reality plane. These values are descriptive, not prescriptive. There is no requirement for them to sum to 100%.
             </p>
             {REALITY_PLANES.map((plane) => (
               <div key={plane.code} className="space-y-3">

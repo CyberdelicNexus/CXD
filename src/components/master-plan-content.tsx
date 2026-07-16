@@ -165,7 +165,7 @@ export function MasterPlanContent() {
         </div>
         <h1 className="text-2xl font-bold text-white mb-2">Master Plan is a Pro feature</h1>
         <p className="text-white/50 mb-8">
-          A single cockpit for every task across every canvas in your account — Table, Kanban,
+          A single cockpit for every task across every canvas in your account: Table, Kanban,
           List, Timeline, Calendar, and Roadmap views, all filtered live and editable across your
           whole workspace.
         </p>
