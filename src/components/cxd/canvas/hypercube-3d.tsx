@@ -59,6 +59,8 @@ import {
   applyTagSuggestions,
   type EnrichedSuggestion,
 } from "@/lib/ai/tag-suggestion-service";
+import { requestEdgeInsight } from "@/lib/ai/edge-insight-service";
+import type { EdgeInsight, EdgeInsightMode } from "@/lib/ai/edge-insight";
 
 // Interaction modes - Two distinct modes per specification
 // DEFAULT MODE: Cube auto-rotates, NOT interactive, face buttons are PRIMARY interaction
@@ -582,6 +584,47 @@ const EDGE_ADJACENT_FACES: [number, number][] = CUBE_EDGE_CORNERS.map(([a, b]) =
   return [faces[0], faces[1]] as [number, number];
 });
 
+// Rotation that centers an EDGE toward the camera: the bisector of its two
+// faces' normals is sent to z2 = -1 (the same "toward viewer" convention as
+// getFrontFaceFromRotation), so both adjacent faces angle toward the camera
+// like an opened book. Solved from project3D's rotation order (X then Y):
+//   y1 = y·cos(rx) - z·sin(rx)
+//   z2 = -x·sin(ry) + (y·sin(rx) + z·cos(rx))·cos(ry)
+// Every edge bisector has exactly two non-zero components, giving three cases.
+// Where two solutions exist we pick the one that keeps the cube upright
+// (|pitch| <= 90) and, when the geometry allows, the edge vertical on screen.
+function getRotationForEdge(edgeIndex: number): { x: number; y: number } {
+  const [fa, fb] = EDGE_ADJACENT_FACES[edgeIndex];
+  const na = FACE_NORMALS[fa];
+  const nb = FACE_NORMALS[fb];
+  let bx = na[0] + nb[0];
+  let by = na[1] + nb[1];
+  let bz = na[2] + nb[2];
+  const len = Math.hypot(bx, by, bz) || 1;
+  bx /= len;
+  by /= len;
+  bz /= len;
+  const EPS = 1e-6;
+  const deg = (r: number) => (r * 180) / Math.PI;
+
+  if (Math.abs(by) < EPS) {
+    // Edge runs along Y (already vertical): pure yaw centers it front.
+    return { x: 0, y: 90 + deg(Math.atan2(bz, bx)) };
+  }
+  if (Math.abs(bz) < EPS) {
+    // Edge runs along Z: pitching to ±90 stands it vertical, then yaw centers it.
+    const rx = by < 0 ? 90 : -90;
+    const z1 = by * Math.sin((rx * Math.PI) / 180); // rotated bisector z before yaw
+    return { x: rx, y: 90 + deg(Math.atan2(z1, bx)) };
+  }
+  // Edge runs along X (stays horizontal): pure pitch brings it front. If that
+  // pitch exceeds 90 the cube would read upside down, so take the equivalent
+  // solution pitched back inside ±90 with a 180 yaw.
+  const rx = deg(Math.atan2(-by, -bz));
+  if (Math.abs(rx) <= 90 + EPS) return { x: rx, y: 0 };
+  return { x: normalizeAngle(rx - 180), y: 180 };
+}
+
 // Circular mean of two hues (degrees) — a blended tint that doesn't wrap ugly
 // across the 360→0 seam (e.g. amber 45 + magenta 320 blends through red, not cyan).
 function blendHue(a: number, b: number): number {
@@ -632,6 +675,27 @@ export function Hypercube3D({
   const [hoveredFace, setHoveredFace] = useState<number | null>(null);
   // Geometric Resonance: which cube edge (0-11) has its relationship panel open.
   const [selectedEdgeIndex, setSelectedEdgeIndex] = useState<number | null>(null);
+
+  // Edge Resonance v2 — reflective friction. The user's own hypothesis comes
+  // FIRST; the AI responds to it and the hypothesis persists across modes.
+  const [edgeHypothesis, setEdgeHypothesis] = useState("");
+  const [revealedHypothesis, setRevealedHypothesis] = useState("");
+  const [edgeInsight, setEdgeInsight] = useState<EdgeInsight | null>(null);
+  const [edgeInsightMode, setEdgeInsightMode] = useState<EdgeInsightMode>("analyze");
+  const [edgeInsightLoading, setEdgeInsightLoading] = useState(false);
+  const [edgeInsightError, setEdgeInsightError] = useState<string | null>(null);
+  const [edgeElementsExpanded, setEdgeElementsExpanded] = useState(false);
+
+  // Fresh reflective slate whenever a different edge (or none) is selected.
+  useEffect(() => {
+    setEdgeHypothesis("");
+    setRevealedHypothesis("");
+    setEdgeInsight(null);
+    setEdgeInsightMode("analyze");
+    setEdgeInsightLoading(false);
+    setEdgeInsightError(null);
+    setEdgeElementsExpanded(false);
+  }, [selectedEdgeIndex]);
 
   // Zoom level for explore mode (1.0 = default, can zoom in/out)
   const [exploreZoom, setExploreZoom] = useState(DEFAULT_ZOOM);
@@ -1341,6 +1405,58 @@ export function Hypercube3D({
     return { edges, maxCount };
   }, [project?.canvasLayout?.elements]);
 
+  // Edge Resonance: select an edge and swing the cube so that edge is centered
+  // toward the viewer (both faces angled like an opened book). Targets are
+  // normalized to the nearest coterminal angle so the turn never exceeds 180°.
+  const selectEdge = useCallback(
+    (idx: number) => {
+      if (selectedEdgeIndex === idx) {
+        setSelectedEdgeIndex(null);
+        return;
+      }
+      setSelectedEdgeIndex(idx);
+      const rot = getRotationForEdge(idx);
+      setTargetRotation({
+        x: cubeRotation.x + normalizeAngle(rot.x - cubeRotation.x),
+        y: cubeRotation.y + normalizeAngle(rot.y - cubeRotation.y),
+      });
+      setIsAnimating(true);
+    },
+    [selectedEdgeIndex, cubeRotation],
+  );
+
+  // Call /api/ai/edge-insight for the open edge. The user's hypothesis (if
+  // written) rides along in every mode and is echoed back in the results.
+  const runEdgeInsight = useCallback(
+    async (mode: EdgeInsightMode) => {
+      const edge = selectedEdgeIndex !== null ? resonance.edges[selectedEdgeIndex] : null;
+      if (!edge || edgeInsightLoading) return;
+      setEdgeInsightLoading(true);
+      setEdgeInsightError(null);
+      setEdgeInsightMode(mode);
+      try {
+        const res = await requestEdgeInsight({
+          faceA: CUBE_FACES[edge.faceA].label,
+          faceB: CUBE_FACES[edge.faceB].label,
+          aCount: edge.aCount,
+          bCount: edge.bCount,
+          shared: edge.shared,
+          hypothesis: edgeHypothesis.trim() || undefined,
+          mode,
+        });
+        if (res.success && res.insight) {
+          setEdgeInsight(res.insight);
+          setRevealedHypothesis(edgeHypothesis.trim());
+        } else {
+          setEdgeInsightError(res.error || "Analysis failed. Try again.");
+        }
+      } finally {
+        setEdgeInsightLoading(false);
+      }
+    },
+    [selectedEdgeIndex, resonance.edges, edgeHypothesis, edgeInsightLoading],
+  );
+
   // Sensemaking Mode - Calculate face intensity and coherence
   // Returns visual parameters based on domain state without requiring interaction
   const calculateFaceIntensity = useCallback(
@@ -1550,8 +1666,9 @@ export function Hypercube3D({
     return generateFaceSummary(focusedFace, project, focusedTaggedElements);
   }, [focusedFace, project, focusedTaggedElements]);
 
-  const edgeColor = isCoreSelected ? SELECTED_COLOR : EDGE_COLOR;
-  const strutColor = isCoreSelected ? SELECTED_COLOR : STRUT_COLOR;
+  // Core selection highlights ONLY the inner cube (soft white); the outer
+  // wireframe and struts keep their resting colors so the whole cube doesn't light up.
+  const strutColor = STRUT_COLOR;
 
   // Cube positioning based on selection state
   // When a face is selected: cube shrinks and moves to top-right as NAVIGATION MAP
@@ -1657,6 +1774,9 @@ export function Hypercube3D({
               "left 0.62s cubic-bezier(0.22,1,0.36,1), top 0.62s cubic-bezier(0.22,1,0.36,1), transform 0.62s cubic-bezier(0.22,1,0.36,1)",
             width: "800px",
             height: "800px",
+            // Filter halos (edge glow, vertex sparks) extend past the 800×800
+            // box; without this the glow gets a hard clipped seam at the bounds.
+            overflow: "visible",
           }}
           viewBox="0 0 800 800"
         >
@@ -1685,10 +1805,11 @@ export function Hypercube3D({
               </feMerge>
             </filter>
 
-            {/* Layered bloom — soft wide halo + tight core, for a premium neon glow */}
+            {/* Layered bloom — soft halo + tight core. Kept deliberately gentle:
+                the v1 halo (stdDeviation 10) read as overpowering in playtests. */}
             <filter id="glow-bloom" x="-60%" y="-60%" width="220%" height="220%">
-              <feGaussianBlur stdDeviation="10" result="halo" />
-              <feGaussianBlur stdDeviation="3.5" result="core" />
+              <feGaussianBlur stdDeviation="5" result="halo" />
+              <feGaussianBlur stdDeviation="2" result="core" />
               <feMerge>
                 <feMergeNode in="halo" />
                 <feMergeNode in="core" />
@@ -1814,8 +1935,10 @@ export function Hypercube3D({
                 const ratio =
                   resonance.maxCount > 0 ? edge.count / resonance.maxCount : 0;
                 stroke = `url(#edgeGrad-${idx})`;
-                strokeWidth = 3 + ratio * 4.5;
-                opacity = 0.6 + ratio * 0.35;
+                // Restrained ramp — v1 (3 + 4.5·ratio at 0.95 opacity) bloomed
+                // too hard; the edge should read, not shout.
+                strokeWidth = 2.5 + ratio * 3;
+                opacity = 0.45 + ratio * 0.3;
                 filterId = "glow-bloom";
               } else if (edge.bothNonEmpty) {
                 stroke = `hsl(${Math.round(edge.hue)} 55% 62%)`;
@@ -1826,7 +1949,7 @@ export function Hypercube3D({
             }
             if (isSelectedEdge) {
               opacity = 1;
-              strokeWidth += 1.5;
+              strokeWidth += 2;
               filterId = "glow-bloom";
             }
 
@@ -1861,9 +1984,7 @@ export function Hypercube3D({
                     style={{ cursor: "pointer", pointerEvents: "stroke" }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      setSelectedEdgeIndex((prev) =>
-                        prev === idx ? null : idx,
-                      );
+                      selectEdge(idx);
                     }}
                   />
                 )}
@@ -1879,11 +2000,12 @@ export function Hypercube3D({
               z: (innerCorners[i].z + innerCorners[j].z) / 2,
             };
 
-            // When Core is selected, inner cube glows electric purple
+            // When Core is selected, the inner cube carries a soft white glow
+            // (the ONLY highlight in that state — no icon, no outer lighting).
             // When a face is selected, inner cube glows cyan (like the selection indicator)
             const hasFaceSelected = focusedFaceIndex !== null;
             const glowColor = isCoreSelected
-              ? "hsl(270 80% 70%)"
+              ? "hsl(0 0% 96%)"
               : hasFaceSelected
                 ? "hsl(185 70% 55%)" // Cyan glow when any face is selected
                 : undefined;
@@ -1923,7 +2045,7 @@ export function Hypercube3D({
                     "stroke 0.4s ease, stroke-width 0.4s ease, opacity 0.4s ease, filter 0.4s ease",
                   filter: isHighlighted
                     ? isCoreSelected
-                      ? "drop-shadow(0 0 8px hsl(270 80% 60%))"
+                      ? "drop-shadow(0 0 6px hsl(0 0% 100% / 0.55))"
                       : "drop-shadow(0 0 6px hsl(185 70% 50%))"
                     : undefined,
                 }}
@@ -1973,25 +2095,8 @@ export function Hypercube3D({
             );
           })}
 
-          {/* Core glyph - always visible at center */}
-          {isCoreSelected && (
-            <g transform="translate(400, 400)">
-              <path
-                d={GLYPHS.core}
-                transform="translate(-20, -20) scale(2)"
-                fill="none"
-                stroke="hsl(195 70% 70%)"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={1}
-                filter="url(#glow-stable)"
-                style={{
-                  filter: "drop-shadow(0 0 12px hsl(195 70% 60%))",
-                }}
-              />
-            </g>
-          )}
+          {/* Core selection renders NO center glyph/dot — the soft white glow
+              on the inner cube (above) is the whole highlight. */}
 
           {/* Face Planes with Identity System — depth-sorted (far first) for correct occlusion */}
           {FACE_CORNER_INDICES
@@ -2012,6 +2117,13 @@ export function Hypercube3D({
               // A face is "focused" if it's selected in the UI
               const isFocused = focusedFaceIndex === faceIndex;
               const isHovered = hoveredFace === faceIndex;
+              // Edge Resonance: both faces adjacent to the selected edge get a
+              // subtle fill tint so the "opened book" reads as one relationship.
+              const isEdgeAdjacent =
+                interactionMode === "explore" &&
+                selectedEdgeIndex !== null &&
+                (EDGE_ADJACENT_FACES[selectedEdgeIndex][0] === faceIndex ||
+                  EDGE_ADJACENT_FACES[selectedEdgeIndex][1] === faceIndex);
               // Dim non-front faces when we have a focused face
               const isDimmed =
                 focusedFaceIndex !== null && !isFocused && !isFrontFace;
@@ -2053,11 +2165,13 @@ export function Hypercube3D({
               const depthFactor = Math.max(0.28, 1 - (centerZ + 200) / 400);
               const faceOpacity = isActive
                 ? 0.52 // Active/front face — strongest
-                : isCoreSelected
-                  ? 0.08 // Very dim when Core is selected — inner cube is the focus
-                  : isDimmed
-                    ? 0.13 // Non-active when something is focused
-                    : 0.16 + depthFactor * 0.3; // translucent glass, weighted by depth
+                : isEdgeAdjacent
+                  ? 0.44 // Both faces of the selected edge — subtle shared tint
+                  : isCoreSelected
+                    ? 0.08 // Very dim when Core is selected — inner cube is the focus
+                    : isDimmed
+                      ? 0.13 // Non-active when something is focused
+                      : 0.16 + depthFactor * 0.3; // translucent glass, weighted by depth
               // Specular sheen strength — CONTINUOUS (no thresholds) so nothing
               // pops on/off as the cube rotates. 0 on dim/core faces.
               const facingStrength = isCoreSelected || isDimmed ? 0 : Math.max(0, depthFactor - 0.45);
@@ -2073,8 +2187,8 @@ export function Hypercube3D({
                     fill={`url(#faceGrad-${faceIndex})`}
                     fillOpacity={faceOpacity}
                     stroke={glowColor}
-                    strokeWidth={isActive ? "3" : "1.25"}
-                    strokeOpacity={isActive ? 1 : 0.6}
+                    strokeWidth={isActive ? "3" : isEdgeAdjacent ? "2" : "1.25"}
+                    strokeOpacity={isActive ? 1 : isEdgeAdjacent ? 0.85 : 0.6}
                     strokeLinejoin="round"
                     filter={isActive ? filterUrl : undefined}
                     className={
@@ -2100,6 +2214,39 @@ export function Hypercube3D({
                     style={{ pointerEvents: "none", mixBlendMode: "screen" }}
                   />
                 </g>
+              );
+            })}
+
+          {/* Edge Resonance: billboarded name labels at the center of each face
+              adjacent to the selected edge. SVG text lives in screen space, so
+              it stays upright ("billboarded") no matter how the cube sits. */}
+          {interactionMode === "explore" &&
+            selectedEdgeIndex !== null &&
+            EDGE_ADJACENT_FACES[selectedEdgeIndex].map((faceIndex) => {
+              const face = CUBE_FACES[faceIndex];
+              const corners = FACE_CORNER_INDICES[faceIndex].map(
+                (i) => outerCorners[i],
+              );
+              const cx = corners.reduce((s, c) => s + c.x, 0) / 4;
+              const cy = corners.reduce((s, c) => s + c.y, 0) / 4;
+              return (
+                <text
+                  key={`edge-face-label-${faceIndex}`}
+                  x={cx}
+                  y={cy}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={15}
+                  fontWeight={600}
+                  letterSpacing="0.08em"
+                  fill={`hsl(${face.tint.hue} 70% 84%)`}
+                  stroke="rgba(0, 0, 0, 0.65)"
+                  strokeWidth={3.5}
+                  paintOrder="stroke"
+                  style={{ pointerEvents: "none", userSelect: "none" }}
+                >
+                  {face.label.toUpperCase()}
+                </text>
               );
             })}
         </svg>
@@ -2518,32 +2665,31 @@ export function Hypercube3D({
             const fa = CUBE_FACES[edge.faceA];
             const fb = CUBE_FACES[edge.faceB];
             const hue = Math.round(edge.hue);
-            const faceChip = (face: CubeFace) => (
-              <span
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border"
-                style={{
-                  borderColor: `hsl(${face.tint.hue} 45% 50% / 0.4)`,
-                  background: `hsl(${face.tint.hue} 45% 22% / 0.3)`,
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 40 40" className="flex-shrink-0">
-                  <path
-                    d={face.glyph}
-                    fill="none"
-                    stroke={`hsl(${face.tint.hue} 60% 70%)`}
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+            // Same icon set as the left face-selector rail, so a face reads
+            // identically in the rail and in this panel.
+            const faceChip = (face: CubeFace) => {
+              const ChipIcon = FACE_ICONS[face.id] || Box;
+              return (
                 <span
-                  className="text-[11px] font-medium whitespace-nowrap"
-                  style={{ color: `hsl(${face.tint.hue} 45% 72%)` }}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border"
+                  style={{
+                    borderColor: `hsl(${face.tint.hue} 45% 50% / 0.4)`,
+                    background: `hsl(${face.tint.hue} 45% 22% / 0.3)`,
+                  }}
                 >
-                  {face.shortLabel}
+                  <ChipIcon
+                    className="w-3.5 h-3.5 flex-shrink-0"
+                    style={{ color: `hsl(${face.tint.hue} 60% 70%)` }}
+                  />
+                  <span
+                    className="text-[11px] font-medium whitespace-nowrap"
+                    style={{ color: `hsl(${face.tint.hue} 45% 72%)` }}
+                  >
+                    {face.shortLabel}
+                  </span>
                 </span>
-              </span>
-            );
+              );
+            };
             const emptyFace = edge.aCount === 0 ? fa : fb;
             return (
               <aside
@@ -2582,10 +2728,7 @@ export function Hypercube3D({
                 <div className="px-4 py-2.5 border-b border-white/10 text-xs">
                   {edge.count > 0 ? (
                     <span className="text-foreground/90">
-                      <span className="font-semibold" style={{ color: `hsl(${hue} 55% 68%)` }}>
-                        {edge.count}
-                      </span>{" "}
-                      shared element{edge.count !== 1 ? "s" : ""} resonate across these faces.
+                      Where these two dimensions meet in your design.
                     </span>
                   ) : edge.bothNonEmpty ? (
                     <span className="text-muted-foreground">
@@ -2601,48 +2744,265 @@ export function Hypercube3D({
                 {/* Body */}
                 {edge.count > 0 ? (
                   <div
-                    className="chat-scrollbar overflow-y-auto p-2 space-y-2"
+                    className="chat-scrollbar overflow-y-auto p-3 space-y-3"
                     style={{ "--chat-scrollbar-hue": hue } as React.CSSProperties}
                   >
-                    {edge.shared.map((el: CanvasElement) => {
-                      const preview = getElementPreview(el, project);
-                      const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
-                      return (
-                        <div
-                          key={el.id}
-                          className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-white/15 hover:border-white/30 transition-all group"
+                    {/* Shared elements: reference material, collapsed by default.
+                        The sense-making below is the point of this panel. */}
+                    <div>
+                      <button
+                        onClick={() => setEdgeElementsExpanded((prev) => !prev)}
+                        className="w-full flex items-center gap-1.5 px-1 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                        aria-expanded={edgeElementsExpanded}
+                      >
+                        <ChevronRight
+                          className={cn(
+                            "w-3.5 h-3.5 transition-transform",
+                            edgeElementsExpanded && "rotate-90",
+                          )}
+                        />
+                        {edge.count} shared element{edge.count !== 1 ? "s" : ""}
+                      </button>
+                      {edgeElementsExpanded && (
+                        <div className="mt-1.5 space-y-2 max-h-[26vh] overflow-y-auto chat-scrollbar pr-0.5">
+                          {edge.shared.map((el: CanvasElement) => {
+                            const preview = getElementPreview(el, project);
+                            const Icon = ELEMENT_TYPE_ICONS[preview.type] || Box;
+                            return (
+                              <div
+                                key={el.id}
+                                className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-white/15 hover:border-white/30 transition-all group"
+                                style={{
+                                  borderLeftColor: `hsl(${hue} 45% 52%)`,
+                                  borderLeftWidth: "2px",
+                                }}
+                              >
+                                <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                                <span className="text-xs text-foreground truncate">
+                                  {preview.title}
+                                </span>
+                                <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                                  {onPreviewElement && (
+                                    <button
+                                      onClick={() => onPreviewElement(el)}
+                                      className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                      title="Quick View"
+                                    >
+                                      <Eye className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  {onNavigateToElement && (
+                                    <button
+                                      onClick={() => onNavigateToElement(el.id)}
+                                      className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                      title="View on Canvas"
+                                    >
+                                      <MapPin className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Reflective friction: the user's own read comes before any
+                        AI output, so the analysis responds to their thinking
+                        instead of replacing it. Writing is optional; Reveal
+                        works either way. */}
+                    {!edgeInsight && !edgeInsightLoading && (
+                      <div
+                        className="rounded-xl border p-3"
+                        style={{
+                          borderColor: `hsl(${hue} 45% 45% / 0.35)`,
+                          background: `hsl(${hue} 45% 20% / 0.15)`,
+                        }}
+                      >
+                        <p className="text-xs text-foreground/90 leading-relaxed">
+                          Before the analysis: what do you sense connects{" "}
+                          <span
+                            className="font-semibold"
+                            style={{ color: `hsl(${fa.tint.hue} 55% 70%)` }}
+                          >
+                            {fa.label}
+                          </span>{" "}
+                          and{" "}
+                          <span
+                            className="font-semibold"
+                            style={{ color: `hsl(${fb.tint.hue} 55% 70%)` }}
+                          >
+                            {fb.label}
+                          </span>{" "}
+                          in your experience?
+                        </p>
+                        <textarea
+                          value={edgeHypothesis}
+                          onChange={(e) => setEdgeHypothesis(e.target.value)}
+                          rows={3}
+                          maxLength={600}
+                          placeholder="Your hunch, in a sentence or two (optional)"
+                          className="mt-2 w-full rounded-lg border bg-black/30 px-2.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none resize-none"
+                          style={{ borderColor: `hsl(${hue} 40% 45% / 0.4)` }}
+                        />
+                        <button
+                          onClick={() => runEdgeInsight("analyze")}
+                          className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors"
                           style={{
-                            borderLeftColor: `hsl(${hue} 45% 52%)`,
-                            borderLeftWidth: "2px",
+                            borderColor: `hsl(${hue} 55% 55% / 0.5)`,
+                            background: `hsl(${hue} 55% 45% / 0.18)`,
+                            color: `hsl(${hue} 55% 80%)`,
                           }}
                         >
-                          <Icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                          <span className="text-xs text-foreground truncate">
-                            {preview.title}
-                          </span>
-                          <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
-                            {onPreviewElement && (
-                              <button
-                                onClick={() => onPreviewElement(el)}
-                                className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
-                                title="Quick View"
-                              >
-                                <Eye className="w-3 h-3" />
-                              </button>
-                            )}
-                            {onNavigateToElement && (
-                              <button
-                                onClick={() => onNavigateToElement(el.id)}
-                                className="p-1 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
-                                title="View on Canvas"
-                              >
-                                <MapPin className="w-3 h-3" />
-                              </button>
-                            )}
+                          <Sparkles className="w-3.5 h-3.5" /> Reveal analysis
+                        </button>
+                      </div>
+                    )}
+
+                    {edgeInsightLoading && (
+                      <div className="flex items-center gap-2 px-1 py-3 text-xs text-muted-foreground">
+                        <Loader2
+                          className="w-4 h-4 animate-spin"
+                          style={{ color: `hsl(${hue} 55% 65%)` }}
+                        />
+                        Reading what sits on both faces...
+                      </div>
+                    )}
+
+                    {edgeInsightError && !edgeInsightLoading && (
+                      <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                        {edgeInsightError}
+                      </div>
+                    )}
+
+                    {edgeInsight && !edgeInsightLoading && (
+                      <div className="space-y-3">
+                        {/* The user's hypothesis stays on top: the AI responds
+                            to it, it does not overwrite it. */}
+                        {revealedHypothesis && (
+                          <div
+                            className="rounded-lg border-l-2 pl-2.5 pr-1 py-1.5"
+                            style={{ borderColor: `hsl(${hue} 55% 60%)` }}
+                          >
+                            <p
+                              className="text-[10px] uppercase tracking-wider font-semibold"
+                              style={{ color: `hsl(${hue} 45% 62%)` }}
+                            >
+                              Your read
+                            </p>
+                            <p className="mt-0.5 text-xs text-foreground/85 italic leading-relaxed">
+                              &quot;{revealedHypothesis}&quot;
+                            </p>
                           </div>
+                        )}
+
+                        {edgeInsight.keyObservations.length > 0 && (
+                          <div>
+                            <p
+                              className="text-[10px] uppercase tracking-wider font-semibold"
+                              style={{ color: `hsl(${hue} 45% 62%)` }}
+                            >
+                              Observations
+                            </p>
+                            <ul className="mt-1 space-y-1.5">
+                              {edgeInsight.keyObservations.map((obs, i) => (
+                                <li
+                                  key={i}
+                                  className="text-xs text-foreground/90 leading-relaxed pl-3 relative"
+                                >
+                                  <span
+                                    className="absolute left-0 top-[7px] w-1 h-1 rounded-full"
+                                    style={{ background: `hsl(${hue} 55% 60%)` }}
+                                  />
+                                  {obs}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {edgeInsight.tension && (
+                          <div
+                            className="rounded-lg border px-2.5 py-2"
+                            style={{
+                              borderColor: `hsl(${hue} 50% 50% / 0.35)`,
+                              background: `hsl(${hue} 50% 22% / 0.18)`,
+                            }}
+                          >
+                            <p
+                              className="text-[10px] uppercase tracking-wider font-semibold"
+                              style={{ color: `hsl(${hue} 45% 62%)` }}
+                            >
+                              Tension
+                            </p>
+                            <p className="mt-0.5 text-xs text-foreground/90 leading-relaxed">
+                              {edgeInsight.tension}
+                            </p>
+                          </div>
+                        )}
+
+                        {edgeInsight.questions.length > 0 && (
+                          <div>
+                            <p
+                              className="text-[10px] uppercase tracking-wider font-semibold"
+                              style={{ color: `hsl(${hue} 45% 62%)` }}
+                            >
+                              For you to sit with
+                            </p>
+                            <ul className="mt-1 space-y-1.5">
+                              {edgeInsight.questions.map((q, i) => (
+                                <li
+                                  key={i}
+                                  className="text-xs text-foreground/85 italic leading-relaxed"
+                                >
+                                  {q}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Go deeper: same route, different lens. The user's
+                            hypothesis rides along with every mode. */}
+                        <div className="grid grid-cols-3 gap-1.5 pt-1">
+                          {(
+                            [
+                              { mode: "tensions", label: "Find tensions" },
+                              { mode: "bridge", label: "Bridge ideas" },
+                              { mode: "deepen", label: "Deepen questions" },
+                            ] as { mode: EdgeInsightMode; label: string }[]
+                          ).map(({ mode, label }) => (
+                            <button
+                              key={mode}
+                              onClick={() => runEdgeInsight(mode)}
+                              disabled={edgeInsightLoading}
+                              className={cn(
+                                "px-1.5 py-1.5 rounded-lg text-[10px] font-medium border transition-colors leading-tight disabled:opacity-60",
+                                edgeInsightMode !== mode &&
+                                "text-muted-foreground hover:text-foreground hover:bg-white/5",
+                              )}
+                              style={{
+                                borderColor:
+                                  edgeInsightMode === mode
+                                    ? `hsl(${hue} 55% 55% / 0.6)`
+                                    : "hsl(0 0% 100% / 0.15)",
+                                background:
+                                  edgeInsightMode === mode
+                                    ? `hsl(${hue} 55% 45% / 0.18)`
+                                    : "transparent",
+                                color:
+                                  edgeInsightMode === mode
+                                    ? `hsl(${hue} 55% 80%)`
+                                    : undefined,
+                              }}
+                            >
+                              {label}
+                            </button>
+                          ))}
                         </div>
-                      );
-                    })}
+                      </div>
+                    )}
                   </div>
                 ) : edge.bothNonEmpty ? (
                   <div className="p-3">
