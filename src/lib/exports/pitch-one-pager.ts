@@ -8,6 +8,7 @@
 // project, so the default output is unchanged.
 
 import { SENSORY_DOMAINS, REALITY_PLANES, type CXDProject } from "@/types/cxd-schema";
+import type { PitchSection, PitchSectionKind } from "@/lib/ai/pitch-generation";
 
 export interface PitchOptions {
   /** Overrides the headline title. */
@@ -356,6 +357,260 @@ export function buildPitchHTML(project: CXDProject, options: PitchOptions = {}):
       ${contact ? `<span class="contact">${esc(contact)}</span>` : ""}
       <span>Concept one-pager &middot; generated ${esc(generated)}</span>
     </footer>
+  </div>
+</body>
+</html>
+`;
+}
+
+// ---------------------------------------------------------------------------
+// AI slide-deck renderer
+//
+// Renders AI-generated PitchSection[] as a self-contained slide deck. In 'deck'
+// mode each section is a full-viewport slide with a print page-break so nothing
+// is cramped; in 'single' mode the sections stack onto one flowing page. Theme
+// (dark/light) and accent are applied to a fully inline stylesheet, and selected
+// project images are placed in the hero and concept sections.
+// ---------------------------------------------------------------------------
+
+export interface PitchDeckOptions {
+  projectName: string;
+  theme: "dark" | "light";
+  accent: string;
+  length: "single" | "deck";
+  /** Selected image URLs (may be remote or data URIs) to embed. */
+  images?: string[];
+  contact?: string;
+}
+
+const KIND_KICKER: Record<PitchSectionKind, string> = {
+  hero: "Overview",
+  concept: "The concept",
+  personas: "Who it is for",
+  sensory: "Sensory signature",
+  stats: "At a glance",
+  roadmap: "Roadmap",
+  cta: "Next step",
+};
+
+function bulletsHTML(bullets: string[] | undefined): string {
+  if (!bullets || bullets.length === 0) return "";
+  return `<ul class="deck-bullets">${bullets.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`;
+}
+
+function bodyHTML(body: string): string {
+  const paras = body
+    .split(/\n{2,}|\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paras.length === 0) return "";
+  return paras.map((p) => `<p>${esc(p)}</p>`).join("");
+}
+
+function imageHTML(src: string | undefined, alt: string): string {
+  if (!src) return "";
+  return `<div class="deck-img"><img src="${esc(src)}" alt="${esc(alt)}" /></div>`;
+}
+
+export function buildPitchDeckHTML(sections: PitchSection[], options: PitchDeckOptions): string {
+  const accent = options.accent?.trim() || "#8b5cf6";
+  const isDark = options.theme !== "light";
+  const single = options.length === "single";
+  const images = (options.images || []).filter(Boolean);
+  const generated = new Date().toISOString().split("T")[0];
+  const projectName = options.projectName || "Untitled Experience";
+
+  // Selected images land in the hero and concept sections; extras become a
+  // trailing gallery so nothing selected is silently dropped.
+  const heroImg = images[0];
+  const conceptImg = images[1];
+  const galleryImgs = images.slice(2);
+
+  const theme = isDark
+    ? {
+        pageBg: "#09060f",
+        slideBg: "linear-gradient(160deg, #120b22 0%, #0c0817 55%, #0e0a1c 100%)",
+        ink: "#ece9f6",
+        inkSoft: "rgba(236,233,246,0.78)",
+        inkFaint: "rgba(236,233,246,0.45)",
+        panel: "rgba(255,255,255,0.03)",
+        rule: "rgba(255,255,255,0.08)",
+      }
+    : {
+        pageBg: "#eeecf4",
+        slideBg: "linear-gradient(160deg, #ffffff 0%, #f7f5fc 100%)",
+        ink: "#1a1626",
+        inkSoft: "#4b455c",
+        inkFaint: "#6f6980",
+        panel: "#faf9fd",
+        rule: "#e7e3ef",
+      };
+
+  const slidesHTML = sections
+    .map((s) => {
+      const img = s.kind === "hero" ? heroImg : s.kind === "concept" ? conceptImg : undefined;
+      const isHero = s.kind === "hero";
+      return `<section class="slide${isHero ? " slide-hero" : ""}">
+      <div class="slide-inner">
+        <div class="kicker">${esc(KIND_KICKER[s.kind] || s.kind)}</div>
+        <${isHero ? "h1" : "h2"} class="slide-title">${esc(s.title)}</${isHero ? "h1" : "h2"}>
+        ${imageHTML(img, s.title)}
+        <div class="slide-body">${bodyHTML(s.body)}</div>
+        ${bulletsHTML(s.bullets)}
+      </div>
+    </section>`;
+    })
+    .join("\n");
+
+  const galleryHTML =
+    galleryImgs.length > 0
+      ? `<section class="slide">
+      <div class="slide-inner">
+        <div class="kicker">Gallery</div>
+        <div class="deck-gallery">${galleryImgs
+          .map((src) => `<img src="${esc(src)}" alt="${esc(projectName)}" />`)
+          .join("")}</div>
+      </div>
+    </section>`
+      : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${esc(projectName)} : Pitch</title>
+<style>
+  :root {
+    --accent: ${accent};
+    --accent-strong: ${hexToRgba(accent, 0.5)};
+    --accent-soft: ${hexToRgba(accent, 0.16)};
+    --accent-faint: ${hexToRgba(accent, 0.08)};
+    --page-bg: ${theme.pageBg};
+    --slide-bg: ${theme.slideBg};
+    --ink: ${theme.ink};
+    --ink-soft: ${theme.inkSoft};
+    --ink-faint: ${theme.inkFaint};
+    --panel: ${theme.panel};
+    --rule: ${theme.rule};
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--page-bg);
+    color: var(--ink);
+    line-height: 1.6;
+  }
+  .deck { max-width: ${single ? "820px" : "980px"}; margin: 0 auto; padding: ${single ? "32px 16px 48px" : "0"}; }
+  .slide {
+    background: var(--slide-bg);
+    ${single ? "" : "min-height: 100vh;"}
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: ${single ? "0" : "56px 24px"};
+    ${single ? "margin-bottom: 20px; border: 1px solid var(--accent-strong); border-radius: 18px;" : "border-bottom: 1px solid var(--rule);"}
+  }
+  .slide-inner {
+    width: 100%;
+    max-width: 720px;
+    padding: ${single ? "36px 44px" : "0"};
+  }
+  .slide-hero .slide-inner { text-align: left; }
+  .kicker {
+    font-size: 11px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  h1.slide-title {
+    font-size: 40px;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.1;
+    margin-bottom: 18px;
+  }
+  h2.slide-title {
+    font-size: 28px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin-bottom: 16px;
+  }
+  .slide-body p { font-size: 16px; color: var(--ink-soft); margin-bottom: 12px; max-width: 62ch; }
+  .slide-body p:last-child { margin-bottom: 0; }
+  .deck-bullets { list-style: none; margin-top: 20px; }
+  .deck-bullets li {
+    position: relative;
+    padding-left: 22px;
+    margin-bottom: 10px;
+    font-size: 15px;
+    color: var(--ink-soft);
+  }
+  .deck-bullets li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 9px;
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  .deck-img { margin: 22px 0; }
+  .deck-img img {
+    width: 100%;
+    max-height: 340px;
+    object-fit: cover;
+    border-radius: 14px;
+    border: 1px solid var(--accent-soft);
+  }
+  .deck-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+  }
+  .deck-gallery img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1px solid var(--accent-soft);
+  }
+  .deck-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    max-width: ${single ? "820px" : "980px"};
+    margin: 8px auto 0;
+    padding: 18px 44px 32px;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+  .deck-footer .brand { color: var(--accent); letter-spacing: 0.08em; }
+  @media print {
+    body { background: var(--page-bg); }
+    .deck { max-width: none; padding: 0; }
+    @page { size: ${single ? "A4 portrait" : "A4 landscape"}; margin: ${single ? "10mm" : "0"}; }
+    .slide {
+      ${single ? "" : "min-height: auto; page-break-after: always; break-after: page;"}
+      ${single ? "border: none; border-radius: 0; margin-bottom: 24px;" : "border-bottom: none;"}
+    }
+    .slide:last-of-type { page-break-after: auto; break-after: auto; }
+    .deck-footer { padding: 12px 24px; }
+  }
+</style>
+</head>
+<body>
+  <div class="deck">
+    ${slidesHTML}
+    ${galleryHTML}
+  </div>
+  <div class="deck-footer">
+    <span class="brand">CXD CANVAS</span>
+    ${options.contact ? `<span>${esc(options.contact)}</span>` : ""}
+    <span>${esc(projectName)} &middot; generated ${esc(generated)}</span>
   </div>
 </body>
 </html>

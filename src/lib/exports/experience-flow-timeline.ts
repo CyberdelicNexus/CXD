@@ -149,10 +149,23 @@ const TIMELINE_CSS = `
   .stage-detail .sd-empty { font-size: 13px; color: var(--ink-faint); font-style: italic; }
 `;
 
+export interface FlowTimelineOptions {
+  /** Document color theme. Defaults to 'light' (unchanged from the original). */
+  theme?: "light" | "dark";
+  /** Accent hex color for the axis, labels and header rule. */
+  accent?: string;
+  /** Include the per-stage detail sections. When false, only the timeline shows. */
+  showStageDetails?: boolean;
+}
+
 export function buildExperienceFlowTimelineHTML(
   project: CXDProject,
   stages: ExperienceFlowStageV2[],
+  options: FlowTimelineOptions = {},
 ): string {
+  const theme = options.theme === "dark" ? "dark" : "light";
+  const accent = options.accent?.trim() || "#7c3aed";
+  const showStageDetails = options.showStageDetails !== false;
   const projectName = project.name || project.intentionCore?.projectName || "Untitled";
   const totalMinutes = stages.reduce((s, st) => s + (st.estimatedMinutes || 0), 0);
 
@@ -223,8 +236,12 @@ export function buildExperienceFlowTimelineHTML(
       </div>
     </div>
 
-    <h2>Stage detail</h2>
-    ${stages.length > 0 ? details : `<p>Add stages in the Experience Flow to populate this timeline.</p>`}
+    ${
+      showStageDetails
+        ? `<h2>Stage detail</h2>
+    ${stages.length > 0 ? details : `<p>Add stages in the Experience Flow to populate this timeline.</p>`}`
+        : ""
+    }
   `;
 
   return buildHtmlDoc({
@@ -232,6 +249,8 @@ export function buildExperienceFlowTimelineHTML(
     artifactTitle: "Experience Flow Timeline",
     bodyHtml,
     landscape: true,
+    accent,
+    theme,
     extraCss: TIMELINE_CSS,
   });
 }

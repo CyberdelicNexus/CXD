@@ -52,6 +52,8 @@ export interface HtmlDocOptions {
   accent?: string;
   /** Extra CSS appended after the base stylesheet (for artifact-specific layout). */
   extraCss?: string;
+  /** Color theme for the generated document. Defaults to 'light'. */
+  theme?: "light" | "dark";
 }
 
 function todayISO(): string {
@@ -67,10 +69,35 @@ export function buildHtmlDoc(opts: HtmlDocOptions): string {
     landscape = false,
     accent = "#7c3aed",
     extraCss = "",
+    theme = "light",
   } = opts;
 
   const pageSize = landscape ? "A4 landscape" : "A4";
   const contentMaxWidth = landscape ? "1180px" : "820px";
+
+  const dark = theme === "dark";
+  const t = dark
+    ? {
+        ink: "#ece9f6",
+        inkSoft: "rgba(236,233,246,0.82)",
+        inkFaint: "rgba(236,233,246,0.5)",
+        rule: "rgba(255,255,255,0.1)",
+        panel: "rgba(255,255,255,0.04)",
+        page: "#140d24",
+        bodyBg: "#09060f",
+        evenRow: "rgba(255,255,255,0.02)",
+      }
+    : {
+        ink: "#1a1626",
+        inkSoft: "#4b455c",
+        inkFaint: "#6f6980",
+        rule: "#e7e3ef",
+        panel: "#faf9fd",
+        page: "#ffffff",
+        bodyBg: "#f2f0f7",
+        evenRow: "#fbfafe",
+      };
+  const printBodyBg = dark ? t.bodyBg : "#fff";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -81,18 +108,18 @@ export function buildHtmlDoc(opts: HtmlDocOptions): string {
 <style>
   :root {
     --accent: ${accent};
-    --ink: #1a1626;
-    --ink-soft: #4b455c;
-    --ink-faint: #6f6980;
-    --rule: #e7e3ef;
-    --panel: #faf9fd;
-    --page: #ffffff;
+    --ink: ${t.ink};
+    --ink-soft: ${t.inkSoft};
+    --ink-faint: ${t.inkFaint};
+    --rule: ${t.rule};
+    --panel: ${t.panel};
+    --page: ${t.page};
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body {
     font-family: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
-    background: #f2f0f7;
+    background: ${t.bodyBg};
     color: var(--ink);
     line-height: 1.6;
     font-size: 15px;
@@ -222,7 +249,7 @@ export function buildHtmlDoc(opts: HtmlDocOptions): string {
     vertical-align: top;
   }
   .doc-sheet th { background: var(--panel); font-weight: 650; color: var(--ink); }
-  .doc-sheet tr:nth-child(even) td { background: #fbfafe; }
+  .doc-sheet tr:nth-child(even) td { background: ${t.evenRow}; }
 
   .doc-footer {
     max-width: ${contentMaxWidth};
@@ -239,7 +266,7 @@ export function buildHtmlDoc(opts: HtmlDocOptions): string {
 
   @media print {
     @page { size: ${pageSize}; margin: 14mm; }
-    body { background: #fff; }
+    body { background: ${printBodyBg}; }
     .doc-header { position: static; box-shadow: none; }
     .print-btn { display: none !important; }
     .doc-body { padding: 16px 0 0; max-width: none; }

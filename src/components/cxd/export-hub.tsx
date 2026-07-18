@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -18,7 +18,11 @@ import {
   GanttChartSquare,
   ImagePlus,
   Printer,
-  Trash2,
+  Sparkles,
+  Eye,
+  Settings2,
+  Loader2,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
@@ -27,13 +31,16 @@ import { ERDGenerator } from "./canvas/erd-generator";
 import { CalendarSyncDialog } from "@/components/calendar-sync-dialog";
 import { ROLE_BUNDLES, buildRoleBriefMarkdown } from "@/lib/exports/role-briefs";
 import { buildFacilitationMarkdown } from "@/lib/exports/facilitation-sheet";
-import {
-  buildPitchHTML,
-  defaultPitchHighlights,
-  type PitchOptions,
-} from "@/lib/exports/pitch-one-pager";
+import { buildPitchHTML, buildPitchDeckHTML } from "@/lib/exports/pitch-one-pager";
 import { buildHtmlDoc, markdownToHtml } from "@/lib/exports/html-doc";
 import { buildExperienceFlowTimelineHTML } from "@/lib/exports/experience-flow-timeline";
+import { generatePitch } from "@/lib/ai/pitch-generation-service";
+import {
+  PITCH_MAX_PROMPT_LEN,
+  type PitchSectionKind,
+  type PitchSection,
+  type PitchBuilderOptions,
+} from "@/lib/ai/pitch-generation";
 import type { CXDProject } from "@/types/cxd-schema";
 import { HYPERCUBE_FACE_TAGS, type HypercubeFaceTag } from "@/types/canvas-elements";
 import type { CanvasElement } from "@/types/canvas-elements";
@@ -88,6 +95,19 @@ function openAndPrintHtml(html: string, fallbackFilename: string) {
       // The user can still print from the opened page.
     }
   }, 600);
+}
+
+/** Open a generated HTML document in a new window for preview (no auto-print). */
+function openHtmlInNewWindow(html: string, fallbackFilename: string) {
+  const win = window.open("", "_blank");
+  if (!win) {
+    downloadTextFile(html, fallbackFilename, "text/html");
+    return;
+  }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
 }
 
 function slug(name: string): string {
@@ -449,33 +469,33 @@ const PITCH_ACCENT_PRESETS: { hex: string; name: string }[] = [
   { hex: "#f59e0b", name: "Amber" },
 ];
 
-const PITCH_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+// Sections the builder lets the author toggle (hero is always generated).
+const PITCH_SECTION_TOGGLES: { kind: PitchSectionKind; label: string }[] = [
+  { kind: "concept", label: "Concept" },
+  { kind: "personas", label: "Personas" },
+  { kind: "sensory", label: "Sensory signature" },
+  { kind: "stats", label: "Stats" },
+  { kind: "roadmap", label: "Roadmap / milestones" },
+  { kind: "cta", label: "Call to action" },
+];
 
-interface PitchFormState {
-  title: string;
-  tagline: string;
-  highlights: [string, string, string];
-  contact: string;
-  accent: string;
-  imageDataUri: string | null;
-  imageError: string | null;
+interface ProjectImage {
+  id: string;
+  src: string;
 }
 
-function pitchFormFromProject(project: CXDProject): PitchFormState {
-  const highlights = defaultPitchHighlights(project);
-  return {
-    title: project.name || project.intentionCore?.projectName || "Untitled Experience",
-    tagline: project.intentionCore?.mainConcept?.trim() || "",
-    highlights: [highlights[0] || "", highlights[1] || "", highlights[2] || ""],
-    contact: "",
-    accent: PITCH_ACCENT_PRESETS[0].hex,
-    imageDataUri: null,
-    imageError: null,
+/** Every image element across the root canvas and all boards, with a usable src. */
+function gatherImageElements(project: CXDProject): ProjectImage[] {
+  const out: ProjectImage[] = [];
+  const push = (els: CanvasElement[]) => {
+    for (const el of els) {
+      if (el.type === "image" && el.src && el.src.trim()) out.push({ id: el.id, src: el.src });
+    }
   };
+  push(project.canvasLayout?.elements || []);
+  for (const board of project.canvasLayout?.boards || []) push(board.nodes || []);
+  return out;
 }
-
-const pitchInputCls =
-  "w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white placeholder:text-white/25 outline-none transition-colors focus:border-violet-400/50";
 
 // ---------------------------------------------------------------------------
 // Export Hub
@@ -496,10 +516,9 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
   const [calSyncOpen, setCalSyncOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // Pitch personalization
-  const [pitchOpen, setPitchOpen] = useState(false);
-  const [pitchForm, setPitchForm] = useState<PitchFormState | null>(null);
-  const pitchImageInputRef = useRef<HTMLInputElement>(null);
+  // Pitch builder + timeline customization popups
+  const [pitchBuilderOpen, setPitchBuilderOpen] = useState(false);
+  const [timelineCustomizeOpen, setTimelineCustomizeOpen] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -593,73 +612,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     downloadTextFile(md, `Facilitation-State-Care-${slug(proj.name)}.md`, "text/markdown");
   }, []);
 
-  // --- Pitch one-pager -----------------------------------------------------
-  const togglePitchForm = useCallback(() => {
-    setPitchOpen((open) => {
-      if (!open) {
-        const proj = useCXDStore.getState().getCurrentProject();
-        if (proj) setPitchForm((f) => f ?? pitchFormFromProject(proj));
-      }
-      return !open;
-    });
-  }, []);
-
-  const pitchOptionsFromForm = useCallback((form: PitchFormState): PitchOptions => {
-    return {
-      title: form.title,
-      tagline: form.tagline,
-      highlights: form.highlights.filter((h) => h.trim()),
-      contact: form.contact,
-      accent: form.accent,
-      imageDataUri: form.imageDataUri,
-    };
-  }, []);
-
-  const handlePitchDownload = useCallback(() => {
-    const proj = useCXDStore.getState().getCurrentProject();
-    if (!proj) return;
-    const html = buildPitchHTML(proj, pitchForm ? pitchOptionsFromForm(pitchForm) : {});
-    downloadTextFile(html, `Pitch-One-Pager-${slug(proj.name)}.html`, "text/html");
-  }, [pitchForm, pitchOptionsFromForm]);
-
-  const handlePitchPrint = useCallback(() => {
-    const proj = useCXDStore.getState().getCurrentProject();
-    if (!proj) return;
-    const html = buildPitchHTML(proj, pitchForm ? pitchOptionsFromForm(pitchForm) : {});
-    openAndPrintHtml(html, `Pitch-One-Pager-${slug(proj.name)}.html`);
-  }, [pitchForm, pitchOptionsFromForm]);
-
-  const handlePitchImage = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (file.size > PITCH_IMAGE_MAX_BYTES) {
-      setPitchForm((f) =>
-        f ? { ...f, imageError: "That image is over 2 MB. Please pick a smaller one." } : f,
-      );
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPitchForm((f) =>
-        f ? { ...f, imageDataUri: String(reader.result || ""), imageError: null } : f,
-      );
-    };
-    reader.onerror = () => {
-      setPitchForm((f) =>
-        f ? { ...f, imageError: "Could not read that file. Please try another image." } : f,
-      );
-    };
-    reader.readAsDataURL(file);
-  }, []);
-
-  const updatePitchField = useCallback(
-    (patch: Partial<PitchFormState>) => {
-      setPitchForm((f) => (f ? { ...f, ...patch } : f));
-    },
-    [],
-  );
-
+  // --- Experience Flow Timeline: one-click default download ----------------
   // Close on Escape while open
   useEffect(() => {
     if (!isOpen) return;
@@ -717,166 +670,16 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                 <ArtifactCard
                   icon={Presentation}
                   title="Pitch One-Pager"
-                  description="A print-ready concept page: intention, desired change, personas and sensory signature. Personalize it, then download or save it as a PDF."
+                  description="An AI-built pitch tuned to what you want to emphasize: theme, sections, project images and length. Preview, download or save it as a PDF."
                   accent="text-rose-300"
                   actions={[
                     {
-                      label: pitchOpen ? "Hide options" : "Personalize & download",
-                      icon: pitchOpen ? ChevronUp : ChevronDown,
-                      onClick: togglePitchForm,
+                      label: "Customize my pitch",
+                      icon: Sparkles,
+                      onClick: () => setPitchBuilderOpen(true),
                     },
                   ]}
-                >
-                  {pitchOpen && pitchForm && (
-                    <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <div>
-                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
-                            Title
-                          </label>
-                          <input
-                            className={pitchInputCls}
-                            value={pitchForm.title}
-                            onChange={(e) => updatePitchField({ title: e.target.value })}
-                            maxLength={120}
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
-                            Contact line
-                          </label>
-                          <input
-                            className={pitchInputCls}
-                            value={pitchForm.contact}
-                            onChange={(e) => updatePitchField({ contact: e.target.value })}
-                            placeholder="name@studio.com · +00 000 000"
-                            maxLength={120}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
-                          Tagline / concept line
-                        </label>
-                        <input
-                          className={pitchInputCls}
-                          value={pitchForm.tagline}
-                          onChange={(e) => updatePitchField({ tagline: e.target.value })}
-                          maxLength={200}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
-                          Highlights (up to 3)
-                        </label>
-                        <div className="space-y-1.5">
-                          {pitchForm.highlights.map((h, i) => (
-                            <input
-                              key={i}
-                              className={pitchInputCls}
-                              value={h}
-                              onChange={(e) => {
-                                const next = [...pitchForm.highlights] as [string, string, string];
-                                next[i] = e.target.value;
-                                updatePitchField({ highlights: next });
-                              }}
-                              placeholder={`Highlight ${i + 1}`}
-                              maxLength={160}
-                            />
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-end gap-4">
-                        <div>
-                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
-                            Accent color
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            {PITCH_ACCENT_PRESETS.map((preset) => (
-                              <button
-                                key={preset.hex}
-                                type="button"
-                                title={preset.name}
-                                onClick={() => updatePitchField({ accent: preset.hex })}
-                                className={cn(
-                                  "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
-                                  pitchForm.accent === preset.hex
-                                    ? "border-white"
-                                    : "border-transparent",
-                                )}
-                                style={{ backgroundColor: preset.hex }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="min-w-0">
-                          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/35">
-                            Image (optional, max 2 MB)
-                          </label>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => pitchImageInputRef.current?.click()}
-                              className="flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/10"
-                            >
-                              <ImagePlus className="h-3 w-3" />
-                              {pitchForm.imageDataUri ? "Replace image" : "Add image"}
-                            </button>
-                            {pitchForm.imageDataUri && (
-                              <>
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={pitchForm.imageDataUri}
-                                  alt="Pitch preview"
-                                  className="h-8 w-12 rounded-md border border-white/10 object-cover"
-                                />
-                                <button
-                                  type="button"
-                                  title="Remove image"
-                                  onClick={() => updatePitchField({ imageDataUri: null, imageError: null })}
-                                  className="rounded-md p-1 text-white/40 transition-colors hover:bg-white/10 hover:text-white"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                          <input
-                            ref={pitchImageInputRef}
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handlePitchImage}
-                          />
-                          {pitchForm.imageError && (
-                            <p className="mt-1 text-[11px] text-rose-300">{pitchForm.imageError}</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-3">
-                        <button
-                          onClick={handlePitchDownload}
-                          className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
-                        >
-                          <Download className="h-3 w-3" />
-                          Download HTML
-                        </button>
-                        <button
-                          onClick={handlePitchPrint}
-                          className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
-                        >
-                          <Printer className="h-3 w-3" />
-                          Save as PDF
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </ArtifactCard>
+                />
               </div>
             </section>
 
@@ -977,6 +780,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   accent="text-cyan-300"
                   actions={[
                     { label: "Download timeline", onClick: handleFlowTimelineHTML },
+                    { label: "Customize", icon: Settings2, onClick: () => setTimelineCustomizeOpen(true) },
                     { label: "Markdown", onClick: handleFlowTimelineMD, variant: "ghost" },
                   ]}
                 />
@@ -1032,7 +836,449 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
 
       {/* Calendar sync: shared dialog, also used by Master Plan and Profile */}
       <CalendarSyncDialog open={calSyncOpen} onClose={() => setCalSyncOpen(false)} />
+
+      {/* Pitch builder popup (Gamma-style) */}
+      {pitchBuilderOpen && project && (
+        <PitchBuilderModal project={project} onClose={() => setPitchBuilderOpen(false)} />
+      )}
+
+      {/* Experience Flow Timeline customization popup */}
+      {timelineCustomizeOpen && (
+        <TimelineCustomizeModal onClose={() => setTimelineCustomizeOpen(false)} />
+      )}
     </>,
     document.body
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared popup shell + control styles
+// ---------------------------------------------------------------------------
+const chip = (active: boolean) =>
+  cn(
+    "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+    active
+      ? "border-violet-400/50 bg-violet-500/20 text-violet-100"
+      : "border-white/10 bg-white/[0.04] text-white/55 hover:bg-white/[0.08] hover:text-white/80",
+  );
+
+const primaryBtn =
+  "flex items-center gap-1.5 rounded-lg bg-violet-500/20 px-3.5 py-2 text-xs font-medium text-violet-100 transition-colors hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-50";
+const ghostBtn =
+  "flex items-center gap-1.5 rounded-lg bg-white/[0.05] px-3.5 py-2 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.1] hover:text-white";
+
+const FIELD_LABEL = "mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-white/40";
+
+/** Backdrop + centered panel shell shared by both builder popups. Uses the
+ *  hub's portal idiom at z-[10000] so it stacks above the Export Hub. Escape is
+ *  intercepted in the capture phase so it does not also close the hub. */
+function PopupShell({
+  title,
+  subtitle,
+  icon: Icon,
+  onClose,
+  children,
+  footer,
+}: {
+  title: string;
+  subtitle?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      aria-modal="true"
+      role="dialog"
+      aria-label={title}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="relative mx-4 flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/85 shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-5 py-3.5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-500/20 bg-violet-500/15">
+              <Icon className="h-4 w-4 text-violet-300" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-white">{title}</h2>
+              {subtitle && <p className="text-xs text-white/45">{subtitle}</p>}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-md p-1.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4" style={{ scrollbarWidth: "thin" }}>
+          {children}
+        </div>
+
+        {footer && (
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-white/10 px-5 py-3.5">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pitch builder popup (Gamma-AI style)
+// ---------------------------------------------------------------------------
+const PITCH_SECTION_ORDER: PitchSectionKind[] = [
+  "hero", "concept", "personas", "sensory", "stats", "roadmap", "cta",
+];
+
+function PitchBuilderModal({ project, onClose }: { project: CXDProject; onClose: () => void }) {
+  const projectName = project.name || project.intentionCore?.projectName || "Untitled Experience";
+
+  const [prompt, setPrompt] = useState("");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [accent, setAccent] = useState(PITCH_ACCENT_PRESETS[0].hex);
+  const [includeImages, setIncludeImages] = useState(true);
+  const [length, setLength] = useState<"single" | "deck">("deck");
+  const [sectionOn, setSectionOn] = useState<Record<PitchSectionKind, boolean>>({
+    hero: true, concept: true, personas: true, sensory: true, stats: true, roadmap: false, cta: true,
+  });
+
+  const images = useMemo(() => gatherImageElements(project), [project]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(images.map((i) => i.id)));
+
+  const [phase, setPhase] = useState<"config" | "generating" | "ready" | "error">("config");
+  const [sections, setSections] = useState<PitchSection[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [insufficient, setInsufficient] = useState(false);
+
+  const selectedSrcs = (): string[] =>
+    includeImages ? images.filter((i) => selectedIds.has(i.id)).map((i) => i.src) : [];
+
+  const chosenSections = (): PitchSectionKind[] =>
+    PITCH_SECTION_ORDER.filter((k) => k === "hero" || sectionOn[k]);
+
+  const currentOptions = (): PitchBuilderOptions => ({
+    theme, accent, includeImages, sections: chosenSections(), length,
+  });
+
+  const buildHTML = (secs: PitchSection[]): string =>
+    buildPitchDeckHTML(secs, { projectName, theme, accent, length, images: selectedSrcs() });
+
+  const handleGenerate = async () => {
+    setPhase("generating");
+    setError(null);
+    setInsufficient(false);
+    const res = await generatePitch(project, currentOptions(), prompt);
+    if (res.success && res.sections) {
+      setSections(res.sections);
+      setPhase("ready");
+    } else {
+      setError(res.error || "Generation failed.");
+      setInsufficient(!!res.insufficientCredits);
+      setPhase("error");
+    }
+  };
+
+  const handlePreview = () => {
+    if (sections) openHtmlInNewWindow(buildHTML(sections), `Pitch-${slug(projectName)}.html`);
+  };
+  const handleDownload = () => {
+    if (sections) downloadTextFile(buildHTML(sections), `Pitch-${slug(projectName)}.html`, "text/html");
+  };
+  const handlePDF = () => {
+    if (sections) openAndPrintHtml(buildHTML(sections), `Pitch-${slug(projectName)}.html`);
+  };
+
+  // Graceful fallback: the previous template-based one-pager, so the card never
+  // dead-ends when the AI call fails.
+  const handleFallback = (mode: "download" | "pdf") => {
+    const html = buildPitchHTML(project, { accent, imageDataUri: selectedSrcs()[0] || null });
+    const file = `Pitch-One-Pager-${slug(projectName)}.html`;
+    if (mode === "pdf") openAndPrintHtml(html, file);
+    else downloadTextFile(html, file, "text/html");
+  };
+
+  const toggleImage = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const generating = phase === "generating";
+
+  const footer =
+    phase === "ready" ? (
+      <>
+        <button onClick={handlePreview} className={primaryBtn}><Eye className="h-3.5 w-3.5" />Preview</button>
+        <button onClick={handleDownload} className={primaryBtn}><Download className="h-3.5 w-3.5" />Download HTML</button>
+        <button onClick={handlePDF} className={primaryBtn}><Printer className="h-3.5 w-3.5" />Save as PDF</button>
+        <button onClick={() => setPhase("config")} className={ghostBtn}>Edit options</button>
+        <button onClick={handleGenerate} className={ghostBtn}><Sparkles className="h-3.5 w-3.5" />Regenerate</button>
+      </>
+    ) : (
+      <>
+        <button onClick={handleGenerate} disabled={generating} className={primaryBtn}>
+          {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {generating ? "Generating..." : "Generate"}
+        </button>
+        {phase === "error" && (
+          <>
+            <button onClick={() => handleFallback("download")} className={ghostBtn}>
+              <Download className="h-3.5 w-3.5" />Use template instead
+            </button>
+            <button onClick={() => handleFallback("pdf")} className={ghostBtn}>
+              <Printer className="h-3.5 w-3.5" />Template PDF
+            </button>
+          </>
+        )}
+      </>
+    );
+
+  return (
+    <PopupShell
+      title="Customize my pitch"
+      subtitle={projectName}
+      icon={Sparkles}
+      onClose={onClose}
+      footer={footer}
+    >
+      {phase === "ready" && sections ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+            <Check className="h-4 w-4 flex-shrink-0" />
+            Pitch ready with {sections.length} section{sections.length === 1 ? "" : "s"}. Preview it, download the HTML, or save it as a PDF from the buttons below.
+          </div>
+          <div className="space-y-2">
+            {sections.map((s, i) => (
+              <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+                <div className="text-[10px] font-medium uppercase tracking-wide text-violet-300">{s.kind}</div>
+                <div className="mt-0.5 text-sm font-semibold text-white">{s.title}</div>
+                {s.body && <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-white/55">{s.body}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Emphasis prompt */}
+          <div>
+            <label className={FIELD_LABEL}>Describe what you want this pitch to emphasize</label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value.slice(0, PITCH_MAX_PROMPT_LEN))}
+              rows={3}
+              placeholder="e.g. Lead with the transformation for first-time visitors and the sensory peak moment."
+              className="w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white placeholder:text-white/25 outline-none transition-colors focus:border-violet-400/50"
+            />
+            <div className="mt-1 text-right text-[10px] text-white/30">{prompt.length}/{PITCH_MAX_PROMPT_LEN}</div>
+          </div>
+
+          {/* Theme + accent */}
+          <div className="flex flex-wrap items-start gap-6">
+            <div>
+              <label className={FIELD_LABEL}>Theme</label>
+              <div className="flex gap-1.5">
+                <button className={chip(theme === "dark")} onClick={() => setTheme("dark")}>Dark</button>
+                <button className={chip(theme === "light")} onClick={() => setTheme("light")}>Light</button>
+              </div>
+            </div>
+            <div>
+              <label className={FIELD_LABEL}>Accent color</label>
+              <div className="flex items-center gap-1.5">
+                {PITCH_ACCENT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.hex}
+                    type="button"
+                    title={preset.name}
+                    onClick={() => setAccent(preset.hex)}
+                    className={cn(
+                      "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
+                      accent === preset.hex ? "border-white" : "border-transparent",
+                    )}
+                    style={{ backgroundColor: preset.hex }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className={FIELD_LABEL}>Length</label>
+              <div className="flex gap-1.5">
+                <button className={chip(length === "single")} onClick={() => setLength("single")}>Single page</button>
+                <button className={chip(length === "deck")} onClick={() => setLength("deck")}>Short deck</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Sections */}
+          <div>
+            <label className={FIELD_LABEL}>Sections to include</label>
+            <div className="flex flex-wrap gap-1.5">
+              {PITCH_SECTION_TOGGLES.map((s) => (
+                <button
+                  key={s.kind}
+                  className={chip(sectionOn[s.kind])}
+                  onClick={() => setSectionOn((prev) => ({ ...prev, [s.kind]: !prev[s.kind] }))}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[10px] text-white/30">A hero opening is always included.</p>
+          </div>
+
+          {/* Images */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-white/40">Include images</label>
+              <div className="flex gap-1.5">
+                <button className={chip(includeImages)} onClick={() => setIncludeImages(true)}>Yes</button>
+                <button className={chip(!includeImages)} onClick={() => setIncludeImages(false)}>No</button>
+              </div>
+            </div>
+            {includeImages && (
+              images.length > 0 ? (
+                <>
+                  <p className="mb-2 text-[11px] text-white/40">Would you like to include these? Selected images are embedded in the pitch.</p>
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+                    {images.map((img) => {
+                      const on = selectedIds.has(img.id);
+                      return (
+                        <button
+                          key={img.id}
+                          type="button"
+                          onClick={() => toggleImage(img.id)}
+                          className={cn(
+                            "relative aspect-square overflow-hidden rounded-lg border-2 transition-colors",
+                            on ? "border-violet-400" : "border-white/10 hover:border-white/25",
+                          )}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img.src} alt="Project asset" className="h-full w-full object-cover" />
+                          {on && (
+                            <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-violet-500 text-white">
+                              <Check className="h-2.5 w-2.5" />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <p className="flex items-center gap-1.5 text-[11px] text-white/35">
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  No image elements on this canvas yet.
+                </p>
+              )
+            )}
+          </div>
+
+          {phase === "error" && error && (
+            <div className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+              {error}
+              {insufficient
+                ? " You can still use the template-based one-pager below."
+                : " Try again, or use the template-based one-pager below."}
+            </div>
+          )}
+        </div>
+      )}
+    </PopupShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Experience Flow Timeline customization popup
+// ---------------------------------------------------------------------------
+function TimelineCustomizeModal({ onClose }: { onClose: () => void }) {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [accent, setAccent] = useState(PITCH_ACCENT_PRESETS[0].hex);
+  const [showDetails, setShowDetails] = useState(true);
+
+  const build = (): { html: string; name: string } | null => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return null;
+    const stages = useCXDStore.getState().getExperienceFlowStages();
+    return {
+      html: buildExperienceFlowTimelineHTML(proj, stages, { theme, accent, showStageDetails: showDetails }),
+      name: `Experience-Flow-Timeline-${slug(proj.name)}.html`,
+    };
+  };
+
+  const doPreview = () => { const r = build(); if (r) openHtmlInNewWindow(r.html, r.name); };
+  const doDownload = () => { const r = build(); if (r) downloadTextFile(r.html, r.name, "text/html"); };
+  const doPDF = () => { const r = build(); if (r) openAndPrintHtml(r.html, r.name); };
+
+  return (
+    <PopupShell
+      title="Customize timeline"
+      subtitle="Experience Flow Timeline"
+      icon={Settings2}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={doPreview} className={primaryBtn}><Eye className="h-3.5 w-3.5" />Preview</button>
+          <button onClick={doDownload} className={primaryBtn}><Download className="h-3.5 w-3.5" />Download</button>
+          <button onClick={doPDF} className={primaryBtn}><Printer className="h-3.5 w-3.5" />Save as PDF</button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className={FIELD_LABEL}>Theme</label>
+          <div className="flex gap-1.5">
+            <button className={chip(theme === "light")} onClick={() => setTheme("light")}>Light</button>
+            <button className={chip(theme === "dark")} onClick={() => setTheme("dark")}>Dark</button>
+          </div>
+        </div>
+        <div>
+          <label className={FIELD_LABEL}>Accent color</label>
+          <div className="flex items-center gap-1.5">
+            {PITCH_ACCENT_PRESETS.map((preset) => (
+              <button
+                key={preset.hex}
+                type="button"
+                title={preset.name}
+                onClick={() => setAccent(preset.hex)}
+                className={cn(
+                  "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
+                  accent === preset.hex ? "border-white" : "border-transparent",
+                )}
+                style={{ backgroundColor: preset.hex }}
+              />
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className={FIELD_LABEL}>Sections</label>
+          <div className="flex gap-1.5">
+            <button className={chip(!showDetails)} onClick={() => setShowDetails(false)}>Timeline only</button>
+            <button className={chip(showDetails)} onClick={() => setShowDetails(true)}>Timeline + stage details</button>
+          </div>
+        </div>
+      </div>
+    </PopupShell>
   );
 }
