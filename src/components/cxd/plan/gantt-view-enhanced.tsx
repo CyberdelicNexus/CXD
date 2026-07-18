@@ -1531,8 +1531,14 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
     // .left already shifts with scrolling — clientX - contentRect.left IS
     // content-relative. Adding scrollLeft on top double-counted the scroll
     // and placed hover/click dates ~a week+ right of the cursor.
+    // contentWidth is read from timelineRef (not timelineContentRef) so this
+    // matches handleDragMove/handleDragStart and every other consumer below —
+    // timelineContentRef now carries an explicit `height` (see
+    // timelineContentHeight) for the grid/today-line alignment fix, and having
+    // click/hover measure a DIFFERENT element's width than drag does is exactly
+    // the kind of thing that silently drifts out of sync; keep one source of truth.
     const contentRect = timelineContentRef.current.getBoundingClientRect();
-    const contentWidth = timelineContentRef.current.scrollWidth;
+    const contentWidth = timelineRef.current.scrollWidth;
     const mouseX = Math.max(0, Math.min(contentWidth, e.clientX - contentRect.left));
     const totalDuration = endDate.getTime() - startDate.getTime();
     const clickedTime = startDate.getTime() + (mouseX / contentWidth) * totalDuration;
@@ -1567,8 +1573,9 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
 
     // Same scroll-double-count fix as handleTimelineHover above — the click
     // must land on the exact date under the cursor, matching the preview.
+    // Same timelineRef-for-width rationale as handleTimelineHover above.
     const contentRect = timelineContentRef.current.getBoundingClientRect();
-    const contentWidth = timelineContentRef.current.scrollWidth;
+    const contentWidth = timelineRef.current.scrollWidth;
     const mouseX = Math.max(0, Math.min(contentWidth, e.clientX - contentRect.left));
     const totalDuration = endDate.getTime() - startDate.getTime();
     const clickedTime = startDate.getTime() + (mouseX / contentWidth) * totalDuration;
