@@ -83,8 +83,10 @@ const ELEMENT_ARRAY_FIELDS = new Set([
   'dependencies',  // inside taskMetadata
   'customTags',    // inside taskMetadata
   'cells',         // table: 2D grid of TableCell (whole-grid replace on edit)
-  'rowColors',     // table: per-row background
-  'colColors',     // table: per-column background
+  'rowColors',     // table: per-row solid background
+  'colColors',     // table: per-column solid background
+  'rowGradient',   // table: per-row continuous horizontal gradient base color
+  'colGradient',   // table: per-column continuous vertical gradient base color
   'colWidths',     // table: per-column widths (px, JSON round-trip)
   'rowHeights',    // table: per-row heights (px, JSON round-trip)
 ]);

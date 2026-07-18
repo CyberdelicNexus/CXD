@@ -374,8 +374,15 @@ export interface TableElement extends CanvasElementBase {
   cols: number;
   // cells[r][c] — row-major grid. Always rows×cols in size.
   cells: TableCell[][];
-  rowColors?: (string | null)[]; // optional per-row background
-  colColors?: (string | null)[]; // optional per-column background
+  rowColors?: (string | null)[]; // optional per-row SOLID background
+  colColors?: (string | null)[]; // optional per-column SOLID background
+  // Continuous-gradient rows/cols. Each non-null entry is the BASE color for a
+  // gradient that reads continuously ACROSS the track: a row renders a single
+  // left→right gradient sliced across its cells, a column a single top→bottom
+  // gradient sliced down its cells. Kept separate from rowColors/colColors (the
+  // solid fills) so the renderer knows to compose the directional slice.
+  rowGradient?: (string | null)[]; // per-row continuous horizontal gradient base color
+  colGradient?: (string | null)[]; // per-column continuous vertical gradient base color
   colWidths?: number[];          // per-column widths (px, treated as ratios normalized to element width)
   rowHeights?: number[];         // per-row heights (px, treated as ratios normalized to element height)
   tableBg?: string;              // container/table background (default fallback)
@@ -398,6 +405,19 @@ export type CanvasElement =
   | BoardElement
   | ExperienceBlockElement
   | TableElement;
+
+// Draw-to-create tables: a click-dragged area is turned into this many STANDARD-
+// size columns/rows rather than stretching a fixed 3×3. cols = round(width /
+// TABLE_STD_COL_W), rows = round(height / TABLE_STD_ROW_H), clamped 1..MAX.
+export const TABLE_STD_COL_W = 110;
+export const TABLE_STD_ROW_H = 40;
+export const TABLE_MAX_TRACKS = 20;
+
+// Rows/cols implied by a drawn area at standard track size (clamped 1..MAX).
+export function tableTracksForSize(width: number, height: number): { rows: number; cols: number } {
+  const clamp = (n: number) => Math.max(1, Math.min(TABLE_MAX_TRACKS, Math.round(n)));
+  return { cols: clamp(width / TABLE_STD_COL_W), rows: clamp(height / TABLE_STD_ROW_H) };
+}
 
 // Create a rows×cols grid of empty cells. Used by element creation + add row/col.
 export function makeEmptyTableCells(rows: number, cols: number): TableCell[][] {

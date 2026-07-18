@@ -31,6 +31,7 @@ import {
   CanvasEdge,
   LineEndStyle,
   makeEmptyTableCells,
+  tableTracksForSize,
 } from "@/types/canvas-elements";
 import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorCursors } from "@/components/collaboration";
@@ -1902,16 +1903,24 @@ export function CXDCanvas() {
           // Note: baseElement.boardId tells which board this node appears in (the parent)
           // childBoardId is the board this node opens into when double-clicked
           break;
-        case "table":
+        case "table": {
+          // Draw-to-create: when the table is click-dragged to a size (options
+          // carries width+height), fill the drawn area with STANDARD-size tracks
+          // instead of stretching a fixed 3×3. A plain click keeps the 3×3 default.
+          const drawn = options?.width != null && options?.height != null;
+          const { rows: tRows, cols: tCols } = drawn
+            ? tableTracksForSize(placedWidth, placedHeight)
+            : { rows: 3, cols: 3 };
           newElement = {
             ...baseElement,
             type: "table",
-            rows: 3,
-            cols: 3,
-            cells: makeEmptyTableCells(3, 3),
+            rows: tRows,
+            cols: tCols,
+            cells: makeEmptyTableCells(tRows, tCols),
             headerRow: true,
           };
           break;
+        }
         default:
           return;
       }

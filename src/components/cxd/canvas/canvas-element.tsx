@@ -3619,20 +3619,27 @@ const TABLE_FONT_SIZES: { key: "sm" | "md" | "lg"; label: string }[] = [
   { key: "lg", label: "Large" },
 ];
 
-// Layout chrome: thick top+left L-grip (move zone) and inset right/bottom add strips.
-const TBL_GRIP = 12;
-const TBL_PLUS = 18; // thickness of a right/bottom "+" add strip (bigger hit area)
-const TBL_EDGE = 10; // clear gap kept at the very right/bottom edge for the floating
-//                      connector port, so the "+" strips never collide with it
+// Layout chrome: slim top+left L move-frame and inset right/bottom add buttons.
+const TBL_GRIP = 10; // top+left move-frame band (also its ~10px inset). Covers the
+//                      top/left EDGE so a grab there moves the table instead of
+//                      starting a connector; the visible frame line sits at its inner edge.
+const TBL_PLUS = 18; // size of a right/bottom "+" add button
+const TBL_EDGE = 14; // clear gap kept at the very right/bottom edge for the floating
+//                      connector port, so the "+" buttons never collide with it
 const TBL_RESERVE = TBL_PLUS + TBL_EDGE; // total right/bottom content inset
+const TBL_PLUS_LEN = 44; // length of a centered "+" button along its edge
 const TBL_MIN_COL = 48; // px floor a column can't be dragged below
 const TBL_MIN_ROW = 28; // px floor a row can't be dragged below
+const TBL_MAX_TRACKS = 50; // sane ceiling for drag-to-add rows/cols
 
-// Move-grip texture — a subtle diagonal hatch that reads as a grippable handle,
-// layered over a brighter/more opaque violet than the grid lines so the move zone
-// is visually distinct from the connector edges.
-const TBL_GRIP_TEXTURE =
-  "repeating-linear-gradient(45deg, rgba(255,255,255,0.16) 0px, rgba(255,255,255,0.16) 1.5px, transparent 1.5px, transparent 5px)";
+// Ghost-purple move-frame fills — a whisper-thin violet gradient (much subtler
+// than the grid lines) that fades toward the outer edge; a crisp inner-edge line
+// (added via boxShadow at render) makes it read as a slim frame just inside the
+// table edge rather than a heavy bar.
+const TBL_GRIP_BG_TOP =
+  "linear-gradient(180deg, rgba(139,92,246,0) 0%, rgba(139,92,246,0.10) 45%, rgba(167,139,250,0.30) 100%)";
+const TBL_GRIP_BG_LEFT =
+  "linear-gradient(90deg, rgba(139,92,246,0) 0%, rgba(139,92,246,0.10) 45%, rgba(167,139,250,0.30) 100%)";
 
 // Transparent-swatch checkerboard (shared with the rest of the color UI).
 const TBL_CHECKER =
@@ -3654,14 +3661,17 @@ function tblMix(
   const b = Math.round(c.b + (t.b - c.b) * amt);
   return `rgb(${r}, ${g}, ${b})`;
 }
-/** Turn a flat color into a tasteful 2-stop (highlight → base → shade) gradient. */
-function tblToGradient(color: string): string {
+/** Turn a flat color into a tasteful 3-stop (highlight → base → shade) gradient.
+ *  angle picks the direction: 135deg diagonal (cell scope, confined), 90deg
+ *  horizontal (row scope, sliced continuously across the row's cells), 180deg
+ *  vertical (column scope, sliced continuously down the column's cells). */
+function tblToGradient(color: string, angle = 135): string {
   if (!color || color === "transparent" || color.includes("gradient")) return color;
   const rgb = tblHexToRgb(color);
   if (!rgb) return color;
   const light = tblMix(rgb, { r: 255, g: 255, b: 255 }, 0.28);
   const dark = tblMix(rgb, { r: 0, g: 0, b: 0 }, 0.38);
-  return `linear-gradient(135deg, ${light} 0%, ${color} 55%, ${dark} 100%)`;
+  return `linear-gradient(${angle}deg, ${light} 0%, ${color} 55%, ${dark} 100%)`;
 }
 
 // Shared offscreen canvas for measuring cell text (min column width). Lazily created,
@@ -3714,6 +3724,8 @@ function TableCard({
   const cols = element.cols ?? 3;
   const rowColors = element.rowColors;
   const colColors = element.colColors;
+  const rowGradient = element.rowGradient;
+  const colGradient = element.colGradient;
   const tableBg = element.tableBg;
   // Grid lines: lineColor/lineWidth are the current model; borderColor is the
   // legacy fallback. lineWidth 0 = no visible grid line.
@@ -3792,6 +3804,21 @@ function TableCard({
     return next;
   }, [rowPx, dragRow]);
 
+  // Left/top offset of each track (prefix sums of the displayed sizes) — used to
+  // position each cell's slice of a continuous row/column gradient.
+  const colLeft = useMemo(() => {
+    const out: number[] = [];
+    let acc = 0;
+    for (const w of dispCol) { out.push(acc); acc += w; }
+    return out;
+  }, [dispCol]);
+  const rowTop = useMemo(() => {
+    const out: number[] = [];
+    let acc = 0;
+    for (const h of dispRow) { out.push(acc); acc += h; }
+    return out;
+  }, [dispRow]);
+
   const cloneGrid = useCallback(
     () => grid.map((row) => row.map((cell) => ({ ...cell }))),
     [grid],
@@ -3827,19 +3854,46 @@ function TableCard({
     [scope, sel, rows, cols, cloneGrid, onUpdate],
   );
 
-  const resolveBg = (r: number, c: number): string | undefined => {
+  // Background for one cell, as a style fragment. Per-cell bg is a confined fill.
+  // Row/column gradients render a SLICE of one continuous gradient (same image on
+  // every cell in the track, sized to the whole track and shifted by the cell's
+  // offset) so the gradient reads continuously across the row / down the column.
+  const cellBgStyle = (r: number, c: number): React.CSSProperties => {
     const cell = grid[r][c];
-    if (cell.bg) return cell.bg;
-    if (rowColors && rowColors[r]) return rowColors[r] || undefined;
-    if (colColors && colColors[c]) return colColors[c] || undefined;
-    if (tableBg) return tableBg;
-    if (headerRow && r === 0) return "rgba(139,92,246,0.22)";
-    return undefined;
+    if (cell.bg) return { background: cell.bg };
+    if (rowGradient && rowGradient[r]) {
+      return {
+        backgroundImage: tblToGradient(rowGradient[r] as string, 90),
+        backgroundRepeat: "no-repeat",
+        backgroundOrigin: "border-box",
+        backgroundSize: `${availW}px 100%`,
+        backgroundPosition: `-${colLeft[c] || 0}px 0`,
+      };
+    }
+    if (colGradient && colGradient[c]) {
+      return {
+        backgroundImage: tblToGradient(colGradient[c] as string, 180),
+        backgroundRepeat: "no-repeat",
+        backgroundOrigin: "border-box",
+        backgroundSize: `100% ${availH}px`,
+        backgroundPosition: `0 -${rowTop[r] || 0}px`,
+      };
+    }
+    if (rowColors && rowColors[r]) return { background: rowColors[r] || undefined };
+    if (colColors && colColors[c]) return { background: colColors[c] || undefined };
+    if (tableBg) return { background: tableBg };
+    if (headerRow && r === 0) return { background: "rgba(139,92,246,0.22)" };
+    return {};
   };
 
   // BACKGROUND menu writes — applies the current Solid/Gradient toggle to the scope.
+  // Cell + table gradients stay diagonal (135deg, confined). Row/column gradients
+  // are stored as a base color in rowGradient/colGradient so the renderer can lay
+  // one continuous horizontal/vertical gradient across the whole track; the matching
+  // solid entry is cleared so exactly one background source wins.
   const applyBg = (raw: string) => {
-    const color = raw === "transparent" ? "transparent" : bgGradient ? tblToGradient(raw) : raw;
+    const isTransparent = raw === "transparent";
+    const color = isTransparent ? "transparent" : bgGradient ? tblToGradient(raw) : raw;
     if (scope === "table") {
       onUpdate({ tableBg: color });
       return;
@@ -3849,12 +3903,26 @@ function TableCard({
       updateCell(sel.r, sel.c, { bg: color });
     } else if (scope === "row") {
       const rc = rowColors ? [...rowColors] : Array<string | null>(rows).fill(null);
-      rc[sel.r] = color;
-      onUpdate({ rowColors: rc });
+      const rg = rowGradient ? [...rowGradient] : Array<string | null>(rows).fill(null);
+      if (bgGradient && !isTransparent) {
+        rg[sel.r] = raw;   // continuous horizontal gradient from this base color
+        rc[sel.r] = null;
+      } else {
+        rc[sel.r] = color; // solid (or transparent)
+        rg[sel.r] = null;
+      }
+      onUpdate({ rowColors: rc, rowGradient: rg });
     } else if (scope === "col") {
       const cc = colColors ? [...colColors] : Array<string | null>(cols).fill(null);
-      cc[sel.c] = color;
-      onUpdate({ colColors: cc });
+      const cg = colGradient ? [...colGradient] : Array<string | null>(cols).fill(null);
+      if (bgGradient && !isTransparent) {
+        cg[sel.c] = raw;   // continuous vertical gradient from this base color
+        cc[sel.c] = null;
+      } else {
+        cc[sel.c] = color;
+        cg[sel.c] = null;
+      }
+      onUpdate({ colColors: cc, colGradient: cg });
     }
   };
 
@@ -3883,6 +3951,9 @@ function TableCard({
       if (colColors)
         updates.colColors =
           t > cols ? [...colColors, ...Array(t - cols).fill(null)] : colColors.slice(0, t);
+      if (colGradient)
+        updates.colGradient =
+          t > cols ? [...colGradient, ...Array(t - cols).fill(null)] : colGradient.slice(0, t);
       if (element.colWidths) {
         const base = element.colWidths.length === cols ? element.colWidths : colPx;
         updates.colWidths = t > cols ? [...base, ...Array(t - cols).fill(unit)] : base.slice(0, t);
@@ -3890,7 +3961,7 @@ function TableCard({
       onUpdate(updates);
       setSel(null);
     },
-    [cols, availW, cloneGrid, colColors, element.colWidths, element.width, colPx, onUpdate],
+    [cols, availW, cloneGrid, colColors, colGradient, element.colWidths, element.width, colPx, onUpdate],
   );
 
   const setRowCount = useCallback(
@@ -3913,6 +3984,9 @@ function TableCard({
       if (rowColors)
         updates.rowColors =
           t > rows ? [...rowColors, ...Array(t - rows).fill(null)] : rowColors.slice(0, t);
+      if (rowGradient)
+        updates.rowGradient =
+          t > rows ? [...rowGradient, ...Array(t - rows).fill(null)] : rowGradient.slice(0, t);
       if (element.rowHeights) {
         const base = element.rowHeights.length === rows ? element.rowHeights : rowPx;
         updates.rowHeights = t > rows ? [...base, ...Array(t - rows).fill(unit)] : base.slice(0, t);
@@ -3920,7 +3994,7 @@ function TableCard({
       onUpdate(updates);
       setSel(null);
     },
-    [rows, cols, availH, cloneGrid, rowColors, element.rowHeights, element.height, rowPx, onUpdate],
+    [rows, cols, availH, cloneGrid, rowColors, rowGradient, element.rowHeights, element.height, rowPx, onUpdate],
   );
 
   // Minimum width for a column = widest word in any of its cells + padding (so a
@@ -4030,14 +4104,16 @@ function TableCard({
     e.stopPropagation();
     const startX = e.clientX;
     const base = cols;
-    const unit = Math.max(24, availW / cols); // ~one column-width per column added
+    const unit = Math.max(24, availW / cols); // ~one column-width per column
     let moved = 0;
     let target = base;
     const move = (ev: MouseEvent) => {
       const dx = (ev.clientX - startX) / zoom;
       moved = Math.max(moved, Math.abs(dx));
-      const added = Math.max(0, Math.round(dx / unit)); // drag-back only undoes additions
-      target = base + added;
+      // Fully bidirectional: drag right past the edge ADDS columns, drag left past
+      // the current extent DELETES them (down to 1). Clamped 1..MAX.
+      const delta = Math.round(dx / unit);
+      target = Math.max(1, Math.min(TBL_MAX_TRACKS, base + delta));
       setPendingCount({ axis: "col", n: target });
     };
     const up = () => {
@@ -4057,14 +4133,16 @@ function TableCard({
     e.stopPropagation();
     const startY = e.clientY;
     const base = rows;
-    const unit = Math.max(24, availH / rows); // ~one row-height per row added
+    const unit = Math.max(24, availH / rows); // ~one row-height per row
     let moved = 0;
     let target = base;
     const move = (ev: MouseEvent) => {
       const dy = (ev.clientY - startY) / zoom;
       moved = Math.max(moved, Math.abs(dy));
-      const added = Math.max(0, Math.round(dy / unit));
-      target = base + added;
+      // Fully bidirectional: drag down past the edge ADDS rows, drag up past the
+      // current extent DELETES them (down to 1). Clamped 1..MAX.
+      const delta = Math.round(dy / unit);
+      target = Math.max(1, Math.min(TBL_MAX_TRACKS, base + delta));
       setPendingCount({ axis: "row", n: target });
     };
     const up = () => {
@@ -4080,13 +4158,19 @@ function TableCard({
 
   const selCell = sel ? grid[sel.r]?.[sel.c] : undefined;
 
-  // Live add-preview: how many provisional rows/cols the current "+" drag would
-  // append, and the exact size each will land at (matches setColCount/setRowCount:
-  // existing tracks keep their px, each new track is availW/cols · availH/rows).
+  // Live drag-preview. Adding: how many provisional rows/cols the drag would append
+  // and the size each lands at (matches setColCount/setRowCount — each new track is
+  // availW/cols · availH/rows). Deleting: how many existing rows/cols would be
+  // removed, plus the on-screen span of the doomed region (from the first removed
+  // track to the current edge) so a red strike-overlay can mark it.
   const previewCols = pendingCount?.axis === "col" ? Math.max(0, pendingCount.n - cols) : 0;
   const previewRows = pendingCount?.axis === "row" ? Math.max(0, pendingCount.n - rows) : 0;
   const previewColW = availW / cols;
   const previewRowH = availH / rows;
+  const removeCols = pendingCount?.axis === "col" ? Math.max(0, cols - pendingCount.n) : 0;
+  const removeRows = pendingCount?.axis === "row" ? Math.max(0, rows - pendingCount.n) : 0;
+  const removeColLeft = removeCols > 0 ? colLeft[pendingCount!.n] || 0 : 0;
+  const removeRowTop = removeRows > 0 ? rowTop[pendingCount!.n] || 0 : 0;
 
   const scopeBtn = (s: TableColorScope, label: string) => (
     <button
@@ -4148,7 +4232,6 @@ function TableCard({
             {grid.map((row, r) => (
               <tr key={r} style={{ height: dispRow[r] }}>
                 {row.map((cell, c) => {
-                  const bg = resolveBg(r, c);
                   const isSel = sel?.r === r && sel?.c === c;
                   const isHeader = headerRow && r === 0;
                   return (
@@ -4158,7 +4241,7 @@ function TableCard({
                         "relative align-middle p-0 overflow-hidden",
                         isSel && "outline outline-2 -outline-offset-2 outline-violet-400",
                       )}
-                      style={{ border: cellBorder, background: bg }}
+                      style={{ border: cellBorder, ...cellBgStyle(r, c) }}
                       onClick={() => setSel({ r, c })}
                     >
                       <TableCellEditor
@@ -4229,14 +4312,16 @@ function TableCard({
           })}
       </div>
 
-      {/* Move grip — thick top + left L. A brighter, hatched violet sets it apart
-          from the subtle grid lines and the connector edges. When the table is
-          selected the grip becomes an explicit move handle: pointer-events-auto +
-          cursor-move, raised above the floating connector port (z 9999) so a grab
-          here is never intercepted by connector-start; its drag carries no handler
-          and simply bubbles to the element's body-drag path (reposition). When
-          unselected it stays inert so connectors can still be drawn from the
-          top/left edges. */}
+      {/* Move grip — a slim ghost-purple frame along the top + left edges. Much
+          subtler than the old bold bar: a whisper-thin violet gradient with a crisp
+          inner-edge line, so it reads as a frame just inside the table edge. It
+          still covers the top/left EDGE (from 0) so a grab there moves the table
+          instead of starting a connector. When the table is selected the frame is
+          an explicit move handle: pointer-events-auto + cursor-move, raised above
+          the floating connector port (z 9999) so a grab is never intercepted by
+          connector-start; its drag carries no handler and bubbles to the element's
+          body-drag path (reposition). When unselected it stays inert so connectors
+          can still be drawn from the top/left edges. */}
       <div
         className={cn(
           "absolute top-0 left-0 right-0 rounded-t-lg",
@@ -4245,8 +4330,8 @@ function TableCard({
         style={{
           height: TBL_GRIP,
           zIndex: isSelected ? 10000 : undefined,
-          background: `${TBL_GRIP_TEXTURE}, linear-gradient(180deg, rgba(167,139,250,0.95), rgba(124,58,237,0.7))`,
-          boxShadow: "inset 0 -1px 0 rgba(255,255,255,0.35)",
+          background: TBL_GRIP_BG_TOP,
+          boxShadow: "inset 0 -1px 0 rgba(167,139,250,0.55)",
         }}
         title="Drag to move the table"
       />
@@ -4258,8 +4343,8 @@ function TableCard({
         style={{
           width: TBL_GRIP,
           zIndex: isSelected ? 10000 : undefined,
-          background: `${TBL_GRIP_TEXTURE}, linear-gradient(90deg, rgba(167,139,250,0.95), rgba(124,58,237,0.7))`,
-          boxShadow: "inset -1px 0 0 rgba(255,255,255,0.35)",
+          background: TBL_GRIP_BG_LEFT,
+          boxShadow: "inset -1px 0 0 rgba(167,139,250,0.55)",
         }}
         title="Drag to move the table"
       />
@@ -4268,33 +4353,47 @@ function TableCard({
           className="absolute top-0 left-0 flex items-center justify-center pointer-events-none"
           style={{ width: TBL_GRIP, height: TBL_GRIP, zIndex: 10001 }}
         >
-          <GripVertical className="w-2.5 h-2.5 text-white" />
+          <GripVertical className="w-2.5 h-2.5 text-violet-200/70" />
         </div>
       )}
 
-      {/* Right "+" — click adds a column, drag right to add more (drag back removes
-          just-added). Inset from the very edge by TBL_EDGE so it never overlaps the
-          floating connector port that lives on the edge. */}
+      {/* Right "+" — click adds a column, drag to add/remove more. A compact pill
+          centered on the right edge (not a full-height strip): inset from the very
+          edge by TBL_EDGE for the floating connector port, and kept clear of the
+          corners so it sits within the table's own affordance zone and never
+          visually collides with adjacent canvas elements. */}
       {isSelected && !isReadOnly && (
         <button
           data-no-drag
           onMouseDown={startColPlus}
-          className="absolute flex items-center justify-center text-violet-50 bg-violet-500/20 hover:bg-violet-500/40 ring-1 ring-inset ring-violet-300/30 transition-colors cursor-ew-resize rounded-lg"
-          style={{ right: TBL_EDGE, width: TBL_PLUS, top: TBL_GRIP, bottom: TBL_RESERVE }}
-          title="Click to add a column · drag right to add more"
+          className="absolute flex items-center justify-center text-violet-50 bg-violet-500/25 hover:bg-violet-500/45 ring-1 ring-inset ring-violet-300/30 shadow-sm transition-colors cursor-ew-resize rounded-full"
+          style={{
+            right: TBL_EDGE,
+            width: TBL_PLUS,
+            height: TBL_PLUS_LEN,
+            top: "50%",
+            transform: "translateY(-50%)",
+          }}
+          title="Click to add a column · drag out to add, drag in to remove"
         >
           <Plus className="w-4 h-4" />
         </button>
       )}
-      {/* Bottom "+" — click adds a row, drag down to add more (drag back removes
-          just-added). Inset from the edge for the same reason as the right strip. */}
+      {/* Bottom "+" — click adds a row, drag to add/remove more. Compact pill
+          centered on the bottom edge, same breathing room as the right one. */}
       {isSelected && !isReadOnly && (
         <button
           data-no-drag
           onMouseDown={startRowPlus}
-          className="absolute flex items-center justify-center text-violet-50 bg-violet-500/20 hover:bg-violet-500/40 ring-1 ring-inset ring-violet-300/30 transition-colors cursor-ns-resize rounded-lg"
-          style={{ bottom: TBL_EDGE, height: TBL_PLUS, left: TBL_GRIP, right: TBL_RESERVE }}
-          title="Click to add a row · drag down to add more"
+          className="absolute flex items-center justify-center text-violet-50 bg-violet-500/25 hover:bg-violet-500/45 ring-1 ring-inset ring-violet-300/30 shadow-sm transition-colors cursor-ns-resize rounded-full"
+          style={{
+            bottom: TBL_EDGE,
+            height: TBL_PLUS,
+            width: TBL_PLUS_LEN,
+            left: "50%",
+            transform: "translateX(-50%)",
+          }}
+          title="Click to add a row · drag out to add, drag in to remove"
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -4355,9 +4454,46 @@ function TableCard({
           </div>
         ))}
 
+      {/* Live delete-preview — a red strike-overlay over the columns/rows the drag
+          would remove (dragging inward past the current extent). Purely visual
+          (pointer-events-none); the store is written once on pointer-up. */}
+      {removeCols > 0 && (
+        <div
+          className="absolute pointer-events-none z-20"
+          style={{
+            left: TBL_GRIP + removeColLeft,
+            top: TBL_GRIP,
+            width: Math.max(0, availW - removeColLeft),
+            height: availH,
+            border: "1px dashed rgba(248,113,113,0.9)",
+            background:
+              "repeating-linear-gradient(45deg, rgba(239,68,68,0.22) 0px, rgba(239,68,68,0.22) 6px, rgba(239,68,68,0.08) 6px, rgba(239,68,68,0.08) 12px)",
+          }}
+        />
+      )}
+      {removeRows > 0 && (
+        <div
+          className="absolute pointer-events-none z-20"
+          style={{
+            left: TBL_GRIP,
+            top: TBL_GRIP + removeRowTop,
+            width: availW,
+            height: Math.max(0, availH - removeRowTop),
+            border: "1px dashed rgba(248,113,113,0.9)",
+            background:
+              "repeating-linear-gradient(45deg, rgba(239,68,68,0.22) 0px, rgba(239,68,68,0.22) 6px, rgba(239,68,68,0.08) 6px, rgba(239,68,68,0.08) 12px)",
+          }}
+        />
+      )}
+
       {/* Live count badge during a plus-drag (complements the ghost preview) */}
       {pendingCount && (
-        <div className="absolute -bottom-6 right-0 px-1.5 py-0.5 rounded bg-black/80 text-white text-[10px] font-medium pointer-events-none z-30">
+        <div
+          className={cn(
+            "absolute -bottom-6 right-0 px-1.5 py-0.5 rounded text-white text-[10px] font-medium pointer-events-none z-30",
+            (removeCols > 0 || removeRows > 0) ? "bg-red-600/90" : "bg-black/80",
+          )}
+        >
           {pendingCount.axis === "col" ? `${pendingCount.n} cols` : `${pendingCount.n} rows`}
         </div>
       )}
@@ -4452,9 +4588,24 @@ function TableCard({
                 Gradient
               </button>
             </div>
-            {/* ── Lines subsection — grid line width presets + color wheel ── */}
+            {/* ── Lines subsection — color wheel sits inline next to the label; the
+                width presets get their own full-width row below. ── */}
             <div className="h-px bg-border/50" />
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Lines</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Lines</div>
+              <label
+                className="w-6 h-6 shrink-0 rounded border border-white/10 hover:scale-110 transition-transform cursor-pointer overflow-hidden relative"
+                style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}
+                title="Line color"
+              >
+                <input
+                  type="color"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={(e) => onUpdate({ lineColor: e.target.value })}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+            </div>
             <div className="flex items-center gap-1">
               {TABLE_LINE_WIDTHS.map(({ label, w }) => (
                 <button
@@ -4474,18 +4625,6 @@ function TableCard({
                   {label}
                 </button>
               ))}
-              <label
-                className="w-6 h-6 shrink-0 rounded border border-white/10 hover:scale-110 transition-transform cursor-pointer overflow-hidden relative"
-                style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}
-                title="Line color"
-              >
-                <input
-                  type="color"
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  onChange={(e) => onUpdate({ lineColor: e.target.value })}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </label>
             </div>
           </div>
 

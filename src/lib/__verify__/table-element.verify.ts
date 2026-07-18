@@ -32,6 +32,8 @@ const table: TableElement = {
   cells,
   rowColors: ['#123A5A', null],
   colColors: [null, null, '#3B1842'],
+  rowGradient: [null, '#4B1B6B'],     // continuous horizontal gradient base for row 1
+  colGradient: [null, '#0F3A3A', null], // continuous vertical gradient base for col 1
   colWidths: [120, 90, 150],
   rowHeights: [60, 90],
   tableBg: 'rgba(20,16,31,0.72)',
@@ -62,6 +64,8 @@ check(round.cells[1][0].bg === table.cells[1][0].bg, 'cell bg (gradient) preserv
 check(round.cells[1][2].align === 'right', 'far cell align preserved');
 check(round.rowColors?.[0] === '#123A5A' && round.rowColors?.[1] === null, 'rowColors preserved (incl null)');
 check(round.colColors?.[2] === '#3B1842', 'colColors preserved');
+check(Array.isArray(round.rowGradient) && round.rowGradient?.[0] === null && round.rowGradient?.[1] === '#4B1B6B', 'rowGradient preserved (incl null)');
+check(Array.isArray(round.colGradient) && round.colGradient?.[1] === '#0F3A3A', 'colGradient preserved');
 check(Array.isArray(round.colWidths) && round.colWidths?.length === 3, 'colWidths is a length-3 array');
 check(round.colWidths?.[0] === 120 && round.colWidths?.[1] === 90 && round.colWidths?.[2] === 150, 'colWidths values preserved');
 check(Array.isArray(round.rowHeights) && round.rowHeights?.length === 2, 'rowHeights is a length-2 array');
