@@ -44,8 +44,13 @@ import {
   Loader2,
   Sparkles,
   Zap,
+  StickyNote,
+  MessageSquarePlus,
 } from "lucide-react";
 import NextImage from "next/image";
+import { v4 as uuidv4 } from "uuid";
+import { useCXDStore } from "@/store/cxd-store";
+import type { FreeformElement } from "@/types/canvas-elements";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
 import { DiagnosticPanelRedesign } from "./diagnostic-panel-redesign";
 import { AIChatPanel } from "./ai-chat-panel";
@@ -204,6 +209,55 @@ const SECTION_TO_TAG: Record<string, HypercubeFaceTag> = {
   contextAndMeaning: "Meaning Architecture",
   intentionCore: "Core",
 };
+
+// Edge Resonance v3 — static one-line relationship descriptions per adjacent
+// face pair. Keyed by the two face ids sorted alphabetically so the lookup is
+// order-independent. Only the 12 adjacent cube pairs exist (opposite faces
+// share no edge); a generic fallback covers anything unexpected.
+const EDGE_RELATIONSHIP_DESCRIPTIONS: Record<string, string> = {
+  "realityPlanes|sensoryDomains":
+    "how the technical planes carry and shape what the senses receive",
+  "realityPlanes|stateMapping":
+    "how the technical substrate triggers the momentary states users pass through",
+  "realityPlanes|traitMapping":
+    "how the platform's structure cultivates lasting traits over time",
+  "contextAndMeaning|realityPlanes":
+    "how the technical planes give form to the story and world",
+  "presence|sensoryDomains":
+    "how sensory input shapes the quality of presence users feel",
+  "sensoryDomains|traitMapping":
+    "how repeated sensory experience settles into enduring traits",
+  "contextAndMeaning|sensoryDomains":
+    "how sensory texture carries the meaning and narrative",
+  "presence|stateMapping":
+    "how the mode of presence colors each passing state",
+  "presence|traitMapping":
+    "how sustained presence hardens into lasting traits",
+  "contextAndMeaning|presence":
+    "how presence anchors the felt meaning of the experience",
+  "stateMapping|traitMapping":
+    "how momentary states accumulate into enduring traits",
+  "contextAndMeaning|stateMapping":
+    "how inner states are shaped by the meaning layer",
+};
+
+function getEdgeRelationshipDescription(faceA: CubeFace, faceB: CubeFace): string {
+  const key = [faceA.id, faceB.id].sort().join("|");
+  const desc =
+    EDGE_RELATIONSHIP_DESCRIPTIONS[key] ||
+    `how ${faceA.semanticRole.toLowerCase()} meets ${faceB.semanticRole.toLowerCase()}`;
+  return `${faceA.label} ↔ ${faceB.label}: ${desc}`;
+}
+
+// Split a two-word face label so it wraps onto two lines when drawn on a face
+// ("State Mapping" -> ["State", "Mapping"]). Longer labels split near the middle.
+function splitLabelTwoLines(label: string): [string, string] {
+  const words = label.trim().split(/\s+/);
+  if (words.length <= 1) return [label, ""];
+  if (words.length === 2) return [words[0], words[1]];
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(" "), words.slice(mid).join(" ")];
+}
 
 const ELEMENT_TYPE_ICONS: Record<
   string,
@@ -538,6 +592,9 @@ function getRotationForFace(faceIndex: number): { x: number; y: number } {
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const DEFAULT_ZOOM = 1;
+// Entering Explore auto-expands the cube to fill most of the central area so
+// its scale (and the fact that it can be manipulated) is obvious at a glance.
+const EXPLORE_INITIAL_ZOOM = 1.6;
 const DRAG_THRESHOLD = 5;
 
 // Auto-rotation speed (degrees per second)
@@ -685,6 +742,14 @@ export function Hypercube3D({
   const [edgeInsightLoading, setEdgeInsightLoading] = useState(false);
   const [edgeInsightError, setEdgeInsightError] = useState<string | null>(null);
   const [edgeElementsExpanded, setEdgeElementsExpanded] = useState(false);
+  // v3: the three exploration modes are picked UP FRONT (before revealing).
+  // null until the user chooses an orientation for the first reveal.
+  const [selectedOrientation, setSelectedOrientation] =
+    useState<EdgeInsightMode | null>(null);
+  // v3: one-time coach note by the face rail after entering Explore. Dismissed
+  // on the first edge click (or on exit). Not per-edge, so it lives outside the
+  // per-edge reset effect below.
+  const [showEdgeHint, setShowEdgeHint] = useState(false);
 
   // Fresh reflective slate whenever a different edge (or none) is selected.
   useEffect(() => {
@@ -695,6 +760,7 @@ export function Hypercube3D({
     setEdgeInsightLoading(false);
     setEdgeInsightError(null);
     setEdgeElementsExpanded(false);
+    setSelectedOrientation(null);
   }, [selectedEdgeIndex]);
 
   // Zoom level for explore mode (1.0 = default, can zoom in/out)
@@ -1127,6 +1193,105 @@ export function Hypercube3D({
     [openGeneralChat],
   );
 
+  // v3: a question from the edge analysis opens the Wizard chat pre-seeded with
+  // that question (same openGeneralChat + pendingInsightContext hand-off the
+  // bridge button uses). No new AI route; the chat only mounts in default mode.
+  const openQuestionInChat = useCallback(
+    (question: string, faceA: number, faceB: number) => {
+      const a = CUBE_FACES[faceA];
+      const b = CUBE_FACES[faceB];
+      if (!a || !b) return;
+      setSelectedEdgeIndex(null);
+      setInteractionMode("default");
+      openGeneralChat();
+      setPendingInsightContext({
+        issueSummary: `Exploring the relationship between ${a.label} and ${b.label}.`,
+        dataPoints: {},
+        suggestedQuestions: [question],
+        relatedFaceIds: [a.id, b.id],
+        userQuestion: question,
+      } as EnrichedDiagnostic["chatContext"]);
+    },
+    [openGeneralChat],
+  );
+
+  // v3: "Draft on canvas" — turn the edge analysis into a single canvas note
+  // card, tagged with BOTH faces, placed near the current viewport center via
+  // the store's batched (freeze-proof) insertion path. No AI call.
+  const draftEdgeAnalysisOnCanvas = useCallback(
+    (faceA: number, faceB: number, insight: EdgeInsight) => {
+      const a = CUBE_FACES[faceA];
+      const b = CUBE_FACES[faceB];
+      if (!a || !b) return;
+      const store = useCXDStore.getState();
+      const proj = store.getCurrentProject();
+      if (!proj) return;
+
+      const tagA = SECTION_TO_TAG[a.id];
+      const tagB = SECTION_TO_TAG[b.id];
+      const tags = Array.from(new Set([tagA, tagB].filter(Boolean)));
+
+      // Build a compact HTML body (same rich-note shape as note-creation-service).
+      const esc = (s: string) =>
+        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const parts: string[] = [];
+      if (insight.keyObservations.length > 0) {
+        parts.push("<p><strong>Observations</strong></p>");
+        parts.push(
+          "<ul>" +
+            insight.keyObservations.map((o) => `<li>${esc(o)}</li>`).join("") +
+            "</ul>",
+        );
+      }
+      if (insight.tension) {
+        parts.push("<p><strong>Tension</strong></p>");
+        parts.push(`<p>${esc(insight.tension)}</p>`);
+      }
+      const noteBody = parts.join("");
+
+      // Place near the current viewport center (same math as
+      // element-generation-service), converting screen center to world coords.
+      const width = 320;
+      const height = 300;
+      const viewportW = typeof window !== "undefined" ? window.innerWidth : 1200;
+      const viewportH =
+        typeof window !== "undefined" ? window.innerHeight - 64 : 700;
+      const cx = (viewportW / 2 - store.canvasPosition.x) / store.canvasZoom;
+      const cy = (viewportH / 2 - store.canvasPosition.y) / store.canvasZoom;
+
+      const card: FreeformElement = {
+        id: uuidv4(),
+        type: "freeform",
+        cardType: "note",
+        noteTitle: `${a.label} ↔ ${b.label}`,
+        noteBody,
+        content: "",
+        x: cx - width / 2,
+        y: cy - height / 2,
+        width,
+        height,
+        zIndex: Date.now() + Math.random(),
+        emoji: "🔗",
+        hypercubeTags: tags,
+        inInbox: false,
+        style: {
+          bgColor:
+            "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
+          textColor: "#ffffff",
+        },
+      };
+
+      store.addCanvasElements([card]);
+      store.setPendingCanvasFitBounds({
+        minX: card.x,
+        minY: card.y,
+        maxX: card.x + width,
+        maxY: card.y + height,
+      });
+    },
+    [],
+  );
+
   function getFaceName(faceKey: string): string {
     const names: Record<string, string> = {
       realityPlanes: "Reality Planes",
@@ -1163,6 +1328,11 @@ export function Hypercube3D({
     setIsCoreSelected(false);
     setIsGeneralChatActive(false);
     setSelectedEdgeIndex(null);
+    // Auto-expand the cube to fill most of the central area (animated via the
+    // SVG scale transition) so the user sees it can be manipulated.
+    setExploreZoom(EXPLORE_INITIAL_ZOOM);
+    // Surface the one-time "click each edge" coaching note.
+    setShowEdgeHint(true);
   }, []);
 
   const exitExploreMode = useCallback(() => {
@@ -1170,8 +1340,9 @@ export function Hypercube3D({
     setInteractionMode("default");
     setIsAnimating(true);
     setTargetRotation({ x: -25, y: -35 });
-    setExploreZoom(1.0); // Reset zoom when exiting explore mode
+    setExploreZoom(1.0); // Restore zoom when exiting explore mode
     setSelectedEdgeIndex(null); // close any open edge-resonance panel
+    setShowEdgeHint(false);
   }, []);
 
   // Wheel handler for zoom in explore mode
@@ -1410,6 +1581,8 @@ export function Hypercube3D({
   // normalized to the nearest coterminal angle so the turn never exceeds 180°.
   const selectEdge = useCallback(
     (idx: number) => {
+      // First edge click dismisses the coaching note.
+      setShowEdgeHint(false);
       if (selectedEdgeIndex === idx) {
         setSelectedEdgeIndex(null);
         return;
@@ -1628,6 +1801,57 @@ export function Hypercube3D({
     const frontIndex = getFrontFaceFromRotation(cubeRotation.x, cubeRotation.y);
     return frontIndex;
   }, [cubeRotation.x, cubeRotation.y]);
+
+  // v3: perspective face labels drawn AS IF written on each cube face (not flat
+  // billboards). For each face we derive an affine transform mapping the label's
+  // local rect onto the face's projected quad (from the already-projected
+  // corners), and fade the label out as the face normal turns away from the
+  // camera (same normal-z convention as getFrontFaceFromRotation). Memoized per
+  // frame here rather than inline so the six transforms are computed once.
+  const perspectiveFaceLabels = useMemo(() => {
+    if (interactionMode !== "explore") return [];
+    const rx = (cubeRotation.x * Math.PI) / 180;
+    const ry = (cubeRotation.y * Math.PI) / 180;
+    const sinRx = Math.sin(rx), cosRx = Math.cos(rx);
+    const sinRy = Math.sin(ry), cosRy = Math.cos(ry);
+
+    return CUBE_FACES.map((face, faceIndex) => {
+      // Face normal turned into camera space; NEGATIVE z2 points at the viewer.
+      const [nx, ny, nz] = FACE_NORMALS[faceIndex];
+      const z2 = -nx * sinRy + (ny * sinRx + nz * cosRx) * cosRy;
+      const facing = -z2; // 1 = squarely facing the camera, <=0 = turned away
+      // Fade from the edge of visibility; hide (and skip the mirrored text) once
+      // the face has turned past the camera plane.
+      const opacity = facing <= 0.12 ? 0 : Math.min(1, (facing - 0.12) / 0.55);
+      if (opacity <= 0.02) {
+        return { faceIndex, opacity: 0, transform: "", lines: ["", ""] as [string, string] };
+      }
+
+      const corners = FACE_CORNER_INDICES[faceIndex].map((i) => outerCorners[i]);
+      const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+      const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+      // Face axes in screen space (average of opposite edges): the local x maps
+      // to the face's horizontal direction, local y to its vertical direction,
+      // each foreshortened by its projected length relative to the face size.
+      const axX = (corners[1].x - corners[0].x + corners[2].x - corners[3].x) / 2;
+      const axY = (corners[1].y - corners[0].y + corners[2].y - corners[3].y) / 2;
+      const ayX = (corners[3].x - corners[0].x + corners[2].x - corners[1].x) / 2;
+      const ayY = (corners[3].y - corners[0].y + corners[2].y - corners[1].y) / 2;
+      // matrix(a b c d e f): (x,y) -> (a·x + c·y + e, b·x + d·y + f). Dividing by
+      // outerSize makes local units track the face's own (unprojected) extent.
+      const a = axX / outerSize;
+      const b = axY / outerSize;
+      const c = ayX / outerSize;
+      const d = ayY / outerSize;
+      const transform = `matrix(${a} ${b} ${c} ${d} ${cx} ${cy})`;
+      return {
+        faceIndex,
+        opacity,
+        transform,
+        lines: splitLabelTwoLines(face.label),
+      };
+    }).filter((l) => l.opacity > 0.02);
+  }, [interactionMode, outerCorners, cubeRotation.x, cubeRotation.y]);
 
 
   const focusedFace =
@@ -2217,38 +2441,52 @@ export function Hypercube3D({
               );
             })}
 
-          {/* Edge Resonance: billboarded name labels at the center of each face
-              adjacent to the selected edge. SVG text lives in screen space, so
-              it stays upright ("billboarded") no matter how the cube sits. */}
+          {/* Explore mode: re-draw the inner cube ON TOP of the (translucent)
+              face planes so it never gets fully occluded by the near face at
+              certain angles — it stays a clear hypercube reference while the
+              perspective labels are shown. Thin + modest opacity so it reads
+              without competing with the faces. */}
           {interactionMode === "explore" &&
-            selectedEdgeIndex !== null &&
-            EDGE_ADJACENT_FACES[selectedEdgeIndex].map((faceIndex) => {
-              const face = CUBE_FACES[faceIndex];
-              const corners = FACE_CORNER_INDICES[faceIndex].map(
-                (i) => outerCorners[i],
-              );
-              const cx = corners.reduce((s, c) => s + c.x, 0) / 4;
-              const cy = corners.reduce((s, c) => s + c.y, 0) / 4;
-              return (
-                <text
-                  key={`edge-face-label-${faceIndex}`}
-                  x={cx}
-                  y={cy}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={15}
-                  fontWeight={600}
-                  letterSpacing="0.08em"
-                  fill={`hsl(${face.tint.hue} 70% 84%)`}
-                  stroke="rgba(0, 0, 0, 0.65)"
-                  strokeWidth={3.5}
-                  paintOrder="stroke"
-                  style={{ pointerEvents: "none", userSelect: "none" }}
-                >
-                  {face.label.toUpperCase()}
-                </text>
-              );
-            })}
+            cubeEdges.map(([i, j], idx) => (
+              <line
+                key={`inner-explore-${idx}`}
+                x1={innerCorners[i].x}
+                y1={innerCorners[i].y}
+                x2={innerCorners[j].x}
+                y2={innerCorners[j].y}
+                stroke={EDGE_COLOR}
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                opacity={0.55}
+                filter="url(#glow-stable)"
+                style={{ pointerEvents: "none" }}
+              />
+            ))}
+
+          {/* v3 perspective face labels — the face name written ON each face
+              (affine-mapped onto the projected quad), regular weight, no stroke,
+              wrapped onto two lines, fading as the face turns from the camera. */}
+          {perspectiveFaceLabels.map(({ faceIndex, opacity, transform, lines }) => {
+            const face = CUBE_FACES[faceIndex];
+            return (
+              <text
+                key={`face-label-${faceIndex}`}
+                transform={transform}
+                textAnchor="middle"
+                fontSize={11}
+                fontWeight={400}
+                letterSpacing="0.02em"
+                fill={`hsl(${face.tint.hue} 60% 88%)`}
+                opacity={opacity}
+                style={{ pointerEvents: "none", userSelect: "none" }}
+              >
+                <tspan x="0" dy="-0.15em">{lines[0]}</tspan>
+                {lines[1] && (
+                  <tspan x="0" dy="1.1em">{lines[1]}</tspan>
+                )}
+              </text>
+            );
+          })}
         </svg>
 
         {/* Face selector — compact vertical rail of icon circles that expand
@@ -2538,6 +2776,23 @@ export function Hypercube3D({
           )}
         </div>
 
+        {/* v3 Explore coaching note — appears by the left face rail on entering
+            Explore, dismissed on the first edge click (or on exit). */}
+        {interactionMode === "explore" && showEdgeHint && selectedEdgeIndex === null && (
+          <div
+            className="hypercube-ui-panel absolute z-40 left-[84px] top-1/2 -translate-y-1/2 max-w-[220px] pointer-events-none"
+          >
+            <div className="rounded-xl border border-amber-400/40 bg-black/70 backdrop-blur-md px-3 py-2.5 shadow-xl">
+              <div className="flex items-center gap-1.5 text-amber-300 text-[10px] uppercase tracking-wider font-semibold">
+                <Compass className="w-3 h-3" /> Explore
+              </div>
+              <p className="mt-1 text-xs text-foreground/90 leading-relaxed">
+                Click each edge to discover the relationship between faces.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Directional Navigation Arrows - TRUE 90° cube rotations */}
         {interactionMode === "default" &&
           (focusedFaceIndex !== null || isCoreSelected) && (
@@ -2693,11 +2948,16 @@ export function Hypercube3D({
             const emptyFace = edge.aCount === 0 ? fa : fb;
             return (
               <aside
-                className="hypercube-ui-panel pointer-events-auto absolute right-4 top-1/2 -translate-y-1/2 z-30 w-[320px] max-h-[76vh] flex flex-col rounded-2xl border backdrop-blur-md bg-black/30 overflow-hidden shadow-2xl"
+                // right offset gives a comfortable margin from the window edge
+                // while pulling the panel in closer to the (now expanded) cube.
+                // onWheel is stopped here so scrolling the analysis never leaks
+                // through to the canvas zoom handler on the scene container.
+                className="hypercube-ui-panel pointer-events-auto absolute right-12 top-1/2 -translate-y-1/2 z-30 w-[320px] max-h-[76vh] flex flex-col rounded-2xl border backdrop-blur-md bg-black/30 overflow-hidden shadow-2xl"
                 style={{
                   borderColor: `hsl(${hue} 45% 50% / 0.4)`,
                   boxShadow: `0 0 0 1px hsl(${hue} 55% 55% / 0.18) inset, 0 8px 40px hsl(${hue} 60% 20% / 0.4)`,
                 }}
+                onWheel={(e) => e.stopPropagation()}
               >
                 {/* Header — the relationship */}
                 <div className="px-4 py-3 border-b border-white/10 flex items-start justify-between gap-2">
@@ -2808,10 +3068,11 @@ export function Hypercube3D({
                       )}
                     </div>
 
-                    {/* Reflective friction: the user's own read comes before any
-                        AI output, so the analysis responds to their thinking
-                        instead of replacing it. Writing is optional; Reveal
-                        works either way. */}
+                    {/* v3 orientation-first flow: a static one-line description
+                        of the relationship, then the three exploration modes as
+                        up-front orientation options (pick one before revealing).
+                        The hypothesis is retained but secondary. "Reveal
+                        analysis" runs the chosen mode. */}
                     {!edgeInsight && !edgeInsightLoading && (
                       <div
                         className="rounded-xl border p-3"
@@ -2821,34 +3082,74 @@ export function Hypercube3D({
                         }}
                       >
                         <p className="text-xs text-foreground/90 leading-relaxed">
-                          Before the analysis: what do you sense connects{" "}
-                          <span
-                            className="font-semibold"
-                            style={{ color: `hsl(${fa.tint.hue} 55% 70%)` }}
-                          >
-                            {fa.label}
-                          </span>{" "}
-                          and{" "}
-                          <span
-                            className="font-semibold"
-                            style={{ color: `hsl(${fb.tint.hue} 55% 70%)` }}
-                          >
-                            {fb.label}
-                          </span>{" "}
-                          in your experience?
+                          {getEdgeRelationshipDescription(fa, fb)}
                         </p>
-                        <textarea
-                          value={edgeHypothesis}
-                          onChange={(e) => setEdgeHypothesis(e.target.value)}
-                          rows={3}
-                          maxLength={600}
-                          placeholder="Your hunch, in a sentence or two (optional)"
-                          className="mt-2 w-full rounded-lg border bg-black/30 px-2.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none resize-none"
-                          style={{ borderColor: `hsl(${hue} 40% 45% / 0.4)` }}
-                        />
+
+                        <p
+                          className="mt-3 text-[10px] uppercase tracking-wider font-semibold"
+                          style={{ color: `hsl(${hue} 45% 62%)` }}
+                        >
+                          Choose a lens to explore
+                        </p>
+                        <div className="mt-1.5 flex flex-col gap-1.5">
+                          {(
+                            [
+                              { mode: "tensions", label: "Find tensions", hint: "Surface the frictions between them" },
+                              { mode: "bridge", label: "Bridge ideas", hint: "Propose links that tie them together" },
+                              { mode: "deepen", label: "Deepen questions", hint: "Open the space with sharper questions" },
+                            ] as { mode: EdgeInsightMode; label: string; hint: string }[]
+                          ).map(({ mode, label, hint }) => {
+                            const active = selectedOrientation === mode;
+                            return (
+                              <button
+                                key={mode}
+                                onClick={() => setSelectedOrientation(mode)}
+                                className={cn(
+                                  "text-left px-2.5 py-2 rounded-lg border transition-colors",
+                                  !active &&
+                                  "text-muted-foreground hover:text-foreground hover:bg-white/5",
+                                )}
+                                style={{
+                                  borderColor: active
+                                    ? `hsl(${hue} 55% 55% / 0.6)`
+                                    : "hsl(0 0% 100% / 0.15)",
+                                  background: active
+                                    ? `hsl(${hue} 55% 45% / 0.18)`
+                                    : "transparent",
+                                  color: active ? `hsl(${hue} 55% 82%)` : undefined,
+                                }}
+                              >
+                                <span className="block text-xs font-medium">{label}</span>
+                                <span className="block text-[10px] text-muted-foreground/80 leading-tight mt-0.5">
+                                  {hint}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Optional, secondary: the user's own reading. Rides along
+                            with whichever lens is revealed. */}
+                        <details className="mt-3 group">
+                          <summary className="text-[11px] text-muted-foreground hover:text-foreground cursor-pointer select-none list-none flex items-center gap-1">
+                            <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+                            Add your own reading (optional)
+                          </summary>
+                          <textarea
+                            value={edgeHypothesis}
+                            onChange={(e) => setEdgeHypothesis(e.target.value)}
+                            rows={3}
+                            maxLength={600}
+                            placeholder="Your hunch about what connects them, in a sentence or two"
+                            className="mt-2 w-full rounded-lg border bg-black/30 px-2.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none resize-none"
+                            style={{ borderColor: `hsl(${hue} 40% 45% / 0.4)` }}
+                          />
+                        </details>
+
                         <button
-                          onClick={() => runEdgeInsight("analyze")}
-                          className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors"
+                          onClick={() => selectedOrientation && runEdgeInsight(selectedOrientation)}
+                          disabled={!selectedOrientation}
+                          className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           style={{
                             borderColor: `hsl(${hue} 55% 55% / 0.5)`,
                             background: `hsl(${hue} 55% 45% / 0.18)`,
@@ -2905,20 +3206,24 @@ export function Hypercube3D({
                             >
                               Observations
                             </p>
-                            <ul className="mt-1 space-y-1.5">
+                            {/* Each observation gets its own call-out box (same
+                                visual treatment as the tension box below). */}
+                            <div className="mt-1 space-y-1.5">
                               {edgeInsight.keyObservations.map((obs, i) => (
-                                <li
+                                <div
                                   key={i}
-                                  className="text-xs text-foreground/90 leading-relaxed pl-3 relative"
+                                  className="rounded-lg border px-2.5 py-2"
+                                  style={{
+                                    borderColor: `hsl(${hue} 50% 50% / 0.35)`,
+                                    background: `hsl(${hue} 50% 22% / 0.18)`,
+                                  }}
                                 >
-                                  <span
-                                    className="absolute left-0 top-[7px] w-1 h-1 rounded-full"
-                                    style={{ background: `hsl(${hue} 55% 60%)` }}
-                                  />
-                                  {obs}
-                                </li>
+                                  <p className="text-xs text-foreground/90 leading-relaxed">
+                                    {obs}
+                                  </p>
+                                </div>
                               ))}
-                            </ul>
+                            </div>
                           </div>
                         )}
 
@@ -2948,20 +3253,45 @@ export function Hypercube3D({
                               className="text-[10px] uppercase tracking-wider font-semibold"
                               style={{ color: `hsl(${hue} 45% 62%)` }}
                             >
-                              For you to sit with
+                              Take one into the Wizard
                             </p>
-                            <ul className="mt-1 space-y-1.5">
+                            {/* Clickable chips: sends the question into the map
+                                Wizard chat (openGeneralChat + pre-seeded context,
+                                same hand-off the bridge button uses). */}
+                            <div className="mt-1 flex flex-col gap-1.5">
                               {edgeInsight.questions.map((q, i) => (
-                                <li
+                                <button
                                   key={i}
-                                  className="text-xs text-foreground/85 italic leading-relaxed"
+                                  onClick={() => openQuestionInChat(q, edge.faceA, edge.faceB)}
+                                  className="group text-left flex items-start gap-1.5 px-2.5 py-2 rounded-lg border border-white/15 hover:border-white/30 hover:bg-white/5 transition-colors"
+                                  title="Ask this in the Wizard chat"
                                 >
-                                  {q}
-                                </li>
+                                  <MessageSquarePlus
+                                    className="w-3.5 h-3.5 flex-shrink-0 mt-0.5"
+                                    style={{ color: `hsl(${hue} 55% 65%)` }}
+                                  />
+                                  <span className="text-xs text-foreground/85 leading-snug">
+                                    {q}
+                                  </span>
+                                </button>
                               ))}
-                            </ul>
+                            </div>
                           </div>
                         )}
+
+                        {/* v3: draft the analysis onto the canvas as a tagged note
+                            card (no AI call), placed near the viewport center. */}
+                        <button
+                          onClick={() => draftEdgeAnalysisOnCanvas(edge.faceA, edge.faceB, edgeInsight)}
+                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-white/5"
+                          style={{
+                            borderColor: `hsl(${hue} 45% 50% / 0.4)`,
+                            color: `hsl(${hue} 45% 78%)`,
+                          }}
+                          title="Insert this analysis as a card on the canvas, tagged with both faces"
+                        >
+                          <StickyNote className="w-3.5 h-3.5" /> Draft on canvas
+                        </button>
 
                         {/* Go deeper: same route, different lens. The user's
                             hypothesis rides along with every mode. */}
