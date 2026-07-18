@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { v4 as uuidv4 } from "uuid";
 import { useCXDStore } from "@/store/cxd-store";
 import { CXD_SECTIONS, CXDSectionId } from "@/types/cxd-schema";
@@ -176,10 +177,16 @@ function CanvasContextMenu({
     };
   }, [onClose, isReady]);
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  // Portal to document.body so the menu escapes the canvas's transformed/stacked context.
+  // Rendered inline it inherited the canvas stacking context, where any element painted
+  // later (e.g. another container, or a selected element forced to a huge zIndex) could
+  // cover it and eat its clicks. On body with a modal-tier z-index it always sits on top.
+  return createPortal(
     <div
       data-context-menu
-      className="fixed z-[100] min-w-[180px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+      className="fixed z-[10001] min-w-[180px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
       style={{
         left: position.x,
         top: position.y,
@@ -306,7 +313,8 @@ function CanvasContextMenu({
           </button>
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -666,12 +674,9 @@ export function CXDCanvas() {
   // 1. When a grouped element changes height, shift siblings below it up/down
   // 2. Containers shrink-wrap to fit their children (expand AND contract)
   const prevElementSizesRef = useRef<Map<string, { height: number; width: number }>>(new Map());
-  const containerAutoResizeFingerprintRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (draggingElement) return; // Don't reflow while user is dragging
-
-    const GAP = 20; // consistent gap used by distribute and container padding
 
     // ── Phase 1: Group reflow — shift siblings when a member's height changes ──
     // Collect all groups
@@ -721,52 +726,14 @@ export function CXDCanvas() {
       });
     }
 
-    // ── Phase 2: Container auto-resize — grow to fit children; never move the origin ──
-    // Previous version was unstable: it measured the children's full left→right / top→bottom
-    // SPAN and shifted the container origin to wrap them. A single child far from the others
-    // (or briefly mis-positioned during a drop) made the container jump to an unreasonable size,
-    // and the origin shift compounded that with a visible reposition. This version measures only
-    // from the container's FIXED origin to the children's right/bottom edge, so the size stays
-    // bounded and the origin never moves. Expand-only past the user floor (minWidth/minHeight,
-    // written on manual resize; current size otherwise) so nudging a child inside the container
-    // doesn't cause it to shrink-jitter; a manual shrink lowers the floor and lets it contract.
-    // Skipped entirely while dragging (guard at top of effect), so it only settles between drags.
-    const containers = canvasElements.filter((el) => el.type === 'container' && !(el as ContainerElement).collapsed);
-
-    for (const container of containers) {
-      const children = canvasElements.filter((el) => el.containerId === container.id);
-      if (children.length === 0) continue;
-
-      const cont = container as ContainerElement;
-      const userMinW = cont.minWidth ?? container.width;
-      const userMinH = cont.minHeight ?? container.height;
-
-      // Apply any pending reflow offsets to children for accurate bounds
-      const getChildY = (c: CanvasElement) => reflowUpdates.get(c.id)?.y ?? c.y;
-
-      const maxChildRight = Math.max(...children.map((c) => c.x + c.width));
-      const maxChildBottom = Math.max(...children.map((c) => getChildY(c) + c.height));
-
-      // Fit from the fixed origin to the far edge of the children + padding.
-      const fitW = maxChildRight + GAP - container.x;
-      const fitH = maxChildBottom + GAP - container.y;
-
-      const newWidth = Math.max(userMinW, fitW);
-      const newHeight = Math.max(userMinH, fitH);
-
-      const fingerprint = `${Math.round(newWidth)},${Math.round(newHeight)}`;
-      if (containerAutoResizeFingerprintRef.current.get(container.id) === fingerprint) continue;
-
-      if (
-        Math.abs(container.width - newWidth) > 1 ||
-        Math.abs(container.height - newHeight) > 1
-      ) {
-        containerAutoResizeFingerprintRef.current.set(container.id, fingerprint);
-        syncUpdateElement(container.id, { width: newWidth, height: newHeight });
-      } else {
-        containerAutoResizeFingerprintRef.current.delete(container.id);
-      }
-    }
+    // ── Container auto-resize is intentionally NOT done here anymore. ──
+    // A reactive resize keyed on canvasElements re-fired on every internal child move and
+    // grew the container expand-only on the right/bottom. Two problems: (1) it felt jumpy —
+    // rearranging a child inside the box nudged the box; (2) because the box always chased
+    // children on the right/bottom but never on the left/top (fixed origin), a child's center
+    // could never get past the ever-growing right/bottom edge, so removal only ever worked by
+    // dragging out the LEFT. Container sizing now happens exclusively at drop time
+    // (handleElementDragEnd), so internal moves never resize and every edge can be exited.
 
     // ── Phase 3: Snapshot current sizes for next comparison ──
     const newSizes = new Map<string, { height: number; width: number }>();
@@ -2108,42 +2075,12 @@ export function CXDCanvas() {
               ? [draggingElement]
               : [];
 
-        // Attach all dropped elements to the container
+        // Attach all dropped elements to the container. Container resizing to fit is done
+        // once, below, by the unified drop-time grow pass (growContainersToFit) — never here
+        // and never reactively — so it can grow on ANY side (origin-shifting for left/top).
         elementsToDrop.forEach((id) => {
           syncAddNodeToContainer(id, targetContainer.id);
         });
-
-        // Auto-expand container to wrap children if they extend beyond the right/bottom edge.
-        // Only expand width/height — never move the container's origin (x, y) to prevent jumps.
-        if (elementsToDrop.length > 0) {
-          const preExistingChildren = canvasElements.filter(
-            (el) => el.containerId === targetContainer.id,
-          );
-          const droppedEls = elementsToDrop
-            .map((id) => canvasElements.find((e) => e.id === id))
-            .filter((e): e is CanvasElement => e !== undefined);
-          const allChildren = [...preExistingChildren, ...droppedEls];
-
-          if (allChildren.length > 0) {
-            const PAD = 20;
-            const maxX = Math.max(...allChildren.map((c) => c.x + c.width));
-            const maxY = Math.max(...allChildren.map((c) => c.y + c.height));
-
-            // Only expand right/bottom — never change x or y
-            const neededWidth = Math.max(targetContainer.width, maxX + PAD - targetContainer.x);
-            const neededHeight = Math.max(targetContainer.height, maxY + PAD - targetContainer.y);
-
-            if (
-              neededWidth !== targetContainer.width ||
-              neededHeight !== targetContainer.height
-            ) {
-              syncUpdateElement(targetContainer.id, {
-                width: neededWidth,
-                height: neededHeight,
-              });
-            }
-          }
-        }
       }
     }
 
@@ -2187,6 +2124,57 @@ export function CXDCanvas() {
         } else if (!foundContainer && el.containerId) {
           // Detach from old container
           syncRemoveNodeFromContainer(id);
+        }
+      }
+    }
+
+    // ── Container grow-to-fit — the ONLY place containers auto-resize (drop time only) ──
+    // Runs after attach/detach has settled, so each dragged element's containerId is final.
+    // Affected containers = the explicit drop target plus whatever container each dragged
+    // element now lives in (covers both "element entered a container" and "an internal
+    // element was released overlapping an edge"). For each, grow EXPAND-ONLY on whichever
+    // side(s) a child pokes past the current edge (+ padding). Growing left/top shifts the
+    // container's x/y; children keep their absolute coords so they don't move on screen.
+    // A move that leaves every child within the current bounds produces no change, so
+    // rearranging elements already inside a container never resizes it.
+    {
+      const PAD = 20;
+      const liveEls = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+      const containersToFit = new Set<string>();
+      if (dropTargetContainerId) containersToFit.add(dropTargetContainerId);
+      dragOriginalPositionsRef.current.forEach((_, id) => {
+        const el = liveEls.find((e) => e.id === id);
+        if (el?.containerId) containersToFit.add(el.containerId);
+      });
+
+      for (const cid of Array.from(containersToFit)) {
+        const container = liveEls.find((e) => e.id === cid);
+        if (!container || container.type !== 'container' || (container as ContainerElement).collapsed) continue;
+
+        const children = liveEls.filter((e) => e.containerId === cid);
+        if (children.length === 0) continue;
+
+        const minChildLeft = Math.min(...children.map((c) => c.x));
+        const minChildTop = Math.min(...children.map((c) => c.y));
+        const maxChildRight = Math.max(...children.map((c) => c.x + c.width));
+        const maxChildBottom = Math.max(...children.map((c) => c.y + c.height));
+
+        // Expand-only on every side. Left/top move the origin; right/bottom extend size.
+        const newLeft = Math.min(container.x, minChildLeft - PAD);
+        const newTop = Math.min(container.y, minChildTop - PAD);
+        const newRight = Math.max(container.x + container.width, maxChildRight + PAD);
+        const newBottom = Math.max(container.y + container.height, maxChildBottom + PAD);
+
+        const newWidth = newRight - newLeft;
+        const newHeight = newBottom - newTop;
+
+        if (
+          Math.abs(newLeft - container.x) > 0.5 ||
+          Math.abs(newTop - container.y) > 0.5 ||
+          Math.abs(newWidth - container.width) > 0.5 ||
+          Math.abs(newHeight - container.height) > 0.5
+        ) {
+          syncUpdateElement(cid, { x: newLeft, y: newTop, width: newWidth, height: newHeight });
         }
       }
     }
