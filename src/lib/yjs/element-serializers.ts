@@ -82,6 +82,9 @@ const ELEMENT_ARRAY_FIELDS = new Set([
   'subtasks',      // inside taskMetadata
   'dependencies',  // inside taskMetadata
   'customTags',    // inside taskMetadata
+  'cells',         // table: 2D grid of TableCell (whole-grid replace on edit)
+  'rowColors',     // table: per-row background
+  'colColors',     // table: per-column background
 ]);
 
 // ─── Canvas Element Serialization ────────────────────────────────────────────

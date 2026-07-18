@@ -14,6 +14,9 @@ import {
   LineElement,
   BoardElement,
   ExperienceBlockElement,
+  TableElement,
+  TableCell,
+  makeEmptyTableCells,
   InspectorSectionId,
   PRESET_COLORS,
   SOLID_STROKE_COLORS,
@@ -701,6 +704,16 @@ export function CanvasElementRenderer({
             element={element as ExperienceBlockElement}
             onOpenPanel={onOpenExperiencePanel}
             onUpdate={onUpdate}
+          />
+        );
+      case "table":
+        return (
+          <TableCard
+            element={element as TableElement}
+            onUpdate={onUpdate}
+            isSelected={isSelected}
+            isReadOnly={isReadOnly}
+            canvasZoom={canvasZoom}
           />
         );
       default:
@@ -2281,25 +2294,22 @@ function TextFontSizeHandle({
 }
 
 
-// Color picker popover - positioned above the toolbar
+// Color picker popover - always opens below the toolbar
 function ColorPicker({
   currentColor,
   onColorChange,
   onClose,
-  position = "above",
 }: {
   currentColor?: string;
   onColorChange: (color: string) => void;
   onClose: () => void;
-  position?: "above" | "below";
 }) {
+  // Submenus always open downward so the user never moves the cursor up to reach options.
   return (
     <div
       className={cn(
         "absolute p-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] grid grid-cols-4 gap-1 w-[148px]",
-        position === "above"
-          ? "bottom-full mb-2 left-1/2 -translate-x-1/2"
-          : "top-full mt-2 left-1/2 -translate-x-1/2",
+        "top-full mt-2 left-1/2 -translate-x-1/2",
       )}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -2786,7 +2796,7 @@ function ContainerStylePicker({
 
   return (
     <div
-      className="absolute left-0 bottom-full mb-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3518,6 +3528,458 @@ function ExperienceViewSubmenu({
           Inline Editor
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Table element ──────────────────────────────────────────────────────────
+
+/**
+ * Single editable table cell. Uncontrolled contentEditable that only syncs its
+ * DOM text from the model when NOT focused — this prevents cursor-jump during
+ * typing and keeps writes off the per-keystroke path (commit happens on blur).
+ */
+function TableCellEditor({
+  value,
+  onCommit,
+  onFocusCell,
+  disabled,
+  style,
+}: {
+  value: string;
+  onCommit: (text: string) => void;
+  onFocusCell: () => void;
+  disabled: boolean;
+  style: React.CSSProperties;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const focused = useRef(false);
+
+  // Sync external value into the DOM only while the user is not editing.
+  useEffect(() => {
+    if (!focused.current && ref.current && ref.current.textContent !== value) {
+      ref.current.textContent = value;
+    }
+  });
+
+  return (
+    <div
+      ref={ref}
+      data-no-drag
+      contentEditable={!disabled}
+      suppressContentEditableWarning
+      className="outline-none w-full h-full whitespace-pre-wrap break-words cursor-text"
+      style={style}
+      onFocus={() => {
+        focused.current = true;
+        onFocusCell();
+      }}
+      onBlur={() => {
+        focused.current = false;
+        const text = ref.current?.textContent ?? "";
+        if (text !== value) onCommit(text);
+      }}
+    />
+  );
+}
+
+type TableColorScope = "cell" | "row" | "col" | "table";
+
+/**
+ * Table card — editable data grid with per-cell text, cell/row/column/table
+ * coloring, and basic text formatting. Commits go through the shared onUpdate
+ * path (whole-grid replace on edit; tables are small). onUpdate is already
+ * ref-stabilized by CanvasElementRenderer.
+ */
+function TableCard({
+  element,
+  onUpdate,
+  isSelected,
+  isReadOnly,
+  canvasZoom = 1,
+}: {
+  element: TableElement;
+  onUpdate: (updates: Partial<TableElement>) => void;
+  isSelected: boolean;
+  isReadOnly: boolean;
+  canvasZoom?: number;
+}) {
+  const rows = element.rows ?? 3;
+  const cols = element.cols ?? 3;
+  const rowColors = element.rowColors;
+  const colColors = element.colColors;
+  const tableBg = element.tableBg;
+  const borderColor = element.borderColor || "rgba(139,92,246,0.35)";
+  const headerRow = element.headerRow ?? false;
+
+  const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
+  const [scope, setScope] = useState<TableColorScope>("cell");
+
+  // Clear the selected cell whenever the whole element is deselected.
+  useEffect(() => {
+    if (!isSelected) setSel(null);
+  }, [isSelected]);
+
+  // Defensive grid: always a full rows×cols matrix even if the model is partial.
+  const grid: TableCell[][] = useMemo(() => {
+    const src = element.cells || [];
+    const g: TableCell[][] = [];
+    for (let r = 0; r < rows; r++) {
+      const row = src[r] || [];
+      const out: TableCell[] = [];
+      for (let c = 0; c < cols; c++) out.push(row[c] ? { ...row[c] } : { text: "" });
+      g.push(out);
+    }
+    return g;
+  }, [element.cells, rows, cols]);
+
+  const cloneGrid = useCallback(
+    () => grid.map((row) => row.map((cell) => ({ ...cell }))),
+    [grid],
+  );
+
+  const updateCell = useCallback(
+    (r: number, c: number, patch: Partial<TableCell>) => {
+      const next = cloneGrid();
+      next[r][c] = { ...next[r][c], ...patch };
+      onUpdate({ cells: next });
+    },
+    [cloneGrid, onUpdate],
+  );
+
+  const resolveBg = (r: number, c: number): string | undefined => {
+    const cell = grid[r][c];
+    if (cell.bg) return cell.bg;
+    if (rowColors && rowColors[r]) return rowColors[r] || undefined;
+    if (colColors && colColors[c]) return colColors[c] || undefined;
+    if (tableBg) return tableBg;
+    if (headerRow && r === 0) return "rgba(139,92,246,0.22)";
+    return undefined;
+  };
+
+  const applyBg = (color: string) => {
+    if (scope === "table") {
+      onUpdate({ tableBg: color });
+      return;
+    }
+    if (!sel) return;
+    if (scope === "cell") {
+      updateCell(sel.r, sel.c, { bg: color });
+    } else if (scope === "row") {
+      const rc = rowColors ? [...rowColors] : Array<string | null>(rows).fill(null);
+      rc[sel.r] = color;
+      onUpdate({ rowColors: rc });
+    } else if (scope === "col") {
+      const cc = colColors ? [...colColors] : Array<string | null>(cols).fill(null);
+      cc[sel.c] = color;
+      onUpdate({ colColors: cc });
+    }
+  };
+
+  const addRow = () => {
+    const next = cloneGrid();
+    next.push(Array.from({ length: cols }, () => ({ text: "" } as TableCell)));
+    onUpdate({
+      rows: rows + 1,
+      cells: next,
+      ...(rowColors ? { rowColors: [...rowColors, null] } : {}),
+    });
+  };
+  const deleteRow = () => {
+    const r = sel?.r ?? rows - 1;
+    if (rows <= 1) return;
+    const next = cloneGrid();
+    next.splice(r, 1);
+    onUpdate({
+      rows: rows - 1,
+      cells: next,
+      ...(rowColors ? { rowColors: rowColors.filter((_, i) => i !== r) } : {}),
+    });
+    setSel(null);
+  };
+  const addCol = () => {
+    const next = cloneGrid().map((row) => [...row, { text: "" } as TableCell]);
+    onUpdate({
+      cols: cols + 1,
+      cells: next,
+      ...(colColors ? { colColors: [...colColors, null] } : {}),
+    });
+  };
+  const deleteCol = () => {
+    const c = sel?.c ?? cols - 1;
+    if (cols <= 1) return;
+    const next = cloneGrid().map((row) => row.filter((_, i) => i !== c));
+    onUpdate({
+      cols: cols - 1,
+      cells: next,
+      ...(colColors ? { colColors: colColors.filter((_, i) => i !== c) } : {}),
+    });
+    setSel(null);
+  };
+
+  const selCell = sel ? grid[sel.r]?.[sel.c] : undefined;
+
+  const scopeBtn = (s: TableColorScope, label: string) => (
+    <button
+      key={s}
+      onClick={(e) => {
+        e.stopPropagation();
+        setScope(s);
+      }}
+      className={cn(
+        "px-2 py-1 rounded text-[11px] font-medium transition-colors",
+        scope === s
+          ? "bg-primary/30 text-primary ring-1 ring-primary"
+          : "text-muted-foreground hover:bg-primary/15 hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="relative w-full h-full" data-no-drag>
+      <div
+        className="w-full h-full overflow-hidden rounded-lg"
+        style={{ background: tableBg || "rgba(20,16,31,0.72)", border: `1px solid ${borderColor}` }}
+      >
+        <table className="w-full h-full border-collapse" style={{ tableLayout: "fixed" }}>
+          <tbody>
+            {grid.map((row, r) => (
+              <tr key={r}>
+                {row.map((cell, c) => {
+                  const bg = resolveBg(r, c);
+                  const isSel = sel?.r === r && sel?.c === c;
+                  const isHeader = headerRow && r === 0;
+                  return (
+                    <td
+                      key={c}
+                      className={cn(
+                        "relative align-middle p-0",
+                        isSel && "outline outline-2 -outline-offset-2 outline-violet-400",
+                      )}
+                      style={{
+                        border: `1px solid ${borderColor}`,
+                        background: bg,
+                        width: `${100 / cols}%`,
+                      }}
+                      onClick={() => {
+                        // Do NOT stopPropagation: let the click bubble to the
+                        // wrapper so the element gets selected (which reveals the
+                        // formatting popover) — just record the active cell.
+                        setSel({ r, c });
+                      }}
+                    >
+                      <TableCellEditor
+                        value={cell.text || ""}
+                        disabled={isReadOnly}
+                        onCommit={(text) => updateCell(r, c, { text })}
+                        onFocusCell={() => setSel({ r, c })}
+                        style={{
+                          color: cell.color || "#ffffff",
+                          fontWeight: cell.bold ? 700 : isHeader ? 600 : 400,
+                          fontStyle: cell.italic ? "italic" : "normal",
+                          textAlign: cell.align || (isHeader ? "center" : "left"),
+                          fontSize: 13,
+                          lineHeight: 1.35,
+                          padding: "4px 6px",
+                          minHeight: 22,
+                        }}
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Formatting popover — opens downward (never above) so the cursor never moves up */}
+      {isSelected && !isReadOnly && (
+        <div
+          className="absolute left-0 top-full mt-2 z-[100] pointer-events-auto"
+          data-no-drag
+          style={{ transform: `scale(${1 / canvasZoom})`, transformOrigin: "top left" }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[256px] flex flex-col gap-2">
+            {/* Scope selector */}
+            <div className="flex items-center gap-1">
+              {scopeBtn("cell", "Cell")}
+              {scopeBtn("row", "Row")}
+              {scopeBtn("col", "Column")}
+              {scopeBtn("table", "Table")}
+            </div>
+
+            {/* Background swatches */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Background</div>
+              <div className="grid grid-cols-6 gap-1">
+                {PRESET_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      applyBg(color);
+                    }}
+                    className={cn(
+                      "w-full h-6 rounded border border-white/10 transition-transform hover:scale-110",
+                      color === "transparent" &&
+                        "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+                    )}
+                    style={{ background: color === "transparent" ? undefined : color }}
+                    title={color === "transparent" ? "Clear" : "Background"}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Text color + style + align (operate on the selected cell) */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Text</div>
+              <div className="grid grid-cols-6 gap-1 mb-1.5">
+                {SOLID_STROKE_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (sel) updateCell(sel.r, sel.c, { color });
+                    }}
+                    className="w-full h-5 rounded-full border border-white/10 transition-transform hover:scale-110 disabled:opacity-40"
+                    style={{ background: color }}
+                    disabled={!sel}
+                    title="Text color"
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (sel) updateCell(sel.r, sel.c, { bold: !selCell?.bold });
+                  }}
+                  disabled={!sel}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40",
+                    selCell?.bold && "bg-primary/20 text-primary",
+                  )}
+                  title="Bold"
+                >
+                  <Bold className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (sel) updateCell(sel.r, sel.c, { italic: !selCell?.italic });
+                  }}
+                  disabled={!sel}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40",
+                    selCell?.italic && "bg-primary/20 text-primary",
+                  )}
+                  title="Italic"
+                >
+                  <Italic className="w-3.5 h-3.5" />
+                </button>
+                <div className="w-px h-4 bg-border/50 mx-0.5" />
+                {(["left", "center", "right"] as const).map((a) => {
+                  const AlignIcon = a === "left" ? AlignLeft : a === "center" ? AlignCenter : AlignRight;
+                  return (
+                    <button
+                      key={a}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (sel) updateCell(sel.r, sel.c, { align: a });
+                      }}
+                      disabled={!sel}
+                      className={cn(
+                        "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40",
+                        selCell?.align === a && "bg-primary/20 text-primary",
+                      )}
+                      title={`Align ${a}`}
+                    >
+                      <AlignIcon className="w-3.5 h-3.5" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Border color + header toggle */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Border</div>
+              <div className="flex items-center gap-1">
+                <div className="grid grid-cols-6 gap-1 flex-1">
+                  {SOLID_STROKE_COLORS.slice(0, 6).map((color) => (
+                    <button
+                      key={color}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdate({ borderColor: color });
+                      }}
+                      className="w-full h-5 rounded border border-white/10 transition-transform hover:scale-110"
+                      style={{ background: color }}
+                      title="Border color"
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdate({ headerRow: !headerRow });
+                  }}
+                  className={cn(
+                    "px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap",
+                    headerRow
+                      ? "bg-primary/30 text-primary ring-1 ring-primary"
+                      : "text-muted-foreground hover:bg-primary/15 hover:text-foreground",
+                  )}
+                  title="Toggle header row"
+                >
+                  Header
+                </button>
+              </div>
+            </div>
+
+            {/* Row / column structure controls */}
+            <div className="flex items-center gap-1 pt-1 border-t border-border/50">
+              <button
+                onClick={(e) => { e.stopPropagation(); addRow(); }}
+                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Add row"
+              >
+                <Plus className="w-3 h-3" /> Row
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteRow(); }}
+                disabled={rows <= 1}
+                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-40"
+                title="Delete row"
+              >
+                <Minus className="w-3 h-3" /> Row
+              </button>
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+              <button
+                onClick={(e) => { e.stopPropagation(); addCol(); }}
+                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                title="Add column"
+              >
+                <Plus className="w-3 h-3" /> Col
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteCol(); }}
+                disabled={cols <= 1}
+                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-40"
+                title="Delete column"
+              >
+                <Minus className="w-3 h-3" /> Col
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5006,7 +5468,6 @@ function FreeformCard({
                       onUpdate({ style: { ...element.style, bgColor: color } })
                     }
                     onClose={() => setShowFocusNoteColorPicker(false)}
-                    position="below"
                   />
                 )}
               </div>

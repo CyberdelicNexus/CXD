@@ -30,6 +30,7 @@ import {
   getNearestAnchor,
   CanvasEdge,
   LineEndStyle,
+  makeEmptyTableCells,
 } from "@/types/canvas-elements";
 import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorCursors } from "@/components/collaboration";
@@ -1780,6 +1781,16 @@ export function CXDCanvas() {
           };
           // Note: baseElement.boardId tells which board this node appears in (the parent)
           // childBoardId is the board this node opens into when double-clicked
+          break;
+        case "table":
+          newElement = {
+            ...baseElement,
+            type: "table",
+            rows: 3,
+            cols: 3,
+            cells: makeEmptyTableCells(3, 3),
+            headerRow: true,
+          };
           break;
         default:
           return;

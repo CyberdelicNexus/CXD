@@ -79,6 +79,12 @@ const TOOLKIT_TOOLS = [
     IconComponent: LucideIcons.LayoutGrid,
     shortcut: "B",
   },
+  {
+    type: "table" as CanvasElementType,
+    label: "Table",
+    IconComponent: LucideIcons.Table,
+    shortcut: "A",
+  },
 ];
 
 const CARD_TYPE_OPTIONS = [

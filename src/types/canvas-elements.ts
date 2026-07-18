@@ -10,7 +10,8 @@ export type CanvasElementType =
   | 'text'
   | 'link'
   | 'board'
-  | 'experienceBlock';
+  | 'experienceBlock'
+  | 'table';
 
 // Shape types available in the shape palette
 export type ShapeType = 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'hexagon' | 'star';
@@ -353,6 +354,29 @@ export interface ExperienceBlockElement extends CanvasElementBase {
   manuallyResized?: boolean; // True if user has manually resized the element
 }
 
+// Table element — structured data grid with per-cell text + coloring/formatting
+export interface TableCell {
+  text: string;
+  bg?: string;      // per-cell background (highest precedence)
+  color?: string;   // text color
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+}
+
+export interface TableElement extends CanvasElementBase {
+  type: 'table';
+  rows: number;
+  cols: number;
+  // cells[r][c] — row-major grid. Always rows×cols in size.
+  cells: TableCell[][];
+  rowColors?: (string | null)[]; // optional per-row background
+  colColors?: (string | null)[]; // optional per-column background
+  tableBg?: string;              // container/table background (default fallback)
+  borderColor?: string;          // grid line color
+  headerRow?: boolean;           // style first row as a header
+}
+
 // Union type for all canvas elements
 export type CanvasElement =
   | FreeformElement
@@ -364,7 +388,15 @@ export type CanvasElement =
   | TextElement
   | LinkElement
   | BoardElement
-  | ExperienceBlockElement;
+  | ExperienceBlockElement
+  | TableElement;
+
+// Create a rows×cols grid of empty cells. Used by element creation + add row/col.
+export function makeEmptyTableCells(rows: number, cols: number): TableCell[][] {
+  return Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => ({ text: '' } as TableCell)),
+  );
+}
 
 // ─── Hypercube tag inheritance ──────────────────────────────────────────
 // Children inside a container do NOT carry their own hypercubeTags (see the
@@ -489,6 +521,7 @@ export const DEFAULT_ELEMENT_SIZES: Record<CanvasElementType, { width: number; h
   link: { width: 320, height: 240 }, // Updated for better bookmark view and 16:9 embed
   board: { width: 200, height: 150 },
   experienceBlock: { width: 220, height: 100 },
+  table: { width: 360, height: 150 },
 };
 
 // Tool definitions for the toolbar
@@ -507,6 +540,7 @@ export const CANVAS_TOOLS: ToolDefinition[] = [
   { type: 'text', label: 'Text', icon: 'Type' },
   { type: 'link', label: 'Link', icon: 'Link' },
   { type: 'board', label: 'Board', icon: 'Layout' },
+  { type: 'table', label: 'Table', icon: 'Table' },
 ];
 
 // Shape definitions for the shape palette

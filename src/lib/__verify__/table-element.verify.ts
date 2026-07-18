@@ -1,0 +1,66 @@
+/**
+ * Verification for the table CanvasElement round-trip through the Y.Doc.
+ * Run: npx tsx src/lib/__verify__/table-element.verify.ts
+ *
+ * Asserts: a TableElement with per-cell text + formatting, rowColors, colColors,
+ * tableBg, borderColor and headerRow survives canvasElementToYMap →
+ * yMapToCanvasElement intact (2D cells grid, colors, bold/italic/align).
+ */
+import * as Y from 'yjs';
+import { canvasElementToYMap, yMapToCanvasElement } from '../yjs/element-serializers';
+import { makeEmptyTableCells } from '@/types/canvas-elements';
+import type { TableElement } from '@/types/canvas-elements';
+
+let failures = 0;
+function check(cond: boolean, msg: string) {
+  if (!cond) { failures++; console.error(`  ✗ ${msg}`); }
+  else console.log(`  ✓ ${msg}`);
+}
+
+const cells = makeEmptyTableCells(2, 3);
+cells[0][0] = { text: 'Name', bold: true, align: 'center', color: '#22D3EE' };
+cells[0][1] = { text: 'Value', italic: true };
+cells[1][0] = { text: 'row cell', bg: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)' };
+cells[1][2] = { text: 'last', align: 'right' };
+
+const table: TableElement = {
+  id: 'tbl-1',
+  type: 'table',
+  x: 100, y: 200, width: 360, height: 150, zIndex: 5,
+  rows: 2, cols: 3,
+  cells,
+  rowColors: ['#123A5A', null],
+  colColors: [null, null, '#3B1842'],
+  tableBg: 'rgba(20,16,31,0.72)',
+  borderColor: 'rgba(139,92,246,0.35)',
+  headerRow: true,
+};
+
+// Integrate into a real Y.Doc (as the elements map does at runtime) before reading back.
+const doc = new Y.Doc();
+const elements = doc.getMap<Y.Map<unknown>>('elements');
+doc.transact(() => { elements.set(table.id, canvasElementToYMap(table)); });
+const round = yMapToCanvasElement(elements.get(table.id) as Y.Map<unknown>) as TableElement;
+
+check(round.type === 'table', 'type is table');
+check(round.rows === 2 && round.cols === 3, 'rows/cols preserved');
+check(Array.isArray(round.cells) && Array.isArray(round.cells[0]), 'cells is a 2D array');
+check(round.cells.length === 2 && round.cells[0].length === 3, 'grid dimensions preserved');
+check(round.cells[0][0].text === 'Name', 'cell text preserved');
+check(round.cells[0][0].bold === true, 'cell bold preserved');
+check(round.cells[0][0].align === 'center', 'cell align preserved');
+check(round.cells[0][0].color === '#22D3EE', 'cell text color preserved');
+check(round.cells[0][1].italic === true, 'cell italic preserved');
+check(round.cells[1][0].bg === table.cells[1][0].bg, 'cell bg (gradient) preserved');
+check(round.cells[1][2].align === 'right', 'far cell align preserved');
+check(round.rowColors?.[0] === '#123A5A' && round.rowColors?.[1] === null, 'rowColors preserved (incl null)');
+check(round.colColors?.[2] === '#3B1842', 'colColors preserved');
+check(round.tableBg === 'rgba(20,16,31,0.72)', 'tableBg preserved');
+check(round.borderColor === 'rgba(139,92,246,0.35)', 'borderColor preserved');
+check(round.headerRow === true, 'headerRow preserved');
+
+if (failures > 0) {
+  console.error(`\n${failures} check(s) FAILED`);
+  process.exit(1);
+}
+console.log('\nAll table round-trip checks passed.');
