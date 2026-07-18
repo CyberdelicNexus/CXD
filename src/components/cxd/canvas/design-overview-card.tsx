@@ -14,6 +14,26 @@ const FACE_COLORS: Record<string, string> = {
   contextAndMeaning: "hsl(320 72% 56%)"
 };
 
+// Same hues as FACE_COLORS, decomposed so we can build a glossy two-stop
+// gradient (lighter highlight -> deeper shade) per face instead of a flat fill.
+const FACE_HSL: Record<string, { h: number; s: number; l: number }> = {
+  realityPlanes: { h: 286, s: 72, l: 52 },
+  sensoryDomains: { h: 45, s: 84, l: 54 },
+  presence: { h: 195, s: 78, l: 55 },
+  stateMapping: { h: 160, s: 70, l: 48 },
+  traitMapping: { h: 260, s: 72, l: 58 },
+  contextAndMeaning: { h: 320, s: 72, l: 56 }
+};
+
+function getFaceGradient(faceId: string): string {
+  const c = FACE_HSL[faceId];
+  if (!c) return FACE_COLORS[faceId];
+  const light = `hsl(${c.h} ${Math.min(c.s + 8, 100)}% ${Math.min(c.l + 16, 88)}%)`;
+  const mid = `hsl(${c.h} ${c.s}% ${c.l}%)`;
+  const dark = `hsl(${c.h} ${Math.min(c.s + 6, 100)}% ${Math.max(c.l - 22, 8)}%)`;
+  return `linear-gradient(135deg, ${light} 0%, ${mid} 45%, ${dark} 100%)`;
+}
+
 interface FaceCompletion {
   faceId: string;
   completion: number;
@@ -142,18 +162,31 @@ export function DesignOverviewCard({
               className="relative flex-1 h-8 rounded border overflow-hidden transition-all duration-400"
               title={`${getFaceName(face.faceId)}: ${Math.round(face.completion * 100)}%`}
               style={{
-                backgroundColor: face.isActive
-                  ? FACE_COLORS[face.faceId]
+                background: face.isActive
+                  ? getFaceGradient(face.faceId)
                   : "rgba(255,255,255,0.04)",
                 borderColor: face.isActive
                   ? `${FACE_COLORS[face.faceId]}AA`
                   : "rgba(255,255,255,0.08)",
                 boxShadow: face.isActive
-                  ? `0 0 0 1px ${FACE_COLORS[face.faceId]}66 inset, 0 0 10px ${FACE_COLORS[face.faceId]}30`
+                  ? `0 1px 0 0 rgba(255,255,255,0.25) inset, 0 -6px 10px -4px rgba(0,0,0,0.35) inset, 0 0 10px ${FACE_COLORS[face.faceId]}40`
                   : "inset 0 0 0 1px rgba(255,255,255,0.05)",
               }}
             >
-              <div className="absolute inset-0 bg-black/15" />
+              {face.isActive && (
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.08) 30%, rgba(255,255,255,0) 55%, rgba(0,0,0,0.18) 100%)"
+                  }}
+                />
+              )}
+              {face.isActive && (
+                <div
+                  className="absolute -top-1 left-1 right-1 h-2 rounded-full blur-[3px]"
+                  style={{ background: "rgba(255,255,255,0.4)" }}
+                />
+              )}
             </div>
           ))}
         </div>
