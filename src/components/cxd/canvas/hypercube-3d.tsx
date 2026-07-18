@@ -742,6 +742,9 @@ export function Hypercube3D({
   const [edgeInsightLoading, setEdgeInsightLoading] = useState(false);
   const [edgeInsightError, setEdgeInsightError] = useState<string | null>(null);
   const [edgeElementsExpanded, setEdgeElementsExpanded] = useState(false);
+  // Brief confirmation after sending the analysis to the canvas Inbox (the Map
+  // view shows no canvas change, so the button itself reports success).
+  const [edgeDraftPlaced, setEdgeDraftPlaced] = useState(false);
   // v3: the three exploration modes are picked UP FRONT (before revealing).
   // null until the user chooses an orientation for the first reveal.
   const [selectedOrientation, setSelectedOrientation] =
@@ -761,6 +764,7 @@ export function Hypercube3D({
     setEdgeInsightError(null);
     setEdgeElementsExpanded(false);
     setSelectedOrientation(null);
+    setEdgeDraftPlaced(false);
   }, [selectedEdgeIndex]);
 
   // Zoom level for explore mode (1.0 = default, can zoom in/out)
@@ -1215,10 +1219,13 @@ export function Hypercube3D({
     [openGeneralChat],
   );
 
-  // v3: "Draft on canvas" — turn the edge analysis into a single canvas note
-  // card, tagged with BOTH faces, placed near the current viewport center via
-  // the store's batched (freeze-proof) insertion path. No AI call.
-  const draftEdgeAnalysisOnCanvas = useCallback(
+  // v3: "Place on canvas" — turn the edge analysis into a single note card,
+  // tagged with BOTH faces, sent to the canvas Inbox (inInbox: true) exactly
+  // like the AI chat's place-on-canvas flow. Uses the store's batched
+  // (freeze-proof) addCanvasElements path. No viewport positioning and no
+  // fit-bounds: the user is in the Map view, so the card waits in the Inbox
+  // for them to place it when they return to the canvas. No AI call.
+  const placeEdgeAnalysisInInbox = useCallback(
     (faceA: number, faceB: number, insight: EdgeInsight) => {
       const a = CUBE_FACES[faceA];
       const b = CUBE_FACES[faceB];
@@ -1249,16 +1256,8 @@ export function Hypercube3D({
       }
       const noteBody = parts.join("");
 
-      // Place near the current viewport center (same math as
-      // element-generation-service), converting screen center to world coords.
-      const width = 320;
-      const height = 300;
-      const viewportW = typeof window !== "undefined" ? window.innerWidth : 1200;
-      const viewportH =
-        typeof window !== "undefined" ? window.innerHeight - 64 : 700;
-      const cx = (viewportW / 2 - store.canvasPosition.x) / store.canvasZoom;
-      const cy = (viewportH / 2 - store.canvasPosition.y) / store.canvasZoom;
-
+      // Inbox item — position is irrelevant until the user drops it on the
+      // canvas, so x/y are 0 and width/height match a regular note.
       const card: FreeformElement = {
         id: uuidv4(),
         type: "freeform",
@@ -1266,14 +1265,14 @@ export function Hypercube3D({
         noteTitle: `${a.label} ↔ ${b.label}`,
         noteBody,
         content: "",
-        x: cx - width / 2,
-        y: cy - height / 2,
-        width,
-        height,
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 300,
         zIndex: Date.now() + Math.random(),
         emoji: "🔗",
         hypercubeTags: tags,
-        inInbox: false,
+        inInbox: true,
         style: {
           bgColor:
             "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
@@ -1282,12 +1281,8 @@ export function Hypercube3D({
       };
 
       store.addCanvasElements([card]);
-      store.setPendingCanvasFitBounds({
-        minX: card.x,
-        minY: card.y,
-        maxX: card.x + width,
-        maxY: card.y + height,
-      });
+      setEdgeDraftPlaced(true);
+      setTimeout(() => setEdgeDraftPlaced(false), 2500);
     },
     [],
   );
@@ -2998,7 +2993,7 @@ export function Hypercube3D({
                 // while pulling the panel in closer to the (now expanded) cube.
                 // onWheel is stopped here so scrolling the analysis never leaks
                 // through to the canvas zoom handler on the scene container.
-                className="hypercube-ui-panel pointer-events-auto absolute right-12 top-1/2 -translate-y-1/2 z-30 w-[320px] max-h-[76vh] flex flex-col rounded-2xl border backdrop-blur-md bg-black/30 overflow-hidden shadow-2xl"
+                className="hypercube-ui-panel pointer-events-auto absolute right-12 top-1/2 -translate-y-1/2 z-30 w-[460px] max-h-[76vh] flex flex-col rounded-2xl border backdrop-blur-md bg-black/30 overflow-hidden shadow-2xl"
                 style={{
                   borderColor: `hsl(${hue} 45% 50% / 0.4)`,
                   boxShadow: `0 0 0 1px hsl(${hue} 55% 55% / 0.18) inset, 0 8px 40px hsl(${hue} 60% 20% / 0.4)`,
@@ -3325,18 +3320,21 @@ export function Hypercube3D({
                           </div>
                         )}
 
-                        {/* v3: draft the analysis onto the canvas as a tagged note
-                            card (no AI call), placed near the viewport center. */}
+                        {/* v3: send the analysis to the canvas Inbox as a tagged
+                            note card (no AI call), same flow as the chat's
+                            place-on-canvas action. */}
                         <button
-                          onClick={() => draftEdgeAnalysisOnCanvas(edge.faceA, edge.faceB, edgeInsight)}
-                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-white/5"
+                          onClick={() => placeEdgeAnalysisInInbox(edge.faceA, edge.faceB, edgeInsight)}
+                          disabled={edgeDraftPlaced}
+                          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-white/5 disabled:opacity-100"
                           style={{
                             borderColor: `hsl(${hue} 45% 50% / 0.4)`,
                             color: `hsl(${hue} 45% 78%)`,
                           }}
-                          title="Insert this analysis as a card on the canvas, tagged with both faces"
+                          title="Send this analysis to the canvas Inbox as a card tagged with both faces"
                         >
-                          <StickyNote className="w-3.5 h-3.5" /> Draft on canvas
+                          <StickyNote className="w-3.5 h-3.5" />
+                          {edgeDraftPlaced ? "Saved to Inbox" : "Place on canvas"}
                         </button>
 
                         {/* Go deeper: same route, different lens. The user's
