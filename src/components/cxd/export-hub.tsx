@@ -13,8 +13,6 @@ import {
   Clapperboard,
   Share2,
   CalendarDays,
-  ChevronDown,
-  ChevronUp,
   GanttChartSquare,
   ImagePlus,
   Printer,
@@ -276,10 +274,20 @@ function buildTasksCSV(project: CXDProject, tasks: TaskProjection[]): string {
 // ---------------------------------------------------------------------------
 // Production Pack: Versions / Milestones summary (markdown source)
 // ---------------------------------------------------------------------------
-function buildVersionsMarkdown(project: CXDProject, tasks: TaskProjection[]): string {
+interface VersionsMarkdownOptions {
+  /** Include OKRs (objectives + key results) per version. Defaults to true. */
+  includeOKRs?: boolean;
+}
+
+function buildVersionsMarkdown(
+  project: CXDProject,
+  tasks: TaskProjection[],
+  options: VersionsMarkdownOptions = {},
+): string {
+  const includeOKRs = options.includeOKRs !== false;
   const projectName = project.name || project.intentionCore?.projectName || "Untitled";
   const versions = [...(project.versions || [])].sort((a, b) => a.order - b.order);
-  const okrs = project.okrs || [];
+  const okrs = includeOKRs ? project.okrs || [] : [];
 
   const lines: string[] = [];
   lines.push(`# Versions & Milestones: ${projectName}`);
@@ -511,14 +519,15 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
   const project = getCurrentProject();
 
   const [erdOpen, setErdOpen] = useState(false);
-  const [briefsOpen, setBriefsOpen] = useState(false);
-  const [briefsAsMarkdown, setBriefsAsMarkdown] = useState(false);
   const [calSyncOpen, setCalSyncOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // Pitch builder + timeline customization popups
+  // Customize popups
   const [pitchBuilderOpen, setPitchBuilderOpen] = useState(false);
   const [timelineCustomizeOpen, setTimelineCustomizeOpen] = useState(false);
+  const [roleBriefsCustomizeOpen, setRoleBriefsCustomizeOpen] = useState(false);
+  const [facilitationCustomizeOpen, setFacilitationCustomizeOpen] = useState(false);
+  const [versionsCustomizeOpen, setVersionsCustomizeOpen] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -569,26 +578,6 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
     const md = buildVersionsMarkdown(proj, tasks);
     downloadTextFile(md, `Production-Pack-Versions-${slug(proj.name)}.md`, "text/markdown");
   }, []);
-
-  const handleRoleBrief = useCallback(
-    (faces: HypercubeFaceTag[], label: string) => {
-      const proj = useCXDStore.getState().getCurrentProject();
-      if (!proj) return;
-      const md = buildRoleBriefMarkdown(proj, faces, label);
-      if (briefsAsMarkdown) {
-        downloadTextFile(md, `Brief-${slug(label)}-${slug(proj.name)}.md`, "text/markdown");
-        return;
-      }
-      const name = proj.name || proj.intentionCore?.projectName || "Untitled";
-      downloadMarkdownAsHtmlDoc(
-        md,
-        name,
-        `Role Brief: ${label}`,
-        `Brief-${slug(label)}-${slug(proj.name)}.html`,
-      );
-    },
-    [briefsAsMarkdown],
-  );
 
   const handleFacilitationHTML = useCallback(() => {
     const proj = useCXDStore.getState().getCurrentProject();
@@ -702,6 +691,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   actions={[
                     { label: "Tasks .csv", onClick: handleTasksCSV },
                     { label: "Versions summary", onClick: handleVersionsHTML },
+                    { label: "Customize versions", icon: Settings2, onClick: () => setVersionsCustomizeOpen(true) },
                     { label: "Markdown", onClick: handleVersionsMD, variant: "ghost" },
                   ]}
                 />
@@ -712,60 +702,12 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   accent="text-violet-300"
                   actions={[
                     {
-                      label: briefsOpen ? "Hide roles" : "Choose role",
-                      icon: briefsOpen ? ChevronUp : ChevronDown,
-                      onClick: () => setBriefsOpen((v) => !v),
+                      label: "Customize & choose role",
+                      icon: Settings2,
+                      onClick: () => setRoleBriefsCustomizeOpen(true),
                     },
                   ]}
-                >
-                  {briefsOpen && (
-                    <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
-                      <div>
-                        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/35">
-                          Role bundles
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {ROLE_BUNDLES.map((bundle) => (
-                            <button
-                              key={bundle.id}
-                              onClick={() => handleRoleBrief(bundle.faces, bundle.label)}
-                              title={bundle.faces.join(" + ")}
-                              className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
-                            >
-                              <Download className="h-3 w-3" />
-                              {bundle.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/35">
-                          Single face
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {HYPERCUBE_FACE_TAGS.map((face) => (
-                            <button
-                              key={face}
-                              onClick={() => handleRoleBrief([face], face)}
-                              className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-white/60 transition-colors hover:border-violet-400/40 hover:bg-violet-500/15 hover:text-violet-200"
-                            >
-                              {face}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <label className="flex cursor-pointer items-center gap-2 text-[11px] text-white/40">
-                        <input
-                          type="checkbox"
-                          checked={briefsAsMarkdown}
-                          onChange={(e) => setBriefsAsMarkdown(e.target.checked)}
-                          className="h-3 w-3 accent-violet-500"
-                        />
-                        Download as Markdown (for power users)
-                      </label>
-                    </div>
-                  )}
-                </ArtifactCard>
+                />
               </div>
             </section>
 
@@ -791,6 +733,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   accent="text-cyan-300"
                   actions={[
                     { label: "Download sheet", onClick: handleFacilitationHTML },
+                    { label: "Customize", icon: Settings2, onClick: () => setFacilitationCustomizeOpen(true) },
                     { label: "Markdown", onClick: handleFacilitationMD, variant: "ghost" },
                   ]}
                 />
@@ -845,6 +788,21 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
       {/* Experience Flow Timeline customization popup */}
       {timelineCustomizeOpen && (
         <TimelineCustomizeModal onClose={() => setTimelineCustomizeOpen(false)} />
+      )}
+
+      {/* Role-Scoped Briefs customization popup (also hosts the role/bundle picker) */}
+      {roleBriefsCustomizeOpen && (
+        <RoleBriefsCustomizeModal onClose={() => setRoleBriefsCustomizeOpen(false)} />
+      )}
+
+      {/* Facilitation & State-Care Sheet customization popup */}
+      {facilitationCustomizeOpen && (
+        <FacilitationCustomizeModal onClose={() => setFacilitationCustomizeOpen(false)} />
+      )}
+
+      {/* Production Pack versions summary customization popup */}
+      {versionsCustomizeOpen && (
+        <VersionsCustomizeModal onClose={() => setVersionsCustomizeOpen(false)} />
       )}
     </>,
     document.body
@@ -1276,6 +1234,324 @@ function TimelineCustomizeModal({ onClose }: { onClose: () => void }) {
           <div className="flex gap-1.5">
             <button className={chip(!showDetails)} onClick={() => setShowDetails(false)}>Timeline only</button>
             <button className={chip(showDetails)} onClick={() => setShowDetails(true)}>Timeline + stage details</button>
+          </div>
+        </div>
+      </div>
+    </PopupShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Role-Scoped Briefs customization popup — also hosts the bundle/face picker
+// that previously lived inline on the card, plus theme, accent and content
+// toggles. Each bundle/face button triggers its own download immediately,
+// using whatever options are currently set above it.
+// ---------------------------------------------------------------------------
+function RoleBriefsCustomizeModal({ onClose }: { onClose: () => void }) {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [accent, setAccent] = useState(PITCH_ACCENT_PRESETS[0].hex);
+  const [includeFraming, setIncludeFraming] = useState(true);
+  const [includeElements, setIncludeElements] = useState(true);
+  const [groupBy, setGroupBy] = useState<"container" | "flat">("container");
+  const [asMarkdown, setAsMarkdown] = useState(false);
+
+  const downloadBrief = (faces: HypercubeFaceTag[], label: string) => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return;
+    const md = buildRoleBriefMarkdown(proj, faces, label, { includeFraming, includeElements, groupBy });
+    if (asMarkdown) {
+      downloadTextFile(md, `Brief-${slug(label)}-${slug(proj.name)}.md`, "text/markdown");
+      return;
+    }
+    const name = proj.name || proj.intentionCore?.projectName || "Untitled";
+    const html = buildHtmlDoc({
+      projectName: name,
+      artifactTitle: `Role Brief: ${label}`,
+      bodyHtml: markdownToHtml(md),
+      theme,
+      accent,
+    });
+    downloadTextFile(html, `Brief-${slug(label)}-${slug(proj.name)}.html`, "text/html");
+  };
+
+  return (
+    <PopupShell title="Customize role brief" subtitle="Role-Scoped Briefs" icon={Users} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start gap-6">
+          <div>
+            <label className={FIELD_LABEL}>Theme</label>
+            <div className="flex gap-1.5">
+              <button className={chip(theme === "light")} onClick={() => setTheme("light")}>Light</button>
+              <button className={chip(theme === "dark")} onClick={() => setTheme("dark")}>Dark</button>
+            </div>
+          </div>
+          <div>
+            <label className={FIELD_LABEL}>Accent color</label>
+            <div className="flex items-center gap-1.5">
+              {PITCH_ACCENT_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  title={preset.name}
+                  onClick={() => setAccent(preset.hex)}
+                  className={cn(
+                    "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
+                    accent === preset.hex ? "border-white" : "border-transparent",
+                  )}
+                  style={{ backgroundColor: preset.hex }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-start gap-6">
+          <div>
+            <label className={FIELD_LABEL}>Wizard framing</label>
+            <div className="flex gap-1.5">
+              <button className={chip(includeFraming)} onClick={() => setIncludeFraming(true)}>Include</button>
+              <button className={chip(!includeFraming)} onClick={() => setIncludeFraming(false)}>Skip</button>
+            </div>
+          </div>
+          <div>
+            <label className={FIELD_LABEL}>Canvas elements</label>
+            <div className="flex gap-1.5">
+              <button className={chip(includeElements)} onClick={() => setIncludeElements(true)}>Include</button>
+              <button className={chip(!includeElements)} onClick={() => setIncludeElements(false)}>Skip</button>
+            </div>
+          </div>
+          <div>
+            <label className={FIELD_LABEL}>Group by</label>
+            <div className="flex gap-1.5">
+              <button className={chip(groupBy === "container")} onClick={() => setGroupBy("container")}>Container / board</button>
+              <button className={chip(groupBy === "flat")} onClick={() => setGroupBy("flat")}>Flat list</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-white/[0.06] pt-3">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/35">
+            Role bundles
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {ROLE_BUNDLES.map((bundle) => (
+              <button
+                key={bundle.id}
+                onClick={() => downloadBrief(bundle.faces, bundle.label)}
+                title={bundle.faces.join(" + ")}
+                className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-medium text-violet-200 transition-colors hover:bg-violet-500/25"
+              >
+                <Download className="h-3 w-3" />
+                {bundle.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/35">
+            Single face
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {HYPERCUBE_FACE_TAGS.map((face) => (
+              <button
+                key={face}
+                onClick={() => downloadBrief([face], face)}
+                className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-white/60 transition-colors hover:border-violet-400/40 hover:bg-violet-500/15 hover:text-violet-200"
+              >
+                {face}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-[11px] text-white/40">
+          <input
+            type="checkbox"
+            checked={asMarkdown}
+            onChange={(e) => setAsMarkdown(e.target.checked)}
+            className="h-3 w-3 accent-violet-500"
+          />
+          Download as Markdown (for power users)
+        </label>
+      </div>
+    </PopupShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Facilitation & State-Care Sheet customization popup
+// ---------------------------------------------------------------------------
+function FacilitationCustomizeModal({ onClose }: { onClose: () => void }) {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [accent, setAccent] = useState(PITCH_ACCENT_PRESETS[0].hex);
+  const [includeStatesTraits, setIncludeStatesTraits] = useState(true);
+  const [includeIntensityCurve, setIncludeIntensityCurve] = useState(true);
+  const [includePresenceProfile, setIncludePresenceProfile] = useState(true);
+  const [includeCare, setIncludeCare] = useState(true);
+
+  const build = (): { html: string; name: string } | null => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return null;
+    const stages = useCXDStore.getState().getExperienceFlowStages();
+    const md = buildFacilitationMarkdown(proj, stages, {
+      includeStatesTraits,
+      includeIntensityCurve,
+      includePresenceProfile,
+      includeConsentGroundingIntegration: includeCare,
+    });
+    const name = proj.name || proj.intentionCore?.projectName || "Untitled";
+    const html = buildHtmlDoc({
+      projectName: name,
+      artifactTitle: "Facilitation & State-Care Sheet",
+      bodyHtml: markdownToHtml(md),
+      theme,
+      accent,
+    });
+    return { html, name: `Facilitation-State-Care-${slug(proj.name)}.html` };
+  };
+
+  const doPreview = () => { const r = build(); if (r) openHtmlInNewWindow(r.html, r.name); };
+  const doDownload = () => { const r = build(); if (r) downloadTextFile(r.html, r.name, "text/html"); };
+  const doPDF = () => { const r = build(); if (r) openAndPrintHtml(r.html, r.name); };
+
+  return (
+    <PopupShell
+      title="Customize sheet"
+      subtitle="Facilitation & State-Care Sheet"
+      icon={Settings2}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={doPreview} className={primaryBtn}><Eye className="h-3.5 w-3.5" />Preview</button>
+          <button onClick={doDownload} className={primaryBtn}><Download className="h-3.5 w-3.5" />Download</button>
+          <button onClick={doPDF} className={primaryBtn}><Printer className="h-3.5 w-3.5" />Save as PDF</button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start gap-6">
+          <div>
+            <label className={FIELD_LABEL}>Theme</label>
+            <div className="flex gap-1.5">
+              <button className={chip(theme === "light")} onClick={() => setTheme("light")}>Light</button>
+              <button className={chip(theme === "dark")} onClick={() => setTheme("dark")}>Dark</button>
+            </div>
+          </div>
+          <div>
+            <label className={FIELD_LABEL}>Accent color</label>
+            <div className="flex items-center gap-1.5">
+              {PITCH_ACCENT_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  title={preset.name}
+                  onClick={() => setAccent(preset.hex)}
+                  className={cn(
+                    "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
+                    accent === preset.hex ? "border-white" : "border-transparent",
+                  )}
+                  style={{ backgroundColor: preset.hex }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+        <div>
+          <label className={FIELD_LABEL}>Sections to include</label>
+          <div className="flex flex-wrap gap-1.5">
+            <button className={chip(includeStatesTraits)} onClick={() => setIncludeStatesTraits((v) => !v)}>
+              States & traits quadrants
+            </button>
+            <button className={chip(includeIntensityCurve)} onClick={() => setIncludeIntensityCurve((v) => !v)}>
+              Intensity curve
+            </button>
+            <button className={chip(includePresenceProfile)} onClick={() => setIncludePresenceProfile((v) => !v)}>
+              Presence profile
+            </button>
+            <button className={chip(includeCare)} onClick={() => setIncludeCare((v) => !v)}>
+              Consent / grounding / integration
+            </button>
+          </div>
+        </div>
+      </div>
+    </PopupShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Production Pack: versions & milestones summary customization popup
+// ---------------------------------------------------------------------------
+function VersionsCustomizeModal({ onClose }: { onClose: () => void }) {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [accent, setAccent] = useState(PITCH_ACCENT_PRESETS[0].hex);
+  const [includeOKRs, setIncludeOKRs] = useState(true);
+
+  const build = (): { html: string; name: string } | null => {
+    const proj = useCXDStore.getState().getCurrentProject();
+    if (!proj) return null;
+    const tasks = getProjectTasks(proj);
+    const md = buildVersionsMarkdown(proj, tasks, { includeOKRs });
+    const name = proj.name || proj.intentionCore?.projectName || "Untitled";
+    const html = buildHtmlDoc({
+      projectName: name,
+      artifactTitle: "Versions & Milestones",
+      bodyHtml: markdownToHtml(md),
+      theme,
+      accent,
+    });
+    return { html, name: `Production-Pack-Versions-${slug(proj.name)}.html` };
+  };
+
+  const doPreview = () => { const r = build(); if (r) openHtmlInNewWindow(r.html, r.name); };
+  const doDownload = () => { const r = build(); if (r) downloadTextFile(r.html, r.name, "text/html"); };
+  const doPDF = () => { const r = build(); if (r) openAndPrintHtml(r.html, r.name); };
+
+  return (
+    <PopupShell
+      title="Customize versions summary"
+      subtitle="Production Pack"
+      icon={Settings2}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={doPreview} className={primaryBtn}><Eye className="h-3.5 w-3.5" />Preview</button>
+          <button onClick={doDownload} className={primaryBtn}><Download className="h-3.5 w-3.5" />Download</button>
+          <button onClick={doPDF} className={primaryBtn}><Printer className="h-3.5 w-3.5" />Save as PDF</button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start gap-6">
+          <div>
+            <label className={FIELD_LABEL}>Theme</label>
+            <div className="flex gap-1.5">
+              <button className={chip(theme === "light")} onClick={() => setTheme("light")}>Light</button>
+              <button className={chip(theme === "dark")} onClick={() => setTheme("dark")}>Dark</button>
+            </div>
+          </div>
+          <div>
+            <label className={FIELD_LABEL}>Accent color</label>
+            <div className="flex items-center gap-1.5">
+              {PITCH_ACCENT_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  title={preset.name}
+                  onClick={() => setAccent(preset.hex)}
+                  className={cn(
+                    "h-6 w-6 rounded-full border-2 transition-transform hover:scale-110",
+                    accent === preset.hex ? "border-white" : "border-transparent",
+                  )}
+                  style={{ backgroundColor: preset.hex }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+        <div>
+          <label className={FIELD_LABEL}>Objectives & key results</label>
+          <div className="flex gap-1.5">
+            <button className={chip(includeOKRs)} onClick={() => setIncludeOKRs(true)}>Include OKRs</button>
+            <button className={chip(!includeOKRs)} onClick={() => setIncludeOKRs(false)}>Skip OKRs</button>
           </div>
         </div>
       </div>

@@ -187,11 +187,26 @@ interface BriefGroup {
 // ---------------------------------------------------------------------------
 // Brief builder
 // ---------------------------------------------------------------------------
+export interface RoleBriefOptions {
+  /** Include the wizard framing section for the covered faces. Defaults to true. */
+  includeFraming?: boolean;
+  /** Include the tagged canvas elements section. Defaults to true. */
+  includeElements?: boolean;
+  /** "container" groups elements under their parent container/board (default).
+   *  "flat" lists every matching element in a single unsorted list. */
+  groupBy?: "container" | "flat";
+}
+
 export function buildRoleBriefMarkdown(
   project: CXDProject,
   faces: HypercubeFaceTag[],
   briefLabel: string,
+  options: RoleBriefOptions = {},
 ): string {
+  const includeFraming = options.includeFraming !== false;
+  const includeElements = options.includeElements !== false;
+  const groupBy = options.groupBy || "container";
+
   const projectName = project.name || project.intentionCore?.projectName || "Untitled";
   const generated = new Date().toISOString().split("T")[0];
 
@@ -207,7 +222,7 @@ export function buildRoleBriefMarkdown(
     return getEffectiveHypercubeTags(el, byId).some((t) => faceSet.has(t));
   });
 
-  // Group by parent container → board → root canvas.
+  // Group by parent container → board → root canvas (skipped entirely in flat mode).
   const groups = new Map<string, BriefGroup>();
   const ensureGroup = (key: string, label: string): BriefGroup => {
     let g = groups.get(key);
@@ -218,19 +233,23 @@ export function buildRoleBriefMarkdown(
     return g;
   };
 
-  for (const el of matching) {
-    if (el.type === "container") {
-      // A tagged container is a group heading; its children match via inheritance.
-      ensureGroup(`container:${el.id}`, (el as ContainerElement).label?.trim() || "Untitled container");
-      continue;
-    }
-    const parent = el.containerId ? byId.get(el.containerId) : undefined;
-    if (parent && parent.type === "container") {
-      ensureGroup(`container:${parent.id}`, parent.label?.trim() || "Untitled container").items.push(el);
-    } else if (el.boardId && boardTitleById.has(el.boardId)) {
-      ensureGroup(`board:${el.boardId}`, `Board: ${boardTitleById.get(el.boardId)}`).items.push(el);
-    } else {
-      ensureGroup("canvas", "Canvas").items.push(el);
+  if (groupBy === "flat") {
+    ensureGroup("all", "All elements").items.push(...matching.filter((el) => el.type !== "container"));
+  } else {
+    for (const el of matching) {
+      if (el.type === "container") {
+        // A tagged container is a group heading; its children match via inheritance.
+        ensureGroup(`container:${el.id}`, (el as ContainerElement).label?.trim() || "Untitled container");
+        continue;
+      }
+      const parent = el.containerId ? byId.get(el.containerId) : undefined;
+      if (parent && parent.type === "container") {
+        ensureGroup(`container:${parent.id}`, parent.label?.trim() || "Untitled container").items.push(el);
+      } else if (el.boardId && boardTitleById.has(el.boardId)) {
+        ensureGroup(`board:${el.boardId}`, `Board: ${boardTitleById.get(el.boardId)}`).items.push(el);
+      } else {
+        ensureGroup("canvas", "Canvas").items.push(el);
+      }
     }
   }
 
@@ -246,48 +265,55 @@ export function buildRoleBriefMarkdown(
   lines.push("");
 
   // Wizard framing for the covered faces
-  lines.push("## Framing (from the wizard)");
-  lines.push("");
-  const sections = faces.flatMap((f) => FACE_TO_SECTIONS[f] || []);
-  if (sections.length === 0) {
-    lines.push("_No wizard sections map to these faces._");
+  if (includeFraming) {
+    lines.push("## Framing (from the wizard)");
     lines.push("");
-  } else {
-    sections.forEach((sectionId) => lines.push(...renderSection(project, sectionId)));
+    const sections = faces.flatMap((f) => FACE_TO_SECTIONS[f] || []);
+    if (sections.length === 0) {
+      lines.push("_No wizard sections map to these faces._");
+      lines.push("");
+    } else {
+      sections.forEach((sectionId) => lines.push(...renderSection(project, sectionId)));
+    }
+
+    lines.push("---");
+    lines.push("");
   }
 
-  lines.push("---");
-  lines.push("");
-
   // Canvas elements
-  lines.push(`## Canvas elements (${matching.filter((e) => e.type !== "container").length})`);
-  lines.push("");
-  if (groups.size === 0) {
-    lines.push("_No canvas elements are tagged with these faces yet. Tag containers or cards in the Map view to route work to this role._");
+  if (includeElements) {
+    lines.push(`## Canvas elements (${matching.filter((e) => e.type !== "container").length})`);
     lines.push("");
-  } else {
-    const annotateFaces = faces.length > 1;
-    for (const group of Array.from(groups.values())) {
-      lines.push(`### ${group.label}`);
+    if (groups.size === 0) {
+      lines.push("_No canvas elements are tagged with these faces yet. Tag containers or cards in the Map view to route work to this role._");
       lines.push("");
-      if (group.items.length === 0) {
-        lines.push("_Container tagged for this role. No cards inside yet._");
-      } else {
-        for (const el of group.items) {
-          const title = elementTitle(el);
-          let bullet = `- **${title}**`;
-          if (annotateFaces) {
-            const hits = getEffectiveHypercubeTags(el, byId).filter((t) => faceSet.has(t));
-            if (hits.length > 0) bullet += ` _(${hits.join(", ")})_`;
-          }
-          lines.push(bullet);
-          const body = elementBody(el);
-          if (body && body !== title) {
-            body.split("\n").forEach((l) => lines.push(`  ${l}`));
+    } else {
+      const annotateFaces = faces.length > 1;
+      const flat = groupBy === "flat";
+      for (const group of Array.from(groups.values())) {
+        if (!flat) {
+          lines.push(`### ${group.label}`);
+          lines.push("");
+        }
+        if (group.items.length === 0) {
+          lines.push("_Container tagged for this role. No cards inside yet._");
+        } else {
+          for (const el of group.items) {
+            const title = elementTitle(el);
+            let bullet = `- **${title}**`;
+            if (annotateFaces) {
+              const hits = getEffectiveHypercubeTags(el, byId).filter((t) => faceSet.has(t));
+              if (hits.length > 0) bullet += ` _(${hits.join(", ")})_`;
+            }
+            lines.push(bullet);
+            const body = elementBody(el);
+            if (body && body !== title) {
+              body.split("\n").forEach((l) => lines.push(`  ${l}`));
+            }
           }
         }
+        lines.push("");
       }
-      lines.push("");
     }
   }
 
