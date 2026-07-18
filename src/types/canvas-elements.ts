@@ -253,6 +253,9 @@ export interface ShapeElement extends CanvasElementBase {
 export interface ContainerElement extends CanvasElementBase {
   type: 'container';
   label?: string;
+  /** When true the container renders with no header/name — a clean, unlabeled
+   *  surface. Used for tidy container-in-container nesting. */
+  hideLabel?: boolean;
   collapsed?: boolean;
   tintColor?: 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
   style?: ElementStyle;

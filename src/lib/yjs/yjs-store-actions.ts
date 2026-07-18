@@ -163,15 +163,47 @@ export function yjsMoveContainerWithChildren(
 ): void {
   doc.transact(() => {
     const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
+
+    // Collect the container plus its FULL descendant subtree via the containerId
+    // chain — direct children, child containers, and their children, recursively —
+    // so a grandchild (an element inside a child container) is not left behind.
+    const toMove = new Set<string>([containerId]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      yElements.forEach((yEl) => {
+        if (yEl instanceof Y.Map) {
+          const id = yEl.get('id') as string;
+          const elContainerId = yEl.get('containerId') as string | undefined;
+          if (elContainerId && toMove.has(elContainerId) && !toMove.has(id)) {
+            toMove.add(id);
+            grew = true;
+          }
+        }
+      });
+    }
+
+    // Shift a stored point (start/end/bend) — held as a nested Y.Map — in place.
+    const shiftPoint = (pt: unknown): void => {
+      if (pt instanceof Y.Map) {
+        pt.set('x', ((pt.get('x') as number) || 0) + deltaX);
+        pt.set('y', ((pt.get('y') as number) || 0) + deltaY);
+      }
+    };
+
     yElements.forEach((yEl) => {
       if (yEl instanceof Y.Map) {
         const id = yEl.get('id') as string;
-        const elContainerId = yEl.get('containerId') as string | undefined;
-        if (id === containerId || elContainerId === containerId) {
-          const x = (yEl.get('x') as number) || 0;
-          const y = (yEl.get('y') as number) || 0;
-          yEl.set('x', x + deltaX);
-          yEl.set('y', y + deltaY);
+        if (!toMove.has(id)) return;
+        const x = (yEl.get('x') as number) || 0;
+        const y = (yEl.get('y') as number) || 0;
+        yEl.set('x', x + deltaX);
+        yEl.set('y', y + deltaY);
+        // LineElements: also shift their world-coordinate start/end/bend points.
+        if (yEl.get('type') === 'line') {
+          shiftPoint(yEl.get('start'));
+          shiftPoint(yEl.get('end'));
+          shiftPoint(yEl.get('bend'));
         }
       }
     });

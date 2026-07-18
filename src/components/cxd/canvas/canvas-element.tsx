@@ -1409,6 +1409,19 @@ export function CanvasElementRenderer({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  onUpdate({ hideLabel: !(element as ContainerElement).hideLabel } as Partial<CanvasElement>);
+                }}
+                className={cn(
+                  "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                  (element as ContainerElement).hideLabel && "bg-primary/20 text-primary",
+                )}
+                title={(element as ContainerElement).hideLabel ? "Show name" : "Hide name"}
+              >
+                <Tag className="w-4 h-4" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
                   onUpdate({ locked: !element.locked });
                 }}
                 className={cn(
@@ -7327,7 +7340,9 @@ function ContainerCard({
           : `inset 0 0 30px rgba(${hexToRgb(tint.mid)}, 0.06)`,
       }}
     >
-      {/* ── Header bar (always visible) ── */}
+      {/* ── Header bar ── hidden when the user hides the name for a clean,
+          unlabeled container (kept while collapsed so it can still be expanded). */}
+      {(!element.hideLabel || element.collapsed) && (
       <div
         className="flex items-center gap-1.5 px-2 flex-shrink-0 relative"
         style={{
@@ -7460,6 +7475,7 @@ function ContainerCard({
           {element.locked ? '🔒' : '🔓'}
         </button>
       </div>
+      )}
 
       {/* ── Body (hidden when collapsed) ── */}
       {!element.collapsed && (

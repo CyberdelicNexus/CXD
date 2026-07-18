@@ -107,6 +107,49 @@ function getDescendantElementIds(rootId: string, elements: CanvasElement[]): Set
   return result;
 }
 
+// Collect every element nested under rootId via the `containerId` chain — direct
+// children, child containers, AND the elements inside those child containers,
+// recursively. Does NOT follow `childBoardId` (board contents live on a separate
+// surface and must not move with the parent). Excludes rootId itself. Used so that
+// moving a container shifts its whole descendant subtree, not just direct children.
+function getContainerDescendantIds(rootId: string, elements: CanvasElement[]): Set<string> {
+  const result = new Set<string>();
+  const queue: string[] = [rootId];
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    for (const el of elements) {
+      if (el.containerId === currentId && !result.has(el.id)) {
+        result.add(el.id);
+        queue.push(el.id);
+      }
+    }
+  }
+  return result;
+}
+
+// Find the innermost (smallest-area) non-collapsed container whose bounds contain
+// `point`, skipping any id in `excludeIds`. Innermost wins so placing an element
+// inside a container nested within another attaches it to the inner one. Returns
+// undefined when the point is over no container.
+function findContainerAtPoint(
+  point: { x: number; y: number },
+  elements: CanvasElement[],
+  excludeIds?: Set<string>,
+): CanvasElement | undefined {
+  let best: CanvasElement | undefined;
+  for (const el of elements) {
+    if (el.type !== 'container' || (el as ContainerElement).collapsed) continue;
+    if (excludeIds?.has(el.id)) continue;
+    if (
+      point.x >= el.x && point.x <= el.x + el.width &&
+      point.y >= el.y && point.y <= el.y + el.height
+    ) {
+      if (!best || el.width * el.height < best.width * best.height) best = el;
+    }
+  }
+  return best;
+}
+
 // Canvas Context Menu Component
 function CanvasContextMenu({
   position,
@@ -908,8 +951,18 @@ export function CXDCanvas() {
       // Select the newly created line
       setSelectedElementId(newLine.id);
       setSelectedElementIds(new Set([newLine.id]));
+
+      // Auto-attach the line to a container when its bounding-box center lands
+      // inside one — a line drawn inside a container becomes its child (moves with
+      // it, inherits tags), exactly like any other placed element.
+      const center = {
+        x: newLine.x + newLine.width / 2,
+        y: newLine.y + newLine.height / 2,
+      };
+      const container = findContainerAtPoint(center, canvasElements);
+      if (container) syncAddNodeToContainer(newLine.id, container.id);
     },
-    [canvasElements, activeBoardId, activeSurface, addCanvasElement],
+    [canvasElements, activeBoardId, activeSurface, addCanvasElement, syncAddElement, syncAddNodeToContainer],
   );
 
   // Duplicate a line element (offset by 20px so it's visible)
@@ -1189,17 +1242,29 @@ export function CXDCanvas() {
                 const targetX = (elOrigin?.x ?? el.x) + snappedDeltaX;
                 const targetY = (elOrigin?.y ?? el.y) + snappedDeltaY;
                 localUpdates.push({ id, x: targetX, y: targetY });
-                // Move children locally too — but SKIP children that are also selected
-                // (they'll be moved by their own selectedElementIds pass, avoiding double-delta)
-                canvasElements.forEach((child) => {
-                  if (child.containerId === id && !selectedElementIds.has(child.id)) {
-                    const childOrigin = dragOriginalPositionsRef.current.get(child.id);
-                    localUpdates.push({
-                      id: child.id,
-                      x: (childOrigin?.x ?? child.x) + snappedDeltaX,
-                      y: (childOrigin?.y ?? child.y) + snappedDeltaY,
-                    });
+                // Move the FULL descendant subtree locally too (nested children, child
+                // containers, and their children) — but SKIP descendants that are also
+                // selected (moved by their own selectedElementIds pass, avoiding double-delta).
+                getContainerDescendantIds(id, canvasElements).forEach((descId) => {
+                  if (selectedElementIds.has(descId)) return;
+                  const descEl = canvasElements.find((e) => e.id === descId);
+                  if (!descEl) return;
+                  const descOrigin = dragOriginalPositionsRef.current.get(descId);
+                  const childUpdate: typeof localUpdates[number] = {
+                    id: descId,
+                    x: (descOrigin?.x ?? descEl.x) + snappedDeltaX,
+                    y: (descOrigin?.y ?? descEl.y) + snappedDeltaY,
+                  };
+                  // Descendant lines also need start/end/bend shifted by the same delta.
+                  if (descEl.type === 'line') {
+                    const origLine = dragOriginalLineCoordsRef.current.get(descId);
+                    if (origLine) {
+                      childUpdate.start = { x: origLine.start.x + snappedDeltaX, y: origLine.start.y + snappedDeltaY };
+                      childUpdate.end = { x: origLine.end.x + snappedDeltaX, y: origLine.end.y + snappedDeltaY };
+                      if (origLine.bend) childUpdate.bend = { x: origLine.bend.x + snappedDeltaX, y: origLine.bend.y + snappedDeltaY };
+                    }
                   }
+                  localUpdates.push(childUpdate);
                 });
               } else {
                 const newX = (elOrigin?.x ?? el.x) + snappedDeltaX;
@@ -1291,20 +1356,31 @@ export function CXDCanvas() {
             // Write position(s) directly to Zustand — no Yjs during drag.
             // commitDragPositionsToYjs on mouseup will do one batch Yjs transaction.
             if (element.type === "container") {
-              // Move container + all its children locally
-              const singleDragUpdates: Array<{ id: string; x: number; y: number }> = [
+              // Move container + its FULL descendant subtree locally (nested children,
+              // child containers, and their children — recursively).
+              const singleDragUpdates: Array<{ id: string; x: number; y: number; start?: { x: number; y: number }; end?: { x: number; y: number }; bend?: { x: number; y: number } }> = [
                 { id: draggingElement, x: newX, y: newY },
               ];
-              canvasElements.forEach((child) => {
-                if (child.containerId === draggingElement) {
-                  const childOrigin = dragOriginalPositionsRef.current.get(child.id);
-                  const cDelta = { x: newX - (elementOrigin?.x ?? element.x), y: newY - (elementOrigin?.y ?? element.y) };
-                  singleDragUpdates.push({
-                    id: child.id,
-                    x: (childOrigin?.x ?? child.x) + cDelta.x,
-                    y: (childOrigin?.y ?? child.y) + cDelta.y,
-                  });
+              const cDelta = { x: newX - (elementOrigin?.x ?? element.x), y: newY - (elementOrigin?.y ?? element.y) };
+              getContainerDescendantIds(draggingElement, canvasElements).forEach((descId) => {
+                const descEl = canvasElements.find((e) => e.id === descId);
+                if (!descEl) return;
+                const descOrigin = dragOriginalPositionsRef.current.get(descId);
+                const childUpdate: typeof singleDragUpdates[number] = {
+                  id: descId,
+                  x: (descOrigin?.x ?? descEl.x) + cDelta.x,
+                  y: (descOrigin?.y ?? descEl.y) + cDelta.y,
+                };
+                // Descendant lines also need start/end/bend shifted by the same delta.
+                if (descEl.type === 'line') {
+                  const origLine = dragOriginalLineCoordsRef.current.get(descId);
+                  if (origLine) {
+                    childUpdate.start = { x: origLine.start.x + cDelta.x, y: origLine.start.y + cDelta.y };
+                    childUpdate.end = { x: origLine.end.x + cDelta.x, y: origLine.end.y + cDelta.y };
+                    if (origLine.bend) childUpdate.bend = { x: origLine.bend.x + cDelta.x, y: origLine.bend.y + cDelta.y };
+                  }
                 }
+                singleDragUpdates.push(childUpdate);
               });
               updateElementsPositionLocal(singleDragUpdates);
             } else {
@@ -1801,20 +1877,12 @@ export function CXDCanvas() {
 
       // Auto-attach to container if element falls inside one (skip containers — no nesting)
       if (newElement.type !== 'container') {
-        const containers = canvasElements.filter(
-          (el) => el.type === 'container' && !(el as ContainerElement).collapsed
-        );
-        const elCenterX = newElement.x + newElement.width / 2;
-        const elCenterY = newElement.y + newElement.height / 2;
-        for (const container of containers) {
-          if (
-            elCenterX >= container.x && elCenterX <= container.x + container.width &&
-            elCenterY >= container.y && elCenterY <= container.y + container.height
-          ) {
-            syncAddNodeToContainer(newElement.id, container.id);
-            break;
-          }
-        }
+        const center = {
+          x: newElement.x + newElement.width / 2,
+          y: newElement.y + newElement.height / 2,
+        };
+        const container = findContainerAtPoint(center, canvasElements);
+        if (container) syncAddNodeToContainer(newElement.id, container.id);
       }
     },
     [
@@ -1929,12 +1997,14 @@ export function CXDCanvas() {
             if (el && !el.locked) {
               offsets.set(id, { x: el.x - baseEl.x, y: el.y - baseEl.y });
               originalPositions.set(id, { x: el.x, y: el.y });
-              // Also capture children of selected containers (for proper child movement)
+              // Also capture the FULL descendant subtree of selected containers
+              // (nested children, child containers, and their children) so every
+              // descendant — not just direct children — moves with the container.
               if (el.type === 'container') {
-                canvasElements.forEach((child) => {
-                  if (child.containerId === id && !effectiveSelectedIds.has(child.id)) {
-                    originalPositions.set(child.id, { x: child.x, y: child.y });
-                  }
+                getContainerDescendantIds(id, canvasElements).forEach((descId) => {
+                  if (effectiveSelectedIds.has(descId)) return;
+                  const descEl = canvasElements.find((e) => e.id === descId);
+                  if (descEl) originalPositions.set(descId, { x: descEl.x, y: descEl.y });
                 });
               }
             }
@@ -1944,12 +2014,12 @@ export function CXDCanvas() {
       } else if (element) {
         // Single element drag - store its original position
         originalPositions.set(elementId, { x: element.x, y: element.y });
-        // If it's a container, also capture all children so we can move them locally
+        // If it's a container, capture its FULL descendant subtree (nested children,
+        // child containers, and their children) so all of them move locally.
         if (element.type === 'container') {
-          canvasElements.forEach((child) => {
-            if (child.containerId === elementId) {
-              originalPositions.set(child.id, { x: child.x, y: child.y });
-            }
+          getContainerDescendantIds(elementId, canvasElements).forEach((descId) => {
+            const descEl = canvasElements.find((e) => e.id === descId);
+            if (descEl) originalPositions.set(descId, { x: descEl.x, y: descEl.y });
           });
         }
       }

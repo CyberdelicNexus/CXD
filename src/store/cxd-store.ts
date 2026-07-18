@@ -2120,6 +2120,20 @@ export const useCXDStore = create<CXDState>()(
         if (yDoc) {
           yjsMoveContainerWithChildren(yDoc, containerId, deltaX, deltaY);
         } else {
+          const els = currentProject.canvasLayout?.elements || [];
+          // Collect the container + its FULL descendant subtree via the containerId
+          // chain so grandchildren (elements inside child containers) move too.
+          const toMove = new Set<string>([containerId]);
+          let grew = true;
+          while (grew) {
+            grew = false;
+            for (const el of els) {
+              if (el.containerId && toMove.has(el.containerId) && !toMove.has(el.id)) {
+                toMove.add(el.id);
+                grew = true;
+              }
+            }
+          }
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === currentProject.id
@@ -2127,11 +2141,18 @@ export const useCXDStore = create<CXDState>()(
                   ...p,
                   canvasLayout: {
                     ...(p.canvasLayout || {}),
-                    elements: (p.canvasLayout?.elements || []).map((el) =>
-                      el.id === containerId || el.containerId === containerId
-                        ? { ...el, x: el.x + deltaX, y: el.y + deltaY }
-                        : el
-                    ),
+                    elements: (p.canvasLayout?.elements || []).map((el) => {
+                      if (!toMove.has(el.id)) return el;
+                      const moved: any = { ...el, x: el.x + deltaX, y: el.y + deltaY };
+                      // LineElements: also shift start/end/bend world coords.
+                      if (el.type === 'line') {
+                        const line = el as any;
+                        if (line.start) moved.start = { x: line.start.x + deltaX, y: line.start.y + deltaY };
+                        if (line.end) moved.end = { x: line.end.x + deltaX, y: line.end.y + deltaY };
+                        if (line.bend) moved.bend = { x: line.bend.x + deltaX, y: line.bend.y + deltaY };
+                      }
+                      return moved;
+                    }),
                   },
                   updatedAt: new Date().toISOString()
                 }
