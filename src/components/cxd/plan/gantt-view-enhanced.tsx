@@ -235,6 +235,11 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
   const MIN_TASK_WIDTH = 40;
   const DEFAULT_TASK_DURATION_DAYS = 3;
   const DRAG_AXIS_THRESHOLD = 6;
+  // Shared row-height constants — the left task-list rows and the right timeline
+  // rows (grid lines, row backgrounds, task bars, today line) MUST derive from
+  // these same values or the two scroll-synced panes drift out of alignment.
+  const ROW_HEIGHT = 60;
+  const VERSION_LANE_HEIGHT = 48;
 
   // Reset timeline extension when zoom level changes
   useEffect(() => {
@@ -735,6 +740,15 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
       });
   }, [versions, startDate, endDate]);
 
+  // Total pixel height of the row content (version lanes + every task row), regardless of
+  // whether it fits in the viewport. The timeline content box below is sized to at least
+  // this height so that anything drawn with `inset-0`/`top-0 bottom-0` (vertical grid
+  // lines, the today marker) spans the FULL row list instead of clipping at the fallback
+  // `100vh` min-height once tasks overflow one screen.
+  const timelineContentHeight = useMemo(() => {
+    return flattenedTasks.length * ROW_HEIGHT + positionedVersions.length * VERSION_LANE_HEIGHT;
+  }, [flattenedTasks.length, positionedVersions.length]);
+
   // Post-layout pass: measure actual task bar DOM positions for connector accuracy.
   // Task bars are positioned with CSS percentages; reading offsetLeft/offsetWidth after
   // layout gives us the exact pixel coordinates the browser computed. The SVG connector
@@ -1052,7 +1066,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
       if (!timelineRef.current) return true;
       const rect = timelineRef.current.getBoundingClientRect();
       const mouseY = e.clientY - rect.top + timelineRef.current.scrollTop;
-      const rowIndex = Math.max(0, Math.min(flattenedTasks.length - 1, Math.floor(mouseY / 60)));
+      const rowIndex = Math.max(0, Math.min(flattenedTasks.length - 1, Math.floor(mouseY / ROW_HEIGHT)));
       const targetTaskId = getReorderableTaskId(rowIndex);
 
       if (!targetTaskId || targetTaskId === gesture.taskId) return true;
@@ -2031,9 +2045,15 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
             </div>
 
             {/* Spacer to align with version lanes on timeline */}
-            <div style={{ height: `${positionedVersions.length * 48}px` }} />
+            <div style={{ height: `${positionedVersions.length * VERSION_LANE_HEIGHT}px` }} />
 
-            <div className="py-2">
+            {/* NOTE: no top padding here — the timeline's row content starts at top:0 of its
+                content box (see `timelineContentRef` below) right after the version-lane
+                spacer, with zero gap. A `py-*` wrapper here would push every left-list row
+                down by that padding relative to its timeline row, since the two panes only
+                stay aligned by sharing pixel-for-pixel offsets. Bottom padding is fine (it
+                only affects the space after the last row). */}
+            <div className="pb-2">
               {flattenedTasks.map((task, index) => {
                 const isHovered = hoveredTaskId === task.id;
                 const isEditing = editingTaskId === task.id;
@@ -2058,7 +2078,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                     )}
                     style={{
                       paddingLeft: `${16 + (task.depth || 0) * 24}px`,
-                      height: '60px'
+                      height: `${ROW_HEIGHT}px`
                     }}
                     onClick={(e) => handleTaskClick(task.id, e.ctrlKey || e.metaKey)}
                     onMouseEnter={() => setHoveredTaskId(task.id)}
@@ -2261,7 +2281,16 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
             <div
               ref={timelineContentRef}
               className="relative"
-              style={{ minHeight: `100vh` }}
+              style={{
+                // `height` is the exact pixel height of all rows (version lanes + tasks);
+                // `minHeight` is the viewport floor so short lists still fill the pane. CSS
+                // resolves the used height to max(height, minHeight), so this box is always
+                // tall enough for every row — which is what lets the `inset-0`/`top-0 bottom-0`
+                // grid lines and today marker below span the full row list instead of
+                // stopping at 100vh once tasks overflow one screen (see timelineContentHeight).
+                minHeight: '100vh',
+                height: `${timelineContentHeight}px`,
+              }}
             >
               {/* Grid Lines */}
               <div className="absolute inset-0 flex">
@@ -2272,12 +2301,12 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
 
               {/* Row backgrounds for hover */}
               {flattenedTasks.map((task, i) => {
-                const versionLanesOffset = positionedVersions.length * 48;
+                const versionLanesOffset = positionedVersions.length * VERSION_LANE_HEIGHT;
                 return (
                   <div
                     key={`row-${task.id}`}
-                    className="absolute inset-x-0 h-[60px] hover:bg-white/5 transition-colors"
-                    style={{ top: `${i * 60 + versionLanesOffset}px` }}
+                    className="absolute inset-x-0 hover:bg-white/5 transition-colors"
+                    style={{ top: `${i * ROW_HEIGHT + versionLanesOffset}px`, height: `${ROW_HEIGHT}px` }}
                     onMouseMove={(e) => handleTimelineHover(e, i)}
                     onMouseLeave={() => setHoverPreview(null)}
                     onClick={(e) => handleTimelineClick(e, i)}
@@ -2338,7 +2367,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                     style={{
                       left,
                       width,
-                      top: `${idx * 48}px`, // Stack versions in dedicated lanes below date header
+                      top: `${idx * VERSION_LANE_HEIGHT}px`, // Stack versions in dedicated lanes below date header
                     }}
                   >
                     <Card
@@ -2427,7 +2456,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                 const isSelected = selectedTaskIds.has(task.id);
                 const isSubtask = task.id.includes('-subtask-');
                 const taskIndex = flattenedTasks.findIndex(t => t.id === task.id);
-                const versionLanesOffset = positionedVersions.length * 48; // Offset for version lanes
+                const versionLanesOffset = positionedVersions.length * VERSION_LANE_HEIGHT; // Offset for version lanes
 
                 return (
                   <div
@@ -2441,8 +2470,8 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                     style={{
                       left,
                       width,
-                      top: `${taskIndex * 60 + versionLanesOffset}px`,
-                      height: '60px',
+                      top: `${taskIndex * ROW_HEIGHT + versionLanesOffset}px`,
+                      height: `${ROW_HEIGHT}px`,
                       padding: '6px 0',
                     }}
                   >
@@ -2604,7 +2633,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                 const rect = timelineRef.current.getBoundingClientRect();
                 const contentWidth = timelineRef.current.scrollWidth;
 
-                const sourceY = sourcePivot?.centerY ?? (sourceIndex !== -1 ? sourceIndex * 60 + 30 : 30);
+                const sourceY = sourcePivot?.centerY ?? (sourceIndex !== -1 ? sourceIndex * ROW_HEIGHT + ROW_HEIGHT / 2 : ROW_HEIGHT / 2);
                 const sourceX = dependencyDragState.sourceNode === 'end'
                   ? (sourcePivot?.rightPx ?? (sourceTask ? ((sourceTask.leftPct + sourceTask.widthPct) / 100) * contentWidth : 0))
                   : (sourcePivot?.leftPx ?? (sourceTask ? (sourceTask.leftPct / 100) * contentWidth : 0));
@@ -2651,7 +2680,7 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                   pointerEvents: 'none',
                   overflow: 'visible',
                   width: '100%',
-                  height: `${flattenedTasks.length * 60}px`
+                  height: `${flattenedTasks.length * ROW_HEIGHT}px`
                 }}
               >
                 <defs>
@@ -2700,8 +2729,8 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                     const contentWidth = timelineRef.current?.scrollWidth || 1;
                     const srcX = sourcePivot?.rightPx ?? ((sourcePositioned.leftPct + sourcePositioned.widthPct) / 100) * contentWidth;
                     const tgtX = targetPivot?.leftPx ?? (targetPositioned.leftPct / 100) * contentWidth;
-                    const sourceY = sourcePivot?.centerY ?? (sourceIndex * 60 + 30);
-                    const targetY = targetPivot?.centerY ?? (targetIndex * 60 + 30);
+                    const sourceY = sourcePivot?.centerY ?? (sourceIndex * ROW_HEIGHT + ROW_HEIGHT / 2);
+                    const targetY = targetPivot?.centerY ?? (targetIndex * ROW_HEIGHT + ROW_HEIGHT / 2);
 
                     // Orthogonal (right-angle) routing like Notion/ClickUp Gantt charts
                     // Pattern: horizontal from source → vertical to target row → horizontal into target
@@ -2716,8 +2745,8 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                       // Overlapping or close: route around via above/below
                       const detourX = Math.max(srcX + horizontalStub, tgtX + horizontalStub + 20);
                       const midY = sourceY < targetY
-                        ? sourceY + 30 + 8  // Below source row
-                        : sourceY - 30 - 8; // Above source row
+                        ? sourceY + ROW_HEIGHT / 2 + 8  // Below source row
+                        : sourceY - ROW_HEIGHT / 2 - 8; // Above source row
                       pathD = `M ${srcX} ${sourceY} L ${detourX} ${sourceY} L ${detourX} ${midY} L ${tgtX - horizontalStub} ${midY} L ${tgtX - horizontalStub} ${targetY} L ${tgtX} ${targetY}`;
                     }
 
@@ -2805,8 +2834,8 @@ export function GanttViewEnhanced({ tasks, versions = [], onTaskClick, onTaskNav
                   if (subtaskIndex === -1 || parentIndex === -1) return null;
 
                   const contentWidth = timelineRef.current?.scrollWidth || 1;
-                  const subtaskY = subtaskPivot?.centerY ?? (subtaskIndex * 60 + 30);
-                  const parentY = parentPivot?.centerY ?? (parentIndex * 60 + 30);
+                  const subtaskY = subtaskPivot?.centerY ?? (subtaskIndex * ROW_HEIGHT + ROW_HEIGHT / 2);
+                  const parentY = parentPivot?.centerY ?? (parentIndex * ROW_HEIGHT + ROW_HEIGHT / 2);
                   const subtaskLeftPx = subtaskPivot?.leftPx ?? ((positionedTasks[idx].leftPct / 100) * contentWidth);
                   const parentLeftPx = parentPivot?.leftPx ?? ((parentPositioned.leftPct / 100) * contentWidth);
 
