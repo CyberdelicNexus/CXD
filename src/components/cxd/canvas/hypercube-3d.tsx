@@ -1830,19 +1830,41 @@ export function Hypercube3D({
       const corners = FACE_CORNER_INDICES[faceIndex].map((i) => outerCorners[i]);
       const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
       const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
-      // Face axes in screen space (average of opposite edges): the local x maps
-      // to the face's horizontal direction, local y to its vertical direction,
-      // each foreshortened by its projected length relative to the face size.
-      const axX = (corners[1].x - corners[0].x + corners[2].x - corners[3].x) / 2;
-      const axY = (corners[1].y - corners[0].y + corners[2].y - corners[3].y) / 2;
-      const ayX = (corners[3].x - corners[0].x + corners[2].x - corners[1].x) / 2;
-      const ayY = (corners[3].y - corners[0].y + corners[2].y - corners[1].y) / 2;
-      // matrix(a b c d e f): (x,y) -> (a·x + c·y + e, b·x + d·y + f). Dividing by
-      // outerSize makes local units track the face's own (unprojected) extent.
-      const a = axX / outerSize;
-      const b = axY / outerSize;
-      const c = ayX / outerSize;
-      const d = ayY / outerSize;
+      // The two in-plane axes of the projected quad, in screen space (each the
+      // average of its two opposite edges so perspective skew stays centred):
+      //   uH runs along the face's "width" edges, uV along its "height" edges.
+      const uHx = (corners[1].x - corners[0].x + corners[2].x - corners[3].x) / 2;
+      const uHy = (corners[1].y - corners[0].y + corners[2].y - corners[3].y) / 2;
+      const uVx = (corners[3].x - corners[0].x + corners[2].x - corners[1].x) / 2;
+      const uVy = (corners[3].y - corners[0].y + corners[2].y - corners[1].y) / 2;
+
+      // Readability guarantee. Choose the label's local axes from the quad so the
+      // text ALWAYS reads left-to-right, upright-ish, foreshortened with the face,
+      // but never mirrored and never vertical:
+      //  (a) baseline = whichever quad edge axis is closest to SCREEN-horizontal;
+      //      if it points left, negate it so text advances rightward.
+      const horizness = (vx: number, vy: number) =>
+        Math.abs(vx) / (Math.hypot(vx, vy) || 1);
+      let baseX: number, baseY: number, downX: number, downY: number;
+      if (horizness(uHx, uHy) >= horizness(uVx, uVy)) {
+        baseX = uHx; baseY = uHy; downX = uVx; downY = uVy;
+      } else {
+        baseX = uVx; baseY = uVy; downX = uHx; downY = uHy;
+      }
+      if (baseX < 0) { baseX = -baseX; baseY = -baseY; }
+      //  (b) down = the OTHER axis; point it down the screen (positive y). Then, if
+      //      the resulting basis is mirrored (negative determinant), negate down so
+      //      the transform is a proper (non-reflected) frame.
+      if (downY < 0) { downX = -downX; downY = -downY; }
+      if (baseX * downY - baseY * downX < 0) { downX = -downX; downY = -downY; }
+
+      // matrix(a b c d e f): local (x,y) -> (a·x + c·y + e, b·x + d·y + f). Dividing
+      // both axes by outerSize makes local units track the face's own (unprojected)
+      // extent, so the label foreshortens exactly with the plane.
+      const a = baseX / outerSize;
+      const b = baseY / outerSize;
+      const c = downX / outerSize;
+      const d = downY / outerSize;
       const transform = `matrix(${a} ${b} ${c} ${d} ${cx} ${cy})`;
       return {
         faceIndex,
@@ -2441,27 +2463,46 @@ export function Hypercube3D({
               );
             })}
 
-          {/* Explore mode: re-draw the inner cube ON TOP of the (translucent)
-              face planes so it never gets fully occluded by the near face at
-              certain angles — it stays a clear hypercube reference while the
-              perspective labels are shown. Thin + modest opacity so it reads
-              without competing with the faces. */}
-          {interactionMode === "explore" &&
-            cubeEdges.map(([i, j], idx) => (
-              <line
-                key={`inner-explore-${idx}`}
-                x1={innerCorners[i].x}
-                y1={innerCorners[i].y}
-                x2={innerCorners[j].x}
-                y2={innerCorners[j].y}
-                stroke={EDGE_COLOR}
-                strokeWidth={1.5}
-                strokeLinecap="round"
-                opacity={0.55}
-                filter="url(#glow-stable)"
-                style={{ pointerEvents: "none" }}
-              />
-            ))}
+          {/* Explore mode: re-draw the FULL hypercube frame ON TOP of the
+              (translucent) face planes so nothing gets occluded by the near
+              face at any angle. Two parts, each covering every element so none
+              can silently drop out:
+                • all 12 inner-cube edges — including the 4 vertical connectors
+                  that otherwise wash out against the bright near-face center
+                • all 8 inner→outer connecting struts, so the hypercube reads
+                  as one nested figure while the perspective labels are shown. */}
+          {interactionMode === "explore" && (
+            <g style={{ pointerEvents: "none" }}>
+              {cubeEdges.map(([i, j], idx) => (
+                <line
+                  key={`inner-explore-${idx}`}
+                  x1={innerCorners[i].x}
+                  y1={innerCorners[i].y}
+                  x2={innerCorners[j].x}
+                  y2={innerCorners[j].y}
+                  stroke={EDGE_COLOR}
+                  strokeWidth={1.75}
+                  strokeLinecap="round"
+                  opacity={0.75}
+                  filter="url(#glow-stable)"
+                />
+              ))}
+              {outerCorners.map((outer, i) => (
+                <line
+                  key={`strut-explore-${i}`}
+                  x1={innerCorners[i].x}
+                  y1={innerCorners[i].y}
+                  x2={outer.x}
+                  y2={outer.y}
+                  stroke={STRUT_COLOR}
+                  strokeWidth={1.25}
+                  strokeLinecap="round"
+                  opacity={0.5}
+                  filter="url(#glow-stable)"
+                />
+              ))}
+            </g>
+          )}
 
           {/* v3 perspective face labels — the face name written ON each face
               (affine-mapped onto the projected quad), regular weight, no stroke,
@@ -2473,16 +2514,21 @@ export function Hypercube3D({
                 key={`face-label-${faceIndex}`}
                 transform={transform}
                 textAnchor="middle"
-                fontSize={11}
+                fontSize={19}
                 fontWeight={400}
-                letterSpacing="0.02em"
-                fill={`hsl(${face.tint.hue} 60% 88%)`}
+                letterSpacing="0.01em"
+                fill={`hsl(${face.tint.hue} 60% 90%)`}
                 opacity={opacity}
-                style={{ pointerEvents: "none", userSelect: "none" }}
+                style={{
+                  pointerEvents: "none",
+                  userSelect: "none",
+                  fontFamily:
+                    "var(--font-poppins), 'Inter', system-ui, -apple-system, sans-serif",
+                }}
               >
-                <tspan x="0" dy="-0.15em">{lines[0]}</tspan>
+                <tspan x="0" dy="-0.1em">{lines[0]}</tspan>
                 {lines[1] && (
-                  <tspan x="0" dy="1.1em">{lines[1]}</tspan>
+                  <tspan x="0" dy="1.05em">{lines[1]}</tspan>
                 )}
               </text>
             );
@@ -2712,18 +2758,18 @@ export function Hypercube3D({
                 borderColor: "hsl(35 40% 25%)",
                 boxShadow: "inset 0 1px 1px hsl(35 40% 20% / 0.3)",
               }}
-              title="Enter explore mode to rotate the cube freely"
+              title="Enter Edge Resonance to rotate the cube and explore face relationships"
             >
               <span className="w-12 h-12 shrink-0 flex items-center justify-center">
                 <Compass className="w-5 h-5 text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 group-hover:scale-110" />
               </span>
               <span
-                className="max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 ease-out"
+                className="max-w-0 opacity-0 group-hover:max-w-[220px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 ease-out"
                 style={{
                   textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
                 }}
               >
-                Explore
+                Edge Resonance
               </span>
             </button>
           ) : (
@@ -2776,15 +2822,15 @@ export function Hypercube3D({
           )}
         </div>
 
-        {/* v3 Explore coaching note — appears by the left face rail on entering
+        {/* v3 Edge Resonance coaching note — centered ABOVE the cube on entering
             Explore, dismissed on the first edge click (or on exit). */}
         {interactionMode === "explore" && showEdgeHint && selectedEdgeIndex === null && (
           <div
-            className="hypercube-ui-panel absolute z-40 left-[84px] top-1/2 -translate-y-1/2 max-w-[220px] pointer-events-none"
+            className="hypercube-ui-panel absolute z-40 left-1/2 top-[12%] -translate-x-1/2 max-w-[280px] pointer-events-none"
           >
-            <div className="rounded-xl border border-amber-400/40 bg-black/70 backdrop-blur-md px-3 py-2.5 shadow-xl">
-              <div className="flex items-center gap-1.5 text-amber-300 text-[10px] uppercase tracking-wider font-semibold">
-                <Compass className="w-3 h-3" /> Explore
+            <div className="rounded-xl border border-amber-400/40 bg-black/70 backdrop-blur-md px-4 py-2.5 shadow-xl text-center">
+              <div className="flex items-center justify-center gap-1.5 text-amber-300 text-[10px] uppercase tracking-wider font-semibold">
+                <Compass className="w-3 h-3" /> Edge Resonance
               </div>
               <p className="mt-1 text-xs text-foreground/90 leading-relaxed">
                 Click each edge to discover the relationship between faces.
