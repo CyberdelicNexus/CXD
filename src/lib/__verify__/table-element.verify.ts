@@ -19,9 +19,9 @@ function check(cond: boolean, msg: string) {
 }
 
 const cells = makeEmptyTableCells(2, 3);
-cells[0][0] = { text: 'Name', bold: true, align: 'center', color: '#22D3EE' };
+cells[0][0] = { text: 'Name', bold: true, align: 'center', color: '#22D3EE', fontSize: 'lg' };
 cells[0][1] = { text: 'Value', italic: true };
-cells[1][0] = { text: 'row cell', bg: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)' };
+cells[1][0] = { text: 'row cell', bg: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)', fontSize: 'sm' };
 cells[1][2] = { text: 'last', align: 'right' };
 
 const table: TableElement = {
@@ -36,6 +36,8 @@ const table: TableElement = {
   rowHeights: [60, 90],
   tableBg: 'rgba(20,16,31,0.72)',
   borderColor: 'rgba(139,92,246,0.35)',
+  lineColor: '#8B5CF6',
+  lineWidth: 2,
   headerRow: true,
 };
 
@@ -54,6 +56,8 @@ check(round.cells[0][0].bold === true, 'cell bold preserved');
 check(round.cells[0][0].align === 'center', 'cell align preserved');
 check(round.cells[0][0].color === '#22D3EE', 'cell text color preserved');
 check(round.cells[0][1].italic === true, 'cell italic preserved');
+check(round.cells[0][0].fontSize === 'lg', 'cell fontSize (lg) preserved');
+check(round.cells[1][0].fontSize === 'sm', 'cell fontSize (sm) preserved');
 check(round.cells[1][0].bg === table.cells[1][0].bg, 'cell bg (gradient) preserved');
 check(round.cells[1][2].align === 'right', 'far cell align preserved');
 check(round.rowColors?.[0] === '#123A5A' && round.rowColors?.[1] === null, 'rowColors preserved (incl null)');
@@ -64,6 +68,8 @@ check(Array.isArray(round.rowHeights) && round.rowHeights?.length === 2, 'rowHei
 check(round.rowHeights?.[0] === 60 && round.rowHeights?.[1] === 90, 'rowHeights values preserved');
 check(round.tableBg === 'rgba(20,16,31,0.72)', 'tableBg preserved');
 check(round.borderColor === 'rgba(139,92,246,0.35)', 'borderColor preserved');
+check(round.lineColor === '#8B5CF6', 'lineColor preserved');
+check(round.lineWidth === 2, 'lineWidth preserved');
 check(round.headerRow === true, 'headerRow preserved');
 
 if (failures > 0) {

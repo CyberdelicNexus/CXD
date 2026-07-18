@@ -362,6 +362,7 @@ export interface TableCell {
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';
+  fontSize?: 'sm' | 'md' | 'lg'; // text size (sm 12 / md 14 / lg 18 px), default md
 }
 
 export interface TableElement extends CanvasElementBase {
@@ -375,7 +376,9 @@ export interface TableElement extends CanvasElementBase {
   colWidths?: number[];          // per-column widths (px, treated as ratios normalized to element width)
   rowHeights?: number[];         // per-row heights (px, treated as ratios normalized to element height)
   tableBg?: string;              // container/table background (default fallback)
-  borderColor?: string;          // grid line color
+  borderColor?: string;          // legacy grid line color (superseded by lineColor)
+  lineColor?: string;            // grid line color (preset via color wheel)
+  lineWidth?: number;            // grid line width in px (0 = none). Presets: thin 1 / medium 2 / thick 4
   headerRow?: boolean;           // style first row as a header
 }
 

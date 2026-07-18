@@ -3590,6 +3590,22 @@ type TableColorScope = "cell" | "row" | "col" | "table";
 // Five preset background base colors (violet-forward, aligned with the palette).
 const TABLE_PRESET_BGS = ["#4B1B6B", "#123A5A", "#0F3A3A", "#3B1842", "#1B2A44"] as const;
 
+// Grid line width presets — kept coarse so lines never read as heavy/ugly.
+const TABLE_LINE_WIDTHS: { label: string; w: number }[] = [
+  { label: "Thin", w: 1 },
+  { label: "Medium", w: 2 },
+  { label: "Thick", w: 4 },
+  { label: "None", w: 0 },
+];
+
+// Cell text-size buttons → concrete px. Default md.
+const TABLE_FONT_PX: Record<"sm" | "md" | "lg", number> = { sm: 12, md: 14, lg: 18 };
+const TABLE_FONT_SIZES: { key: "sm" | "md" | "lg"; label: string }[] = [
+  { key: "sm", label: "Small" },
+  { key: "md", label: "Medium" },
+  { key: "lg", label: "Large" },
+];
+
 // Layout chrome: thick top+left L-grip (move zone) and slim right/bottom add strips.
 const TBL_GRIP = 12;
 const TBL_PLUS = 16;
@@ -3673,7 +3689,11 @@ function TableCard({
   const rowColors = element.rowColors;
   const colColors = element.colColors;
   const tableBg = element.tableBg;
-  const borderColor = element.borderColor || "rgba(139,92,246,0.28)";
+  // Grid lines: lineColor/lineWidth are the current model; borderColor is the
+  // legacy fallback. lineWidth 0 = no visible grid line.
+  const lineColor = element.lineColor || element.borderColor || "rgba(139,92,246,0.28)";
+  const lineWidth = element.lineWidth ?? 1;
+  const cellBorder = lineWidth > 0 ? `${lineWidth}px solid ${lineColor}` : "none";
   const headerRow = element.headerRow ?? false;
   const zoom = canvasZoom || 1;
 
@@ -3758,6 +3778,27 @@ function TableCard({
       onUpdate({ cells: next });
     },
     [cloneGrid, onUpdate],
+  );
+
+  // Apply a cell patch across the current color scope (cell/row/col/table).
+  // Used by the font-size controls so text size follows the same scope model.
+  const applyCellScopePatch = useCallback(
+    (patch: Partial<TableCell>) => {
+      if (scope !== "table" && !sel) return;
+      const next = cloneGrid();
+      if (scope === "table") {
+        for (let r = 0; r < rows; r++)
+          for (let c = 0; c < cols; c++) next[r][c] = { ...next[r][c], ...patch };
+      } else if (scope === "row" && sel) {
+        for (let c = 0; c < cols; c++) next[sel.r][c] = { ...next[sel.r][c], ...patch };
+      } else if (scope === "col" && sel) {
+        for (let r = 0; r < rows; r++) next[r][sel.c] = { ...next[r][sel.c], ...patch };
+      } else if (sel) {
+        next[sel.r][sel.c] = { ...next[sel.r][sel.c], ...patch };
+      }
+      onUpdate({ cells: next });
+    },
+    [scope, sel, rows, cols, cloneGrid, onUpdate],
   );
 
   const resolveBg = (r: number, c: number): string | undefined => {
@@ -3864,8 +3905,10 @@ function TableCard({
       for (let r = 0; r < rows; r++) {
         const cell = grid[r]?.[c];
         if (!cell?.text) continue;
-        const weight = cell.bold ? 700 : headerRow && r === 0 ? 600 : 400;
-        const font = `${cell.italic ? "italic " : ""}${weight} 13px system-ui, sans-serif`;
+        const isHdr = headerRow && r === 0;
+        const weight = cell.bold ? 700 : isHdr ? 700 : 400;
+        const px = isHdr && !cell.fontSize ? 16 : TABLE_FONT_PX[cell.fontSize || "md"];
+        const font = `${cell.italic ? "italic " : ""}${weight} ${px}px system-ui, sans-serif`;
         for (const word of cell.text.split(/\s+/)) {
           if (word) max = Math.max(max, tblMeasureText(word, font));
         }
@@ -4080,7 +4123,7 @@ function TableCard({
                         "relative align-middle p-0 overflow-hidden",
                         isSel && "outline outline-2 -outline-offset-2 outline-violet-400",
                       )}
-                      style={{ border: `1px solid ${borderColor}`, background: bg }}
+                      style={{ border: cellBorder, background: bg }}
                       onClick={() => setSel({ r, c })}
                     >
                       <TableCellEditor
@@ -4090,13 +4133,19 @@ function TableCard({
                         onFocusCell={() => setSel({ r, c })}
                         style={{
                           color: cell.color || "#ffffff",
-                          fontWeight: cell.bold ? 700 : isHeader ? 600 : 400,
+                          fontWeight: cell.bold ? 700 : isHeader ? 700 : 400,
                           fontStyle: cell.italic ? "italic" : "normal",
+                          // Horizontal alignment per the cell's align field (default
+                          // left; header defaults center). Vertical centering comes
+                          // from the flex column below so short text sits mid-cell.
                           textAlign: cell.align || (isHeader ? "center" : "left"),
-                          fontSize: 13,
+                          fontSize:
+                            isHeader && !cell.fontSize ? 16 : TABLE_FONT_PX[cell.fontSize || "md"],
                           lineHeight: 1.35,
                           padding: "4px 6px",
-                          minHeight: 22,
+                          display: "flex",
+                          flexDirection: "column",
+                          justifyContent: "center",
                         }}
                       />
                     </td>
@@ -4201,15 +4250,18 @@ function TableCard({
         </div>
       )}
 
-      {/* LEFT background menu — presets + transparent + wheel + solid/gradient toggle */}
+      {/* LEFT-side menus — Background panel, then Text panel stacked below it with
+          a small gap. Both hang off the table's left edge so a tall table never
+          hides them the way the old below-the-table popover did. */}
       {isSelected && !isReadOnly && (
         <div
-          className="absolute right-full top-0 mr-2 z-[100] pointer-events-auto"
+          className="absolute right-full top-0 mr-2 z-[100] pointer-events-auto flex flex-col gap-2"
           data-no-drag
           style={{ transform: `scale(${1 / zoom})`, transformOrigin: "top right" }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
+          {/* ── Background panel (scope + fills + line presets) ── */}
           <div className="p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[176px] flex flex-col gap-2">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Background</div>
             {/* Scope selector */}
@@ -4288,94 +4340,146 @@ function TableCard({
                 Gradient
               </button>
             </div>
+            {/* ── Lines subsection — grid line width presets + color wheel ── */}
+            <div className="h-px bg-border/50" />
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Lines</div>
+            <div className="flex items-center gap-1">
+              {TABLE_LINE_WIDTHS.map(({ label, w }) => (
+                <button
+                  key={label}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdate({ lineWidth: w });
+                  }}
+                  className={cn(
+                    "flex-1 px-1 py-1 rounded text-[10px] font-medium transition-colors",
+                    lineWidth === w
+                      ? "bg-primary/30 text-primary ring-1 ring-primary"
+                      : "text-muted-foreground hover:bg-primary/15 hover:text-foreground",
+                  )}
+                  title={`${label} grid lines`}
+                >
+                  {label}
+                </button>
+              ))}
+              <label
+                className="w-6 h-6 shrink-0 rounded border border-white/10 hover:scale-110 transition-transform cursor-pointer overflow-hidden relative"
+                style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}
+                title="Line color"
+              >
+                <input
+                  type="color"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={(e) => onUpdate({ lineColor: e.target.value })}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* BOTTOM formatting menu — text color (white/black/wheel), bold/italic, align, header */}
-      {isSelected && !isReadOnly && (
-        <div
-          className="absolute left-0 top-full mt-2 z-[100] pointer-events-auto"
-          data-no-drag
-          style={{ transform: `scale(${1 / zoom})`, transformOrigin: "top left" }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="p-1.5 rounded-lg bg-card backdrop-blur border border-border shadow-xl flex items-center gap-1.5">
+          {/* ── Text panel (color, bold/italic, align, header, font size) ── */}
+          <div className="p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[176px] flex flex-col gap-2">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Text</div>
             {/* Text color: white / black / wheel (operate on the selected cell) */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (sel) updateCell(sel.r, sel.c, { color: "#ffffff" });
-              }}
-              disabled={!sel}
-              className="w-5 h-5 rounded-full border border-white/25 bg-white disabled:opacity-40 hover:scale-110 transition-transform"
-              title="White text"
-            />
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (sel) updateCell(sel.r, sel.c, { color: "#000000" });
-              }}
-              disabled={!sel}
-              className="w-5 h-5 rounded-full border border-white/25 bg-black disabled:opacity-40 hover:scale-110 transition-transform"
-              title="Black text"
-            />
-            <label
-              className={cn(
-                "w-5 h-5 rounded-full border border-white/25 overflow-hidden relative",
-                sel ? "cursor-pointer hover:scale-110 transition-transform" : "opacity-40 pointer-events-none",
-              )}
-              style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}
-              title="Custom text color"
-            >
-              <input
-                type="color"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                onChange={(e) => {
-                  if (sel) updateCell(sel.r, sel.c, { color: e.target.value });
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (sel) updateCell(sel.r, sel.c, { color: "#ffffff" });
                 }}
-                onClick={(e) => e.stopPropagation()}
+                disabled={!sel}
+                className="w-5 h-5 rounded-full border border-white/25 bg-white disabled:opacity-40 hover:scale-110 transition-transform"
+                title="White text"
               />
-            </label>
-            <div className="w-px h-4 bg-border/50 mx-0.5" />
-            {/* Bold / italic */}
-            {fmtBtn(
-              "bold",
-              !!selCell?.bold,
-              (e) => {
-                e.stopPropagation();
-                if (sel) updateCell(sel.r, sel.c, { bold: !selCell?.bold });
-              },
-              "Bold",
-              <Bold className="w-3.5 h-3.5" />,
-            )}
-            {fmtBtn(
-              "italic",
-              !!selCell?.italic,
-              (e) => {
-                e.stopPropagation();
-                if (sel) updateCell(sel.r, sel.c, { italic: !selCell?.italic });
-              },
-              "Italic",
-              <Italic className="w-3.5 h-3.5" />,
-            )}
-            <div className="w-px h-4 bg-border/50 mx-0.5" />
-            {/* Align */}
-            {(["left", "center", "right"] as const).map((a) => {
-              const AlignIcon = a === "left" ? AlignLeft : a === "center" ? AlignCenter : AlignRight;
-              return fmtBtn(
-                a,
-                selCell?.align === a,
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (sel) updateCell(sel.r, sel.c, { color: "#000000" });
+                }}
+                disabled={!sel}
+                className="w-5 h-5 rounded-full border border-white/25 bg-black disabled:opacity-40 hover:scale-110 transition-transform"
+                title="Black text"
+              />
+              <label
+                className={cn(
+                  "w-5 h-5 rounded-full border border-white/25 overflow-hidden relative",
+                  sel ? "cursor-pointer hover:scale-110 transition-transform" : "opacity-40 pointer-events-none",
+                )}
+                style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}
+                title="Custom text color"
+              >
+                <input
+                  type="color"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={(e) => {
+                    if (sel) updateCell(sel.r, sel.c, { color: e.target.value });
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+            </div>
+            {/* Bold / italic · align L/C/R */}
+            <div className="flex items-center gap-0.5">
+              {fmtBtn(
+                "bold",
+                !!selCell?.bold,
                 (e) => {
                   e.stopPropagation();
-                  if (sel) updateCell(sel.r, sel.c, { align: a });
+                  if (sel) updateCell(sel.r, sel.c, { bold: !selCell?.bold });
                 },
-                `Align ${a}`,
-                <AlignIcon className="w-3.5 h-3.5" />,
-              );
-            })}
-            <div className="w-px h-4 bg-border/50 mx-0.5" />
+                "Bold",
+                <Bold className="w-3.5 h-3.5" />,
+              )}
+              {fmtBtn(
+                "italic",
+                !!selCell?.italic,
+                (e) => {
+                  e.stopPropagation();
+                  if (sel) updateCell(sel.r, sel.c, { italic: !selCell?.italic });
+                },
+                "Italic",
+                <Italic className="w-3.5 h-3.5" />,
+              )}
+              <div className="w-px h-4 bg-border/50 mx-0.5" />
+              {(["left", "center", "right"] as const).map((a) => {
+                const AlignIcon = a === "left" ? AlignLeft : a === "center" ? AlignCenter : AlignRight;
+                return fmtBtn(
+                  a,
+                  selCell?.align === a,
+                  (e) => {
+                    e.stopPropagation();
+                    if (sel) updateCell(sel.r, sel.c, { align: a });
+                  },
+                  `Align ${a}`,
+                  <AlignIcon className="w-3.5 h-3.5" />,
+                );
+              })}
+            </div>
+            {/* Font size — Small / Medium / Large (applies across the current scope) */}
+            <div className="grid grid-cols-3 gap-1">
+              {TABLE_FONT_SIZES.map(({ key, label }) => {
+                const active = (selCell?.fontSize || "md") === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      applyCellScopePatch({ fontSize: key });
+                    }}
+                    disabled={scope !== "table" && !sel}
+                    className={cn(
+                      "px-1 py-1 rounded text-[11px] font-medium transition-colors disabled:opacity-40",
+                      active
+                        ? "bg-primary/30 text-primary ring-1 ring-primary"
+                        : "text-muted-foreground hover:bg-primary/15 hover:text-foreground",
+                    )}
+                    title={`${label} text`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
             {/* Header row toggle */}
             <button
               onClick={(e) => {
