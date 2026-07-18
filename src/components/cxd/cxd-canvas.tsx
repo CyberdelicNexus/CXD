@@ -127,6 +127,35 @@ function getContainerDescendantIds(rootId: string, elements: CanvasElement[]): S
   return result;
 }
 
+// Containers live in a dedicated z-index band that sits strictly BELOW every
+// non-container element (those are created at zIndex >= 0). Within the band a
+// container's z rises with its nesting depth, so a container nested inside another
+// paints ABOVE its parent — making the inner one the top DOM node at that point and
+// therefore selectable / independently draggable — while still staying behind real
+// elements. The base is far enough negative that no realistic nesting depth can climb
+// out of the band into the >= 0 element range.
+const CONTAINER_Z_BASE = -100000;
+
+// Depth of a container in the nesting tree: 0 for a root container, +1 per container
+// ancestor walked via the `containerId` chain. Cycle-guarded. Non-container ancestors
+// terminate the walk (containerId should only ever point at a container, but be safe).
+function getContainerNestingDepth(
+  el: CanvasElement,
+  byId: Map<string, CanvasElement>,
+): number {
+  let depth = 0;
+  let cursor: CanvasElement | undefined = el;
+  const seen = new Set<string>();
+  while (cursor?.containerId && !seen.has(cursor.containerId)) {
+    const parent = byId.get(cursor.containerId);
+    if (!parent || parent.type !== 'container') break;
+    seen.add(cursor.containerId);
+    depth++;
+    cursor = parent;
+  }
+  return depth;
+}
+
 // Find the innermost (smallest-area) non-collapsed container whose bounds contain
 // `point`, skipping any id in `excludeIds`. Innermost wins so placing an element
 // inside a container nested within another attaches it to the inner one. Returns
@@ -524,6 +553,24 @@ export function CXDCanvas() {
     removeNodeFromContainer(nodeId);
     broadcastUpdate({ type: 'element_update', elementId: nodeId, changes: { containerId: null } });
   }, [removeNodeFromContainer, broadcastUpdate]);
+
+  // Recompute every container's z-index from its nesting depth so nested containers
+  // paint above their parents (selectable / independently draggable) while the whole
+  // container band stays below all non-container elements. Reads the live post-mutation
+  // element list (containerId writes flush back synchronously) and writes only the
+  // containers whose z actually changed, so it is a no-op once the tree is normalized.
+  // Call this after any operation that changes container nesting (attach, detach, or a
+  // container created inside another).
+  const reindexContainerZ = useCallback(() => {
+    const els = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+    const byId = new Map<string, CanvasElement>(els.map((e) => [e.id, e] as const));
+    els.forEach((el) => {
+      if (el.type !== 'container') return;
+      const targetZ = CONTAINER_Z_BASE + getContainerNestingDepth(el, byId);
+      const currentZ = Number.isFinite(el.zIndex) ? el.zIndex : 0;
+      if (currentZ !== targetZ) syncUpdateElement(el.id, { zIndex: targetZ });
+    });
+  }, [syncUpdateElement]);
 
   // Broadcast full state sync after undo/redo (LWW only — CRDT uses Y.UndoManager)
   const syncAfterUndoRedo = useCallback(() => {
@@ -1172,14 +1219,14 @@ export function CXDCanvas() {
           );
           currentBoardTargetId = boardTarget?.id || null;
 
-          const containerTarget = canvasElements.find(
-            (el) =>
-              el.type === "container" &&
-              !(el as ContainerElement).collapsed &&
-              !selectedElementIds.has(el.id) &&
-              !excludedTargetIds.has(el.id) &&
-              mouseCanvasX >= el.x && mouseCanvasX <= el.x + el.width &&
-              mouseCanvasY >= el.y && mouseCanvasY <= el.y + el.height,
+          // Innermost-wins so dropping onto a container nested inside another targets the
+          // INNER one; exclude the dragged element(s) and their descendants (no self-nest).
+          const containerExclude = new Set<string>(excludedTargetIds);
+          selectedElementIds.forEach((id) => containerExclude.add(id));
+          const containerTarget = findContainerAtPoint(
+            { x: mouseCanvasX, y: mouseCanvasY },
+            canvasElements,
+            containerExclude,
           );
           currentContainerTargetId = containerTarget?.id || null;
         }
@@ -1798,17 +1845,14 @@ export function CXDCanvas() {
           };
           break;
         case "container":
-          // Containers should always be at the back, so use a lower z-index
-          const minZIndex = canvasElements.reduce(
-            (min, el) =>
-              Math.min(min, Number.isFinite(el.zIndex) ? el.zIndex : 0),
-            0,
-          );
+          // Containers live in a dedicated z-band strictly below all elements; a root
+          // container sits at the band base. If this one is created inside another it is
+          // attached below, and reindexContainerZ bumps it to parentDepth + 1.
           newElement = {
             ...baseElement,
             type: "container",
             label: "",
-            zIndex: minZIndex - 1, // Place behind all other elements
+            zIndex: CONTAINER_Z_BASE, // Behind all non-container elements (band base)
             minWidth: baseElement.width,
             minHeight: baseElement.height,
           };
@@ -1875,14 +1919,20 @@ export function CXDCanvas() {
       syncAddElement(newElement);
       setSelectedElementId(newElement.id);
 
-      // Auto-attach to container if element falls inside one (skip containers — no nesting)
-      if (newElement.type !== 'container') {
+      // Auto-attach to the innermost container the new element lands inside. Containers
+      // nest too: a container created inside another becomes its child. Exclude the new
+      // element itself as a candidate target.
+      {
         const center = {
           x: newElement.x + newElement.width / 2,
           y: newElement.y + newElement.height / 2,
         };
-        const container = findContainerAtPoint(center, canvasElements);
-        if (container) syncAddNodeToContainer(newElement.id, container.id);
+        const container = findContainerAtPoint(center, canvasElements, new Set([newElement.id]));
+        if (container) {
+          syncAddNodeToContainer(newElement.id, container.id);
+          // A newly nested container needs its depth-based z so it paints above its parent.
+          if (newElement.type === 'container') reindexContainerZ();
+        }
       }
     },
     [
@@ -1890,6 +1940,7 @@ export function CXDCanvas() {
       addCanvasElement,
       syncAddElement,
       syncAddNodeToContainer,
+      reindexContainerZ,
       createBoard,
       activeBoardId,
       activeSurface,
@@ -2145,16 +2196,32 @@ export function CXDCanvas() {
       );
 
       if (targetContainer && targetContainer.type === "container") {
-        // Collect elements to drop (either selected elements or the dragging element)
-        const elementsToDrop =
+        // Collect elements to drop (either selected elements or the dragging element).
+        // Containers are included so a container can be nested into another; the drop
+        // target was already computed excluding the dragged element(s) and their
+        // descendants, so this can never create a containerId cycle.
+        const rawDrop =
           selectedElementIds.size > 0
-            ? Array.from(selectedElementIds).filter((id) => {
-              const el = canvasElements.find((e) => e.id === id);
-              return el && el.type !== "container";
-            })
+            ? Array.from(selectedElementIds)
             : draggingElement
               ? [draggingElement]
               : [];
+        const dropSet = new Set(rawDrop);
+        // When both a container and something inside it are in the drop set, only
+        // re-parent the outermost — a descendant keeps its place in the subtree that
+        // moves as one unit into the target.
+        const elementsToDrop = rawDrop.filter((id) => {
+          const el = canvasElements.find((e) => e.id === id);
+          if (!el) return false;
+          let cursor = el.containerId;
+          const seen = new Set<string>();
+          while (cursor && !seen.has(cursor)) {
+            if (dropSet.has(cursor)) return false;
+            seen.add(cursor);
+            cursor = canvasElements.find((e) => e.id === cursor)?.containerId;
+          }
+          return true;
+        });
 
         // Attach all dropped elements to the container. Container resizing to fit is done
         // once, below, by the unified drop-time grow pass (growContainersToFit) — never here
@@ -2176,28 +2243,21 @@ export function CXDCanvas() {
             : [];
 
       const liveElements = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
-      const containers = liveElements.filter(
-        (el) => el.type === 'container' && !(el as ContainerElement).collapsed
-      );
 
       for (const id of draggedIds) {
         const el = liveElements.find((e) => e.id === id);
-        if (!el || el.type === 'container') continue;
+        if (!el) continue;
 
-        const elCenterX = el.x + el.width / 2;
-        const elCenterY = el.y + el.height / 2;
-        let foundContainer: string | null = null;
+        // Containers participate too so nesting is reversible: dragging a nested container
+        // out drops it back to the root. Exclude the element itself and (for containers)
+        // its whole descendant subtree so it can never be nested into its own child.
+        const excludeIds =
+          el.type === 'container'
+            ? getDescendantElementIds(id, liveElements)
+            : new Set<string>([id]);
 
-        for (const container of containers) {
-          if (container.id === id) continue; // skip self
-          if (
-            elCenterX >= container.x && elCenterX <= container.x + container.width &&
-            elCenterY >= container.y && elCenterY <= container.y + container.height
-          ) {
-            foundContainer = container.id;
-            break;
-          }
-        }
+        const center = { x: el.x + el.width / 2, y: el.y + el.height / 2 };
+        const foundContainer = findContainerAtPoint(center, liveElements, excludeIds)?.id || null;
 
         if (foundContainer && el.containerId !== foundContainer) {
           // Attach to new container
@@ -2260,6 +2320,23 @@ export function CXDCanvas() {
       }
     }
 
+    // If a container was dragged (into another, out of one, or between), its nesting depth
+    // may have changed — recompute the container z-band so nested containers paint above
+    // their parents (selectable) while staying below all elements. Skipped when no
+    // container moved so ordinary element drags never touch container z-indices.
+    {
+      const zEls = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+      const draggedIdsForZ =
+        selectedElementIds.size > 0
+          ? Array.from(selectedElementIds)
+          : draggingElement
+            ? [draggingElement]
+            : [];
+      if (draggedIdsForZ.some((id) => zEls.find((e) => e.id === id)?.type === 'container')) {
+        reindexContainerZ();
+      }
+    }
+
     // Commit all final drag positions to Yjs in one batch transaction.
     // During the drag we wrote directly to Zustand (no Yjs) for instant visual
     // feedback. Now we produce a single Yjs update → one broadcast to peers.
@@ -2294,6 +2371,7 @@ export function CXDCanvas() {
     syncAddNodeToContainer,
     syncRemoveNodeFromContainer,
     syncUpdateElement,
+    reindexContainerZ,
     dropTargetBoardId,
     dropTargetContainerId,
     selectedElementIds,
@@ -5121,8 +5199,7 @@ export function CXDCanvas() {
                       } else if (elType === 'shape') {
                         newEl = { ...base, type: 'shape', x: worldX - 75, y: worldY - 75, width: 150, height: 150, shapeType: 'rectangle', content: '', style: { bgColor: 'hsl(var(--primary) / 0.3)', borderColor: 'hsl(var(--primary))' } } as CanvasElement;
                       } else if (elType === 'container') {
-                        const minZ = canvasElements.reduce((m, el) => Math.min(m, el.zIndex ?? 0), 0);
-                        newEl = { ...base, type: 'container', x: worldX - 160, y: worldY - 120, width: 320, height: 240, label: '', zIndex: minZ - 1 } as CanvasElement;
+                        newEl = { ...base, type: 'container', x: worldX - 160, y: worldY - 120, width: 320, height: 240, label: '', zIndex: CONTAINER_Z_BASE } as CanvasElement;
                       } else if (elType === 'image') {
                         newEl = { ...base, type: 'image', x: worldX - 150, y: worldY - 100, width: 300, height: 200, src: '', objectFit: 'cover' } as CanvasElement;
                       } else if (elType === 'link') {
@@ -5602,7 +5679,9 @@ export function CXDCanvas() {
                   newElement = { ...baseElement, type: 'link', url: '', title: '', linkMode: 'embed' };
                   break;
                 case 'container':
-                  newElement = { ...baseElement, type: 'container' };
+                  // Containers live in the dedicated z-band below all elements (band base
+                  // for a root; reindexContainerZ bumps it if it lands inside another).
+                  newElement = { ...baseElement, type: 'container', zIndex: CONTAINER_Z_BASE };
                   break;
                 case 'board':
                   newElement = { ...baseElement, type: 'board', title: 'Board', icon: '📋', childBoardId: uuidv4() };
@@ -5614,21 +5693,17 @@ export function CXDCanvas() {
               syncAddElement(newElement);
               setSelectedElementId(newElement.id);
 
-              // Auto-attach to container if element falls inside one (skip containers — no nesting)
-              if (newElement.type !== 'container') {
-                const containers = canvasElements.filter(
-                  (el) => el.type === 'container' && !(el as ContainerElement).collapsed
-                );
-                const elCenterX = newElement.x + newElement.width / 2;
-                const elCenterY = newElement.y + newElement.height / 2;
-                for (const container of containers) {
-                  if (
-                    elCenterX >= container.x && elCenterX <= container.x + container.width &&
-                    elCenterY >= container.y && elCenterY <= container.y + container.height
-                  ) {
-                    syncAddNodeToContainer(newElement.id, container.id);
-                    break;
-                  }
+              // Auto-attach to the innermost container the new element lands inside.
+              // Containers nest too: one created inside another becomes its child.
+              {
+                const center = {
+                  x: newElement.x + newElement.width / 2,
+                  y: newElement.y + newElement.height / 2,
+                };
+                const container = findContainerAtPoint(center, canvasElements, new Set([newElement.id]));
+                if (container) {
+                  syncAddNodeToContainer(newElement.id, container.id);
+                  if (newElement.type === 'container') reindexContainerZ();
                 }
               }
             }
