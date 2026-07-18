@@ -3619,11 +3619,20 @@ const TABLE_FONT_SIZES: { key: "sm" | "md" | "lg"; label: string }[] = [
   { key: "lg", label: "Large" },
 ];
 
-// Layout chrome: thick top+left L-grip (move zone) and slim right/bottom add strips.
+// Layout chrome: thick top+left L-grip (move zone) and inset right/bottom add strips.
 const TBL_GRIP = 12;
-const TBL_PLUS = 16;
+const TBL_PLUS = 18; // thickness of a right/bottom "+" add strip (bigger hit area)
+const TBL_EDGE = 10; // clear gap kept at the very right/bottom edge for the floating
+//                      connector port, so the "+" strips never collide with it
+const TBL_RESERVE = TBL_PLUS + TBL_EDGE; // total right/bottom content inset
 const TBL_MIN_COL = 48; // px floor a column can't be dragged below
 const TBL_MIN_ROW = 28; // px floor a row can't be dragged below
+
+// Move-grip texture — a subtle diagonal hatch that reads as a grippable handle,
+// layered over a brighter/more opaque violet than the grid lines so the move zone
+// is visually distinct from the connector edges.
+const TBL_GRIP_TEXTURE =
+  "repeating-linear-gradient(45deg, rgba(255,255,255,0.16) 0px, rgba(255,255,255,0.16) 1.5px, transparent 1.5px, transparent 5px)";
 
 // Transparent-swatch checkerboard (shared with the rest of the color UI).
 const TBL_CHECKER =
@@ -3673,10 +3682,14 @@ function tblMeasureText(text: string, font: string): number {
  * ref-stabilized by CanvasElementRenderer.
  *
  * Chrome:
- *  - thick top+left L-grip = drag-to-move zone (falls through to the element's
- *    existing body-drag path);
- *  - slim right/bottom "+" strips = click to add one row/col, drag to add many
- *    (drag back removes just-added, never below the pre-drag count / 1×1);
+ *  - thick top+left L-grip = drag-to-move zone. A brighter hatched violet marks it
+ *    apart from the connector edges; when selected it captures the pointer above
+ *    the floating connector port and bubbles to the element's body-drag path;
+ *  - right/bottom "+" strips (inset from the very edge so they never collide with
+ *    the connector port) = click to add one row/col, drag to add many (drag back
+ *    removes just-added, never below the pre-drag count / 1×1). A live ghost
+ *    preview of the provisional rows/cols renders during the drag; the store is
+ *    written once on pointer-up;
  *  - draggable dividers between columns/rows set per-track sizes (colWidths /
  *    rowHeights, stored as px and normalized to the element size so element
  *    resize scales proportionally while divider drag sets individual tracks);
@@ -3739,8 +3752,8 @@ function TableCard({
 
   // Content area = element minus the grip + plus strips (constant, so selecting
   // never reflows the grid).
-  const availW = Math.max(1, element.width - TBL_GRIP - TBL_PLUS);
-  const availH = Math.max(1, element.height - TBL_GRIP - TBL_PLUS);
+  const availW = Math.max(1, element.width - TBL_GRIP - TBL_RESERVE);
+  const availH = Math.max(1, element.height - TBL_GRIP - TBL_RESERVE);
 
   // Column widths / row heights normalized to the content area. Ratio model:
   // element resize scales all tracks proportionally (no store write); divider
@@ -4067,6 +4080,14 @@ function TableCard({
 
   const selCell = sel ? grid[sel.r]?.[sel.c] : undefined;
 
+  // Live add-preview: how many provisional rows/cols the current "+" drag would
+  // append, and the exact size each will land at (matches setColCount/setRowCount:
+  // existing tracks keep their px, each new track is availW/cols · availH/rows).
+  const previewCols = pendingCount?.axis === "col" ? Math.max(0, pendingCount.n - cols) : 0;
+  const previewRows = pendingCount?.axis === "row" ? Math.max(0, pendingCount.n - rows) : 0;
+  const previewColW = availW / cols;
+  const previewRowH = availH / rows;
+
   const scopeBtn = (s: TableColorScope, label: string) => (
     <button
       key={s}
@@ -4108,10 +4129,11 @@ function TableCard({
 
   return (
     <div className="relative w-full h-full">
-      {/* Content area (inset by the grip + plus strips) */}
+      {/* Content area (inset by the grip on top/left and the add strip + edge gap
+          on right/bottom) */}
       <div
         className="absolute overflow-hidden"
-        style={{ left: TBL_GRIP, top: TBL_GRIP, right: TBL_PLUS, bottom: TBL_PLUS }}
+        style={{ left: TBL_GRIP, top: TBL_GRIP, right: TBL_RESERVE, bottom: TBL_RESERVE }}
       >
         <table
           className="border-collapse"
@@ -4207,56 +4229,133 @@ function TableCard({
           })}
       </div>
 
-      {/* Move grip — thick top + left L (violet). pointer-events-none so the drag
-          falls through to the element's body-drag path (reposition the element). */}
+      {/* Move grip — thick top + left L. A brighter, hatched violet sets it apart
+          from the subtle grid lines and the connector edges. When the table is
+          selected the grip becomes an explicit move handle: pointer-events-auto +
+          cursor-move, raised above the floating connector port (z 9999) so a grab
+          here is never intercepted by connector-start; its drag carries no handler
+          and simply bubbles to the element's body-drag path (reposition). When
+          unselected it stays inert so connectors can still be drawn from the
+          top/left edges. */}
       <div
-        className="absolute top-0 left-0 right-0 pointer-events-none rounded-t-lg"
+        className={cn(
+          "absolute top-0 left-0 right-0 rounded-t-lg",
+          isSelected ? "pointer-events-auto cursor-move" : "pointer-events-none",
+        )}
         style={{
           height: TBL_GRIP,
-          background: "linear-gradient(180deg, rgba(139,92,246,0.55), rgba(139,92,246,0.26))",
+          zIndex: isSelected ? 10000 : undefined,
+          background: `${TBL_GRIP_TEXTURE}, linear-gradient(180deg, rgba(167,139,250,0.95), rgba(124,58,237,0.7))`,
+          boxShadow: "inset 0 -1px 0 rgba(255,255,255,0.35)",
         }}
+        title="Drag to move the table"
       />
       <div
-        className="absolute top-0 left-0 bottom-0 pointer-events-none rounded-l-lg"
+        className={cn(
+          "absolute top-0 left-0 bottom-0 rounded-l-lg",
+          isSelected ? "pointer-events-auto cursor-move" : "pointer-events-none",
+        )}
         style={{
           width: TBL_GRIP,
-          background: "linear-gradient(90deg, rgba(139,92,246,0.55), rgba(139,92,246,0.26))",
+          zIndex: isSelected ? 10000 : undefined,
+          background: `${TBL_GRIP_TEXTURE}, linear-gradient(90deg, rgba(167,139,250,0.95), rgba(124,58,237,0.7))`,
+          boxShadow: "inset -1px 0 0 rgba(255,255,255,0.35)",
         }}
+        title="Drag to move the table"
       />
       {isSelected && (
         <div
           className="absolute top-0 left-0 flex items-center justify-center pointer-events-none"
-          style={{ width: TBL_GRIP, height: TBL_GRIP }}
+          style={{ width: TBL_GRIP, height: TBL_GRIP, zIndex: 10001 }}
         >
-          <GripVertical className="w-2.5 h-2.5 text-white/85" />
+          <GripVertical className="w-2.5 h-2.5 text-white" />
         </div>
       )}
 
-      {/* Right "+" — click adds a column, drag right to add more (drag back removes just-added) */}
+      {/* Right "+" — click adds a column, drag right to add more (drag back removes
+          just-added). Inset from the very edge by TBL_EDGE so it never overlaps the
+          floating connector port that lives on the edge. */}
       {isSelected && !isReadOnly && (
         <button
           data-no-drag
           onMouseDown={startColPlus}
-          className="absolute flex items-center justify-center text-violet-100 bg-violet-500/15 hover:bg-violet-500/35 transition-colors cursor-ew-resize rounded-r-lg"
-          style={{ right: 0, width: TBL_PLUS, top: TBL_GRIP, bottom: TBL_PLUS }}
+          className="absolute flex items-center justify-center text-violet-50 bg-violet-500/20 hover:bg-violet-500/40 ring-1 ring-inset ring-violet-300/30 transition-colors cursor-ew-resize rounded-lg"
+          style={{ right: TBL_EDGE, width: TBL_PLUS, top: TBL_GRIP, bottom: TBL_RESERVE }}
           title="Click to add a column · drag right to add more"
         >
-          <Plus className="w-3 h-3" />
+          <Plus className="w-4 h-4" />
         </button>
       )}
-      {/* Bottom "+" — click adds a row, drag down to add more (drag back removes just-added) */}
+      {/* Bottom "+" — click adds a row, drag down to add more (drag back removes
+          just-added). Inset from the edge for the same reason as the right strip. */}
       {isSelected && !isReadOnly && (
         <button
           data-no-drag
           onMouseDown={startRowPlus}
-          className="absolute flex items-center justify-center text-violet-100 bg-violet-500/15 hover:bg-violet-500/35 transition-colors cursor-ns-resize rounded-b-lg"
-          style={{ bottom: 0, height: TBL_PLUS, left: TBL_GRIP, right: TBL_PLUS }}
+          className="absolute flex items-center justify-center text-violet-50 bg-violet-500/20 hover:bg-violet-500/40 ring-1 ring-inset ring-violet-300/30 transition-colors cursor-ns-resize rounded-lg"
+          style={{ bottom: TBL_EDGE, height: TBL_PLUS, left: TBL_GRIP, right: TBL_RESERVE }}
           title="Click to add a row · drag down to add more"
         >
-          <Plus className="w-3 h-3" />
+          <Plus className="w-4 h-4" />
         </button>
       )}
-      {/* Live count preview during a plus-drag */}
+
+      {/* Live add-preview — ghost/outlined cells for the rows/cols the current drag
+          would append, positioned exactly where the real tracks will land. Purely
+          visual DOM (pointer-events-none); the store is written once on pointer-up.
+          Extends past the element's right/bottom edge as the table "grows", and
+          shrinks back to nothing as the drag returns to the pre-drag count. */}
+      {previewCols > 0 &&
+        Array.from({ length: previewCols }).map((_, i) => (
+          <div
+            key={`pcol${i}`}
+            className="absolute pointer-events-none z-20"
+            style={{
+              left: TBL_GRIP + availW + i * previewColW,
+              top: TBL_GRIP,
+              width: previewColW,
+              height: availH,
+            }}
+          >
+            {dispRow.map((h, r) => (
+              <div
+                key={r}
+                style={{
+                  height: h,
+                  border: "1px dashed rgba(167,139,250,0.8)",
+                  background: "rgba(139,92,246,0.14)",
+                }}
+              />
+            ))}
+          </div>
+        ))}
+      {previewRows > 0 &&
+        Array.from({ length: previewRows }).map((_, i) => (
+          <div
+            key={`prow${i}`}
+            className="absolute pointer-events-none z-20 flex"
+            style={{
+              left: TBL_GRIP,
+              top: TBL_GRIP + availH + i * previewRowH,
+              width: availW,
+              height: previewRowH,
+            }}
+          >
+            {dispCol.map((w, c) => (
+              <div
+                key={c}
+                style={{
+                  width: w,
+                  height: "100%",
+                  border: "1px dashed rgba(167,139,250,0.8)",
+                  background: "rgba(139,92,246,0.14)",
+                }}
+              />
+            ))}
+          </div>
+        ))}
+
+      {/* Live count badge during a plus-drag (complements the ghost preview) */}
       {pendingCount && (
         <div className="absolute -bottom-6 right-0 px-1.5 py-0.5 rounded bg-black/80 text-white text-[10px] font-medium pointer-events-none z-30">
           {pendingCount.axis === "col" ? `${pendingCount.n} cols` : `${pendingCount.n} rows`}
