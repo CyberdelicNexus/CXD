@@ -270,6 +270,7 @@ export function FloatingPort({
 
   return (
     <div
+      data-connector-port
       style={{ ...orbStyle, width: 22, height: 22, zIndex: 9999, cursor: 'crosshair', pointerEvents: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}

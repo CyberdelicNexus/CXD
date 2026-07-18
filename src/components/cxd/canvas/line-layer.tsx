@@ -146,17 +146,23 @@ export function LineLayer({
     const container = containerRef.current;
 
     const handlePointerDown = (e: PointerEvent) => {
+      // Only the left button starts a draw.
+      if (e.button !== 0) return;
+
+      // A press on a connector port orb belongs to the FloatingPort
+      // connector-drag flow — leave it alone so connectors can still be drawn
+      // from an element's port even while the line tool is active.
       const target = e.target as HTMLElement;
+      if (target.closest("[data-connector-port]")) return;
 
-      // Only start on background/dot-grid
-      if (
-        !target.classList.contains("canvas-background") &&
-        !target.classList.contains("dot-grid") &&
-        target !== container
-      ) {
-        return;
-      }
-
+      // While the line tool is active, a press anywhere on the canvas surface
+      // begins a line draw — including over a container or an element inside one.
+      // Container/element body-mousedown handlers early-return while a line tool
+      // is active (see canvas-element handleBodyMouseDown), so the press is ours
+      // to claim and there is no cross-pipeline conflict. Presses on empty
+      // background/dot-grid draw exactly as before. Interactive line chrome
+      // (existing line handles / radial menu) stops propagation itself before
+      // the event reaches this container-level listener.
       e.preventDefault();
       e.stopPropagation();
 

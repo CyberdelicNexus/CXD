@@ -4508,6 +4508,7 @@ export function CXDCanvas() {
                 isHighlighted={highlightedElementId === element.id}
                 isHoverTarget={hoverTargetNodeId === element.id}
                 showGroupHover={isCtrlPressed && (!!element.groupId || !!element.containerId)}
+                lineToolActive={activeTool === "line"}
                 onSelect={(e) => {
                 // Don't select when space is held (hand/pan tool active)
                 if (isSpacePressed) return;

@@ -240,6 +240,9 @@ interface CanvasElementRendererProps {
   tourId?: string;
   /** Show hover outline for group individual select (when Ctrl is held) */
   showGroupHover?: boolean;
+  /** True when a line-family tool is active — presses belong to the line-draw
+   * pipeline (LineLayer), so this element must not select/drag on press. */
+  lineToolActive?: boolean;
 }
 
 export function CanvasElementRenderer({
@@ -271,6 +274,7 @@ export function CanvasElementRenderer({
   snapToGrid = false,
   tourId,
   showGroupHover,
+  lineToolActive = false,
 }: CanvasElementRendererProps) {
   // Stabilize onUpdate via ref so that effects and sub-component callbacks
   // that depend on onUpdate don't re-fire just because the parent re-rendered
@@ -589,6 +593,14 @@ export function CanvasElementRenderer({
   // Handle drag from element body (not just the handle)
   const handleBodyMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      // While a line-family tool is active, a press over this element must NOT
+      // select or drag it — the press belongs to the line-draw pipeline
+      // (LineLayer). Do nothing and do NOT stopPropagation, so the native
+      // pointerdown reaches LineLayer's container listener and a line can start
+      // anywhere, including inside a container. The finished line then attaches
+      // to the container it was drawn over via handleCreateLine's bbox-center logic.
+      if (lineToolActive) return;
+
       // Don't drag locked elements
       if (element.locked) {
         e.stopPropagation();
@@ -615,7 +627,7 @@ export function CanvasElementRenderer({
         onDragStart(e);
       }
     },
-    [onDragStart, isEditing, element],
+    [onDragStart, isEditing, element, lineToolActive],
   );
 
   const renderContent = () => {
@@ -886,6 +898,9 @@ export function CanvasElementRenderer({
       data-canvas-node="true"
       onClick={(e) => {
         e.stopPropagation();
+        // While a line tool is active this press belongs to the line-draw
+        // pipeline — don't select the element on the trailing click.
+        if (lineToolActive) return;
         onSelect(e);
       }}
       onMouseDown={handleBodyMouseDown}
