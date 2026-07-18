@@ -85,6 +85,8 @@ const ELEMENT_ARRAY_FIELDS = new Set([
   'cells',         // table: 2D grid of TableCell (whole-grid replace on edit)
   'rowColors',     // table: per-row background
   'colColors',     // table: per-column background
+  'colWidths',     // table: per-column widths (px, JSON round-trip)
+  'rowHeights',    // table: per-row heights (px, JSON round-trip)
 ]);
 
 // ─── Canvas Element Serialization ────────────────────────────────────────────

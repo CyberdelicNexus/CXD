@@ -3,8 +3,9 @@
  * Run: npx tsx src/lib/__verify__/table-element.verify.ts
  *
  * Asserts: a TableElement with per-cell text + formatting, rowColors, colColors,
- * tableBg, borderColor and headerRow survives canvasElementToYMap →
- * yMapToCanvasElement intact (2D cells grid, colors, bold/italic/align).
+ * colWidths, rowHeights, tableBg, borderColor and headerRow survives
+ * canvasElementToYMap → yMapToCanvasElement intact (2D cells grid, colors,
+ * bold/italic/align, per-track sizes).
  */
 import * as Y from 'yjs';
 import { canvasElementToYMap, yMapToCanvasElement } from '../yjs/element-serializers';
@@ -31,6 +32,8 @@ const table: TableElement = {
   cells,
   rowColors: ['#123A5A', null],
   colColors: [null, null, '#3B1842'],
+  colWidths: [120, 90, 150],
+  rowHeights: [60, 90],
   tableBg: 'rgba(20,16,31,0.72)',
   borderColor: 'rgba(139,92,246,0.35)',
   headerRow: true,
@@ -55,6 +58,10 @@ check(round.cells[1][0].bg === table.cells[1][0].bg, 'cell bg (gradient) preserv
 check(round.cells[1][2].align === 'right', 'far cell align preserved');
 check(round.rowColors?.[0] === '#123A5A' && round.rowColors?.[1] === null, 'rowColors preserved (incl null)');
 check(round.colColors?.[2] === '#3B1842', 'colColors preserved');
+check(Array.isArray(round.colWidths) && round.colWidths?.length === 3, 'colWidths is a length-3 array');
+check(round.colWidths?.[0] === 120 && round.colWidths?.[1] === 90 && round.colWidths?.[2] === 150, 'colWidths values preserved');
+check(Array.isArray(round.rowHeights) && round.rowHeights?.length === 2, 'rowHeights is a length-2 array');
+check(round.rowHeights?.[0] === 60 && round.rowHeights?.[1] === 90, 'rowHeights values preserved');
 check(round.tableBg === 'rgba(20,16,31,0.72)', 'tableBg preserved');
 check(round.borderColor === 'rgba(139,92,246,0.35)', 'borderColor preserved');
 check(round.headerRow === true, 'headerRow preserved');

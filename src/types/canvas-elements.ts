@@ -372,6 +372,8 @@ export interface TableElement extends CanvasElementBase {
   cells: TableCell[][];
   rowColors?: (string | null)[]; // optional per-row background
   colColors?: (string | null)[]; // optional per-column background
+  colWidths?: number[];          // per-column widths (px, treated as ratios normalized to element width)
+  rowHeights?: number[];         // per-row heights (px, treated as ratios normalized to element height)
   tableBg?: string;              // container/table background (default fallback)
   borderColor?: string;          // grid line color
   headerRow?: boolean;           // style first row as a header

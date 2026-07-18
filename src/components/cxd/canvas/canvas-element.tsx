@@ -3585,11 +3585,75 @@ function TableCellEditor({
 
 type TableColorScope = "cell" | "row" | "col" | "table";
 
+// ─── Table color + measurement helpers ──────────────────────────────────────
+
+// Five preset background base colors (violet-forward, aligned with the palette).
+const TABLE_PRESET_BGS = ["#4B1B6B", "#123A5A", "#0F3A3A", "#3B1842", "#1B2A44"] as const;
+
+// Layout chrome: thick top+left L-grip (move zone) and slim right/bottom add strips.
+const TBL_GRIP = 12;
+const TBL_PLUS = 16;
+const TBL_MIN_COL = 48; // px floor a column can't be dragged below
+const TBL_MIN_ROW = 28; // px floor a row can't be dragged below
+
+// Transparent-swatch checkerboard (shared with the rest of the color UI).
+const TBL_CHECKER =
+  "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]";
+
+function tblHexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function tblMix(
+  c: { r: number; g: number; b: number },
+  t: { r: number; g: number; b: number },
+  amt: number,
+): string {
+  const r = Math.round(c.r + (t.r - c.r) * amt);
+  const g = Math.round(c.g + (t.g - c.g) * amt);
+  const b = Math.round(c.b + (t.b - c.b) * amt);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+/** Turn a flat color into a tasteful 2-stop (highlight → base → shade) gradient. */
+function tblToGradient(color: string): string {
+  if (!color || color === "transparent" || color.includes("gradient")) return color;
+  const rgb = tblHexToRgb(color);
+  if (!rgb) return color;
+  const light = tblMix(rgb, { r: 255, g: 255, b: 255 }, 0.28);
+  const dark = tblMix(rgb, { r: 0, g: 0, b: 0 }, 0.38);
+  return `linear-gradient(135deg, ${light} 0%, ${color} 55%, ${dark} 100%)`;
+}
+
+// Shared offscreen canvas for measuring cell text (min column width). Lazily created,
+// used only on demand (divider drag start) — never in a per-frame store-writing loop.
+let _tblMeasureCtx: CanvasRenderingContext2D | null = null;
+function tblMeasureText(text: string, font: string): number {
+  if (typeof document === "undefined") return 0;
+  if (!_tblMeasureCtx) _tblMeasureCtx = document.createElement("canvas").getContext("2d");
+  if (!_tblMeasureCtx) return 0;
+  _tblMeasureCtx.font = font;
+  return _tblMeasureCtx.measureText(text || "").width;
+}
+
 /**
  * Table card — editable data grid with per-cell text, cell/row/column/table
  * coloring, and basic text formatting. Commits go through the shared onUpdate
  * path (whole-grid replace on edit; tables are small). onUpdate is already
  * ref-stabilized by CanvasElementRenderer.
+ *
+ * Chrome:
+ *  - thick top+left L-grip = drag-to-move zone (falls through to the element's
+ *    existing body-drag path);
+ *  - slim right/bottom "+" strips = click to add one row/col, drag to add many
+ *    (drag back removes just-added, never below the pre-drag count / 1×1);
+ *  - draggable dividers between columns/rows set per-track sizes (colWidths /
+ *    rowHeights, stored as px and normalized to the element size so element
+ *    resize scales proportionally while divider drag sets individual tracks);
+ *  - a left-side BACKGROUND menu (presets + transparent + wheel + solid/gradient)
+ *    and a bottom formatting menu (text color white/black/wheel, bold/italic,
+ *    align, header toggle).
  */
 function TableCard({
   element,
@@ -3609,11 +3673,18 @@ function TableCard({
   const rowColors = element.rowColors;
   const colColors = element.colColors;
   const tableBg = element.tableBg;
-  const borderColor = element.borderColor || "rgba(139,92,246,0.35)";
+  const borderColor = element.borderColor || "rgba(139,92,246,0.28)";
   const headerRow = element.headerRow ?? false;
+  const zoom = canvasZoom || 1;
 
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
   const [scope, setScope] = useState<TableColorScope>("cell");
+  const [bgGradient, setBgGradient] = useState(false);
+
+  // Live drag previews (local state only — the store is written once on pointer-up).
+  const [dragCol, setDragCol] = useState<{ i: number; a: number; b: number } | null>(null);
+  const [dragRow, setDragRow] = useState<{ i: number; a: number; b: number } | null>(null);
+  const [pendingCount, setPendingCount] = useState<{ axis: "row" | "col"; n: number } | null>(null);
 
   // Clear the selected cell whenever the whole element is deselected.
   useEffect(() => {
@@ -3632,6 +3703,48 @@ function TableCard({
     }
     return g;
   }, [element.cells, rows, cols]);
+
+  // Content area = element minus the grip + plus strips (constant, so selecting
+  // never reflows the grid).
+  const availW = Math.max(1, element.width - TBL_GRIP - TBL_PLUS);
+  const availH = Math.max(1, element.height - TBL_GRIP - TBL_PLUS);
+
+  // Column widths / row heights normalized to the content area. Ratio model:
+  // element resize scales all tracks proportionally (no store write); divider
+  // drag sets individual tracks (one store write on release).
+  const colPx = useMemo(() => {
+    const raw =
+      element.colWidths && element.colWidths.length === cols
+        ? element.colWidths.map((w) => (w > 0 ? w : 1))
+        : Array(cols).fill(availW / cols);
+    const sum = raw.reduce((a, b) => a + b, 0) || 1;
+    return raw.map((w) => (w / sum) * availW);
+  }, [element.colWidths, cols, availW]);
+
+  const rowPx = useMemo(() => {
+    const raw =
+      element.rowHeights && element.rowHeights.length === rows
+        ? element.rowHeights.map((h) => (h > 0 ? h : 1))
+        : Array(rows).fill(availH / rows);
+    const sum = raw.reduce((a, b) => a + b, 0) || 1;
+    return raw.map((h) => (h / sum) * availH);
+  }, [element.rowHeights, rows, availH]);
+
+  // Apply live divider preview over the committed track sizes.
+  const dispCol = useMemo(() => {
+    if (!dragCol) return colPx;
+    const next = [...colPx];
+    next[dragCol.i] = dragCol.a;
+    next[dragCol.i + 1] = dragCol.b;
+    return next;
+  }, [colPx, dragCol]);
+  const dispRow = useMemo(() => {
+    if (!dragRow) return rowPx;
+    const next = [...rowPx];
+    next[dragRow.i] = dragRow.a;
+    next[dragRow.i + 1] = dragRow.b;
+    return next;
+  }, [rowPx, dragRow]);
 
   const cloneGrid = useCallback(
     () => grid.map((row) => row.map((cell) => ({ ...cell }))),
@@ -3657,7 +3770,9 @@ function TableCard({
     return undefined;
   };
 
-  const applyBg = (color: string) => {
+  // BACKGROUND menu writes — applies the current Solid/Gradient toggle to the scope.
+  const applyBg = (raw: string) => {
+    const color = raw === "transparent" ? "transparent" : bgGradient ? tblToGradient(raw) : raw;
     if (scope === "table") {
       onUpdate({ tableBg: color });
       return;
@@ -3676,45 +3791,222 @@ function TableCard({
     }
   };
 
-  const addRow = () => {
-    const next = cloneGrid();
-    next.push(Array.from({ length: cols }, () => ({ text: "" } as TableCell)));
-    onUpdate({
-      rows: rows + 1,
-      cells: next,
-      ...(rowColors ? { rowColors: [...rowColors, null] } : {}),
-    });
+  // Structure resize — sets an absolute row/col count, growing/shrinking the
+  // element by one track-unit per added/removed track so existing tracks keep
+  // their pixel size. Called once on pointer-up (never per drag frame).
+  const setColCount = useCallback(
+    (target: number) => {
+      const t = Math.max(1, Math.round(target));
+      if (t === cols) return;
+      const unit = availW / cols;
+      let next = cloneGrid();
+      if (t > cols) {
+        next = next.map((row) => [
+          ...row,
+          ...Array.from({ length: t - cols }, () => ({ text: "" }) as TableCell),
+        ]);
+      } else {
+        next = next.map((row) => row.slice(0, t));
+      }
+      const updates: Partial<TableElement> = {
+        cols: t,
+        cells: next,
+        width: Math.max(80, element.width + (t - cols) * unit),
+      };
+      if (colColors)
+        updates.colColors =
+          t > cols ? [...colColors, ...Array(t - cols).fill(null)] : colColors.slice(0, t);
+      if (element.colWidths) {
+        const base = element.colWidths.length === cols ? element.colWidths : colPx;
+        updates.colWidths = t > cols ? [...base, ...Array(t - cols).fill(unit)] : base.slice(0, t);
+      }
+      onUpdate(updates);
+      setSel(null);
+    },
+    [cols, availW, cloneGrid, colColors, element.colWidths, element.width, colPx, onUpdate],
+  );
+
+  const setRowCount = useCallback(
+    (target: number) => {
+      const t = Math.max(1, Math.round(target));
+      if (t === rows) return;
+      const unit = availH / rows;
+      let next = cloneGrid();
+      if (t > rows) {
+        for (let i = rows; i < t; i++)
+          next.push(Array.from({ length: cols }, () => ({ text: "" }) as TableCell));
+      } else {
+        next = next.slice(0, t);
+      }
+      const updates: Partial<TableElement> = {
+        rows: t,
+        cells: next,
+        height: Math.max(60, element.height + (t - rows) * unit),
+      };
+      if (rowColors)
+        updates.rowColors =
+          t > rows ? [...rowColors, ...Array(t - rows).fill(null)] : rowColors.slice(0, t);
+      if (element.rowHeights) {
+        const base = element.rowHeights.length === rows ? element.rowHeights : rowPx;
+        updates.rowHeights = t > rows ? [...base, ...Array(t - rows).fill(unit)] : base.slice(0, t);
+      }
+      onUpdate(updates);
+      setSel(null);
+    },
+    [rows, cols, availH, cloneGrid, rowColors, element.rowHeights, element.height, rowPx, onUpdate],
+  );
+
+  // Minimum width for a column = widest word in any of its cells + padding (so a
+  // column can't be dragged narrower than its content needs). Measured on demand.
+  const colMinWidth = useCallback(
+    (c: number): number => {
+      let max = 0;
+      for (let r = 0; r < rows; r++) {
+        const cell = grid[r]?.[c];
+        if (!cell?.text) continue;
+        const weight = cell.bold ? 700 : headerRow && r === 0 ? 600 : 400;
+        const font = `${cell.italic ? "italic " : ""}${weight} 13px system-ui, sans-serif`;
+        for (const word of cell.text.split(/\s+/)) {
+          if (word) max = Math.max(max, tblMeasureText(word, font));
+        }
+      }
+      return Math.max(TBL_MIN_COL, Math.min(max + 14, availW * 0.85));
+    },
+    [grid, rows, headerRow, availW],
+  );
+
+  // ─── Divider drags (per-column / per-row resize) ───────────────────────────
+  const startColDivider = (i: number) => (e: React.MouseEvent) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const minL = colMinWidth(i);
+    const minR = colMinWidth(i + 1);
+    const startX = e.clientX;
+    const baseA = colPx[i];
+    const baseB = colPx[i + 1];
+    let finalA = baseA;
+    let finalB = baseB;
+    const move = (ev: MouseEvent) => {
+      const delta = (ev.clientX - startX) / zoom;
+      let a = baseA + delta;
+      let b = baseB - delta;
+      if (a < minL) {
+        b -= minL - a;
+        a = minL;
+      }
+      if (b < minR) {
+        a -= minR - b;
+        b = minR;
+      }
+      finalA = a;
+      finalB = b;
+      setDragCol({ i, a, b });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      const next = [...colPx];
+      next[i] = finalA;
+      next[i + 1] = finalB;
+      setDragCol(null);
+      onUpdate({ colWidths: next });
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
   };
-  const deleteRow = () => {
-    const r = sel?.r ?? rows - 1;
-    if (rows <= 1) return;
-    const next = cloneGrid();
-    next.splice(r, 1);
-    onUpdate({
-      rows: rows - 1,
-      cells: next,
-      ...(rowColors ? { rowColors: rowColors.filter((_, i) => i !== r) } : {}),
-    });
-    setSel(null);
+
+  const startRowDivider = (i: number) => (e: React.MouseEvent) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const baseA = rowPx[i];
+    const baseB = rowPx[i + 1];
+    let finalA = baseA;
+    let finalB = baseB;
+    const move = (ev: MouseEvent) => {
+      const delta = (ev.clientY - startY) / zoom;
+      let a = baseA + delta;
+      let b = baseB - delta;
+      if (a < TBL_MIN_ROW) {
+        b -= TBL_MIN_ROW - a;
+        a = TBL_MIN_ROW;
+      }
+      if (b < TBL_MIN_ROW) {
+        a -= TBL_MIN_ROW - b;
+        b = TBL_MIN_ROW;
+      }
+      finalA = a;
+      finalB = b;
+      setDragRow({ i, a, b });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      const next = [...rowPx];
+      next[i] = finalA;
+      next[i + 1] = finalB;
+      setDragRow(null);
+      onUpdate({ rowHeights: next });
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
   };
-  const addCol = () => {
-    const next = cloneGrid().map((row) => [...row, { text: "" } as TableCell]);
-    onUpdate({
-      cols: cols + 1,
-      cells: next,
-      ...(colColors ? { colColors: [...colColors, null] } : {}),
-    });
+
+  // ─── Plus-button drags (add/remove rows & columns) ─────────────────────────
+  const startColPlus = (e: React.MouseEvent) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const base = cols;
+    const unit = Math.max(24, availW / cols); // ~one column-width per column added
+    let moved = 0;
+    let target = base;
+    const move = (ev: MouseEvent) => {
+      const dx = (ev.clientX - startX) / zoom;
+      moved = Math.max(moved, Math.abs(dx));
+      const added = Math.max(0, Math.round(dx / unit)); // drag-back only undoes additions
+      target = base + added;
+      setPendingCount({ axis: "col", n: target });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      setPendingCount(null);
+      if (target === base && moved < 4) setColCount(base + 1); // treat as a click
+      else if (target !== base) setColCount(target);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
   };
-  const deleteCol = () => {
-    const c = sel?.c ?? cols - 1;
-    if (cols <= 1) return;
-    const next = cloneGrid().map((row) => row.filter((_, i) => i !== c));
-    onUpdate({
-      cols: cols - 1,
-      cells: next,
-      ...(colColors ? { colColors: colColors.filter((_, i) => i !== c) } : {}),
-    });
-    setSel(null);
+
+  const startRowPlus = (e: React.MouseEvent) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const base = rows;
+    const unit = Math.max(24, availH / rows); // ~one row-height per row added
+    let moved = 0;
+    let target = base;
+    const move = (ev: MouseEvent) => {
+      const dy = (ev.clientY - startY) / zoom;
+      moved = Math.max(moved, Math.abs(dy));
+      const added = Math.max(0, Math.round(dy / unit));
+      target = base + added;
+      setPendingCount({ axis: "row", n: target });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      setPendingCount(null);
+      if (target === base && moved < 4) setRowCount(base + 1);
+      else if (target !== base) setRowCount(target);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
   };
 
   const selCell = sel ? grid[sel.r]?.[sel.c] : undefined;
@@ -3727,7 +4019,7 @@ function TableCard({
         setScope(s);
       }}
       className={cn(
-        "px-2 py-1 rounded text-[11px] font-medium transition-colors",
+        "px-1.5 py-1 rounded text-[11px] font-medium transition-colors",
         scope === s
           ? "bg-primary/30 text-primary ring-1 ring-primary"
           : "text-muted-foreground hover:bg-primary/15 hover:text-foreground",
@@ -3737,16 +4029,46 @@ function TableCard({
     </button>
   );
 
+  const fmtBtn = (
+    keyId: string,
+    active: boolean,
+    onClick: (e: React.MouseEvent) => void,
+    title: string,
+    icon: React.ReactNode,
+  ) => (
+    <button
+      key={keyId}
+      onClick={onClick}
+      disabled={!sel}
+      className={cn(
+        "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40",
+        active && "bg-primary/20 text-primary",
+      )}
+      title={title}
+    >
+      {icon}
+    </button>
+  );
+
   return (
-    <div className="relative w-full h-full" data-no-drag>
+    <div className="relative w-full h-full">
+      {/* Content area (inset by the grip + plus strips) */}
       <div
-        className="w-full h-full overflow-hidden rounded-lg"
-        style={{ background: tableBg || "rgba(20,16,31,0.72)", border: `1px solid ${borderColor}` }}
+        className="absolute overflow-hidden"
+        style={{ left: TBL_GRIP, top: TBL_GRIP, right: TBL_PLUS, bottom: TBL_PLUS }}
       >
-        <table className="w-full h-full border-collapse" style={{ tableLayout: "fixed" }}>
+        <table
+          className="border-collapse"
+          style={{ tableLayout: "fixed", width: availW, height: availH }}
+        >
+          <colgroup>
+            {dispCol.map((w, c) => (
+              <col key={c} style={{ width: w }} />
+            ))}
+          </colgroup>
           <tbody>
             {grid.map((row, r) => (
-              <tr key={r}>
+              <tr key={r} style={{ height: dispRow[r] }}>
                 {row.map((cell, c) => {
                   const bg = resolveBg(r, c);
                   const isSel = sel?.r === r && sel?.c === c;
@@ -3755,20 +4077,11 @@ function TableCard({
                     <td
                       key={c}
                       className={cn(
-                        "relative align-middle p-0",
+                        "relative align-middle p-0 overflow-hidden",
                         isSel && "outline outline-2 -outline-offset-2 outline-violet-400",
                       )}
-                      style={{
-                        border: `1px solid ${borderColor}`,
-                        background: bg,
-                        width: `${100 / cols}%`,
-                      }}
-                      onClick={() => {
-                        // Do NOT stopPropagation: let the click bubble to the
-                        // wrapper so the element gets selected (which reveals the
-                        // formatting popover) — just record the active cell.
-                        setSel({ r, c });
-                      }}
+                      style={{ border: `1px solid ${borderColor}`, background: bg }}
+                      onClick={() => setSel({ r, c })}
                     >
                       <TableCellEditor
                         value={cell.text || ""}
@@ -3793,190 +4106,292 @@ function TableCard({
             ))}
           </tbody>
         </table>
+
+        {/* Column dividers — drag to resize the two adjacent columns */}
+        {isSelected &&
+          !isReadOnly &&
+          dispCol.slice(0, -1).map((_, i) => {
+            const left = dispCol.slice(0, i + 1).reduce((a, b) => a + b, 0);
+            return (
+              <div
+                key={`cd${i}`}
+                data-no-drag
+                onMouseDown={startColDivider(i)}
+                className="absolute top-0 bottom-0 z-20 cursor-col-resize group/cd"
+                style={{ left: left - 4, width: 8 }}
+                title="Drag to resize column"
+              >
+                <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-violet-400/0 group-hover/cd:bg-violet-400/70 transition-colors" />
+              </div>
+            );
+          })}
+        {/* Row dividers — drag to resize the two adjacent rows */}
+        {isSelected &&
+          !isReadOnly &&
+          dispRow.slice(0, -1).map((_, i) => {
+            const top = dispRow.slice(0, i + 1).reduce((a, b) => a + b, 0);
+            return (
+              <div
+                key={`rd${i}`}
+                data-no-drag
+                onMouseDown={startRowDivider(i)}
+                className="absolute left-0 right-0 z-20 cursor-row-resize group/rd"
+                style={{ top: top - 4, height: 8 }}
+                title="Drag to resize row"
+              >
+                <div className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-violet-400/0 group-hover/rd:bg-violet-400/70 transition-colors" />
+              </div>
+            );
+          })}
       </div>
 
-      {/* Formatting popover — opens downward (never above) so the cursor never moves up */}
+      {/* Move grip — thick top + left L (violet). pointer-events-none so the drag
+          falls through to the element's body-drag path (reposition the element). */}
+      <div
+        className="absolute top-0 left-0 right-0 pointer-events-none rounded-t-lg"
+        style={{
+          height: TBL_GRIP,
+          background: "linear-gradient(180deg, rgba(139,92,246,0.55), rgba(139,92,246,0.26))",
+        }}
+      />
+      <div
+        className="absolute top-0 left-0 bottom-0 pointer-events-none rounded-l-lg"
+        style={{
+          width: TBL_GRIP,
+          background: "linear-gradient(90deg, rgba(139,92,246,0.55), rgba(139,92,246,0.26))",
+        }}
+      />
+      {isSelected && (
+        <div
+          className="absolute top-0 left-0 flex items-center justify-center pointer-events-none"
+          style={{ width: TBL_GRIP, height: TBL_GRIP }}
+        >
+          <GripVertical className="w-2.5 h-2.5 text-white/85" />
+        </div>
+      )}
+
+      {/* Right "+" — click adds a column, drag right to add more (drag back removes just-added) */}
+      {isSelected && !isReadOnly && (
+        <button
+          data-no-drag
+          onMouseDown={startColPlus}
+          className="absolute flex items-center justify-center text-violet-100 bg-violet-500/15 hover:bg-violet-500/35 transition-colors cursor-ew-resize rounded-r-lg"
+          style={{ right: 0, width: TBL_PLUS, top: TBL_GRIP, bottom: TBL_PLUS }}
+          title="Click to add a column · drag right to add more"
+        >
+          <Plus className="w-3 h-3" />
+        </button>
+      )}
+      {/* Bottom "+" — click adds a row, drag down to add more (drag back removes just-added) */}
+      {isSelected && !isReadOnly && (
+        <button
+          data-no-drag
+          onMouseDown={startRowPlus}
+          className="absolute flex items-center justify-center text-violet-100 bg-violet-500/15 hover:bg-violet-500/35 transition-colors cursor-ns-resize rounded-b-lg"
+          style={{ bottom: 0, height: TBL_PLUS, left: TBL_GRIP, right: TBL_PLUS }}
+          title="Click to add a row · drag down to add more"
+        >
+          <Plus className="w-3 h-3" />
+        </button>
+      )}
+      {/* Live count preview during a plus-drag */}
+      {pendingCount && (
+        <div className="absolute -bottom-6 right-0 px-1.5 py-0.5 rounded bg-black/80 text-white text-[10px] font-medium pointer-events-none z-30">
+          {pendingCount.axis === "col" ? `${pendingCount.n} cols` : `${pendingCount.n} rows`}
+        </div>
+      )}
+
+      {/* LEFT background menu — presets + transparent + wheel + solid/gradient toggle */}
+      {isSelected && !isReadOnly && (
+        <div
+          className="absolute right-full top-0 mr-2 z-[100] pointer-events-auto"
+          data-no-drag
+          style={{ transform: `scale(${1 / zoom})`, transformOrigin: "top right" }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[176px] flex flex-col gap-2">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Background</div>
+            {/* Scope selector */}
+            <div className="grid grid-cols-4 gap-1">
+              {scopeBtn("cell", "Cell")}
+              {scopeBtn("row", "Row")}
+              {scopeBtn("col", "Col")}
+              {scopeBtn("table", "Table")}
+            </div>
+            {/* Presets + transparent + color wheel */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {TABLE_PRESET_BGS.map((c) => (
+                <button
+                  key={c}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    applyBg(c);
+                  }}
+                  className="w-6 h-6 rounded border border-white/10 hover:scale-110 transition-transform"
+                  style={{ background: bgGradient ? tblToGradient(c) : c }}
+                  title="Background color"
+                />
+              ))}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  applyBg("transparent");
+                }}
+                className={cn(
+                  "w-6 h-6 rounded border border-white/10 hover:scale-110 transition-transform",
+                  TBL_CHECKER,
+                )}
+                title="Transparent"
+              />
+              <label
+                className="w-6 h-6 rounded border border-white/10 hover:scale-110 transition-transform cursor-pointer overflow-hidden relative"
+                style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}
+                title="Custom color"
+              >
+                <input
+                  type="color"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={(e) => applyBg(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+            </div>
+            {/* Solid / gradient toggle */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setBgGradient(false);
+                }}
+                className={cn(
+                  "flex-1 px-2 py-1 rounded text-[11px] font-medium transition-colors",
+                  !bgGradient
+                    ? "bg-primary/30 text-primary ring-1 ring-primary"
+                    : "text-muted-foreground hover:bg-primary/15",
+                )}
+              >
+                Solid
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setBgGradient(true);
+                }}
+                className={cn(
+                  "flex-1 px-2 py-1 rounded text-[11px] font-medium transition-colors",
+                  bgGradient
+                    ? "bg-primary/30 text-primary ring-1 ring-primary"
+                    : "text-muted-foreground hover:bg-primary/15",
+                )}
+              >
+                Gradient
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM formatting menu — text color (white/black/wheel), bold/italic, align, header */}
       {isSelected && !isReadOnly && (
         <div
           className="absolute left-0 top-full mt-2 z-[100] pointer-events-auto"
           data-no-drag
-          style={{ transform: `scale(${1 / canvasZoom})`, transformOrigin: "top left" }}
+          style={{ transform: `scale(${1 / zoom})`, transformOrigin: "top left" }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[256px] flex flex-col gap-2">
-            {/* Scope selector */}
-            <div className="flex items-center gap-1">
-              {scopeBtn("cell", "Cell")}
-              {scopeBtn("row", "Row")}
-              {scopeBtn("col", "Column")}
-              {scopeBtn("table", "Table")}
-            </div>
-
-            {/* Background swatches */}
-            <div>
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Background</div>
-              <div className="grid grid-cols-6 gap-1">
-                {PRESET_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      applyBg(color);
-                    }}
-                    className={cn(
-                      "w-full h-6 rounded border border-white/10 transition-transform hover:scale-110",
-                      color === "transparent" &&
-                        "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
-                    )}
-                    style={{ background: color === "transparent" ? undefined : color }}
-                    title={color === "transparent" ? "Clear" : "Background"}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Text color + style + align (operate on the selected cell) */}
-            <div>
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Text</div>
-              <div className="grid grid-cols-6 gap-1 mb-1.5">
-                {SOLID_STROKE_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (sel) updateCell(sel.r, sel.c, { color });
-                    }}
-                    className="w-full h-5 rounded-full border border-white/10 transition-transform hover:scale-110 disabled:opacity-40"
-                    style={{ background: color }}
-                    disabled={!sel}
-                    title="Text color"
-                  />
-                ))}
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (sel) updateCell(sel.r, sel.c, { bold: !selCell?.bold });
-                  }}
-                  disabled={!sel}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40",
-                    selCell?.bold && "bg-primary/20 text-primary",
-                  )}
-                  title="Bold"
-                >
-                  <Bold className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (sel) updateCell(sel.r, sel.c, { italic: !selCell?.italic });
-                  }}
-                  disabled={!sel}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40",
-                    selCell?.italic && "bg-primary/20 text-primary",
-                  )}
-                  title="Italic"
-                >
-                  <Italic className="w-3.5 h-3.5" />
-                </button>
-                <div className="w-px h-4 bg-border/50 mx-0.5" />
-                {(["left", "center", "right"] as const).map((a) => {
-                  const AlignIcon = a === "left" ? AlignLeft : a === "center" ? AlignCenter : AlignRight;
-                  return (
-                    <button
-                      key={a}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (sel) updateCell(sel.r, sel.c, { align: a });
-                      }}
-                      disabled={!sel}
-                      className={cn(
-                        "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40",
-                        selCell?.align === a && "bg-primary/20 text-primary",
-                      )}
-                      title={`Align ${a}`}
-                    >
-                      <AlignIcon className="w-3.5 h-3.5" />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Border color + header toggle */}
-            <div>
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Border</div>
-              <div className="flex items-center gap-1">
-                <div className="grid grid-cols-6 gap-1 flex-1">
-                  {SOLID_STROKE_COLORS.slice(0, 6).map((color) => (
-                    <button
-                      key={color}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUpdate({ borderColor: color });
-                      }}
-                      className="w-full h-5 rounded border border-white/10 transition-transform hover:scale-110"
-                      style={{ background: color }}
-                      title="Border color"
-                    />
-                  ))}
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onUpdate({ headerRow: !headerRow });
-                  }}
-                  className={cn(
-                    "px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap",
-                    headerRow
-                      ? "bg-primary/30 text-primary ring-1 ring-primary"
-                      : "text-muted-foreground hover:bg-primary/15 hover:text-foreground",
-                  )}
-                  title="Toggle header row"
-                >
-                  Header
-                </button>
-              </div>
-            </div>
-
-            {/* Row / column structure controls */}
-            <div className="flex items-center gap-1 pt-1 border-t border-border/50">
-              <button
-                onClick={(e) => { e.stopPropagation(); addRow(); }}
-                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-                title="Add row"
-              >
-                <Plus className="w-3 h-3" /> Row
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); deleteRow(); }}
-                disabled={rows <= 1}
-                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-40"
-                title="Delete row"
-              >
-                <Minus className="w-3 h-3" /> Row
-              </button>
-              <div className="w-px h-4 bg-border/50 mx-0.5" />
-              <button
-                onClick={(e) => { e.stopPropagation(); addCol(); }}
-                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-                title="Add column"
-              >
-                <Plus className="w-3 h-3" /> Col
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); deleteCol(); }}
-                disabled={cols <= 1}
-                className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[11px] hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors disabled:opacity-40"
-                title="Delete column"
-              >
-                <Minus className="w-3 h-3" /> Col
-              </button>
-            </div>
+          <div className="p-1.5 rounded-lg bg-card backdrop-blur border border-border shadow-xl flex items-center gap-1.5">
+            {/* Text color: white / black / wheel (operate on the selected cell) */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (sel) updateCell(sel.r, sel.c, { color: "#ffffff" });
+              }}
+              disabled={!sel}
+              className="w-5 h-5 rounded-full border border-white/25 bg-white disabled:opacity-40 hover:scale-110 transition-transform"
+              title="White text"
+            />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (sel) updateCell(sel.r, sel.c, { color: "#000000" });
+              }}
+              disabled={!sel}
+              className="w-5 h-5 rounded-full border border-white/25 bg-black disabled:opacity-40 hover:scale-110 transition-transform"
+              title="Black text"
+            />
+            <label
+              className={cn(
+                "w-5 h-5 rounded-full border border-white/25 overflow-hidden relative",
+                sel ? "cursor-pointer hover:scale-110 transition-transform" : "opacity-40 pointer-events-none",
+              )}
+              style={{ background: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }}
+              title="Custom text color"
+            >
+              <input
+                type="color"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                onChange={(e) => {
+                  if (sel) updateCell(sel.r, sel.c, { color: e.target.value });
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </label>
+            <div className="w-px h-4 bg-border/50 mx-0.5" />
+            {/* Bold / italic */}
+            {fmtBtn(
+              "bold",
+              !!selCell?.bold,
+              (e) => {
+                e.stopPropagation();
+                if (sel) updateCell(sel.r, sel.c, { bold: !selCell?.bold });
+              },
+              "Bold",
+              <Bold className="w-3.5 h-3.5" />,
+            )}
+            {fmtBtn(
+              "italic",
+              !!selCell?.italic,
+              (e) => {
+                e.stopPropagation();
+                if (sel) updateCell(sel.r, sel.c, { italic: !selCell?.italic });
+              },
+              "Italic",
+              <Italic className="w-3.5 h-3.5" />,
+            )}
+            <div className="w-px h-4 bg-border/50 mx-0.5" />
+            {/* Align */}
+            {(["left", "center", "right"] as const).map((a) => {
+              const AlignIcon = a === "left" ? AlignLeft : a === "center" ? AlignCenter : AlignRight;
+              return fmtBtn(
+                a,
+                selCell?.align === a,
+                (e) => {
+                  e.stopPropagation();
+                  if (sel) updateCell(sel.r, sel.c, { align: a });
+                },
+                `Align ${a}`,
+                <AlignIcon className="w-3.5 h-3.5" />,
+              );
+            })}
+            <div className="w-px h-4 bg-border/50 mx-0.5" />
+            {/* Header row toggle */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpdate({ headerRow: !headerRow });
+              }}
+              className={cn(
+                "px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap",
+                headerRow
+                  ? "bg-primary/30 text-primary ring-1 ring-primary"
+                  : "text-muted-foreground hover:bg-primary/15 hover:text-foreground",
+              )}
+              title="Toggle header row"
+            >
+              Header
+            </button>
           </div>
         </div>
       )}
