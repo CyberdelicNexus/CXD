@@ -937,8 +937,9 @@ export function CanvasElementRenderer({
           />
         )}
       {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
-      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && (
+      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && (() => {
         /* Counter-rotation wrapper: un-rotates around element center so menu stays fixed above */
+        const toolbar = (
         <div
           className="absolute inset-0 pointer-events-none z-50"
           style={{
@@ -1717,7 +1718,42 @@ export function CanvasElementRenderer({
           </button>
         </div>
         </div>
-      )}
+        );
+
+        // Containers sit in a deep-negative z band (ee25b91), which establishes a
+        // stacking context that would trap this toolbar (and its submenus) behind any
+        // overlapping element, making the buttons unclickable. A selected container
+        // deliberately does NOT pop to the top (f475478) so its children stay
+        // hit-testable, so we cannot lift the container body. Instead portal the toolbar
+        // into the canvas transform layer (the element wrapper's parent) as a high-z
+        // sibling of every element wrapper: it escapes the negative stacking context and
+        // paints above all elements, yet still tracks pan/zoom because it lives inside the
+        // same transformed layer. Non-container elements pop to z 2e9 when selected, so
+        // their in-place toolbar is already on top, so leave that path untouched.
+        if (element.type === "container" && typeof document !== "undefined") {
+          const layer = elementRef.current?.parentElement;
+          if (layer) {
+            return createPortal(
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: element.x,
+                  top: element.y,
+                  width: element.width,
+                  height: (element as ContainerElement).collapsed ? 28 : element.height,
+                  zIndex: 2000000001,
+                  transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined,
+                }}
+              >
+                {toolbar}
+              </div>,
+              layer,
+            );
+          }
+        }
+
+        return toolbar;
+      })()}
       {/* Hypercube tag indicators */}
       {element.hypercubeTags && element.hypercubeTags.length > 0 && (
         <div
