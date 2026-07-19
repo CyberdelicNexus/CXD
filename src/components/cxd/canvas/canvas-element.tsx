@@ -8674,6 +8674,8 @@ function LinkCard({
                 rel="noopener noreferrer"
                 className="text-muted-foreground hover:text-primary transition-colors"
                 data-no-drag
+                draggable={false}
+                onDragStart={(e) => e.preventDefault()}
                 title="Open in new tab"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -8706,6 +8708,8 @@ function LinkCard({
                 rel="noopener noreferrer"
                 className="text-muted-foreground hover:text-primary transition-colors"
                 data-no-drag
+                draggable={false}
+                onDragStart={(e) => e.preventDefault()}
                 title="Open in new tab"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -8741,6 +8745,8 @@ function LinkCard({
                 rel="noopener noreferrer"
                 className="text-muted-foreground hover:text-primary transition-colors"
                 data-no-drag
+                draggable={false}
+                onDragStart={(e) => e.preventDefault()}
                 title="Open in new tab"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -8772,6 +8778,8 @@ function LinkCard({
             rel="noopener noreferrer"
             className="text-xs text-primary hover:underline flex items-center gap-1"
             data-no-drag
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
           >
             Open in new tab <ExternalLink className="w-3 h-3" />
           </a>
@@ -8812,6 +8820,8 @@ function LinkCard({
               rel="noopener noreferrer"
               className="text-xs text-primary hover:underline flex items-center gap-1"
               data-no-drag
+              draggable={false}
+              onDragStart={(e) => e.preventDefault()}
               onClick={(e) => e.stopPropagation()}
             >
               <ExternalLink className="w-3 h-3" /> Open
@@ -8922,6 +8932,8 @@ function LinkCard({
         rel="noopener noreferrer"
         className="text-sm font-semibold text-foreground hover:text-primary transition-colors line-clamp-2 leading-snug"
         data-no-drag
+        draggable={false}
+        onDragStart={(e) => e.preventDefault()}
         onClick={(e) => e.stopPropagation()}
       >
         {linkTitle}
@@ -8944,6 +8956,8 @@ function LinkCard({
         rel="noopener noreferrer"
         className="flex-shrink-0 w-6 h-6 rounded hover:bg-primary/10 flex items-center justify-center transition-colors"
         data-no-drag
+        draggable={false}
+        onDragStart={(e) => e.preventDefault()}
         title="Open in new tab"
         onClick={(e) => e.stopPropagation()}
       >
@@ -9055,6 +9069,8 @@ function LinkCard({
           rel="noopener noreferrer"
           className="text-muted-foreground hover:text-primary transition-colors flex-shrink-0"
           data-no-drag
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
           title="Open in new tab"
         >
           <ExternalLink className="w-3.5 h-3.5" />
@@ -9074,6 +9090,8 @@ function LinkCard({
               rel="noopener noreferrer"
               className="text-xs text-primary hover:underline flex items-center gap-1"
               data-no-drag
+              draggable={false}
+              onDragStart={(e) => e.preventDefault()}
             >
               Open in new tab <ExternalLink className="w-3 h-3" />
             </a>
