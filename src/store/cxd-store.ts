@@ -49,7 +49,7 @@ import {
   yjsUpdateStageField, yjsAddExperienceFlowStage, yjsRemoveExperienceFlowStage,
   yjsMoveExperienceFlowStage, yjsSetExperienceFlowDescription,
   yjsDeleteElementField, yjsReorderRealityPlanes, yjsReorderExperienceFlowStage,
-  yjsToggleExperienceFlowStageRealityPlane,
+  yjsToggleExperienceFlowStageRealityPlane, wouldCreateContainerCycle,
 } from '@/lib/yjs/yjs-store-actions';
 import { createCanvasUndoManager, createDesignUndoManager } from '@/lib/yjs/undo-manager';
 import { framingToCanvas, framingInsertionOrigin, elementsBoundingBox } from '@/lib/framing-to-canvas';
@@ -2063,6 +2063,13 @@ export const useCXDStore = create<CXDState>()(
       addNodeToContainer: (nodeId, containerId) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
+
+        // Cycle safety (central chokepoint): never nest a container into itself or one
+        // of its own descendants — that would make the parent a descendant of its child,
+        // ballooning the bounding box. Covers every attach path since they all write
+        // containerId through here.
+        const els = currentProject.canvasLayout?.elements || [];
+        if (wouldCreateContainerCycle(nodeId, containerId, els)) return;
 
         const { yDoc } = get();
         if (yDoc) {

@@ -37,6 +37,7 @@ import { useCollaborationContext } from "@/contexts/collaboration-context";
 import { CollaboratorCursors } from "@/components/collaboration";
 import { useCanvasSettings } from "@/hooks/use-canvas-settings";
 import { useCanvasPermissions } from "@/hooks/use-canvas-permissions";
+import { wouldCreateContainerCycle } from '@/lib/yjs/yjs-store-actions';
 import { getGradient, GRADIENT_ORDER, type GradientName } from './canvas/connector-gradients';
 import { ConnectorRadialMenu } from './canvas/connector-radial-menu';
 import { CommentPin } from './canvas/comment-pin';
@@ -546,6 +547,11 @@ export function CXDCanvas() {
 
   // Sync node-container attachment/detachment
   const syncAddNodeToContainer = useCallback((nodeId: string, containerId: string) => {
+    // Cycle safety: bail (no store write, no peer broadcast) if attaching nodeId into
+    // containerId would make a container a descendant of its own subtree. Read live
+    // elements so the check reflects any in-flight re-parenting/resize from this drop.
+    const els = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+    if (wouldCreateContainerCycle(nodeId, containerId, els)) return;
     addNodeToContainer(nodeId, containerId);
     broadcastUpdate({ type: 'element_update', elementId: nodeId, changes: { containerId } });
   }, [addNodeToContainer, broadcastUpdate]);
@@ -3016,13 +3022,26 @@ export function CXDCanvas() {
   // Global keyboard shortcut system
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't run shortcuts while editing text or in special editing modes
+      // Don't run shortcuts while editing text or in special editing modes. Check BOTH
+      // the event target and the actually-focused element, and use the boolean
+      // `isContentEditable` (true even when the caret sits in a child node whose own
+      // contentEditable attribute is "inherit"/"plaintext-only") so a shape's text
+      // editor — contentEditable OR the shape/TextElement textarea — makes every canvas
+      // shortcut, Delete/Backspace included, stand down and let native text deletion
+      // happen. Deleting the selected element is only reached when NO text editor is
+      // focused (shape selected but not in text-edit mode).
       const target = e.target as HTMLElement;
-      const isEditingText =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.contentEditable === "true" ||
-        target.classList.contains("resize-none"); // TextElement textarea
+      const activeEl =
+        typeof document !== "undefined"
+          ? (document.activeElement as HTMLElement | null)
+          : null;
+      const isTextEditorNode = (node: HTMLElement | null): boolean =>
+        !!node &&
+        (node.tagName === "INPUT" ||
+          node.tagName === "TEXTAREA" ||
+          node.isContentEditable ||
+          node.classList.contains("resize-none")); // shape / TextElement textarea
+      const isEditingText = isTextEditorNode(target) || isTextEditorNode(activeEl);
 
       // ESCAPE - Always cancels current mode/closes menus/deselects elements
       // BUT don't interfere with text editing - let text component handle it

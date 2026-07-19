@@ -15,6 +15,33 @@ import { setYText, createYText } from './y-text-helpers';
 import { v4 as uuidv4 } from 'uuid';
 import type { RealityPlaneCode as RPCode } from '@/types/cxd-schema';
 
+// ─── Container cycle safety ──────────────────────────────────────────────────
+
+// Central guard against containerId cycles. Returns true when attaching `elementId`
+// into `targetContainerId` would make a container a descendant of its own subtree —
+// i.e. the target IS the element, or `elementId` already appears somewhere in the
+// target's ancestor chain (so the target is nested under the element). Walks the
+// TARGET's ancestor chain via `containerId`, independent of geometry, so it catches
+// every self-nest path (drag-end auto-attach, drop target, grow-to-fit origin shifts,
+// findContainerAtPoint attach). Never assign a container's containerId to a target for
+// which this returns true. `seen` also protects against a pre-existing malformed cycle.
+export function wouldCreateContainerCycle(
+  elementId: string,
+  targetContainerId: string,
+  elements: CanvasElement[],
+): boolean {
+  if (!elementId || !targetContainerId) return false;
+  const byId = new Map(elements.map((el) => [el.id, el] as const));
+  let cursor: string | undefined = targetContainerId;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === elementId) return true;
+    seen.add(cursor);
+    cursor = byId.get(cursor)?.containerId;
+  }
+  return false;
+}
+
 // ─── Canvas Elements ─────────────────────────────────────────────────────────
 
 export function yjsAddElement(doc: Y.Doc, element: CanvasElement): void {
