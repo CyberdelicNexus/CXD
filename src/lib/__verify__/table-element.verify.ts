@@ -3,9 +3,11 @@
  * Run: npx tsx src/lib/__verify__/table-element.verify.ts
  *
  * Asserts: a TableElement with per-cell text + formatting, rowColors, colColors,
- * colWidths, rowHeights, tableBg, borderColor and headerRow survives
- * canvasElementToYMap → yMapToCanvasElement intact (2D cells grid, colors,
- * bold/italic/align, per-track sizes).
+ * rowGradient, colGradient, tableGradient, colWidths, rowHeights, tableBg,
+ * borderColor and headerRow survives canvasElementToYMap → yMapToCanvasElement
+ * intact (2D cells grid, colors, bold/italic/align, per-track sizes). Also checks
+ * that a column reorder moves the cells grid and every per-track array in lockstep
+ * and still round-trips.
  */
 import * as Y from 'yjs';
 import { canvasElementToYMap, yMapToCanvasElement } from '../yjs/element-serializers';
@@ -37,6 +39,7 @@ const table: TableElement = {
   colWidths: [120, 90, 150],
   rowHeights: [60, 90],
   tableBg: 'rgba(20,16,31,0.72)',
+  tableGradient: '#4B1B6B',           // one continuous corner-to-corner table gradient (base color)
   borderColor: 'rgba(139,92,246,0.35)',
   lineColor: '#8B5CF6',
   lineWidth: 2,
@@ -71,10 +74,36 @@ check(round.colWidths?.[0] === 120 && round.colWidths?.[1] === 90 && round.colWi
 check(Array.isArray(round.rowHeights) && round.rowHeights?.length === 2, 'rowHeights is a length-2 array');
 check(round.rowHeights?.[0] === 60 && round.rowHeights?.[1] === 90, 'rowHeights values preserved');
 check(round.tableBg === 'rgba(20,16,31,0.72)', 'tableBg preserved');
+check(round.tableGradient === '#4B1B6B', 'tableGradient (continuous table gradient base) preserved');
 check(round.borderColor === 'rgba(139,92,246,0.35)', 'borderColor preserved');
 check(round.lineColor === '#8B5CF6', 'lineColor preserved');
 check(round.lineWidth === 2, 'lineWidth preserved');
 check(round.headerRow === true, 'headerRow preserved');
+
+// ─── Column reorder: cells + per-column arrays move in lockstep ──────────────
+// Mirrors tblMoveItem in canvas-element.tsx (remove at `from`, insert at `to`).
+function moveItem<T>(arr: T[], from: number, to: number): T[] {
+  const a = [...arr];
+  const [x] = a.splice(from, 1);
+  a.splice(Math.max(0, Math.min(a.length, to)), 0, x);
+  return a;
+}
+// Move column 2 → 0. cells (each row), colColors, colGradient, colWidths reorder together.
+const from = 2, to = 0;
+const reordered: TableElement = {
+  ...table,
+  cells: round.cells.map((r2) => moveItem(r2, from, to)),
+  colColors: moveItem([...(round.colColors as (string | null)[])], from, to),
+  colGradient: moveItem([...(round.colGradient as (string | null)[])], from, to),
+  colWidths: moveItem([...(round.colWidths as number[])], from, to),
+};
+doc.transact(() => { elements.set('tbl-reordered', canvasElementToYMap(reordered)); });
+const rr = yMapToCanvasElement(elements.get('tbl-reordered') as Y.Map<unknown>) as TableElement;
+check(rr.colWidths?.[0] === 150, 'reorder: moved column width lands at new index 0');
+check(rr.colColors?.[0] === '#3B1842', 'reorder: moved column color moved in lockstep');
+check(rr.colGradient?.[0] === null, 'reorder: moved column gradient (null) moved in lockstep');
+check(rr.cells[0][0].text === 'last' || rr.cells[1][0].text === 'last', 'reorder: cell content followed its column');
+check(rr.cols === 3 && rr.cells[0].length === 3, 'reorder: grid width unchanged after reorder');
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`);

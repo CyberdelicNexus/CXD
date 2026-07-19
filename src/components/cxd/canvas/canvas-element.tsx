@@ -3571,12 +3571,14 @@ function TableCellEditor({
   value,
   onCommit,
   onFocusCell,
+  onEditingChange,
   disabled,
   style,
 }: {
   value: string;
   onCommit: (text: string) => void;
   onFocusCell: () => void;
+  onEditingChange?: (editing: boolean) => void;
   disabled: boolean;
   style: React.CSSProperties;
 }) {
@@ -3600,10 +3602,12 @@ function TableCellEditor({
       style={style}
       onFocus={() => {
         focused.current = true;
+        onEditingChange?.(true);
         onFocusCell();
       }}
       onBlur={() => {
         focused.current = false;
+        onEditingChange?.(false);
         const text = ref.current?.textContent ?? "";
         if (text !== value) onCommit(text);
       }}
@@ -3634,27 +3638,40 @@ const TABLE_FONT_SIZES: { key: "sm" | "md" | "lg"; label: string }[] = [
   { key: "lg", label: "Large" },
 ];
 
-// Layout chrome: slim top+left L move-frame and inset right/bottom add buttons.
-const TBL_GRIP = 10; // top+left move-frame band (also its ~10px inset). Covers the
-//                      top/left EDGE so a grab there moves the table instead of
-//                      starting a connector; the visible frame line sits at its inner edge.
-const TBL_PLUS = 18; // size of a right/bottom "+" add button
-const TBL_EDGE = 14; // clear gap kept at the very right/bottom edge for the floating
-//                      connector port, so the "+" buttons never collide with it
-const TBL_RESERVE = TBL_PLUS + TBL_EDGE; // total right/bottom content inset
+// Layout chrome. The table content sits inside the element with a small margin on
+// every side: top/left host the row/column reorder handles and give the selection
+// frame room; right/bottom additionally reserve space so the "+" add buttons sit
+// FULLY OUTSIDE the grid (never over a cell, never over the bottom/right border).
+const TBL_FRAME = 10;   // selection frame band width (inner-glow, item 1) + drag affordance
+const TBL_PAD = 14;     // top/left content margin (reorder handles + frame breathing room)
+const TBL_PLUS = 18;    // size of a right/bottom "+" add button
+const TBL_PLUS_GAP = 6; // clear gap between the table border and the "+" button
+const TBL_RIGHT = TBL_PLUS + TBL_PLUS_GAP + 6; // right/bottom content inset (button lives here, outside the grid)
 const TBL_PLUS_LEN = 44; // length of a centered "+" button along its edge
 const TBL_MIN_COL = 48; // px floor a column can't be dragged below
 const TBL_MIN_ROW = 28; // px floor a row can't be dragged below
 const TBL_MAX_TRACKS = 50; // sane ceiling for drag-to-add rows/cols
 
-// Ghost-purple move-frame fills — a whisper-thin violet gradient (much subtler
-// than the grid lines) that fades toward the outer edge; a crisp inner-edge line
-// (added via boxShadow at render) makes it read as a slim frame just inside the
-// table edge rather than a heavy bar.
-const TBL_GRIP_BG_TOP =
-  "linear-gradient(180deg, rgba(139,92,246,0) 0%, rgba(139,92,246,0.10) 45%, rgba(167,139,250,0.30) 100%)";
-const TBL_GRIP_BG_LEFT =
-  "linear-gradient(90deg, rgba(139,92,246,0) 0%, rgba(139,92,246,0.10) 45%, rgba(167,139,250,0.30) 100%)";
+// Ghost-purple selection frame — a soft inset-shadow-style inner glow, ~10px wide,
+// opaque violet at the outer edge fading inward to transparency. Rendered as four
+// edge bands (top/right/bottom/left) so the table's interior stays clickable; each
+// band is the drag-to-move affordance (pointer-events-auto + cursor-move, bubbling
+// to the element body-drag path).
+const TBL_FRAME_V = "rgba(167,139,250,0.55)";
+const TBL_FRAME_TOP = `linear-gradient(180deg, ${TBL_FRAME_V} 0%, rgba(167,139,250,0) 100%)`;
+const TBL_FRAME_BOTTOM = `linear-gradient(0deg, ${TBL_FRAME_V} 0%, rgba(167,139,250,0) 100%)`;
+const TBL_FRAME_LEFT = `linear-gradient(90deg, ${TBL_FRAME_V} 0%, rgba(167,139,250,0) 100%)`;
+const TBL_FRAME_RIGHT = `linear-gradient(270deg, ${TBL_FRAME_V} 0%, rgba(167,139,250,0) 100%)`;
+
+// Reorder one track (column or row) and its per-track styling in lockstep: removes
+// the item at `from` and re-inserts it at `to`. Used by the row/column drag-reorder.
+function tblMoveItem<T>(arr: T[], from: number, to: number): T[] {
+  const a = [...arr];
+  if (from < 0 || from >= a.length) return a;
+  const [x] = a.splice(from, 1);
+  a.splice(Math.max(0, Math.min(a.length, to)), 0, x);
+  return a;
+}
 
 // Transparent-swatch checkerboard (shared with the rest of the color UI).
 const TBL_CHECKER =
@@ -3707,20 +3724,24 @@ function tblMeasureText(text: string, font: string): number {
  * ref-stabilized by CanvasElementRenderer.
  *
  * Chrome:
- *  - thick top+left L-grip = drag-to-move zone. A brighter hatched violet marks it
- *    apart from the connector edges; when selected it captures the pointer above
- *    the floating connector port and bubbles to the element's body-drag path;
- *  - right/bottom "+" strips (inset from the very edge so they never collide with
- *    the connector port) = click to add one row/col, drag to add many (drag back
- *    removes just-added, never below the pre-drag count / 1×1). A live ghost
+ *  - a four-side ghost-purple selection frame (soft inner glow, shown only while
+ *    selected) is the drag-to-move zone: its edge bands capture the pointer above
+ *    the floating connector port and bubble to the element's body-drag path, with a
+ *    six-dot GripVertical marking the handle; the interior stays clickable;
+ *  - right/bottom "+" buttons sit FULLY OUTSIDE the grid (in the reserved margin
+ *    beyond the last col/row) = click to add one row/col, drag to add many (drag
+ *    back removes just-added, never below the pre-drag count / 1×1). A live ghost
  *    preview of the provisional rows/cols renders during the drag; the store is
  *    written once on pointer-up;
+ *  - reorder handles in the top/left margin drag a column/row to a new position;
+ *    the cells grid and all per-track styling move in lockstep, committed on drop;
  *  - draggable dividers between columns/rows set per-track sizes (colWidths /
  *    rowHeights, stored as px and normalized to the element size so element
  *    resize scales proportionally while divider drag sets individual tracks);
- *  - a left-side BACKGROUND menu (presets + transparent + wheel + solid/gradient)
- *    and a bottom formatting menu (text color white/black/wheel, bold/italic,
- *    align, header toggle).
+ *  - a left-side BACKGROUND menu (presets + transparent + wheel + solid/gradient;
+ *    a table-scope gradient is one continuous corner-to-corner gradient) and a
+ *    bottom formatting menu (text color white/black/wheel, bold/italic, align,
+ *    header toggle).
  */
 function TableCard({
   element,
@@ -3742,6 +3763,7 @@ function TableCard({
   const rowGradient = element.rowGradient;
   const colGradient = element.colGradient;
   const tableBg = element.tableBg;
+  const tableGradient = element.tableGradient;
   // Grid lines: lineColor/lineWidth are the current model; borderColor is the
   // legacy fallback. lineWidth 0 = no visible grid line.
   const lineColor = element.lineColor || element.borderColor || "rgba(139,92,246,0.28)";
@@ -3753,16 +3775,39 @@ function TableCard({
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
   const [scope, setScope] = useState<TableColorScope>("cell");
   const [bgGradient, setBgGradient] = useState(false);
+  const [editingCell, setEditingCell] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Live drag previews (local state only — the store is written once on pointer-up).
   const [dragCol, setDragCol] = useState<{ i: number; a: number; b: number } | null>(null);
   const [dragRow, setDragRow] = useState<{ i: number; a: number; b: number } | null>(null);
   const [pendingCount, setPendingCount] = useState<{ axis: "row" | "col"; n: number } | null>(null);
+  // Live reorder previews — { from, to } track index while dragging a move handle.
+  const [reorderCol, setReorderCol] = useState<{ from: number; to: number } | null>(null);
+  const [reorderRow, setReorderRow] = useState<{ from: number; to: number } | null>(null);
 
   // Clear the selected cell whenever the whole element is deselected.
   useEffect(() => {
     if (!isSelected) setSel(null);
   }, [isSelected]);
+
+  // Blur the active cell editor when the user clicks anywhere outside this table
+  // (mirrors the embed/outside-click idiom). Attached only while a cell is being
+  // edited and torn down when editing ends or the component unmounts, so no
+  // document listener ever leaks. Without this the caret keeps blinking (and
+  // typing keeps landing) in the cell after the element is deselected.
+  useEffect(() => {
+    if (!editingCell) return;
+    const onDown = (e: PointerEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      if (root.contains(e.target as Node)) return; // click inside the table — leave focus alone
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active.isContentEditable && root.contains(active)) active.blur();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [editingCell]);
 
   // Defensive grid: always a full rows×cols matrix even if the model is partial.
   const grid: TableCell[][] = useMemo(() => {
@@ -3777,10 +3822,11 @@ function TableCard({
     return g;
   }, [element.cells, rows, cols]);
 
-  // Content area = element minus the grip + plus strips (constant, so selecting
-  // never reflows the grid).
-  const availW = Math.max(1, element.width - TBL_GRIP - TBL_RESERVE);
-  const availH = Math.max(1, element.height - TBL_GRIP - TBL_RESERVE);
+  // Content area = element minus the surrounding margins (top/left = TBL_PAD;
+  // right/bottom also reserve TBL_RIGHT so the "+" buttons live outside the grid).
+  // Constant regardless of selection, so selecting never reflows the grid.
+  const availW = Math.max(1, element.width - TBL_PAD - TBL_RIGHT);
+  const availH = Math.max(1, element.height - TBL_PAD - TBL_RIGHT);
 
   // Column widths / row heights normalized to the content area. Ratio model:
   // element resize scales all tracks proportionally (no store write); divider
@@ -3896,6 +3942,19 @@ function TableCard({
     }
     if (rowColors && rowColors[r]) return { background: rowColors[r] || undefined };
     if (colColors && colColors[c]) return { background: colColors[c] || undefined };
+    // Table-scope gradient: ONE gradient across the whole table. Every cell paints
+    // the same table-wide image (sized to the full content W×H) and shifts it by
+    // the cell's top-left offset, so each cell shows its slice of the single
+    // corner-to-corner gradient — continuous, no per-cell repetition.
+    if (tableGradient) {
+      return {
+        backgroundImage: tblToGradient(tableGradient, 135),
+        backgroundRepeat: "no-repeat",
+        backgroundOrigin: "border-box",
+        backgroundSize: `${availW}px ${availH}px`,
+        backgroundPosition: `-${colLeft[c] || 0}px -${rowTop[r] || 0}px`,
+      };
+    }
     if (tableBg) return { background: tableBg };
     if (headerRow && r === 0) return { background: "rgba(139,92,246,0.22)" };
     return {};
@@ -3910,7 +3969,15 @@ function TableCard({
     const isTransparent = raw === "transparent";
     const color = isTransparent ? "transparent" : bgGradient ? tblToGradient(raw) : raw;
     if (scope === "table") {
-      onUpdate({ tableBg: color });
+      // Gradient at table scope becomes ONE continuous corner-to-corner gradient
+      // (stored as a base color in tableGradient; the renderer slices it per cell).
+      // A solid/transparent table fill clears tableGradient ('' reads as unset) so
+      // exactly one background source wins.
+      if (bgGradient && !isTransparent) {
+        onUpdate({ tableGradient: raw });
+      } else {
+        onUpdate({ tableBg: color, tableGradient: "" });
+      }
       return;
     }
     if (!sel) return;
@@ -4171,6 +4238,92 @@ function TableCard({
     document.addEventListener("mouseup", up);
   };
 
+  // ─── Row / column reorder (drag a move handle to a new position) ───────────
+  // The cells grid and every per-track array (colColors/colGradient/colWidths for
+  // a column; rowColors/rowGradient/rowHeights for a row) move in lockstep, so a
+  // track carries all its styling to the new index. Committed once on pointer-up.
+  const commitColReorder = useCallback(
+    (from: number, to: number) => {
+      if (from === to) return;
+      const next = cloneGrid().map((row) => tblMoveItem(row, from, to));
+      const updates: Partial<TableElement> = { cells: next };
+      if (colColors && colColors.length === cols) updates.colColors = tblMoveItem([...colColors], from, to);
+      if (colGradient && colGradient.length === cols) updates.colGradient = tblMoveItem([...colGradient], from, to);
+      if (element.colWidths && element.colWidths.length === cols)
+        updates.colWidths = tblMoveItem([...element.colWidths], from, to);
+      onUpdate(updates);
+      setSel((s) => (s ? { ...s, c: to } : s));
+    },
+    [cloneGrid, colColors, colGradient, element.colWidths, cols, onUpdate],
+  );
+
+  const commitRowReorder = useCallback(
+    (from: number, to: number) => {
+      if (from === to) return;
+      const next = tblMoveItem(cloneGrid(), from, to);
+      const updates: Partial<TableElement> = { cells: next };
+      if (rowColors && rowColors.length === rows) updates.rowColors = tblMoveItem([...rowColors], from, to);
+      if (rowGradient && rowGradient.length === rows) updates.rowGradient = tblMoveItem([...rowGradient], from, to);
+      if (element.rowHeights && element.rowHeights.length === rows)
+        updates.rowHeights = tblMoveItem([...element.rowHeights], from, to);
+      onUpdate(updates);
+      setSel((s) => (s ? { ...s, r: to } : s));
+    },
+    [cloneGrid, rowColors, rowGradient, element.rowHeights, rows, onUpdate],
+  );
+
+  const startColReorder = (c: number) => (e: React.MouseEvent) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    let to = c;
+    const move = (ev: MouseEvent) => {
+      const dx = (ev.clientX - startX) / zoom;
+      const center = (colLeft[c] || 0) + dispCol[c] / 2 + dx;
+      let t = cols - 1;
+      for (let i = 0; i < cols; i++) {
+        if (center < (colLeft[i] || 0) + dispCol[i]) { t = i; break; }
+      }
+      to = Math.max(0, Math.min(cols - 1, t));
+      setReorderCol({ from: c, to });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      setReorderCol(null);
+      commitColReorder(c, to);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
+
+  const startRowReorder = (r: number) => (e: React.MouseEvent) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    let to = r;
+    const move = (ev: MouseEvent) => {
+      const dy = (ev.clientY - startY) / zoom;
+      const center = (rowTop[r] || 0) + dispRow[r] / 2 + dy;
+      let t = rows - 1;
+      for (let i = 0; i < rows; i++) {
+        if (center < (rowTop[i] || 0) + dispRow[i]) { t = i; break; }
+      }
+      to = Math.max(0, Math.min(rows - 1, t));
+      setReorderRow({ from: r, to });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      setReorderRow(null);
+      commitRowReorder(r, to);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
+
   const selCell = sel ? grid[sel.r]?.[sel.c] : undefined;
 
   // Live drag-preview. Adding: how many provisional rows/cols the drag would append
@@ -4227,12 +4380,12 @@ function TableCard({
   );
 
   return (
-    <div className="relative w-full h-full">
-      {/* Content area (inset by the grip on top/left and the add strip + edge gap
-          on right/bottom) */}
+    <div ref={rootRef} className="relative w-full h-full">
+      {/* Content area (inset by TBL_PAD on top/left; right/bottom also reserve
+          TBL_RIGHT so the "+" buttons sit outside the grid) */}
       <div
         className="absolute overflow-hidden"
-        style={{ left: TBL_GRIP, top: TBL_GRIP, right: TBL_RESERVE, bottom: TBL_RESERVE }}
+        style={{ left: TBL_PAD, top: TBL_PAD, right: TBL_RIGHT, bottom: TBL_RIGHT }}
       >
         <table
           className="border-collapse"
@@ -4264,6 +4417,7 @@ function TableCard({
                         disabled={isReadOnly}
                         onCommit={(text) => updateCell(r, c, { text })}
                         onFocusCell={() => setSel({ r, c })}
+                        onEditingChange={setEditingCell}
                         style={{
                           color: cell.color || "#ffffff",
                           fontWeight: cell.bold ? 700 : isHeader ? 700 : 400,
@@ -4327,66 +4481,107 @@ function TableCard({
           })}
       </div>
 
-      {/* Move grip — a slim ghost-purple frame along the top + left edges. Much
-          subtler than the old bold bar: a whisper-thin violet gradient with a crisp
-          inner-edge line, so it reads as a frame just inside the table edge. It
-          still covers the top/left EDGE (from 0) so a grab there moves the table
-          instead of starting a connector. When the table is selected the frame is
-          an explicit move handle: pointer-events-auto + cursor-move, raised above
-          the floating connector port (z 9999) so a grab is never intercepted by
-          connector-start; its drag carries no handler and bubbles to the element's
-          body-drag path (reposition). When unselected it stays inert so connectors
-          can still be drawn from the top/left edges. */}
-      <div
-        className={cn(
-          "absolute top-0 left-0 right-0 rounded-t-lg",
-          isSelected ? "pointer-events-auto cursor-move" : "pointer-events-none",
-        )}
-        style={{
-          height: TBL_GRIP,
-          zIndex: isSelected ? 10000 : undefined,
-          background: TBL_GRIP_BG_TOP,
-          boxShadow: "inset 0 -1px 0 rgba(167,139,250,0.55)",
-        }}
-        title="Drag to move the table"
-      />
-      <div
-        className={cn(
-          "absolute top-0 left-0 bottom-0 rounded-l-lg",
-          isSelected ? "pointer-events-auto cursor-move" : "pointer-events-none",
-        )}
-        style={{
-          width: TBL_GRIP,
-          zIndex: isSelected ? 10000 : undefined,
-          background: TBL_GRIP_BG_LEFT,
-          boxShadow: "inset -1px 0 0 rgba(167,139,250,0.55)",
-        }}
-        title="Drag to move the table"
-      />
+      {/* Selection frame — four ghost-purple edge bands forming a soft inset glow
+          around ALL FOUR sides of the table, shown ONLY while selected (absent on
+          deselect). Each band is ~10px, opaque violet at the outer edge fading
+          inward to transparency. The bands are the drag-to-move affordance:
+          pointer-events-auto + cursor-move, raised above the floating connector
+          port (z 9999) so a grab is never intercepted; they carry no handler and
+          bubble to the element body-drag path (reposition). The interior between
+          the bands stays uncovered so cells remain clickable/editable. A six-dot
+          GripVertical on the top band marks the move handle. */}
       {isSelected && (
+        <>
+          {/* top */}
+          <div
+            className="absolute pointer-events-auto cursor-move"
+            style={{ left: TBL_PAD, top: TBL_PAD, width: availW, height: TBL_FRAME, zIndex: 10000, background: TBL_FRAME_TOP }}
+            title="Drag to move the table"
+          />
+          {/* bottom */}
+          <div
+            className="absolute pointer-events-auto cursor-move"
+            style={{ left: TBL_PAD, top: TBL_PAD + availH - TBL_FRAME, width: availW, height: TBL_FRAME, zIndex: 10000, background: TBL_FRAME_BOTTOM }}
+            title="Drag to move the table"
+          />
+          {/* left */}
+          <div
+            className="absolute pointer-events-auto cursor-move"
+            style={{ left: TBL_PAD, top: TBL_PAD, width: TBL_FRAME, height: availH, zIndex: 10000, background: TBL_FRAME_LEFT }}
+            title="Drag to move the table"
+          />
+          {/* right */}
+          <div
+            className="absolute pointer-events-auto cursor-move"
+            style={{ left: TBL_PAD + availW - TBL_FRAME, top: TBL_PAD, width: TBL_FRAME, height: availH, zIndex: 10000, background: TBL_FRAME_RIGHT }}
+            title="Drag to move the table"
+          />
+          {/* six-dot move handle on the top band */}
+          <div
+            className="absolute flex items-center justify-center pointer-events-none"
+            style={{ left: TBL_PAD, top: TBL_PAD - 1, width: availW, height: TBL_FRAME + 2, zIndex: 10001 }}
+          >
+            <GripVertical className="w-3 h-3 text-violet-100/80 rotate-90" />
+          </div>
+        </>
+      )}
+
+      {/* Row / column reorder handles — a slim bar in the outer margin above the
+          selected column (drag left/right to reorder columns) and left of the
+          selected row (drag up/down to reorder rows). Subtle until hovered. The
+          cells grid + all per-track styling move together, committed once on drop;
+          a violet insertion line shows the live target position during the drag. */}
+      {isSelected && !isReadOnly && sel && (
         <div
-          className="absolute top-0 left-0 flex items-center justify-center pointer-events-none"
-          style={{ width: TBL_GRIP, height: TBL_GRIP, zIndex: 10001 }}
+          data-no-drag
+          onMouseDown={startColReorder(sel.c)}
+          className="absolute z-30 flex items-center justify-center cursor-grab active:cursor-grabbing group/cr rounded"
+          style={{ left: TBL_PAD + (colLeft[sel.c] || 0), top: 1, width: dispCol[sel.c], height: TBL_PAD - 2 }}
+          title="Drag to reorder column"
         >
-          <GripVertical className="w-2.5 h-2.5 text-violet-200/70" />
+          <div className="h-1.5 w-8 max-w-[80%] rounded-full bg-violet-400/40 group-hover/cr:bg-violet-400/80 transition-colors" />
         </div>
+      )}
+      {isSelected && !isReadOnly && sel && (
+        <div
+          data-no-drag
+          onMouseDown={startRowReorder(sel.r)}
+          className="absolute z-30 flex items-center justify-center cursor-grab active:cursor-grabbing group/rr rounded"
+          style={{ left: 1, top: TBL_PAD + (rowTop[sel.r] || 0), width: TBL_PAD - 2, height: dispRow[sel.r] }}
+          title="Drag to reorder row"
+        >
+          <div className="w-1.5 h-8 max-h-[80%] rounded-full bg-violet-400/40 group-hover/rr:bg-violet-400/80 transition-colors" />
+        </div>
+      )}
+      {/* Live insertion indicators during a reorder drag */}
+      {reorderCol && (
+        <div
+          className="absolute pointer-events-none z-40"
+          style={{ left: TBL_PAD + (colLeft[reorderCol.to] || 0) - 1, top: TBL_PAD, width: 2, height: availH, background: "rgba(167,139,250,0.95)" }}
+        />
+      )}
+      {reorderRow && (
+        <div
+          className="absolute pointer-events-none z-40"
+          style={{ left: TBL_PAD, top: TBL_PAD + (rowTop[reorderRow.to] || 0) - 1, width: availW, height: 2, background: "rgba(167,139,250,0.95)" }}
+        />
       )}
 
       {/* Right "+" — click adds a column, drag to add/remove more. A compact pill
-          centered on the right edge (not a full-height strip): inset from the very
-          edge by TBL_EDGE for the floating connector port, and kept clear of the
-          corners so it sits within the table's own affordance zone and never
-          visually collides with adjacent canvas elements. */}
+          sitting FULLY OUTSIDE the grid, in the right margin beyond the last column
+          (TBL_PLUS_GAP past the table's right border) and centered on the table's
+          height. It never covers a cell, and the table's right border stays fully
+          drawn. */}
       {isSelected && !isReadOnly && (
         <button
           data-no-drag
           onMouseDown={startColPlus}
           className="absolute flex items-center justify-center text-violet-50 bg-violet-500/25 hover:bg-violet-500/45 ring-1 ring-inset ring-violet-300/30 shadow-sm transition-colors cursor-ew-resize rounded-full"
           style={{
-            right: TBL_EDGE,
+            right: TBL_RIGHT - TBL_PLUS_GAP - TBL_PLUS,
             width: TBL_PLUS,
             height: TBL_PLUS_LEN,
-            top: "50%",
+            top: TBL_PAD + availH / 2,
             transform: "translateY(-50%)",
           }}
           title="Click to add a column · drag out to add, drag in to remove"
@@ -4394,18 +4589,19 @@ function TableCard({
           <Plus className="w-4 h-4" />
         </button>
       )}
-      {/* Bottom "+" — click adds a row, drag to add/remove more. Compact pill
-          centered on the bottom edge, same breathing room as the right one. */}
+      {/* Bottom "+" — click adds a row, drag to add/remove more. Compact pill fully
+          OUTSIDE the grid, in the bottom margin beyond the last row and centered on
+          the table's width. Never covers a cell; the bottom border stays fully drawn. */}
       {isSelected && !isReadOnly && (
         <button
           data-no-drag
           onMouseDown={startRowPlus}
           className="absolute flex items-center justify-center text-violet-50 bg-violet-500/25 hover:bg-violet-500/45 ring-1 ring-inset ring-violet-300/30 shadow-sm transition-colors cursor-ns-resize rounded-full"
           style={{
-            bottom: TBL_EDGE,
+            bottom: TBL_RIGHT - TBL_PLUS_GAP - TBL_PLUS,
             height: TBL_PLUS,
             width: TBL_PLUS_LEN,
-            left: "50%",
+            left: TBL_PAD + availW / 2,
             transform: "translateX(-50%)",
           }}
           title="Click to add a row · drag out to add, drag in to remove"
@@ -4425,8 +4621,8 @@ function TableCard({
             key={`pcol${i}`}
             className="absolute pointer-events-none z-20"
             style={{
-              left: TBL_GRIP + availW + i * previewColW,
-              top: TBL_GRIP,
+              left: TBL_PAD + availW + i * previewColW,
+              top: TBL_PAD,
               width: previewColW,
               height: availH,
             }}
@@ -4449,8 +4645,8 @@ function TableCard({
             key={`prow${i}`}
             className="absolute pointer-events-none z-20 flex"
             style={{
-              left: TBL_GRIP,
-              top: TBL_GRIP + availH + i * previewRowH,
+              left: TBL_PAD,
+              top: TBL_PAD + availH + i * previewRowH,
               width: availW,
               height: previewRowH,
             }}
@@ -4476,8 +4672,8 @@ function TableCard({
         <div
           className="absolute pointer-events-none z-20"
           style={{
-            left: TBL_GRIP + removeColLeft,
-            top: TBL_GRIP,
+            left: TBL_PAD + removeColLeft,
+            top: TBL_PAD,
             width: Math.max(0, availW - removeColLeft),
             height: availH,
             border: "1px dashed rgba(248,113,113,0.9)",
@@ -4490,8 +4686,8 @@ function TableCard({
         <div
           className="absolute pointer-events-none z-20"
           style={{
-            left: TBL_GRIP,
-            top: TBL_GRIP + removeRowTop,
+            left: TBL_PAD,
+            top: TBL_PAD + removeRowTop,
             width: availW,
             height: Math.max(0, availH - removeRowTop),
             border: "1px dashed rgba(248,113,113,0.9)",

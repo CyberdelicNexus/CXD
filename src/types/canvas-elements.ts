@@ -386,6 +386,13 @@ export interface TableElement extends CanvasElementBase {
   colWidths?: number[];          // per-column widths (px, treated as ratios normalized to element width)
   rowHeights?: number[];         // per-row heights (px, treated as ratios normalized to element height)
   tableBg?: string;              // container/table background (default fallback)
+  // Table-scope gradient: ONE continuous gradient spanning the whole table from
+  // corner to corner. Stored as a BASE color; the renderer lays a single
+  // table-wide gradient and gives each cell its slice (backgroundSize = full
+  // table W×H, per-cell backgroundPosition from the colLeft/rowTop offsets), so
+  // it reads smooth and continuous rather than repeating per cell. Takes
+  // precedence over tableBg; cleared to '' when a solid table fill is chosen.
+  tableGradient?: string;
   borderColor?: string;          // legacy grid line color (superseded by lineColor)
   lineColor?: string;            // grid line color (preset via color wheel)
   lineWidth?: number;            // grid line width in px (0 = none). Presets: thin 1 / medium 2 / thick 4
