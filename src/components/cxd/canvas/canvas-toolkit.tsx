@@ -205,8 +205,15 @@ export function CanvasToolkit({
   const [shapeCreationDrag, setShapeCreationDrag] = useState<{
     startX: number; startY: number; currentX: number; currentY: number; tool: CanvasElementType;
   } | null>(null);
+  // Render-INDEPENDENT source of truth for the live draw gesture that the window
+  // mousemove/mouseup handlers read. It is written synchronously inside those handlers
+  // (below), NOT mirrored from state on every render. During a container draw the
+  // capture-highlight re-renders the (expensive) canvas parent on every pointer-move,
+  // which can delay this toolkit's own render commit, so a state-mirrored ref could
+  // still read null/stale at mouseup and the create-on-release would silently bail
+  // (drawing a container then nothing appears). setState below is kept only to drive
+  // the dashed preview rectangle.
   const shapeCreationDragRef = useRef(shapeCreationDrag);
-  shapeCreationDragRef.current = shapeCreationDrag;
 
   // Active tool ref so mousemove/mouseup listeners always see latest value
   const activeToolRef = useRef(activeTool);
@@ -261,17 +268,21 @@ export function CanvasToolkit({
       e.stopPropagation();
 
       const { x, y } = toCanvasCoords(e.clientX, e.clientY);
-      setShapeCreationDrag({
+      const startDrag = {
         startX: x, startY: y, currentX: x, currentY: y,
         tool: activeToolRef.current!,
-      });
+      };
+      shapeCreationDragRef.current = startDrag; // sync now so mouseup can never miss it
+      setShapeCreationDrag(startDrag);
     };
 
     const handleMouseMove = (e: MouseEvent) => {
       const drag = shapeCreationDragRef.current;
       if (!drag) return;
       const { x, y } = toCanvasCoords(e.clientX, e.clientY);
-      setShapeCreationDrag({ ...drag, currentX: x, currentY: y });
+      const moved = { ...drag, currentX: x, currentY: y };
+      shapeCreationDragRef.current = moved;
+      setShapeCreationDrag(moved);
     };
 
     const handleMouseUp = (e: MouseEvent) => {
@@ -297,6 +308,7 @@ export function CanvasToolkit({
         onPlaceElement(drag.tool, { x: drag.startX, y: drag.startY }, options);
       }
 
+      shapeCreationDragRef.current = null;
       setShapeCreationDrag(null);
       setActiveTool(null);
       setShowCardTypeMenu(false);
