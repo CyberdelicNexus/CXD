@@ -2117,11 +2117,22 @@ export function CXDCanvas() {
   useEffect(() => {
     if (activeTool !== 'container' || !containerRef.current) return;
 
+    // Clear the highlight without churning a NEW empty Set on every call —
+    // a fresh Set() is a new reference and would re-render/re-run this effect,
+    // and with store-derived values previously in the deps that produced an
+    // infinite update loop the moment the container tool was selected.
+    const clearCapture = () =>
+      setContainerCaptureIds((prev) => (prev.size === 0 ? prev : new Set()));
+
+    // Read viewport + elements FRESH from the store inside the handlers rather
+    // than closing over the reactive (unstable-reference) values, so this effect
+    // depends only on activeTool and never re-runs mid-draw.
     const toWorld = (clientX: number, clientY: number) => {
       const rect = containerRef.current!.getBoundingClientRect();
+      const { canvasPosition: pos, canvasZoom: zoom } = useCXDStore.getState();
       return {
-        x: (clientX - rect.left - canvasPosition.x) / canvasZoom,
-        y: (clientY - rect.top - canvasPosition.y) / canvasZoom,
+        x: (clientX - rect.left - pos.x) / zoom,
+        y: (clientY - rect.top - pos.y) / zoom,
       };
     };
 
@@ -2147,13 +2158,20 @@ export function CXDCanvas() {
         width: Math.abs(cur.x - start.x),
         height: Math.abs(cur.y - start.y),
       };
-      setContainerCaptureIds(new Set(elementsEnclosedByRect(rect, canvasElements)));
+      const elements = useCXDStore.getState().getCanvasElements().filter((el) => !el.inInbox);
+      const ids = elementsEnclosedByRect(rect, elements);
+      // Only replace the Set when the membership actually changed, so a
+      // pointer-move that scoops in nothing new does not re-render.
+      setContainerCaptureIds((prev) => {
+        if (prev.size === ids.length && ids.every((id) => prev.has(id))) return prev;
+        return new Set(ids);
+      });
     };
 
     const onUp = () => {
       if (!containerDrawStartRef.current) return;
       containerDrawStartRef.current = null;
-      setContainerCaptureIds(new Set());
+      clearCapture();
     };
 
     // Capture phase on window so this observes the press before the toolkit's own
@@ -2166,9 +2184,9 @@ export function CXDCanvas() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       containerDrawStartRef.current = null;
-      setContainerCaptureIds(new Set());
+      clearCapture();
     };
-  }, [activeTool, canvasPosition, canvasZoom, canvasElements]);
+  }, [activeTool]);
 
   // Handle element drag start
   const handleElementDragStart = useCallback(
