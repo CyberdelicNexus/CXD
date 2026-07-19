@@ -42,6 +42,7 @@ import { saveProject, insertProject, deleteProjectFromDb, updateProjectShareToke
 import type * as Y from 'yjs';
 import {
   yjsAddElement, yjsUpdateElement, yjsRemoveElement, yjsDuplicateElement, yjsBatchUpdatePositions,
+  yjsBatchUpdateContainerIds,
   yjsAddEdge, yjsUpdateEdge, yjsRemoveEdge,
   yjsMoveContainerWithChildren, yjsCreateGroup, yjsUngroup,
   yjsSetDesignTextField, yjsSetDesignNumberField, yjsSetMetaField,
@@ -272,6 +273,7 @@ interface CXDState {
 
   // Actions - Container Management
   addNodeToContainer: (nodeId: string, containerId: string) => void;
+  attachNodesToContainer: (nodeIds: string[], containerId: string) => void;
   removeNodeFromContainer: (nodeId: string) => void;
   moveContainerWithChildren: (containerId: string, deltaX: number, deltaY: number) => void;
 
@@ -2091,6 +2093,42 @@ export const useCXDStore = create<CXDState>()(
                 : p
             ),
           }));
+        }
+      },
+
+      // Attach MANY nodes to one container in a single freeze-proof commit. Used by
+      // the "draw a container around existing elements to capture them" gesture on
+      // release: each node is cycle-checked (never nest the new container into its own
+      // subtree), Zustand is updated in one set(), and Yjs is written in one
+      // 'drag-commit' transaction the bridge skips re-flushing (already applied here).
+      attachNodesToContainer: (nodeIds, containerId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+        const els = currentProject.canvasLayout?.elements || [];
+        const valid = nodeIds.filter(
+          (id) => id !== containerId && !wouldCreateContainerCycle(id, containerId, els),
+        );
+        if (valid.length === 0) return;
+        const validSet = new Set(valid);
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  elements: (p.canvasLayout?.elements || []).map((el) =>
+                    validSet.has(el.id) ? { ...el, containerId } : el,
+                  ),
+                },
+                updatedAt: new Date().toISOString(),
+              }
+              : p,
+          ),
+        }));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsBatchUpdateContainerIds(yDoc, valid.map((id) => ({ id, containerId })));
         }
       },
 

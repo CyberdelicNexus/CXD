@@ -181,6 +181,30 @@ function findContainerAtPoint(
   return best;
 }
 
+// Ids of elements whose CENTER falls inside `rect` (world coords). "Center inside"
+// is the same "mostly inside" rule used by container hit-testing elsewhere, so a
+// container drawn around loose elements captures exactly what visibly sits within it.
+// `excludeId` skips the just-created container itself.
+function elementsEnclosedByRect(
+  rect: { x: number; y: number; width: number; height: number },
+  elements: CanvasElement[],
+  excludeId?: string,
+): string[] {
+  const ids: string[] = [];
+  for (const el of elements) {
+    if (el.id === excludeId) continue;
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    if (
+      cx >= rect.x && cx <= rect.x + rect.width &&
+      cy >= rect.y && cy <= rect.y + rect.height
+    ) {
+      ids.push(el.id);
+    }
+  }
+  return ids;
+}
+
 // Canvas Context Menu Component
 function CanvasContextMenu({
   position,
@@ -424,6 +448,7 @@ export function CXDCanvas() {
     activeSurface,
     moveContainerWithChildren,
     addNodeToContainer,
+    attachNodesToContainer,
     removeNodeFromContainer,
     pushCanvasHistory,
     undo,
@@ -683,6 +708,13 @@ export function CXDCanvas() {
   const [dropTargetContainerId, setDropTargetContainerId] = useState<
     string | null
   >(null);
+
+  // Live "capture" preview while drawing a NEW container over existing elements: the
+  // ids of elements the current drawn rectangle encloses (updated per pointer-move,
+  // local state only). Cleared on release; the actual containerId writes happen once
+  // in handlePlaceElement. containerDrawStartRef holds the draw origin in world coords.
+  const [containerCaptureIds, setContainerCaptureIds] = useState<Set<string>>(new Set());
+  const containerDrawStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Experience block drag state
   const [draggingExperienceBlock, setDraggingExperienceBlock] = useState<{
@@ -1070,6 +1102,38 @@ export function CXDCanvas() {
     },
     [syncUpdateElement, syncAddNodeToContainer, syncRemoveNodeFromContainer],
   );
+
+  // While a line is being dragged, highlight the container its center currently sits in
+  // (same drop-target animation elements show) so the user previews where it will attach.
+  // Uses the exact center/hit-test as handleLineDragCommit, so the highlighted container
+  // is precisely the one the line will attach to on release. Only local React state is
+  // touched here — the per-frame line geometry write already happens via onUpdateLine.
+  const handleLineDragHover = useCallback((lineId: string | null) => {
+    if (!lineId) {
+      setDropTargetContainerId(null);
+      return;
+    }
+    const liveElements =
+      useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+    const line = liveElements.find((e) => e.id === lineId) as LineElement | undefined;
+    if (!line) {
+      setDropTargetContainerId(null);
+      return;
+    }
+    const pts = [line.start, line.end, line.bend].filter(Boolean) as {
+      x: number;
+      y: number;
+    }[];
+    if (pts.length < 2) return;
+    const minX = Math.min(...pts.map((p) => p.x));
+    const minY = Math.min(...pts.map((p) => p.y));
+    const maxX = Math.max(...pts.map((p) => p.x));
+    const maxY = Math.max(...pts.map((p) => p.y));
+    const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    const found =
+      findContainerAtPoint(center, liveElements, new Set([lineId]))?.id || null;
+    setDropTargetContainerId(found);
+  }, []);
 
   // Duplicate a line element (offset by 20px so it's visible)
   const handleDuplicateLine = useCallback(
@@ -2001,12 +2065,42 @@ export function CXDCanvas() {
           if (newElement.type === 'container') reindexContainerZ();
         }
       }
+
+      // Capture-on-draw: a NEW container DRAG-drawn (options carry width+height) so its
+      // bounds enclose existing elements adopts them as children (containerId set) in one
+      // commit. A plain click-place (default size, no drawn dims) never captures. Only the
+      // OUTERMOST enclosed items are re-parented — an element whose own parent is also
+      // enclosed stays with that parent (which is itself captured), preserving existing
+      // nesting and recursive move. attachNodesToContainer cycle-guards each write, so an
+      // ancestor container can never be pulled into its own descendant.
+      if (newElement.type === 'container' && options?.width != null && options?.height != null) {
+        const rect = { x: newElement.x, y: newElement.y, width: newElement.width, height: newElement.height };
+        const enclosed = elementsEnclosedByRect(rect, canvasElements, newElement.id);
+        if (enclosed.length > 0) {
+          const enclosedSet = new Set(enclosed);
+          const byId = new Map(canvasElements.map((el) => [el.id, el] as const));
+          const captureIds = enclosed.filter((id) => {
+            const parentId = byId.get(id)?.containerId;
+            return !(parentId && enclosedSet.has(parentId));
+          });
+          if (captureIds.length > 0) {
+            attachNodesToContainer(captureIds, newElement.id);
+            // Depth-based z for any captured child container(s) so they paint above the
+            // new parent.
+            if (captureIds.some((id) => byId.get(id)?.type === 'container')) reindexContainerZ();
+          }
+        }
+      }
+
+      // Select the freshly placed element (a captured-container draw selects the container).
+      setSelectedElementIds(new Set([newElement.id]));
     },
     [
       canvasElements,
       addCanvasElement,
       syncAddElement,
       syncAddNodeToContainer,
+      attachNodesToContainer,
       reindexContainerZ,
       createBoard,
       activeBoardId,
@@ -2014,6 +2108,67 @@ export function CXDCanvas() {
       canEdit,
     ],
   );
+
+  // Live capture-highlight while drawing a NEW container (item 2). Armed only when the
+  // container tool is active. The toolkit owns the actual draw-drag + creation; this
+  // mirrors its world-coordinate math purely to preview which existing elements the
+  // growing rectangle will scoop in, updated per pointer-move. Local highlight state
+  // only — no store writes. handlePlaceElement performs the real capture on release.
+  useEffect(() => {
+    if (activeTool !== 'container' || !containerRef.current) return;
+
+    const toWorld = (clientX: number, clientY: number) => {
+      const rect = containerRef.current!.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - canvasPosition.x) / canvasZoom,
+        y: (clientY - rect.top - canvasPosition.y) / canvasZoom,
+      };
+    };
+
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      const isCanvasSurface =
+        target.classList.contains('canvas-background') ||
+        target.classList.contains('dot-grid') ||
+        target === containerRef.current ||
+        !!target.closest('[data-node-id]');
+      if (!isCanvasSurface) return;
+      containerDrawStartRef.current = toWorld(e.clientX, e.clientY);
+    };
+
+    const onMove = (e: MouseEvent) => {
+      const start = containerDrawStartRef.current;
+      if (!start) return;
+      const cur = toWorld(e.clientX, e.clientY);
+      const rect = {
+        x: Math.min(start.x, cur.x),
+        y: Math.min(start.y, cur.y),
+        width: Math.abs(cur.x - start.x),
+        height: Math.abs(cur.y - start.y),
+      };
+      setContainerCaptureIds(new Set(elementsEnclosedByRect(rect, canvasElements)));
+    };
+
+    const onUp = () => {
+      if (!containerDrawStartRef.current) return;
+      containerDrawStartRef.current = null;
+      setContainerCaptureIds(new Set());
+    };
+
+    // Capture phase on window so this observes the press before the toolkit's own
+    // canvas-level handler (which stopsPropagation), without itself blocking it.
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      containerDrawStartRef.current = null;
+      setContainerCaptureIds(new Set());
+    };
+  }, [activeTool, canvasPosition, canvasZoom, canvasElements]);
 
   // Handle element drag start
   const handleElementDragStart = useCallback(
@@ -4817,6 +4972,39 @@ export function CXDCanvas() {
           />
         )}
       </div>
+      {/* Capture preview (item 2): while drawing a NEW container, ring + tint the
+          existing elements the current rectangle encloses (the ones that will be
+          adopted on release). Shares the canvas transform so rects align to elements;
+          pointer-events none so it never intercepts the ongoing draw. */}
+      {containerCaptureIds.size > 0 && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
+            transformOrigin: "0 0",
+            zIndex: 9990,
+          }}
+        >
+          {canvasElements
+            .filter((el) => containerCaptureIds.has(el.id))
+            .map((el) => (
+              <div
+                key={el.id}
+                className="absolute rounded-lg"
+                style={{
+                  left: el.x,
+                  top: el.y,
+                  width: el.width,
+                  height: el.height,
+                  boxShadow:
+                    "0 0 0 2px rgba(167,139,250,0.9), 0 0 18px rgba(167,139,250,0.45)",
+                  background: "rgba(167,139,250,0.14)",
+                  transition: "opacity 0.08s ease",
+                }}
+              />
+            ))}
+        </div>
+      )}
       {/* Line Layer - SVG overlay for all lines with proper state machine */}
       <LineLayer
         lines={
@@ -4875,6 +5063,7 @@ export function CXDCanvas() {
         onUpdateLine={(id, updates) => syncUpdateElement(id, updates)}
         onCreateLine={handleCreateLine}
         onLineDragCommit={handleLineDragCommit}
+        onLineDragHover={handleLineDragHover}
         onDeleteLine={(id) => syncRemoveElement(id)}
         onDuplicateLine={handleDuplicateLine}
         canvasPosition={canvasPosition}

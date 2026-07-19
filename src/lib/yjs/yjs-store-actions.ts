@@ -94,6 +94,30 @@ export function yjsBatchUpdatePositions(
   }, 'drag-commit');
 }
 
+/**
+ * Set (or clear) containerId on many elements in a single Yjs transaction.
+ * Origin 'drag-commit' so the bridge skips re-applying to Zustand (the caller
+ * already updated Zustand directly), while the transaction is still persisted and
+ * broadcast to peers. Used by the "draw a container around elements to capture
+ * them" path so the whole capture commits once on release, not per element.
+ */
+export function yjsBatchUpdateContainerIds(
+  doc: Y.Doc,
+  updates: Array<{ id: string; containerId: string | null }>,
+): void {
+  if (updates.length === 0) return;
+  doc.transact(() => {
+    const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
+    for (const upd of updates) {
+      const yEl = yElements.get(upd.id);
+      if (yEl instanceof Y.Map) {
+        if (upd.containerId == null) yEl.delete('containerId');
+        else yEl.set('containerId', upd.containerId);
+      }
+    }
+  }, 'drag-commit');
+}
+
 export function yjsDuplicateElement(doc: Y.Doc, elementId: string): string | null {
   const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
   const yEl = yElements.get(elementId);

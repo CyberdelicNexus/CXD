@@ -46,6 +46,12 @@ interface LineLayerProps {
   // container auto-attach/detach (set or clear containerId) and resync the line's
   // stored bounding box. Drag-END only — never per pointer-move frame.
   onLineDragCommit?: (lineId: string) => void;
+  // Called per pointer-move frame WHILE a line is being dragged (whole-line or handle)
+  // with the dragged line's id, and once with null when the drag ends or is cancelled.
+  // The canvas uses it to highlight the container the line currently hovers over (the
+  // same drop-target animation elements show), so a line dragged toward a container
+  // previews where it will attach. Only React state is touched — never the store.
+  onLineDragHover?: (lineId: string | null) => void;
   onDeleteLine: (id: string) => void;
   onDuplicateLine?: (line: LineElement) => void;
   canvasPosition: { x: number; y: number };
@@ -65,6 +71,7 @@ export function LineLayer({
   onUpdateLine,
   onCreateLine,
   onLineDragCommit,
+  onLineDragHover,
   onDeleteLine,
   onDuplicateLine,
   canvasPosition,
@@ -131,6 +138,7 @@ export function LineLayer({
               bend: initialLineState.current.bend,
             });
           }
+          onLineDragHover?.(null);
           setMode("idle");
           setActiveHandle(null);
           setActiveLineId(null);
@@ -139,7 +147,7 @@ export function LineLayer({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mode, activeLineId, onUpdateLine, onLineToolComplete]);
+  }, [mode, activeLineId, onUpdateLine, onLineToolComplete, onLineDragHover]);
 
   // Handle line tool activation - enter drawing mode on canvas click
   useEffect(() => {
@@ -426,6 +434,12 @@ export function LineLayer({
           },
         });
       }
+
+      // Preview the container the dragged line now hovers over (drop-target highlight).
+      // Local React state only in the canvas handler — no store write per frame.
+      if ((mode === "draggingLine" || mode === "draggingHandle") && activeLineId) {
+        onLineDragHover?.(activeLineId);
+      }
     };
 
     const handlePointerUp = (e: PointerEvent) => {
@@ -458,7 +472,9 @@ export function LineLayer({
         setMode("idle");
         onLineToolComplete();
       } else if (mode === "draggingHandle" || mode === "draggingLine") {
-        // Commit container attach/detach + bbox resync now that geometry is final.
+        // Clear the hover highlight first, then commit container attach/detach + bbox
+        // resync now that geometry is final.
+        onLineDragHover?.(null);
         if (activeLineId) onLineDragCommit?.(activeLineId);
         setMode("idle");
         setActiveHandle(null);
@@ -493,6 +509,7 @@ export function LineLayer({
     onUpdateLine,
     onCreateLine,
     onLineDragCommit,
+    onLineDragHover,
     onLineToolComplete,
   ]);
 
@@ -547,9 +564,13 @@ export function LineLayer({
         return;
       }
 
-      // If this line is part of a multi-selection, let the canvas handle drag
-      // (the onSelectLine callback will trigger handleElementDragStart in cxd-canvas)
-      if (selectedLineIds.has(lineId) && selectedLineIds.size > 0) {
+      // Only delegate to the canvas multi-drag path when this line is part of a TRUE
+      // multi-selection (size > 1). A single selected line (size 1) must stay owned by
+      // this layer's own drag state machine — otherwise startLineDrag early-returns into
+      // a select-only path and the line can never enter "draggingLine". That was the
+      // "locked" bug for in-container lines, which stay selected after being dropped in,
+      // so every subsequent stroke press re-selected instead of moving them.
+      if (selectedLineIds.has(lineId) && selectedLineIds.size > 1) {
         onSelectLine(lineId, e);
         return;
       }
