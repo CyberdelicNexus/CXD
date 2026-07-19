@@ -3772,17 +3772,6 @@ function tblToGradient(color: string, angle = 135): string {
   return `linear-gradient(${angle}deg, ${color} 0%, ${dark} 100%)`;
 }
 
-// Shared offscreen canvas for measuring cell text (min column width). Lazily created,
-// used only on demand (divider drag start) — never in a per-frame store-writing loop.
-let _tblMeasureCtx: CanvasRenderingContext2D | null = null;
-function tblMeasureText(text: string, font: string): number {
-  if (typeof document === "undefined") return 0;
-  if (!_tblMeasureCtx) _tblMeasureCtx = document.createElement("canvas").getContext("2d");
-  if (!_tblMeasureCtx) return 0;
-  _tblMeasureCtx.font = font;
-  return _tblMeasureCtx.measureText(text || "").width;
-}
-
 /**
  * Table card — editable data grid with per-cell text, cell/row/column/table
  * coloring, and basic text formatting. Commits go through the shared onUpdate
@@ -3997,11 +3986,21 @@ function TableCard({
   isReadOnlyRef.current = isReadOnly;
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
+  // While the user is actively dragging a divider / reorder handle / plus button,
+  // auto-grow measurement is SUSPENDED: otherwise the observer fires on the live
+  // preview (columns/rows re-wrap → table resizes) and commits {rowHeights,height}
+  // mid-drag, which thrashes the drag state and fights the manual adjustment (e.g.
+  // the row you're shrinking snaps back to its content height on every mouse move).
+  // The drag's own preview already reflows the grid visually; the model is resynced
+  // once on release via measureRef, so rows still refit to any new column widths.
+  const interactingRef = useRef(false);
+  interactingRef.current = !!(dragCol || dragRow || pendingCount || reorderCol || reorderRow);
+  const measureRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const table = tableRef.current;
     if (!table || typeof ResizeObserver === "undefined") return;
     const measure = () => {
-      if (isReadOnlyRef.current) return;
+      if (isReadOnlyRef.current || interactingRef.current) return;
       const els = trRefs.current;
       const dRow = dispRowRef.current;
       const n = rowsRef.current;
@@ -4021,6 +4020,7 @@ function TableCard({
       autoGrowSigRef.current = sig;
       onUpdateRef.current({ rowHeights: measured, height: newHeight });
     };
+    measureRef.current = measure;
     const ro = new ResizeObserver(measure);
     ro.observe(table);
     measure(); // initial pass for content present at mount
@@ -4226,26 +4226,13 @@ function TableCard({
     [rows, cols, availH, cloneGrid, rowColors, rowGradient, element.rowHeights, element.height, rowPx, onUpdate],
   );
 
-  // Minimum width for a column = widest word in any of its cells + padding (so a
-  // column can't be dragged narrower than its content needs). Measured on demand.
-  const colMinWidth = useCallback(
-    (c: number): number => {
-      let max = 0;
-      for (let r = 0; r < rows; r++) {
-        const cell = grid[r]?.[c];
-        if (!cell?.text) continue;
-        const isHdr = headerRow && r === 0;
-        const weight = cell.bold ? 700 : isHdr ? 700 : 400;
-        const px = isHdr && !cell.fontSize ? 16 : TABLE_FONT_PX[cell.fontSize || "md"];
-        const font = `${cell.italic ? "italic " : ""}${weight} ${px}px system-ui, sans-serif`;
-        for (const word of cell.text.split(/\s+/)) {
-          if (word) max = Math.max(max, tblMeasureText(word, font));
-        }
-      }
-      return Math.max(TBL_MIN_COL, Math.min(max + 14, availW * 0.85));
-    },
-    [grid, rows, headerRow, availW],
-  );
+  // Minimum width a column can be dragged to. A flat floor now that cells wrap:
+  // long/unbroken content no longer needs the column to be wide (break-words wraps
+  // it and the row grows to fit), so the column may go as narrow as TBL_MIN_COL.
+  // The previous "widest word" floor ballooned to ~85% of the table for a cell
+  // holding one long no-space string, which squished every other column to the
+  // floor and made the dividers impossible to drag.
+  const colMinWidth = useCallback((_c: number): number => TBL_MIN_COL, []);
 
   // ─── Divider drags (per-column / per-row resize) ───────────────────────────
   const startColDivider = (i: number) => (e: React.MouseEvent) => {
@@ -4283,6 +4270,9 @@ function TableCard({
       next[i + 1] = finalB;
       setDragCol(null);
       onUpdate({ colWidths: next });
+      // Columns changed → some rows may now wrap differently. Auto-grow was
+      // suspended during the drag; resync once after the committed layout paints.
+      requestAnimationFrame(() => measureRef.current?.());
     };
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", up);
@@ -4321,6 +4311,10 @@ function TableCard({
       next[i + 1] = finalB;
       setDragRow(null);
       onUpdate({ rowHeights: next });
+      // Auto-grow was suspended during the drag; resync after paint so a row the
+      // user shrank below its content snaps back to fit (content is never clipped),
+      // while a row grown taller than its content keeps the manual height.
+      requestAnimationFrame(() => measureRef.current?.());
     };
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", up);
