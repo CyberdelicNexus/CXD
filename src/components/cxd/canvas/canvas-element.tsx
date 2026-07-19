@@ -3783,38 +3783,6 @@ function tblMeasureText(text: string, font: string): number {
   return _tblMeasureCtx.measureText(text || "").width;
 }
 
-// Estimate how many lines `text` wraps to inside `maxWidth` px at `font` — a greedy
-// word-wrap simulation over canvas text measurement. Approximate (not real DOM
-// layout) but deterministic and depends only on content + column width, never on
-// the table's own row-height state, so a row-height auto-grow effect driven by
-// this can never feed back into itself.
-function tblEstimateWrappedLines(text: string, maxWidth: number, font: string): number {
-  if (!text) return 1;
-  let totalLines = 0;
-  for (const para of text.split("\n")) {
-    const words = para.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      totalLines += 1;
-      continue;
-    }
-    const spaceWidth = tblMeasureText(" ", font);
-    let lineCount = 1;
-    let lineWidth = 0;
-    for (const word of words) {
-      const wordWidth = tblMeasureText(word, font);
-      const next = lineWidth === 0 ? wordWidth : lineWidth + spaceWidth + wordWidth;
-      if (next > maxWidth && lineWidth > 0) {
-        lineCount++;
-        lineWidth = wordWidth;
-      } else {
-        lineWidth = next;
-      }
-    }
-    totalLines += lineCount;
-  }
-  return Math.max(1, totalLines);
-}
-
 /**
  * Table card — editable data grid with per-cell text, cell/row/column/table
  * coloring, and basic text formatting. Commits go through the shared onUpdate
@@ -3995,47 +3963,49 @@ function TableCard({
     return out;
   }, [dispRow]);
 
-  // Minimum height each row needs so its tallest cell's wrapped text is never
-  // clipped. Depends only on content + committed column widths — deliberately
-  // NOT on rowPx/availH/element.height — so the auto-grow effect below can
-  // never feed back into itself (see that effect for why this matters).
-  const requiredRowPx = useMemo(() => {
-    return grid.map((row, r) => {
-      const isHdr = headerRow && r === 0;
-      let maxLines = 1;
-      let maxFontPx = 14;
-      for (let c = 0; c < cols; c++) {
-        const cell = row[c];
-        if (!cell?.text) continue;
-        const weight = cell.bold ? 700 : isHdr ? 700 : 400;
-        const px = isHdr && !cell.fontSize ? 16 : TABLE_FONT_PX[cell.fontSize || "md"];
-        const font = `${cell.italic ? "italic " : ""}${weight} ${px}px system-ui, sans-serif`;
-        const maxWidth = Math.max(1, (colPx[c] || 0) - 12); // matches the cell's own "4px 6px" padding
-        maxLines = Math.max(maxLines, tblEstimateWrappedLines(cell.text, maxWidth, font));
-        maxFontPx = Math.max(maxFontPx, px);
-      }
-      return Math.max(TBL_MIN_ROW, Math.ceil(maxLines * maxFontPx * 1.35) + 8);
-    });
-  }, [grid, cols, headerRow, colPx]);
-
-  // Grow (never shrink) rows whose content no longer fits their committed height.
-  // Converges in exactly one extra render: newHeight is set to EXACTLY sum(newRowHeights),
-  // so on the next pass rowPx's ratio-normalize step (raw/sum*availH) is an identity —
-  // it does not redistribute the extra space across other rows, only the row(s) that
-  // actually needed it end up taller. requiredRowPx not depending on rowPx/availH is
-  // what guarantees this settles instead of oscillating.
+  // Auto-grow rows to fit their content by MEASURING the real rendered layout,
+  // not by estimating. A word-count estimate can't model CSS break-words (a long
+  // unbroken string like "sdfgsdfgsdfg…" wraps to several lines the estimate
+  // reads as one), so the row silently stayed too short and the text spilled
+  // across the gridline. Instead the browser lays the grid out — cells have no
+  // fixed height and no overflow clip, so each <tr> grows naturally to fit its
+  // tallest cell — and we read each row's real offsetHeight and commit it back
+  // as that row's height. That keeps the whole model (dispRow, the SVG gridline
+  // overlay, and element.height) in lockstep with what's actually painted, so
+  // wrapped text always sits inside its cell and pushes the rows below it down.
+  //
+  // offsetHeight is border-box layout px, unaffected by the canvas zoom transform,
+  // and for a table row equals max(committed height, content height) — a value
+  // above the committed dispRow[r] means content overflowed and the row must grow.
+  // Grow-only: rows are never shrunk here, so manual divider-drag enlargements and
+  // the ratio-resize model are preserved. Converges in one pass — after committing,
+  // element.height == sum(rowHeights)+chrome makes rowPx a pass-through identity, so
+  // the next measure sees content fitting exactly and stops. A signature guard makes
+  // the no-deps (measure-every-render) effect a true no-op once settled.
+  const trRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const autoGrowSigRef = useRef<string>("");
   useEffect(() => {
     if (isReadOnly) return;
-    const needsGrow = requiredRowPx.some((req, r) => req > (rowPx[r] || 0) + 1);
-    if (!needsGrow) return;
-    const newRowHeights = rowPx.map((h, r) => Math.round(Math.max(h, requiredRowPx[r])));
-    const newHeight = Math.round(newRowHeights.reduce((a, b) => a + b, 0) + TBL_PAD + TBL_RIGHT);
-    const sig = `${newRowHeights.join(",")}|${newHeight}`;
+    const els = trRefs.current;
+    if (!els.length) return;
+    const measured: number[] = [];
+    let grew = false;
+    for (let r = 0; r < rows; r++) {
+      const committed = dispRow[r] || 0;
+      const real = els[r] ? els[r]!.offsetHeight : committed;
+      if (real > committed + 2) grew = true;
+      measured.push(Math.round(Math.max(real, committed)));
+    }
+    if (!grew) return;
+    const newHeight = Math.round(measured.reduce((a, b) => a + b, 0) + TBL_PAD + TBL_RIGHT);
+    const sig = `${measured.join(",")}|${newHeight}`;
     if (autoGrowSigRef.current === sig) return;
     autoGrowSigRef.current = sig;
-    onUpdate({ rowHeights: newRowHeights, height: newHeight });
-  }, [requiredRowPx, rowPx, isReadOnly, onUpdate]);
+    onUpdate({ rowHeights: measured, height: newHeight });
+    // grid/dispCol are here to re-measure after a text edit or a column-width
+    // change (either alters wrapping → row height) even though the body doesn't
+    // read them directly; dispRow re-runs it through the one-pass convergence.
+  }, [grid, dispCol, dispRow, rows, isReadOnly, onUpdate]);
 
   const cloneGrid = useCallback(
     () => grid.map((row) => row.map((cell) => ({ ...cell }))),
@@ -4593,7 +4563,13 @@ function TableCard({
           </colgroup>
           <tbody>
             {grid.map((row, r) => (
-              <tr key={r} style={{ height: dispRow[r] }}>
+              <tr
+                key={r}
+                ref={(el) => {
+                  trRefs.current[r] = el;
+                }}
+                style={{ height: dispRow[r] }}
+              >
                 {row.map((cell, c) => {
                   const isSel = sel?.r === r && sel?.c === c;
                   const isEditingThisCell = editingCellPos?.r === r && editingCellPos?.c === c;
