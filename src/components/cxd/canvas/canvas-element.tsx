@@ -4602,15 +4602,14 @@ function TableCard({
                     <td
                       key={c}
                       className={cn(
+                        // vertical-align: middle centers short text; the cell stays a
+                        // real table-cell (NEVER display:flex — that collapses the
+                        // whole fixed grid) so columns keep their widths and rows grow
+                        // naturally to fit tall/wrapped content.
                         "relative align-middle p-0",
                         isSel && "outline outline-2 -outline-offset-2 outline-violet-400",
                       )}
-                      style={{
-                        ...cellBgStyle(r, c),
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "center",
-                      }}
+                      style={{ ...cellBgStyle(r, c) }}
                       onClick={() => {
                         setSel({ r, c });
                         rootRef.current?.focus();
@@ -4639,7 +4638,8 @@ function TableCard({
                           fontStyle: cell.italic ? "italic" : "normal",
                           // Horizontal alignment per the cell's align field (default
                           // left; header defaults center). Vertical centering comes
-                          // from the td's own flex column so short text sits mid-cell.
+                          // from the td's vertical-align:middle so short text sits
+                          // mid-cell while long text still wraps and grows the row.
                           textAlign: cell.align || (isHeader ? "center" : "left"),
                           fontSize:
                             isHeader && !cell.fontSize ? 16 : TABLE_FONT_PX[cell.fontSize || "md"],
