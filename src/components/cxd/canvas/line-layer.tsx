@@ -42,6 +42,10 @@ interface LineLayerProps {
   onCreateLine: (
     line: Omit<LineElement, "id" | "zIndex" | "boardId" | "surface">,
   ) => void;
+  // Called once when a stroke/handle drag finishes so the canvas can re-run
+  // container auto-attach/detach (set or clear containerId) and resync the line's
+  // stored bounding box. Drag-END only — never per pointer-move frame.
+  onLineDragCommit?: (lineId: string) => void;
   onDeleteLine: (id: string) => void;
   onDuplicateLine?: (line: LineElement) => void;
   canvasPosition: { x: number; y: number };
@@ -60,6 +64,7 @@ export function LineLayer({
   onSelectLine,
   onUpdateLine,
   onCreateLine,
+  onLineDragCommit,
   onDeleteLine,
   onDuplicateLine,
   canvasPosition,
@@ -453,6 +458,8 @@ export function LineLayer({
         setMode("idle");
         onLineToolComplete();
       } else if (mode === "draggingHandle" || mode === "draggingLine") {
+        // Commit container attach/detach + bbox resync now that geometry is final.
+        if (activeLineId) onLineDragCommit?.(activeLineId);
         setMode("idle");
         setActiveHandle(null);
         setActiveLineId(null);
@@ -485,6 +492,7 @@ export function LineLayer({
     screenToWorld,
     onUpdateLine,
     onCreateLine,
+    onLineDragCommit,
     onLineToolComplete,
   ]);
 
@@ -854,9 +862,22 @@ export function LineLayer({
     );
   };
 
+  // Split by containment. Open-canvas lines stay in the base layer BELOW the element
+  // layer (unchanged behaviour). Lines attached to a container render in a second SVG
+  // stacked ABOVE the element layer so they paint in front of the container body and
+  // their strokes receive the pointer instead of the container eating the click.
+  const openLines = lines.filter((l) => !l.containerId);
+  const containerLines = lines.filter((l) => l.containerId);
+
+  const renderLineNode = (line: LineElement) => {
+    if (!line.start || !line.end) return null;
+    const isSelected = line.id === selectedLineId || selectedLineIds.has(line.id);
+    return renderLine(line, isSelected);
+  };
+
   return (
     <>
-      {/* SVG Line Layer */}
+      {/* Base SVG Line Layer — open-canvas lines (behind the element layer) + draft */}
       <svg
         ref={svgRef}
         className="absolute inset-0 w-full h-full"
@@ -866,16 +887,26 @@ export function LineLayer({
           cursor: isLineToolActive ? "crosshair" : undefined,
         }}
       >
-        {/* Render existing lines */}
-        {lines.map((line) => {
-          if (!line.start || !line.end) return null;
-          const isSelected = line.id === selectedLineId || selectedLineIds.has(line.id);
-          return renderLine(line, isSelected);
-        })}
+        {openLines.map(renderLineNode)}
 
         {/* Render draft line during creation */}
         {renderDraftLine()}
       </svg>
+
+      {/* Elevated SVG layer — in-container lines paint ABOVE the Canvas Content layer
+          (which sits at z-index 10). A container div lives inside that content stacking
+          context, so an absolute z-index of 11 here beats the entire content group,
+          including any element boosted to a huge z-index inside it. pointer-events is
+          none at the SVG level; only each line's stroke/handles opt back in, so clicks
+          on empty container body still reach the container. */}
+      {containerLines.length > 0 && (
+        <svg
+          className="absolute inset-0 w-full h-full"
+          style={{ zIndex: 11, pointerEvents: "none" }}
+        >
+          {containerLines.map(renderLineNode)}
+        </svg>
+      )}
       {/* Context Menu for selected line */}
       {selectedLineId &&
         mode === "idle" &&

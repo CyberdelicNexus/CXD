@@ -1013,6 +1013,58 @@ export function CXDCanvas() {
     [canvasElements, activeBoardId, activeSurface, addCanvasElement, syncAddElement, syncAddNodeToContainer],
   );
 
+  // Commit a line stroke/handle drag: resync its stored bounding box from the final
+  // geometry, then attach it to whatever container its center now sits in (or detach
+  // when it was dragged back out onto open canvas). Drag-END only — the LineLayer state
+  // machine already wrote start/end/bend per frame; this runs once on pointer-up so the
+  // line gets a containerId (renders in front, moves with the container) or loses it.
+  const handleLineDragCommit = useCallback(
+    (lineId: string) => {
+      const liveElements =
+        useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+      const line = liveElements.find((e) => e.id === lineId) as LineElement | undefined;
+      if (!line) return;
+
+      const pts = [line.start, line.end, line.bend].filter(Boolean) as {
+        x: number;
+        y: number;
+      }[];
+      if (pts.length < 2) return;
+
+      const minX = Math.min(...pts.map((p) => p.x));
+      const minY = Math.min(...pts.map((p) => p.y));
+      const maxX = Math.max(...pts.map((p) => p.x));
+      const maxY = Math.max(...pts.map((p) => p.y));
+
+      // Keep the stored bbox in sync so container hit-testing / grow-to-fit read
+      // correct bounds after the drag moved start/end/bend.
+      if (
+        line.x !== minX ||
+        line.y !== minY ||
+        line.width !== maxX - minX ||
+        line.height !== maxY - minY
+      ) {
+        syncUpdateElement(lineId, {
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY,
+        });
+      }
+
+      const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+      const found =
+        findContainerAtPoint(center, liveElements, new Set([lineId]))?.id || null;
+
+      if (found && line.containerId !== found) {
+        syncAddNodeToContainer(lineId, found);
+      } else if (!found && line.containerId) {
+        syncRemoveNodeFromContainer(lineId);
+      }
+    },
+    [syncUpdateElement, syncAddNodeToContainer, syncRemoveNodeFromContainer],
+  );
+
   // Duplicate a line element (offset by 20px so it's visible)
   const handleDuplicateLine = useCallback(
     (line: LineElement) => {
@@ -4803,6 +4855,7 @@ export function CXDCanvas() {
         }}
         onUpdateLine={(id, updates) => syncUpdateElement(id, updates)}
         onCreateLine={handleCreateLine}
+        onLineDragCommit={handleLineDragCommit}
         onDeleteLine={(id) => syncRemoveElement(id)}
         onDuplicateLine={handleDuplicateLine}
         canvasPosition={canvasPosition}
