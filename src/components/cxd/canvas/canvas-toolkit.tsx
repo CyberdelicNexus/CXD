@@ -283,9 +283,6 @@ export function CanvasToolkit({
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
       const target = e.target as HTMLElement;
-      // TEMP DIAGNOSTIC — remove once the container-drop bug is confirmed fixed.
-      // eslint-disable-next-line no-console
-      console.log("[toolkit] mousedown", { tool: activeToolRef.current, targetTag: target.tagName, targetClass: target.className, hasNodeIdAncestor: !!target.closest("[data-node-id]") });
       // Let clicks on floating UI chrome (toolbars, panels, menus) behave normally —
       // only intercept clicks on the canvas surface itself: empty background/grid, or
       // a rendered canvas element (identified by data-node-id, e.g. a container). This
@@ -296,9 +293,6 @@ export function CanvasToolkit({
         target.classList.contains("dot-grid") ||
         target === canvasRef.current ||
         !!target.closest("[data-node-id]");
-      // TEMP DIAGNOSTIC
-      // eslint-disable-next-line no-console
-      console.log("[toolkit] isCanvasSurface?", isCanvasSurface);
       if (!isCanvasSurface) return;
 
       // Placement mode must always place, even when the click lands on an existing
@@ -328,14 +322,7 @@ export function CanvasToolkit({
 
     const handleMouseUp = (e: MouseEvent) => {
       const drag = shapeCreationDragRef.current;
-      // TEMP DIAGNOSTIC — remove once the container-drop bug is confirmed fixed.
-      // eslint-disable-next-line no-console
-      console.log("[toolkit] mouseup fired, drag=", drag, "target=", (e.target as HTMLElement)?.tagName, (e.target as HTMLElement)?.className);
-      if (!drag) {
-        // eslint-disable-next-line no-console
-        console.log("[toolkit] mouseup bailed: no drag in progress (ref was already null)");
-        return;
-      }
+      if (!drag) return;
 
       // Clear the drag/tool UI state FIRST, unconditionally, before calling out to
       // onPlaceElement. Previously this cleanup ran only after onPlaceElement returned,
@@ -355,9 +342,6 @@ export function CanvasToolkit({
 
       const options = getOptions();
 
-      // eslint-disable-next-line no-console
-      console.log("[toolkit] mouseup processing:", { dx, dy, willDrag: dx >= MIN_DRAG_DISTANCE || dy >= MIN_DRAG_DISTANCE, tool: drag.tool });
-
       try {
         if (dx >= MIN_DRAG_DISTANCE || dy >= MIN_DRAG_DISTANCE) {
           // Drag: create with custom size — position at top-left of drawn rectangle
@@ -366,11 +350,7 @@ export function CanvasToolkit({
           const width = Math.max(dx, 20);
           const height = Math.max(dy, 20);
           // Place at center of the drawn rectangle (handlePlaceElement offsets by half size)
-          // eslint-disable-next-line no-console
-          console.log("[toolkit] calling onPlaceElement (drag)", { left, top, width, height });
           onPlaceElementRef.current(drag.tool, { x: left + width / 2, y: top + height / 2 }, { ...options, width, height });
-          // eslint-disable-next-line no-console
-          console.log("[toolkit] onPlaceElement (drag) returned");
         } else {
           // Click: use default size, place centered on click
           onPlaceElementRef.current(drag.tool, { x: drag.startX, y: drag.startY }, options);

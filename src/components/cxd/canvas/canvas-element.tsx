@@ -3612,6 +3612,7 @@ function TableCellEditor({
   onFocusCell,
   onEditingChange,
   disabled,
+  editable,
   style,
 }: {
   value: string;
@@ -3619,6 +3620,11 @@ function TableCellEditor({
   onFocusCell: () => void;
   onEditingChange?: (editing: boolean) => void;
   disabled: boolean;
+  // Whether THIS cell is the one actively being text-edited (double-click or
+  // Enter puts exactly one cell into this state at a time). While false the
+  // div is not contentEditable at all, so a plain click can only select the
+  // cell (handled by the parent td's onClick) instead of grabbing a caret.
+  editable: boolean;
   style: React.CSSProperties;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -3631,14 +3637,29 @@ function TableCellEditor({
     }
   });
 
+  // Entering edit mode (double-click / Enter) flips `editable` true on a div
+  // that wasn't focused a moment ago — pick up the caret and drop it at the
+  // end of the existing text, mirroring the common spreadsheet convention.
+  useEffect(() => {
+    if (!editable || !ref.current) return;
+    const el = ref.current;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, [editable]);
+
   return (
     <div
       ref={ref}
       data-no-drag
-      contentEditable={!disabled}
+      contentEditable={!disabled && editable}
       suppressContentEditableWarning
-      className="outline-none w-full h-full whitespace-pre-wrap break-words cursor-text"
-      style={style}
+      className="outline-none w-full whitespace-pre-wrap break-words"
+      style={{ ...style, cursor: editable ? "text" : "default" }}
       onFocus={() => {
         focused.current = true;
         onEditingChange?.(true);
@@ -3739,7 +3760,7 @@ function tblMix(
   const b = Math.round(c.b + (t.b - c.b) * amt);
   return `rgb(${r}, ${g}, ${b})`;
 }
-/** Turn a flat color into a tasteful 3-stop (highlight → base → shade) gradient.
+/** Turn a flat color into a tasteful 2-stop (normal tone → shade) gradient.
  *  angle picks the direction: 135deg diagonal (cell scope, confined), 90deg
  *  horizontal (row scope, sliced continuously across the row's cells), 180deg
  *  vertical (column scope, sliced continuously down the column's cells). */
@@ -3747,9 +3768,8 @@ function tblToGradient(color: string, angle = 135): string {
   if (!color || color === "transparent" || color.includes("gradient")) return color;
   const rgb = tblHexToRgb(color);
   if (!rgb) return color;
-  const light = tblMix(rgb, { r: 255, g: 255, b: 255 }, 0.28);
   const dark = tblMix(rgb, { r: 0, g: 0, b: 0 }, 0.38);
-  return `linear-gradient(${angle}deg, ${light} 0%, ${color} 55%, ${dark} 100%)`;
+  return `linear-gradient(${angle}deg, ${color} 0%, ${dark} 100%)`;
 }
 
 // Shared offscreen canvas for measuring cell text (min column width). Lazily created,
@@ -3761,6 +3781,38 @@ function tblMeasureText(text: string, font: string): number {
   if (!_tblMeasureCtx) return 0;
   _tblMeasureCtx.font = font;
   return _tblMeasureCtx.measureText(text || "").width;
+}
+
+// Estimate how many lines `text` wraps to inside `maxWidth` px at `font` — a greedy
+// word-wrap simulation over canvas text measurement. Approximate (not real DOM
+// layout) but deterministic and depends only on content + column width, never on
+// the table's own row-height state, so a row-height auto-grow effect driven by
+// this can never feed back into itself.
+function tblEstimateWrappedLines(text: string, maxWidth: number, font: string): number {
+  if (!text) return 1;
+  let totalLines = 0;
+  for (const para of text.split("\n")) {
+    const words = para.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      totalLines += 1;
+      continue;
+    }
+    const spaceWidth = tblMeasureText(" ", font);
+    let lineCount = 1;
+    let lineWidth = 0;
+    for (const word of words) {
+      const wordWidth = tblMeasureText(word, font);
+      const next = lineWidth === 0 ? wordWidth : lineWidth + spaceWidth + wordWidth;
+      if (next > maxWidth && lineWidth > 0) {
+        lineCount++;
+        lineWidth = wordWidth;
+      } else {
+        lineWidth = next;
+      }
+    }
+    totalLines += lineCount;
+  }
+  return Math.max(1, totalLines);
 }
 
 /**
@@ -3824,10 +3876,14 @@ function TableCard({
   const headerRow = element.headerRow ?? false;
   const zoom = canvasZoom || 1;
 
+  // Selected vs. editing are two distinct states: a single click selects a cell
+  // (arrow keys then navigate between cells); double-click or Enter puts that one
+  // cell into text-edit mode (arrow keys then move the caret as normal, handled
+  // natively by the contentEditable div).
   const [sel, setSel] = useState<{ r: number; c: number } | null>(null);
+  const [editingCellPos, setEditingCellPos] = useState<{ r: number; c: number } | null>(null);
   const [scope, setScope] = useState<TableColorScope>("cell");
   const [bgGradient, setBgGradient] = useState(false);
-  const [editingCell, setEditingCell] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Live drag previews (local state only — the store is written once on pointer-up).
@@ -3842,9 +3898,12 @@ function TableCard({
   const [hoverColHandle, setHoverColHandle] = useState(false);
   const [hoverRowHandle, setHoverRowHandle] = useState(false);
 
-  // Clear the selected cell whenever the whole element is deselected.
+  // Clear the selected/editing cell whenever the whole element is deselected.
   useEffect(() => {
-    if (!isSelected) setSel(null);
+    if (!isSelected) {
+      setSel(null);
+      setEditingCellPos(null);
+    }
   }, [isSelected]);
 
   // Blur the active cell editor when the user clicks anywhere outside this table
@@ -3853,7 +3912,7 @@ function TableCard({
   // document listener ever leaks. Without this the caret keeps blinking (and
   // typing keeps landing) in the cell after the element is deselected.
   useEffect(() => {
-    if (!editingCell) return;
+    if (!editingCellPos) return;
     const onDown = (e: PointerEvent) => {
       const root = rootRef.current;
       if (!root) return;
@@ -3863,7 +3922,7 @@ function TableCard({
     };
     document.addEventListener("pointerdown", onDown, true);
     return () => document.removeEventListener("pointerdown", onDown, true);
-  }, [editingCell]);
+  }, [editingCellPos]);
 
   // Defensive grid: always a full rows×cols matrix even if the model is partial.
   const grid: TableCell[][] = useMemo(() => {
@@ -3935,6 +3994,48 @@ function TableCard({
     for (const h of dispRow) { out.push(acc); acc += h; }
     return out;
   }, [dispRow]);
+
+  // Minimum height each row needs so its tallest cell's wrapped text is never
+  // clipped. Depends only on content + committed column widths — deliberately
+  // NOT on rowPx/availH/element.height — so the auto-grow effect below can
+  // never feed back into itself (see that effect for why this matters).
+  const requiredRowPx = useMemo(() => {
+    return grid.map((row, r) => {
+      const isHdr = headerRow && r === 0;
+      let maxLines = 1;
+      let maxFontPx = 14;
+      for (let c = 0; c < cols; c++) {
+        const cell = row[c];
+        if (!cell?.text) continue;
+        const weight = cell.bold ? 700 : isHdr ? 700 : 400;
+        const px = isHdr && !cell.fontSize ? 16 : TABLE_FONT_PX[cell.fontSize || "md"];
+        const font = `${cell.italic ? "italic " : ""}${weight} ${px}px system-ui, sans-serif`;
+        const maxWidth = Math.max(1, (colPx[c] || 0) - 12); // matches the cell's own "4px 6px" padding
+        maxLines = Math.max(maxLines, tblEstimateWrappedLines(cell.text, maxWidth, font));
+        maxFontPx = Math.max(maxFontPx, px);
+      }
+      return Math.max(TBL_MIN_ROW, Math.ceil(maxLines * maxFontPx * 1.35) + 8);
+    });
+  }, [grid, cols, headerRow, colPx]);
+
+  // Grow (never shrink) rows whose content no longer fits their committed height.
+  // Converges in exactly one extra render: newHeight is set to EXACTLY sum(newRowHeights),
+  // so on the next pass rowPx's ratio-normalize step (raw/sum*availH) is an identity —
+  // it does not redistribute the extra space across other rows, only the row(s) that
+  // actually needed it end up taller. requiredRowPx not depending on rowPx/availH is
+  // what guarantees this settles instead of oscillating.
+  const autoGrowSigRef = useRef<string>("");
+  useEffect(() => {
+    if (isReadOnly) return;
+    const needsGrow = requiredRowPx.some((req, r) => req > (rowPx[r] || 0) + 1);
+    if (!needsGrow) return;
+    const newRowHeights = rowPx.map((h, r) => Math.round(Math.max(h, requiredRowPx[r])));
+    const newHeight = Math.round(newRowHeights.reduce((a, b) => a + b, 0) + TBL_PAD + TBL_RIGHT);
+    const sig = `${newRowHeights.join(",")}|${newHeight}`;
+    if (autoGrowSigRef.current === sig) return;
+    autoGrowSigRef.current = sig;
+    onUpdate({ rowHeights: newRowHeights, height: newHeight });
+  }, [requiredRowPx, rowPx, isReadOnly, onUpdate]);
 
   const cloneGrid = useCallback(
     () => grid.map((row) => row.map((cell) => ({ ...cell }))),
@@ -4435,17 +4536,55 @@ function TableCard({
     </button>
   );
 
+  // Cell selected but not editing: arrow keys move `sel` between cells; Enter/F2
+  // starts editing the selected cell. While a cell IS being edited, this returns
+  // without touching the keys at all — the contentEditable div handles arrows as
+  // normal caret movement, and the canvas's own global arrow-key handler already
+  // no-ops for a focused contentEditable (see cxd-canvas.tsx's isEditingText check)
+  // so nothing here needs to coordinate with it in that state. Only in the
+  // "selected but not editing" state must this stop the event before it reaches
+  // that global handler, which would otherwise nudge the whole table element.
+  const handleTableKeyDown = (e: React.KeyboardEvent) => {
+    if (!sel || editingCellPos) return;
+    const { r, c } = sel;
+    if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      e.stopPropagation();
+      let nr = r;
+      let nc = c;
+      if (e.key === "ArrowUp") nr = Math.max(0, r - 1);
+      if (e.key === "ArrowDown") nr = Math.min(rows - 1, r + 1);
+      if (e.key === "ArrowLeft") nc = Math.max(0, c - 1);
+      if (e.key === "ArrowRight") nc = Math.min(cols - 1, c + 1);
+      setSel({ r: nr, c: nc });
+      return;
+    }
+    if (!isReadOnly && (e.key === "Enter" || e.key === "F2")) {
+      e.preventDefault();
+      e.stopPropagation();
+      setEditingCellPos({ r, c });
+    }
+  };
+
   return (
-    <div ref={rootRef} className="relative w-full h-full">
+    <div
+      ref={rootRef}
+      tabIndex={0}
+      onKeyDown={handleTableKeyDown}
+      className="relative w-full h-full outline-none"
+    >
       {/* Content area (inset by TBL_PAD on top/left; right/bottom also reserve
-          TBL_RIGHT so the "+" buttons sit outside the grid) */}
+          TBL_RIGHT so the "+" buttons sit outside the grid). No overflow clipping —
+          rows are allowed to grow taller than their committed height so wrapped
+          cell text is never cut off; the auto-grow effect above keeps element.height
+          in sync so this almost never visibly overflows past the reserved margin. */}
       <div
-        className="absolute overflow-hidden"
+        className="absolute"
         style={{ left: TBL_PAD, top: TBL_PAD, right: TBL_RIGHT, bottom: TBL_RIGHT }}
       >
         <table
           className="border-collapse"
-          style={{ tableLayout: "fixed", width: availW, height: availH }}
+          style={{ tableLayout: "fixed", width: availW }}
         >
           <colgroup>
             {dispCol.map((w, c) => (
@@ -4457,38 +4596,55 @@ function TableCard({
               <tr key={r} style={{ height: dispRow[r] }}>
                 {row.map((cell, c) => {
                   const isSel = sel?.r === r && sel?.c === c;
+                  const isEditingThisCell = editingCellPos?.r === r && editingCellPos?.c === c;
                   const isHeader = headerRow && r === 0;
                   return (
                     <td
                       key={c}
                       className={cn(
-                        "relative align-middle p-0 overflow-hidden",
+                        "relative align-middle p-0",
                         isSel && "outline outline-2 -outline-offset-2 outline-violet-400",
                       )}
-                      style={{ ...cellBgStyle(r, c) }}
-                      onClick={() => setSel({ r, c })}
+                      style={{
+                        ...cellBgStyle(r, c),
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "center",
+                      }}
+                      onClick={() => {
+                        setSel({ r, c });
+                        rootRef.current?.focus();
+                      }}
+                      onDoubleClick={() => {
+                        if (isReadOnly) return;
+                        setSel({ r, c });
+                        setEditingCellPos({ r, c });
+                      }}
                     >
                       <TableCellEditor
                         value={cell.text || ""}
                         disabled={isReadOnly}
+                        editable={!isReadOnly && isEditingThisCell}
                         onCommit={(text) => updateCell(r, c, { text })}
                         onFocusCell={() => setSel({ r, c })}
-                        onEditingChange={setEditingCell}
+                        onEditingChange={(editing) => {
+                          setEditingCellPos((prev) => {
+                            if (editing) return { r, c };
+                            return prev && prev.r === r && prev.c === c ? null : prev;
+                          });
+                        }}
                         style={{
                           color: cell.color || "#ffffff",
                           fontWeight: cell.bold ? 700 : isHeader ? 700 : 400,
                           fontStyle: cell.italic ? "italic" : "normal",
                           // Horizontal alignment per the cell's align field (default
                           // left; header defaults center). Vertical centering comes
-                          // from the flex column below so short text sits mid-cell.
+                          // from the td's own flex column so short text sits mid-cell.
                           textAlign: cell.align || (isHeader ? "center" : "left"),
                           fontSize:
                             isHeader && !cell.fontSize ? 16 : TABLE_FONT_PX[cell.fontSize || "md"],
                           lineHeight: 1.35,
                           padding: "4px 6px",
-                          display: "flex",
-                          flexDirection: "column",
-                          justifyContent: "center",
                         }}
                       />
                     </td>
