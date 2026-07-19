@@ -1901,6 +1901,8 @@ export function CXDCanvas() {
         height?: number;
       },
     ) => {
+      // eslint-disable-next-line no-console
+      console.log("[handlePlaceElement] called", { type, position, options, canEdit });
       if (!canEdit) return;
       const size = DEFAULT_ELEMENT_SIZES[type];
       const placedWidth = options?.width ?? size.width;
@@ -2047,8 +2049,12 @@ export function CXDCanvas() {
           return;
       }
 
+      // eslint-disable-next-line no-console
+      console.log("[handlePlaceElement] creating element, about to syncAddElement", { id: newElement.id, type: newElement.type, x: newElement.x, y: newElement.y, width: newElement.width, height: newElement.height });
       syncAddElement(newElement);
       setSelectedElementId(newElement.id);
+      // eslint-disable-next-line no-console
+      console.log("[handlePlaceElement] syncAddElement done, element should now exist in the store");
 
       // Auto-attach to the innermost container the new element lands inside. Containers
       // nest too: a container created inside another becomes its child. Exclude the new
@@ -2080,9 +2086,13 @@ export function CXDCanvas() {
       // above) by this point, so a failure capturing enclosed elements must never make
       // the whole gesture look like it did nothing — the user still gets their container.
       try {
+        // eslint-disable-next-line no-console
+        console.log("[handlePlaceElement] capture check", { isContainer: newElement.type === 'container', optionsWidth: options?.width, optionsHeight: options?.height });
         if (newElement.type === 'container' && options?.width != null && options?.height != null) {
           const rect = { x: newElement.x, y: newElement.y, width: newElement.width, height: newElement.height };
           const enclosed = elementsEnclosedByRect(rect, canvasElements, newElement.id);
+          // eslint-disable-next-line no-console
+          console.log("[handlePlaceElement] enclosed elements:", enclosed);
           if (enclosed.length > 0) {
             const enclosedSet = new Set(enclosed);
             const byId = new Map(canvasElements.map((el) => [el.id, el] as const));
@@ -2179,6 +2189,8 @@ export function CXDCanvas() {
     };
 
     const onUp = () => {
+      // eslint-disable-next-line no-console
+      console.log("[highlight] onUp fired, hadStart=", !!containerDrawStartRef.current);
       if (!containerDrawStartRef.current) return;
       containerDrawStartRef.current = null;
       clearCapture();
