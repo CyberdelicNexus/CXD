@@ -3963,49 +3963,69 @@ function TableCard({
     return out;
   }, [dispRow]);
 
-  // Auto-grow rows to fit their content by MEASURING the real rendered layout,
-  // not by estimating. A word-count estimate can't model CSS break-words (a long
-  // unbroken string like "sdfgsdfgsdfg…" wraps to several lines the estimate
-  // reads as one), so the row silently stayed too short and the text spilled
-  // across the gridline. Instead the browser lays the grid out — cells have no
-  // fixed height and no overflow clip, so each <tr> grows naturally to fit its
-  // tallest cell — and we read each row's real offsetHeight and commit it back
-  // as that row's height. That keeps the whole model (dispRow, the SVG gridline
-  // overlay, and element.height) in lockstep with what's actually painted, so
-  // wrapped text always sits inside its cell and pushes the rows below it down.
+  // Auto-grow rows to fit their content by MEASURING the real rendered layout in
+  // REALTIME, not by estimating. A word-count estimate can't model CSS break-words
+  // (a long unbroken string like "sdfgsdfgsdfg…" wraps to several lines the estimate
+  // reads as one), so the row silently stayed too short and text spilled across the
+  // gridline. Instead the browser lays the grid out — cells have no fixed height and
+  // no overflow clip, so each <tr> grows naturally to fit its tallest cell — and a
+  // ResizeObserver on the table fires whenever that rendered size changes. Crucially
+  // that fires WHILE the user types into a contentEditable cell (the div expands
+  // before the text is ever committed to the model on blur), so the model updates
+  // live rather than only on deselect. On each change we read every row's real
+  // offsetHeight and commit it as that row's height, keeping dispRow, the SVG
+  // gridline overlay, and element.height in lockstep with what's painted, so wrapped
+  // text always sits inside its cell and pushes the rows below it down.
   //
   // offsetHeight is border-box layout px, unaffected by the canvas zoom transform,
-  // and for a table row equals max(committed height, content height) — a value
-  // above the committed dispRow[r] means content overflowed and the row must grow.
-  // Grow-only: rows are never shrunk here, so manual divider-drag enlargements and
-  // the ratio-resize model are preserved. Converges in one pass — after committing,
-  // element.height == sum(rowHeights)+chrome makes rowPx a pass-through identity, so
-  // the next measure sees content fitting exactly and stops. A signature guard makes
-  // the no-deps (measure-every-render) effect a true no-op once settled.
+  // and for a table row equals max(committed height, content height) — a value above
+  // the committed dispRow[r] means content overflowed and the row must grow. Grow-only:
+  // rows are never shrunk here, so manual divider-drag enlargements and the ratio-resize
+  // model are preserved. No RO feedback loop: committing rowHeights sets each row's
+  // min-height to the height it ALREADY rendered at, so the observed table doesn't
+  // change size and the observer doesn't re-fire (the signature guard is the backstop).
+  // The observer reads live values via refs so it is created once and never re-subscribes
+  // mid-keystroke.
   const trRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const tableRef = useRef<HTMLTableElement>(null);
   const autoGrowSigRef = useRef<string>("");
+  const dispRowRef = useRef(dispRow);
+  dispRowRef.current = dispRow;
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const isReadOnlyRef = useRef(isReadOnly);
+  isReadOnlyRef.current = isReadOnly;
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
   useEffect(() => {
-    if (isReadOnly) return;
-    const els = trRefs.current;
-    if (!els.length) return;
-    const measured: number[] = [];
-    let grew = false;
-    for (let r = 0; r < rows; r++) {
-      const committed = dispRow[r] || 0;
-      const real = els[r] ? els[r]!.offsetHeight : committed;
-      if (real > committed + 2) grew = true;
-      measured.push(Math.round(Math.max(real, committed)));
-    }
-    if (!grew) return;
-    const newHeight = Math.round(measured.reduce((a, b) => a + b, 0) + TBL_PAD + TBL_RIGHT);
-    const sig = `${measured.join(",")}|${newHeight}`;
-    if (autoGrowSigRef.current === sig) return;
-    autoGrowSigRef.current = sig;
-    onUpdate({ rowHeights: measured, height: newHeight });
-    // grid/dispCol are here to re-measure after a text edit or a column-width
-    // change (either alters wrapping → row height) even though the body doesn't
-    // read them directly; dispRow re-runs it through the one-pass convergence.
-  }, [grid, dispCol, dispRow, rows, isReadOnly, onUpdate]);
+    const table = tableRef.current;
+    if (!table || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      if (isReadOnlyRef.current) return;
+      const els = trRefs.current;
+      const dRow = dispRowRef.current;
+      const n = rowsRef.current;
+      if (!els.length) return;
+      const measured: number[] = [];
+      let grew = false;
+      for (let r = 0; r < n; r++) {
+        const committed = dRow[r] || 0;
+        const real = els[r] ? els[r]!.offsetHeight : committed;
+        if (real > committed + 2) grew = true;
+        measured.push(Math.round(Math.max(real, committed)));
+      }
+      if (!grew) return;
+      const newHeight = Math.round(measured.reduce((a, b) => a + b, 0) + TBL_PAD + TBL_RIGHT);
+      const sig = `${measured.join(",")}|${newHeight}`;
+      if (autoGrowSigRef.current === sig) return;
+      autoGrowSigRef.current = sig;
+      onUpdateRef.current({ rowHeights: measured, height: newHeight });
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(table);
+    measure(); // initial pass for content present at mount
+    return () => ro.disconnect();
+  }, []);
 
   const cloneGrid = useCallback(
     () => grid.map((row) => row.map((cell) => ({ ...cell }))),
@@ -4553,6 +4573,7 @@ function TableCard({
         style={{ left: TBL_PAD, top: TBL_PAD, right: TBL_RIGHT, bottom: TBL_RIGHT }}
       >
         <table
+          ref={tableRef}
           className="border-collapse"
           style={{ tableLayout: "fixed", width: availW }}
         >
