@@ -219,29 +219,64 @@ export function CanvasToolkit({
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
 
+  // Everything the placement effect's handlers need, mirrored into refs and updated
+  // on every render (plain assignment, not inside a useEffect — this keeps them
+  // current without adding a single one to the effect's own dependency array). This
+  // is what makes the effect below safe to mount ONLY on [activeTool]: previously
+  // canvasPosition/canvasZoom/onPlaceElement/etc. were real deps, and — critically —
+  // canvasOriginOffset defaults to a bare `{ x: 0, y: 0 }` object literal when the
+  // caller never passes it (as is the case here), which React sees as a NEW
+  // reference on every single render. Since this component re-renders on every
+  // mousemove during its own drag (setShapeCreationDrag drives the dashed preview),
+  // that tore the whole effect down and rebuilt all three window listeners
+  // continuously for the full duration of every drag-to-create gesture — leaving
+  // windows where the real mouseup could land with no listener attached at all,
+  // which is exactly what the diagnostic logging showed happening for container
+  // captures (the highlight effect's mouseup fired reliably because ITS deps are
+  // just [activeTool]; this effect's did not, until now).
+  const canvasPositionRef = useRef(canvasPosition);
+  canvasPositionRef.current = canvasPosition;
+  const canvasZoomRef = useRef(canvasZoom);
+  canvasZoomRef.current = canvasZoom;
+  const canvasOriginOffsetRef = useRef(canvasOriginOffset);
+  canvasOriginOffsetRef.current = canvasOriginOffset;
+  const onPlaceElementRef = useRef(onPlaceElement);
+  onPlaceElementRef.current = onPlaceElement;
+  const selectedShapeTypeRef = useRef(selectedShapeType);
+  selectedShapeTypeRef.current = selectedShapeType;
+  const selectedLinkModeRef = useRef(selectedLinkMode);
+  selectedLinkModeRef.current = selectedLinkMode;
+  const selectedCardTypeRef = useRef(selectedCardType);
+  selectedCardTypeRef.current = selectedCardType;
+  const setActiveToolRef = useRef(setActiveTool);
+  setActiveToolRef.current = setActiveTool;
+
   // Minimum drag distance (in canvas px) to count as a drag vs a click
   const MIN_DRAG_DISTANCE = 10;
 
-  // Handle click-and-drag placement when tool is active (except for line which uses drag)
+  // Handle click-and-drag placement when tool is active (except for line which uses drag).
+  // Deliberately mounted only on [activeTool, canvasRef] (canvasRef is a stable ref object,
+  // so in practice this is just [activeTool]) — see the ref block above for why every other
+  // value is read live instead of being a dependency.
   useEffect(() => {
     if (!activeTool || activeTool === "line" || !canvasRef.current) return;
 
     const toCanvasCoords = (clientX: number, clientY: number) => {
       const rect = canvasRef.current!.getBoundingClientRect();
       return {
-        x: (clientX - rect.left - canvasPosition.x - canvasOriginOffset.x) / canvasZoom,
-        y: (clientY - rect.top - canvasPosition.y - canvasOriginOffset.y) / canvasZoom,
+        x: (clientX - rect.left - canvasPositionRef.current.x - canvasOriginOffsetRef.current.x) / canvasZoomRef.current,
+        y: (clientY - rect.top - canvasPositionRef.current.y - canvasOriginOffsetRef.current.y) / canvasZoomRef.current,
       };
     };
 
     const getOptions = () => {
       const tool = activeToolRef.current;
       return tool === "shape"
-        ? { shapeType: selectedShapeType }
+        ? { shapeType: selectedShapeTypeRef.current }
         : tool === "link"
-          ? { linkMode: selectedLinkMode }
+          ? { linkMode: selectedLinkModeRef.current }
           : tool === "freeform"
-            ? { cardType: selectedCardType }
+            ? { cardType: selectedCardTypeRef.current }
             : undefined;
     };
 
@@ -311,7 +346,7 @@ export function CanvasToolkit({
       // too so a thrown error can't escape this window listener uncaught.
       shapeCreationDragRef.current = null;
       setShapeCreationDrag(null);
-      setActiveTool(null);
+      setActiveToolRef.current(null);
       setShowCardTypeMenu(false);
 
       const { x, y } = toCanvasCoords(e.clientX, e.clientY);
@@ -333,12 +368,12 @@ export function CanvasToolkit({
           // Place at center of the drawn rectangle (handlePlaceElement offsets by half size)
           // eslint-disable-next-line no-console
           console.log("[toolkit] calling onPlaceElement (drag)", { left, top, width, height });
-          onPlaceElement(drag.tool, { x: left + width / 2, y: top + height / 2 }, { ...options, width, height });
+          onPlaceElementRef.current(drag.tool, { x: left + width / 2, y: top + height / 2 }, { ...options, width, height });
           // eslint-disable-next-line no-console
           console.log("[toolkit] onPlaceElement (drag) returned");
         } else {
           // Click: use default size, place centered on click
-          onPlaceElement(drag.tool, { x: drag.startX, y: drag.startY }, options);
+          onPlaceElementRef.current(drag.tool, { x: drag.startX, y: drag.startY }, options);
         }
       } catch (err) {
         console.error("[CanvasToolkit] onPlaceElement failed:", err);
@@ -374,18 +409,10 @@ export function CanvasToolkit({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp, true);
     };
-  }, [
-    activeTool,
-    canvasRef,
-    canvasPosition,
-    canvasZoom,
-    onPlaceElement,
-    selectedShapeType,
-    selectedLinkMode,
-    selectedCardType,
-    canvasOriginOffset,
-    setActiveTool,
-  ]);
+    // Deliberately minimal: every other value the handlers need is read live via the
+    // ref block above, so this effect (and its window listeners) survives the churn
+    // of a drag gesture instead of tearing down and rebuilding mid-drag.
+  }, [activeTool, canvasRef]);
 
   // NOTE: Line drawing is now handled by LineLayer component
   // The line tool state is lifted to the parent and passed via props
