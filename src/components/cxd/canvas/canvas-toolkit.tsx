@@ -334,13 +334,25 @@ export function CanvasToolkit({
     // mirrors the capture-highlight's own window-capture start listener in cxd-canvas so
     // both agree on the exact same start condition. The isCanvasSurface gate above still
     // limits it to the canvas surface, so a press on floating UI chrome is left untouched.
+    //
+    // mouseup is ALSO registered on the capture phase, for the same reason: when the drawn
+    // rectangle encloses existing elements, the release point almost always lands ON one of
+    // them. A bubble-phase window listener only fires once the event has bubbled all the
+    // way back up WITHOUT any descendant calling stopPropagation() along the way - and
+    // several element interaction handlers (drag-end, click-to-select, etc.) do exactly
+    // that. That silently swallowed the release: no container was created, and the drag
+    // preview never cleared because this handler never ran at all (no exception, nothing
+    // to catch) - reproducing exactly when the draw enclosed objects and never on empty
+    // canvas. A capture-phase window listener fires FIRST, before the event can reach any
+    // element and be stopped, so it is immune to this regardless of what is under the
+    // cursor on release.
     window.addEventListener("mousedown", handleMouseDown, true);
     window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("mouseup", handleMouseUp, true);
     return () => {
       window.removeEventListener("mousedown", handleMouseDown, true);
       window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mouseup", handleMouseUp, true);
     };
   }, [
     activeTool,

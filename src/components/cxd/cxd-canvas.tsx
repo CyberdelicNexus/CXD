@@ -2185,14 +2185,18 @@ export function CXDCanvas() {
     };
 
     // Capture phase on window so this observes the press before the toolkit's own
-    // canvas-level handler (which stopsPropagation), without itself blocking it.
+    // canvas-level handler (which stopsPropagation), without itself blocking it. mouseup
+    // is capture-phase too: releasing over one of the enclosed elements can have its
+    // propagation stopped by that element's own handlers before it ever bubbles back to
+    // a plain window listener, which left the highlight frozen mid-draw. Capture fires
+    // before any element gets a chance to do that.
     window.addEventListener('mousedown', onDown, true);
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('mouseup', onUp, true);
     return () => {
       window.removeEventListener('mousedown', onDown, true);
       window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mouseup', onUp, true);
       containerDrawStartRef.current = null;
       clearCapture();
     };
