@@ -912,6 +912,9 @@ export function CanvasElementRenderer({
         !isCroppingImage &&
         element.type !== "line" &&
         element.type !== "text" &&
+        // Link elements (bookmark + embed) skip the connector orb: it overlaps the
+        // corner/edge resize handles and blocks resizing. Links are not connectable.
+        element.type !== "link" &&
         !(element.type === "freeform" && (element as FreeformElement).isDocument) && (
           <FloatingPort
             elementId={element.id}
@@ -8825,7 +8828,7 @@ function LinkCard({
   // aspect ratio (recomputed every render, so it switches live while resizing):
   //   • wide/thin  (width/height > 1.2) → image LEFT, info RIGHT, actions on the far right
   //   • square/portrait (else)          → image on TOP, info + actions stacked below
-  // The default link size (320×240 ≈ 1.33) lands in the wide layout, so a freshly
+  // The default link size (360×120 = 3.0) lands in the wide layout, so a freshly
   // pasted bookmark renders as the slim horizontal row.
   if (element.linkMode === "bookmark" || !element.linkMode) {
     const isWide = element.height > 0 && element.width / element.height > 1.2;

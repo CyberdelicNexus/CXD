@@ -553,7 +553,7 @@ export const DEFAULT_ELEMENT_SIZES: Record<CanvasElementType, { width: number; h
   connector: { width: 0, height: 0 },
   line: { width: 200, height: 0 },
   text: { width: 400, height: 40 },
-  link: { width: 320, height: 240 }, // Updated for better bookmark view and 16:9 embed
+  link: { width: 360, height: 120 }, // Rectangular default (ratio 3) → slim horizontal bookmark-bar layout
   board: { width: 200, height: 150 },
   experienceBlock: { width: 220, height: 100 },
   table: { width: 360, height: 150 },
