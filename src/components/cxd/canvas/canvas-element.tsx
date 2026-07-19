@@ -8245,6 +8245,12 @@ function LinkCard({
   const activatePointerDown = useRef<{ x: number; y: number } | null>(null);
   const [urlError, setUrlError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Bookmark preview (og:image) load failure — falls back to favicon/placeholder.
+  // Reset whenever the thumbnail URL changes so a re-fetch gets a fresh attempt.
+  const [thumbError, setThumbError] = useState(false);
+  useEffect(() => {
+    setThumbError(false);
+  }, [element.thumbnail]);
 
   // Auto-fetch bookmark metadata when element is created with a URL but no metadata yet.
   // This handles the paste-as-bookmark flow where the URL is set but the card is empty.
@@ -8702,93 +8708,154 @@ function LinkCard({
     );
   }
 
-  // Bookmark mode - Image-first layout (reference layout)
+  // Bookmark mode — slim, responsive card. Two layouts driven by the element's
+  // aspect ratio (recomputed every render, so it switches live while resizing):
+  //   • wide/thin  (width/height > 1.2) → image LEFT, info RIGHT, actions on the far right
+  //   • square/portrait (else)          → image on TOP, info + actions stacked below
+  // The default link size (320×240 ≈ 1.33) lands in the wide layout, so a freshly
+  // pasted bookmark renders as the slim horizontal row.
   if (element.linkMode === "bookmark" || !element.linkMode) {
+    const isWide = element.height > 0 && element.width / element.height > 1.2;
+    const showThumb = !!element.thumbnail && !thumbError;
+    const linkTitle = element.title || element.domain || "Link";
+
+    // og:image preview with graceful fallback: broken/absent image → favicon → globe.
+    const imageArea = showThumb ? (
+      <NextImage
+        src={element.thumbnail!}
+        alt=""
+        fill
+        className="object-cover"
+        draggable={false}
+        onDragStart={(e) => e.preventDefault()}
+        onError={() => setThumbError(true)}
+        unoptimized
+      />
+    ) : element.favicon ? (
+      <div className="w-full h-full flex items-center justify-center">
+        <NextImage
+          src={element.favicon}
+          alt=""
+          width={36}
+          height={36}
+          className="w-9 h-9 opacity-80"
+          draggable={false}
+          unoptimized
+        />
+      </div>
+    ) : (
+      <div className="w-full h-full flex items-center justify-center">
+        <Globe className="w-10 h-10 text-muted-foreground/30" />
+      </div>
+    );
+
+    const faviconEl = element.favicon ? (
+      <NextImage
+        src={element.favicon}
+        alt=""
+        width={16}
+        height={16}
+        className="w-4 h-4 flex-shrink-0"
+        draggable={false}
+        unoptimized
+      />
+    ) : (
+      <Globe className="w-4 h-4 text-muted-foreground/60 flex-shrink-0" />
+    );
+
+    const titleLink = (
+      <a
+        href={element.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm font-semibold text-foreground hover:text-primary transition-colors line-clamp-2 leading-snug"
+        data-no-drag
+        onClick={(e) => e.stopPropagation()}
+      >
+        {linkTitle}
+      </a>
+    );
+
+    const domainRow = (
+      <div className="flex items-center gap-1.5 min-w-0">
+        {faviconEl}
+        <span className="text-xs text-muted-foreground/80 truncate">
+          {element.domain}
+        </span>
+      </div>
+    );
+
+    const openLink = (
+      <a
+        href={element.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex-shrink-0 w-6 h-6 rounded hover:bg-primary/10 flex items-center justify-center transition-colors"
+        data-no-drag
+        title="Open in new tab"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
+      </a>
+    );
+
+    // Edit-URL as a small circular icon button (opens the existing URL editor +
+    // re-fetch flow). Only discoverable when the element is selected and editable.
+    const editButton =
+      isSelected && !isReadOnly ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsEditing(true);
+          }}
+          className="flex-shrink-0 w-7 h-7 rounded-full bg-card border border-border shadow-sm flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+          data-no-drag
+          title="Edit URL"
+        >
+          <Edit2 className="w-3.5 h-3.5" />
+        </button>
+      ) : null;
+
+    // WIDE / thin rectangle → image left, info right, actions far right.
+    if (isWide) {
+      return (
+        <div className="w-full h-full rounded-lg border border-border bg-card/80 backdrop-blur overflow-hidden flex items-stretch">
+          <div className="relative w-2/5 max-w-[180px] min-w-[64px] flex-shrink-0 bg-gradient-to-br from-muted/30 to-muted/10 overflow-hidden">
+            {imageArea}
+          </div>
+          <div className="flex-1 min-w-0 flex flex-col justify-center gap-1 px-3 py-2">
+            {titleLink}
+            {domainRow}
+          </div>
+          <div className="flex-shrink-0 flex flex-col items-center justify-center gap-2 pr-2 pl-1">
+            {openLink}
+            {editButton}
+          </div>
+        </div>
+      );
+    }
+
+    // SQUARE / portrait → image on top, info + edit control stacked below.
     return (
       <div className="w-full h-full rounded-lg border border-border bg-card/80 backdrop-blur overflow-hidden flex flex-col">
-        {/* Large thumbnail area - top priority */}
         <div className="flex-1 min-h-0 bg-gradient-to-br from-muted/30 to-muted/10 relative overflow-hidden">
-          {element.thumbnail ? (
-            <NextImage
-              src={element.thumbnail}
-              alt=""
-              fill
-              className="object-cover"
-              draggable={false}
-              onDragStart={(e) => e.preventDefault()}
-              unoptimized
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <Globe className="w-12 h-12 text-muted-foreground/30" />
-            </div>
-          )}
+          {imageArea}
         </div>
-        {/* Metadata section - below image */}
-        <div className="p-3 space-y-2 bg-card/50 border-t border-border/50">
-          {/* Title and external link */}
+        <div className="p-3 space-y-1.5 bg-card/50 border-t border-border/50">
           <div className="flex items-start gap-2">
-            <a
-              href={element.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 text-sm font-semibold text-foreground hover:text-primary transition-colors line-clamp-2 leading-snug"
-              data-no-drag
-            >
-              {element.title || element.domain || "Link"}
-            </a>
-            <a
-              href={element.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-shrink-0 w-6 h-6 rounded hover:bg-primary/10 flex items-center justify-center transition-colors"
-              data-no-drag
-              title="Open in new tab"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
-            </a>
+            <div className="flex-1 min-w-0">{titleLink}</div>
+            {openLink}
           </div>
-
-          {/* Description */}
           {element.description && (
             <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
               {element.description}
             </p>
           )}
-
-          {/* Domain with favicon */}
-          <div className="flex items-center gap-1.5 pt-0.5">
-            {element.favicon && (
-              <NextImage
-                src={element.favicon}
-                alt=""
-                width={16}
-                height={16}
-                className="w-4 h-4"
-                draggable={false}
-                unoptimized
-              />
-            )}
-            <span className="text-xs text-muted-foreground/80 truncate">
-              {element.domain}
-            </span>
+          <div className="flex items-center justify-between gap-2 pt-0.5">
+            {domainRow}
+            {editButton}
           </div>
         </div>
-        {/* Edit button - only shown when selected */}
-        {isSelected && !isReadOnly && (
-          <div className="px-3 pb-2 pt-1 border-t border-border/50 bg-card/50">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsEditing(true);
-              }}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              data-no-drag
-            >
-              Edit URL
-            </button>
-          </div>
-        )}
       </div>
     );
   }
