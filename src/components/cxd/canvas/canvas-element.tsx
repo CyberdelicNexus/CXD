@@ -3643,7 +3643,14 @@ const TABLE_FONT_SIZES: { key: "sm" | "md" | "lg"; label: string }[] = [
 // frame room; right/bottom additionally reserve space so the "+" add buttons sit
 // FULLY OUTSIDE the grid (never over a cell, never over the bottom/right border).
 const TBL_FRAME = 10;   // selection frame band width (inner-glow, item 1) + drag affordance
-const TBL_PAD = 14;     // top/left content margin (reorder handles + frame breathing room)
+// Top/left content margin. Reserves room for the row/column reorder handles to sit
+// BELOW the connector port orb (which is centered on the element edge and reaches
+// ~11px inward), so a handle never overlaps the orb. See TBL_HANDLE_OFF.
+const TBL_PAD = 28;
+// Distance from the element edge to the reorder handle band. Kept > the connector
+// orb's inward reach (~11px) so the handle clears the orb; the band then fills the
+// remaining margin down to the grid's top/left border.
+const TBL_HANDLE_OFF = 15;
 const TBL_PLUS = 18;    // size of a right/bottom "+" add button
 const TBL_PLUS_GAP = 6; // clear gap between the table border and the "+" button
 const TBL_RIGHT = TBL_PLUS + TBL_PLUS_GAP + 6; // right/bottom content inset (button lives here, outside the grid)
@@ -3768,7 +3775,13 @@ function TableCard({
   // legacy fallback. lineWidth 0 = no visible grid line.
   const lineColor = element.lineColor || element.borderColor || "rgba(139,92,246,0.28)";
   const lineWidth = element.lineWidth ?? 1;
-  const cellBorder = lineWidth > 0 ? `${lineWidth}px solid ${lineColor}` : "none";
+  // Grid lines are NOT drawn as per-cell CSS borders (those scale with the canvas
+  // transform and round inconsistently at fractional zoom → uneven weights, and the
+  // outer edges get clipped by the content wrapper's overflow-hidden so the bottom/
+  // right of the grid can vanish when unselected). Instead every horizontal and
+  // vertical line — plus the closing outer rectangle — is one SVG overlay stroke with
+  // vector-effect:non-scaling-stroke, so all lines are identical in width and color and
+  // stay crisp at ANY zoom. See the gridLines overlay in the render below.
   const headerRow = element.headerRow ?? false;
   const zoom = canvasZoom || 1;
 
@@ -3785,6 +3798,10 @@ function TableCard({
   // Live reorder previews — { from, to } track index while dragging a move handle.
   const [reorderCol, setReorderCol] = useState<{ from: number; to: number } | null>(null);
   const [reorderRow, setReorderRow] = useState<{ from: number; to: number } | null>(null);
+  // Whether the pointer is hovering a reorder handle — drives the whole-row/column
+  // selection outline so it is clear what a handle click/drag will move.
+  const [hoverColHandle, setHoverColHandle] = useState(false);
+  const [hoverRowHandle, setHoverRowHandle] = useState(false);
 
   // Clear the selected cell whenever the whole element is deselected.
   useEffect(() => {
@@ -4409,7 +4426,7 @@ function TableCard({
                         "relative align-middle p-0 overflow-hidden",
                         isSel && "outline outline-2 -outline-offset-2 outline-violet-400",
                       )}
-                      style={{ border: cellBorder, ...cellBgStyle(r, c) }}
+                      style={{ ...cellBgStyle(r, c) }}
                       onClick={() => setSel({ r, c })}
                     >
                       <TableCellEditor
@@ -4481,6 +4498,94 @@ function TableCard({
           })}
       </div>
 
+      {/* Uniform grid lines (item 1 + item 3). A single SVG overlay draws every
+          interior line AND the closing outer rectangle as strokes with an identical
+          color/width. vector-effect:non-scaling-stroke keeps each stroke exactly
+          lineWidth device-px regardless of the canvas scale(zoom) transform, so all
+          lines render at the same weight and stay crisp at any zoom (no per-cell
+          border sub-pixel rounding). It sits OUTSIDE the overflow-hidden content
+          wrapper (overflow:visible) so the bottom/right edges are never clipped — the
+          grid is a complete closed rectangle whether the table is selected or not.
+          pointer-events:none keeps the cells underneath clickable/editable. */}
+      {lineWidth > 0 && (
+        <svg
+          className="absolute pointer-events-none"
+          width={availW}
+          height={availH}
+          shapeRendering="crispEdges"
+          style={{ left: TBL_PAD, top: TBL_PAD, width: availW, height: availH, overflow: "visible", zIndex: 6 }}
+        >
+          {/* Closing outer border — all four sides, always present */}
+          <rect
+            x={0}
+            y={0}
+            width={availW}
+            height={availH}
+            fill="none"
+            stroke={lineColor}
+            strokeWidth={lineWidth}
+            vectorEffect="non-scaling-stroke"
+          />
+          {/* Interior vertical lines (between columns) */}
+          {colLeft.slice(1).map((x, i) => (
+            <line
+              key={`gv${i}`}
+              x1={x}
+              y1={0}
+              x2={x}
+              y2={availH}
+              stroke={lineColor}
+              strokeWidth={lineWidth}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          {/* Interior horizontal lines (between rows) */}
+          {rowTop.slice(1).map((y, i) => (
+            <line
+              key={`gh${i}`}
+              x1={0}
+              y1={y}
+              x2={availW}
+              y2={y}
+              stroke={lineColor}
+              strokeWidth={lineWidth}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </svg>
+      )}
+
+      {/* Whole-row / whole-column selection outline (item 2b). Shown while a reorder
+          handle is hovered (which row/column a click would move) and while a reorder
+          drag is in progress (what is being moved). pointer-events:none so it never
+          interferes with the handle or cells. */}
+      {isSelected && !isReadOnly && sel && (hoverColHandle || reorderCol) && (
+        <div
+          className="absolute pointer-events-none z-40 rounded-[2px]"
+          style={{
+            left: TBL_PAD + (colLeft[reorderCol ? reorderCol.from : sel.c] || 0),
+            top: TBL_PAD,
+            width: dispCol[reorderCol ? reorderCol.from : sel.c] || 0,
+            height: availH,
+            boxShadow: "inset 0 0 0 2px rgba(167,139,250,0.95)",
+            background: "rgba(167,139,250,0.12)",
+          }}
+        />
+      )}
+      {isSelected && !isReadOnly && sel && (hoverRowHandle || reorderRow) && (
+        <div
+          className="absolute pointer-events-none z-40 rounded-[2px]"
+          style={{
+            left: TBL_PAD,
+            top: TBL_PAD + (rowTop[reorderRow ? reorderRow.from : sel.r] || 0),
+            width: availW,
+            height: dispRow[reorderRow ? reorderRow.from : sel.r] || 0,
+            boxShadow: "inset 0 0 0 2px rgba(167,139,250,0.95)",
+            background: "rgba(167,139,250,0.12)",
+          }}
+        />
+      )}
+
       {/* Selection frame — four ghost-purple edge bands forming a soft inset glow
           around ALL FOUR sides of the table, shown ONLY while selected (absent on
           deselect). Each band is ~10px, opaque violet at the outer edge fading
@@ -4535,8 +4640,12 @@ function TableCard({
         <div
           data-no-drag
           onMouseDown={startColReorder(sel.c)}
+          onMouseEnter={() => setHoverColHandle(true)}
+          onMouseLeave={() => setHoverColHandle(false)}
           className="absolute z-30 flex items-center justify-center cursor-grab active:cursor-grabbing group/cr rounded"
-          style={{ left: TBL_PAD + (colLeft[sel.c] || 0), top: 1, width: dispCol[sel.c], height: TBL_PAD - 2 }}
+          // Sits in the inner part of the top margin (offset past the connector orb by
+          // TBL_HANDLE_OFF, ending 2px above the grid) so it never overlaps the orb.
+          style={{ left: TBL_PAD + (colLeft[sel.c] || 0), top: TBL_HANDLE_OFF, width: dispCol[sel.c], height: TBL_PAD - TBL_HANDLE_OFF - 2 }}
           title="Drag to reorder column"
         >
           <div className="h-1.5 w-8 max-w-[80%] rounded-full bg-violet-400/40 group-hover/cr:bg-violet-400/80 transition-colors" />
@@ -4546,8 +4655,12 @@ function TableCard({
         <div
           data-no-drag
           onMouseDown={startRowReorder(sel.r)}
+          onMouseEnter={() => setHoverRowHandle(true)}
+          onMouseLeave={() => setHoverRowHandle(false)}
           className="absolute z-30 flex items-center justify-center cursor-grab active:cursor-grabbing group/rr rounded"
-          style={{ left: 1, top: TBL_PAD + (rowTop[sel.r] || 0), width: TBL_PAD - 2, height: dispRow[sel.r] }}
+          // Sits in the inner part of the left margin (offset past the connector orb by
+          // TBL_HANDLE_OFF, ending 2px before the grid) so it never overlaps the orb.
+          style={{ left: TBL_HANDLE_OFF, top: TBL_PAD + (rowTop[sel.r] || 0), width: TBL_PAD - TBL_HANDLE_OFF - 2, height: dispRow[sel.r] }}
           title="Drag to reorder row"
         >
           <div className="w-1.5 h-8 max-h-[80%] rounded-full bg-violet-400/40 group-hover/rr:bg-violet-400/80 transition-colors" />
