@@ -289,29 +289,40 @@ export function CanvasToolkit({
       const drag = shapeCreationDragRef.current;
       if (!drag) return;
 
+      // Clear the drag/tool UI state FIRST, unconditionally, before calling out to
+      // onPlaceElement. Previously this cleanup ran only after onPlaceElement returned,
+      // so if it (or a side effect it triggers, e.g. the container capture-attach logic)
+      // ever threw, the ghost drag rectangle never cleared and the tool never exited —
+      // the gesture looked "stuck drawing" with nothing created. Ordering it first means
+      // the UI always recovers even if placement itself fails; wrap the call in try/catch
+      // too so a thrown error can't escape this window listener uncaught.
+      shapeCreationDragRef.current = null;
+      setShapeCreationDrag(null);
+      setActiveTool(null);
+      setShowCardTypeMenu(false);
+
       const { x, y } = toCanvasCoords(e.clientX, e.clientY);
       const dx = Math.abs(x - drag.startX);
       const dy = Math.abs(y - drag.startY);
 
       const options = getOptions();
 
-      if (dx >= MIN_DRAG_DISTANCE || dy >= MIN_DRAG_DISTANCE) {
-        // Drag: create with custom size — position at top-left of drawn rectangle
-        const left = Math.min(drag.startX, x);
-        const top = Math.min(drag.startY, y);
-        const width = Math.max(dx, 20);
-        const height = Math.max(dy, 20);
-        // Place at center of the drawn rectangle (handlePlaceElement offsets by half size)
-        onPlaceElement(drag.tool, { x: left + width / 2, y: top + height / 2 }, { ...options, width, height });
-      } else {
-        // Click: use default size, place centered on click
-        onPlaceElement(drag.tool, { x: drag.startX, y: drag.startY }, options);
+      try {
+        if (dx >= MIN_DRAG_DISTANCE || dy >= MIN_DRAG_DISTANCE) {
+          // Drag: create with custom size — position at top-left of drawn rectangle
+          const left = Math.min(drag.startX, x);
+          const top = Math.min(drag.startY, y);
+          const width = Math.max(dx, 20);
+          const height = Math.max(dy, 20);
+          // Place at center of the drawn rectangle (handlePlaceElement offsets by half size)
+          onPlaceElement(drag.tool, { x: left + width / 2, y: top + height / 2 }, { ...options, width, height });
+        } else {
+          // Click: use default size, place centered on click
+          onPlaceElement(drag.tool, { x: drag.startX, y: drag.startY }, options);
+        }
+      } catch (err) {
+        console.error("[CanvasToolkit] onPlaceElement failed:", err);
       }
-
-      shapeCreationDragRef.current = null;
-      setShapeCreationDrag(null);
-      setActiveTool(null);
-      setShowCardTypeMenu(false);
     };
 
     // Intercept the press on WINDOW in the capture phase (not on the canvas node) so the

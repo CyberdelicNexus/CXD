@@ -2052,8 +2052,9 @@ export function CXDCanvas() {
 
       // Auto-attach to the innermost container the new element lands inside. Containers
       // nest too: a container created inside another becomes its child. Exclude the new
-      // element itself as a candidate target.
-      {
+      // element itself as a candidate target. Defensive: the element itself is already
+      // created above, so a failure here must not make the placement look like a no-op.
+      try {
         const center = {
           x: newElement.x + newElement.width / 2,
           y: newElement.y + newElement.height / 2,
@@ -2064,6 +2065,8 @@ export function CXDCanvas() {
           // A newly nested container needs its depth-based z so it paints above its parent.
           if (newElement.type === 'container') reindexContainerZ();
         }
+      } catch (err) {
+        console.error('[handlePlaceElement] Auto-attach-to-parent failed:', err);
       }
 
       // Capture-on-draw: a NEW container DRAG-drawn (options carry width+height) so its
@@ -2073,23 +2076,30 @@ export function CXDCanvas() {
       // enclosed stays with that parent (which is itself captured), preserving existing
       // nesting and recursive move. attachNodesToContainer cycle-guards each write, so an
       // ancestor container can never be pulled into its own descendant.
-      if (newElement.type === 'container' && options?.width != null && options?.height != null) {
-        const rect = { x: newElement.x, y: newElement.y, width: newElement.width, height: newElement.height };
-        const enclosed = elementsEnclosedByRect(rect, canvasElements, newElement.id);
-        if (enclosed.length > 0) {
-          const enclosedSet = new Set(enclosed);
-          const byId = new Map(canvasElements.map((el) => [el.id, el] as const));
-          const captureIds = enclosed.filter((id) => {
-            const parentId = byId.get(id)?.containerId;
-            return !(parentId && enclosedSet.has(parentId));
-          });
-          if (captureIds.length > 0) {
-            attachNodesToContainer(captureIds, newElement.id);
-            // Depth-based z for any captured child container(s) so they paint above the
-            // new parent.
-            if (captureIds.some((id) => byId.get(id)?.type === 'container')) reindexContainerZ();
+      // Wrapped defensively: the container element itself is already created (synced
+      // above) by this point, so a failure capturing enclosed elements must never make
+      // the whole gesture look like it did nothing — the user still gets their container.
+      try {
+        if (newElement.type === 'container' && options?.width != null && options?.height != null) {
+          const rect = { x: newElement.x, y: newElement.y, width: newElement.width, height: newElement.height };
+          const enclosed = elementsEnclosedByRect(rect, canvasElements, newElement.id);
+          if (enclosed.length > 0) {
+            const enclosedSet = new Set(enclosed);
+            const byId = new Map(canvasElements.map((el) => [el.id, el] as const));
+            const captureIds = enclosed.filter((id) => {
+              const parentId = byId.get(id)?.containerId;
+              return !(parentId && enclosedSet.has(parentId));
+            });
+            if (captureIds.length > 0) {
+              attachNodesToContainer(captureIds, newElement.id);
+              // Depth-based z for any captured child container(s) so they paint above the
+              // new parent.
+              if (captureIds.some((id) => byId.get(id)?.type === 'container')) reindexContainerZ();
+            }
           }
         }
+      } catch (err) {
+        console.error('[handlePlaceElement] Container capture-attach failed:', err);
       }
 
       // Select the freshly placed element (a captured-container draw selects the container).
