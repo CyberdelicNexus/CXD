@@ -314,14 +314,20 @@ export function CanvasToolkit({
       setShowCardTypeMenu(false);
     };
 
-    const canvas = canvasRef.current;
-    // Capture phase: intercept before the click reaches (and gets stopped by) an
-    // underlying element's own bubble-phase mousedown handler.
-    canvas.addEventListener("mousedown", handleMouseDown, true);
+    // Intercept the press on WINDOW in the capture phase (not on the canvas node) so the
+    // placement gesture is caught before ANY element, selection overlay, portal, or
+    // document handler can act on it. This makes the draw-create begin even when the
+    // initial press lands on top of an existing element (data-node-id) - e.g. starting a
+    // capturing container from on top of an object - instead of the press falling through
+    // to that element and the toolkit only click-placing a default container later. It
+    // mirrors the capture-highlight's own window-capture start listener in cxd-canvas so
+    // both agree on the exact same start condition. The isCanvasSurface gate above still
+    // limits it to the canvas surface, so a press on floating UI chrome is left untouched.
+    window.addEventListener("mousedown", handleMouseDown, true);
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => {
-      canvas.removeEventListener("mousedown", handleMouseDown, true);
+      window.removeEventListener("mousedown", handleMouseDown, true);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
