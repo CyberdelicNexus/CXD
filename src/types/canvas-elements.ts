@@ -214,7 +214,12 @@ export interface ImageElement extends CanvasElementBase {
   type: 'image';
   src: string;
   alt?: string;
-  description?: string;   // Optional caption; when set the element renders as a storyboard frame
+  description?: string;             // Storyboard caption text
+  storyboard?: boolean;            // Storyboard frame mode (image + caption in a bordered cell)
+  storyboardBgColor?: string;      // Frame background
+  storyboardBorderColor?: string;  // Frame border color
+  storyboardBorderWidth?: number;  // Frame border width (px)
+  storyboardTextColor?: string;    // Caption text color
   objectFit?: 'cover' | 'contain' | 'fill';
   imageMeta?: {
     width: number;

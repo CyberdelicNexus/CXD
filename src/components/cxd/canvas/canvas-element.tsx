@@ -961,6 +961,44 @@ export function CanvasElementRenderer({
           onMouseDown={(e) => e.stopPropagation()}
         >
           {/* Element-specific actions */}
+          {element.type === "image" && (element as ImageElement).storyboard && (
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (showColorPicker) {
+                    closeAllSubmenus();
+                  } else {
+                    setColorPickerDefaultMode("stroke");
+                    openColorPicker();
+                  }
+                }}
+                className={cn(
+                  "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                  showColorPicker && "bg-primary/20 text-primary",
+                )}
+                title="Storyboard colors"
+              >
+                <Palette className="w-4 h-4" />
+              </button>
+              {showColorPicker && (
+                <ShapeColorPicker
+                  fillColor={(element as ImageElement).storyboardBgColor || "#0f0f12"}
+                  strokeColor={(element as ImageElement).storyboardBorderColor || "#b8b8be"}
+                  strokeWidth={(element as ImageElement).storyboardBorderWidth ?? 3}
+                  textColor={(element as ImageElement).storyboardTextColor || "#f4f4f5"}
+                  onFillColorChange={(color) => onUpdate({ storyboardBgColor: color })}
+                  onStrokeColorChange={(color) => onUpdate({ storyboardBorderColor: color })}
+                  onStrokeWidthChange={(width) => onUpdate({ storyboardBorderWidth: width })}
+                  onFillOpacityChange={() => { /* n/a for storyboard frames */ }}
+                  onTextColorChange={(color) => onUpdate({ storyboardTextColor: color })}
+                  onClose={() => setShowColorPicker(false)}
+                  defaultMode={colorPickerDefaultMode}
+                />
+              )}
+            </div>
+          )}
           {element.type === "shape" && (
             <>
               {/* Color Picker (Fill/Stroke/Text unified) */}
@@ -6852,6 +6890,61 @@ function FreeformCard({
   );
 }
 
+/**
+ * Storyboard caption: an editable textarea whose font-size auto-shrinks so the
+ * text always fits the fixed caption strip (down to a floor, then it scrolls).
+ * Starts large and steps down — so short captions read big and long ones shrink
+ * to fit instead of overflowing onto the image.
+ */
+function StoryboardCaption({
+  value,
+  onChange,
+  color,
+  readOnly,
+  resizeKey,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  color: string;
+  readOnly?: boolean;
+  resizeKey: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const MAX = 16;
+    const MIN = 9;
+    let size = MAX;
+    el.style.fontSize = `${size}px`;
+    // Step down until the content fits the strip's height (or we hit the floor).
+    while (size > MIN && el.scrollHeight > el.clientHeight + 1) {
+      size -= 1;
+      el.style.fontSize = `${size}px`;
+    }
+  }, []);
+  useEffect(() => {
+    fit();
+  }, [value, resizeKey, fit]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => {
+        onChange(e.target.value);
+        fit();
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      placeholder="Add a caption…"
+      readOnly={readOnly}
+      data-no-drag
+      className="w-full h-full resize-none bg-transparent leading-snug outline-none border-0 focus:ring-0 placeholder:text-white/30"
+      style={{ color }}
+    />
+  );
+}
+
 // Image card component with upload
 function ImageCard({
   element,
@@ -6869,13 +6962,6 @@ function ImageCard({
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
   const [isCropping, setIsCropping] = useState(false);
-  // Storyboard caption: open when the element already has a description, or after
-  // the user turns it on via the toolbar. When on, the image renders as a framed
-  // storyboard cell with an editable caption underneath.
-  const [captionOpen, setCaptionOpen] = useState(
-    typeof (element as ImageElement).description === "string" &&
-      (element as ImageElement).description!.length > 0,
-  );
 
   // Notify parent when crop mode changes so resize handles can hide
   useEffect(() => {
@@ -7385,7 +7471,14 @@ function ImageCard({
   const isCropped =
     crop.x !== 0 || crop.y !== 0 || crop.width !== 100 || crop.height !== 100;
   const hasEdits = isCropped || flipH || flipV;
-  const isStoryboard = captionOpen || !!element.description;
+  // Storyboard frame mode (persistent field so the element toolbar can offer a
+  // colour editor for it). Defaults are soft — a thin light-grey border on a
+  // near-black cell — and every colour/width is overridable via the toolbar.
+  const isStoryboard = !!element.storyboard;
+  const sbBorderColor = element.storyboardBorderColor || "#b8b8be";
+  const sbBgColor = element.storyboardBgColor || "#0f0f12";
+  const sbBorderWidth = element.storyboardBorderWidth ?? 3;
+  const sbTextColor = element.storyboardTextColor || "#f4f4f5";
 
   // Image is loaded - show clean media tile
   return (
@@ -7394,11 +7487,12 @@ function ImageCard({
       data-crop-mode={isCropping ? "true" : undefined}
     >
       <div
-        className={cn(
-          "w-full h-full flex flex-col",
-          // Storyboard frame: thick light border wrapping the image + caption.
-          isStoryboard && "rounded-md border-[6px] border-neutral-100 bg-neutral-900 shadow-xl overflow-hidden",
-        )}
+        className={cn("w-full h-full flex flex-col", isStoryboard && "rounded-md overflow-hidden shadow-xl")}
+        style={
+          isStoryboard
+            ? { border: `${sbBorderWidth}px solid ${sbBorderColor}`, background: sbBgColor }
+            : undefined
+        }
       >
       <div
         ref={imageContainerRef}
@@ -7543,19 +7637,19 @@ function ImageCard({
           </div>
         )}
       </div>
-      {/* Storyboard caption strip — editable text under the framed image */}
+      {/* Storyboard caption strip — sits BELOW the image (never over it); text
+          auto-shrinks to fit when long. */}
       {isStoryboard && (
-        <div className="shrink-0 border-t-[6px] border-neutral-100 bg-neutral-900 px-2 py-1.5">
-          <textarea
+        <div
+          className="shrink-0 h-[28%] min-h-[38px] max-h-[46%] px-2 py-1.5"
+          style={{ borderTop: `${sbBorderWidth}px solid ${sbBorderColor}`, background: sbBgColor }}
+        >
+          <StoryboardCaption
             value={element.description || ""}
-            onChange={(e) => onUpdate({ description: e.target.value })}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="Add a caption…"
+            onChange={(v) => onUpdate({ description: v })}
+            color={sbTextColor}
             readOnly={isReadOnly}
-            data-no-drag
-            rows={2}
-            className="w-full resize-none bg-transparent text-[13px] leading-snug text-neutral-100 placeholder:text-neutral-500 outline-none border-0 focus:ring-0"
+            resizeKey={`${element.width}x${element.height}`}
           />
         </div>
       )}
@@ -7607,22 +7701,14 @@ function ImageCard({
             <FlipVertical className="w-4 h-4" />
           </button>
           <button
-            onClick={() => {
-              setCaptionOpen((v) => {
-                const next = !v;
-                // Turning the caption off clears the stored description so the
-                // frame doesn't reappear on reload.
-                if (!next) onUpdate({ description: "" });
-                return next;
-              });
-            }}
+            onClick={() => onUpdate({ storyboard: !element.storyboard })}
             className={cn(
               "p-2 rounded-md transition-colors",
               isStoryboard
                 ? "bg-primary/20 text-primary"
                 : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
             )}
-            title={isStoryboard ? "Remove caption" : "Add caption (storyboard)"}
+            title={isStoryboard ? "Remove caption frame" : "Add caption (storyboard)"}
           >
             <Captions className="w-4 h-4" />
           </button>

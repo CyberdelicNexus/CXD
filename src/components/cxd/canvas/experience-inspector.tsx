@@ -823,7 +823,9 @@ export function ExperienceInspectorPanel({
 
   return (
     <div
-      className="fixed top-16 bottom-0 z-20 flex flex-col backdrop-blur-xl border-l border-border shadow-2xl shadow-black/20 transition-transform duration-300 ease-out"
+      // top-20 clears the 80px navbar (was top-16 / 64px, which tucked the header
+      // under it); the header also gets extra top padding for breathing room.
+      className="fixed top-20 bottom-0 z-20 flex flex-col backdrop-blur-xl border-l border-border shadow-2xl shadow-black/20 transition-transform duration-300 ease-out"
       style={{
         right: "0px",
         width: `${PANEL_WIDTH}px`,
@@ -837,7 +839,7 @@ export function ExperienceInspectorPanel({
       {/* Vertical divider/glow when panel is open */}
       {isOpen && <></>}
       {/* Panel Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 pt-6 pb-3 border-b border-border">
         <div className="flex items-center gap-3">
           <span className="text-primary">{sectionInfo?.icon}</span>
           <div>
