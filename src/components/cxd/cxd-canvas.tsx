@@ -704,6 +704,20 @@ export function CXDCanvas() {
     null,
   );
 
+  // Pending multi-element drop into a board — when more than one element is
+  // dropped we ask the user whether to keep their current arrangement or
+  // distribute them into a grid, instead of always redistributing.
+  const [boardDropChoice, setBoardDropChoice] = useState<{
+    childBoardId: string;
+    elementIds: string[];
+    screenX: number;
+    screenY: number;
+  } | null>(null);
+
+  // Last known mouse position (screen px) — used for paste placement and the
+  // board-drop chooser. Declared here so earlier callbacks can read it.
+  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+
   // Drop target container (for hover feedback)
   const [dropTargetContainerId, setDropTargetContainerId] = useState<
     string | null
@@ -2235,39 +2249,83 @@ export function CXDCanvas() {
         return;
       }
 
-      // Alt-drag to duplicate
+      // Alt-drag to duplicate — duplicates the WHOLE current selection (or the
+      // grabbed element's group), not just the single element under the cursor,
+      // so alt-dragging a multi-selection into a board copies all of them.
       if (e.altKey && element) {
         pushCanvasHistory();
-        // Copy must render above everything else on the canvas — an
-        // unbumped (equal) zIndex leaves it buried under other elements.
+
+        // Which elements to copy: the active multi-selection if the grabbed one is
+        // part of it, else the grabbed element's group, else just the one.
+        const groupMembers = element.groupId
+          ? canvasElements.filter((el) => el.groupId === element.groupId).map((el) => el.id)
+          : [];
+        const sourceIds =
+          selectedElementIds.size > 1 && selectedElementIds.has(elementId)
+            ? Array.from(selectedElementIds)
+            : groupMembers.length > 1
+              ? groupMembers
+              : [elementId];
+        const sources = sourceIds
+          .map((id) => canvasElements.find((el) => el.id === id))
+          .filter((el): el is CanvasElement => !!el && !el.locked);
+        if (sources.length === 0) return;
+
+        // Copies must render above everything else on the canvas.
         const altDragMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
-        const newElement: CanvasElement = {
-          ...element,
-          id: uuidv4(),
-          x: element.x,
-          y: element.y,
-          zIndex: altDragMaxZ + 1,
-        };
+        // Fresh ids, remapping groupId (per source group) and containerId (only when
+        // the parent is also being copied) so grouping/nesting survives within the copy.
+        const idRemap = new Map<string, string>();
+        sources.forEach((el) => idRemap.set(el.id, uuidv4()));
+        const groupIdRemap = new Map<string, string>();
 
-        // For line elements, also copy start/end/bend with a small offset
-        if (element.type === 'line' && 'start' in element) {
-          const line = element as any;
-          const offset = 20;
-          (newElement as any).start = { x: line.start.x + offset, y: line.start.y + offset };
-          (newElement as any).end = { x: line.end.x + offset, y: line.end.y + offset };
-          if (line.bend) {
-            (newElement as any).bend = { x: line.bend.x + offset, y: line.bend.y + offset };
+        const clones: CanvasElement[] = sources.map((el, i) => {
+          const cloned = (typeof structuredClone === "function"
+            ? structuredClone(el)
+            : JSON.parse(JSON.stringify(el))) as CanvasElement;
+          const anyClone = cloned as any;
+          if (anyClone.groupId) {
+            if (!groupIdRemap.has(anyClone.groupId)) groupIdRemap.set(anyClone.groupId, uuidv4());
+            anyClone.groupId = groupIdRemap.get(anyClone.groupId);
           }
-        }
+          if (anyClone.containerId && idRemap.has(anyClone.containerId)) {
+            anyClone.containerId = idRemap.get(anyClone.containerId);
+          }
+          anyClone.id = idRemap.get(el.id)!;
+          anyClone.zIndex = altDragMaxZ + 1 + i;
+          return cloned;
+        });
 
-        syncAddElement(newElement);
-        setSelectedElementId(newElement.id);
-        setSelectedElementIds(new Set([newElement.id]));
-        setDraggingElement(newElement.id);
+        // Single batched insert (freeze-proof) then drag all copies as a group.
+        addCanvasElements(clones);
+
+        const primaryCloneId = idRemap.get(elementId)!;
+        const primaryClone = clones.find((c) => c.id === primaryCloneId)!;
+        setSelectedElementIds(new Set(clones.map((c) => c.id)));
+        setSelectedElementId(primaryCloneId);
+        setDraggingElement(primaryCloneId);
         setDragElementStart({ x: e.clientX, y: e.clientY });
-        const altDragPositions = new Map<string, { x: number; y: number }>();
-        altDragPositions.set(newElement.id, { x: newElement.x, y: newElement.y });
-        dragOriginalPositionsRef.current = altDragPositions;
+
+        const offsets = new Map<string, { x: number; y: number }>();
+        const originalPositions = new Map<string, { x: number; y: number }>();
+        const lineCoords = new Map<string, { start: { x: number; y: number }; end: { x: number; y: number }; bend?: { x: number; y: number } }>();
+        clones.forEach((c) => {
+          offsets.set(c.id, { x: c.x - primaryClone.x, y: c.y - primaryClone.y });
+          originalPositions.set(c.id, { x: c.x, y: c.y });
+          if (c.type === "line") {
+            const lineEl = c as LineElement;
+            if (lineEl.start && lineEl.end) {
+              lineCoords.set(c.id, {
+                start: { ...lineEl.start },
+                end: { ...lineEl.end },
+                bend: lineEl.bend ? { ...lineEl.bend } : undefined,
+              });
+            }
+          }
+        });
+        setDragOffsets(offsets);
+        dragOriginalPositionsRef.current = originalPositions;
+        dragOriginalLineCoordsRef.current = lineCoords;
         return;
       }
 
@@ -2355,6 +2413,90 @@ export function CXDCanvas() {
     [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition, canEdit],
   );
 
+  // Move a set of elements onto a (child) board, either preserving their current
+  // relative arrangement ("keep") or laying them out in a fresh non-overlapping
+  // grid ("distribute"). Shared by the single-drop fast path and the multi-drop
+  // keep/distribute chooser.
+  const moveElementsIntoBoard = useCallback(
+    (ids: string[], childBoardId: string, mode: "keep" | "distribute") => {
+      const els = getCanvasElements();
+      const movable = ids
+        .map((id) => els.find((e) => e.id === id))
+        .filter((el): el is CanvasElement => !!el && el.type !== "board");
+      if (movable.length === 0) return;
+
+      type Rect = { x: number; y: number; width: number; height: number };
+      const MARGIN = 32;
+      const START_X = 80;
+      const START_Y = 80;
+
+      if (mode === "keep") {
+        // Preserve relative positions: translate the whole group so its top-left
+        // lands at (START_X, START_Y) in the board's coordinate space.
+        const minX = Math.min(...movable.map((el) => el.x));
+        const minY = Math.min(...movable.map((el) => el.y));
+        movable.forEach((el) => {
+          updateCanvasElement(el.id, {
+            boardId: childBoardId,
+            x: START_X + (el.x - minX),
+            y: START_Y + (el.y - minY),
+          });
+        });
+        return;
+      }
+
+      // distribute → grid of empty slots that avoids existing board content.
+      const occupied: Rect[] = els
+        .filter((el) => el.boardId === childBoardId && el.type !== "line" && el.type !== "connector")
+        .map((el) => ({ x: el.x, y: el.y, width: el.width || 200, height: el.height || 200 }));
+
+      const GRID_STEP_X = 260;
+      const GRID_STEP_Y = 220;
+      const MAX_COLS = 8;
+      const MAX_ROWS = 30;
+      const findEmptySlot = (width: number, height: number): { x: number; y: number } => {
+        const overlapsAny = (cx: number, cy: number) =>
+          occupied.some(
+            (p) =>
+              cx < p.x + p.width + MARGIN &&
+              cx + width + MARGIN > p.x &&
+              cy < p.y + p.height + MARGIN &&
+              cy + height + MARGIN > p.y,
+          );
+        for (let row = 0; row < MAX_ROWS; row++) {
+          for (let col = 0; col < MAX_COLS; col++) {
+            const cx = START_X + col * GRID_STEP_X;
+            const cy = START_Y + row * GRID_STEP_Y;
+            if (!overlapsAny(cx, cy)) return { x: cx, y: cy };
+          }
+        }
+        return { x: START_X + Math.random() * 400, y: START_Y + Math.random() * 400 };
+      };
+
+      movable.forEach((el) => {
+        const w = el.width || 200;
+        const h = el.height || 200;
+        const { x, y } = findEmptySlot(w, h);
+        occupied.push({ x, y, width: w, height: h });
+        updateCanvasElement(el.id, { boardId: childBoardId, x, y });
+      });
+    },
+    [getCanvasElements, updateCanvasElement],
+  );
+
+  // Resolve a pending multi-element board drop with the user's chosen layout.
+  const applyBoardDropChoice = useCallback(
+    (mode: "keep" | "distribute") => {
+      if (!boardDropChoice) return;
+      pushCanvasHistory();
+      moveElementsIntoBoard(boardDropChoice.elementIds, boardDropChoice.childBoardId, mode);
+      setBoardDropChoice(null);
+      setSelectedElementIds(new Set());
+      setSelectedElementId(null);
+    },
+    [boardDropChoice, moveElementsIntoBoard, pushCanvasHistory, setSelectedElementIds, setSelectedElementId],
+  );
+
   // Handle element drag end
   const handleElementDragEnd = useCallback(() => {
     // Check if dropped on a board (both multi-select and single element)
@@ -2370,69 +2512,35 @@ export function CXDCanvas() {
       ) {
         const targetChildBoardId = (targetBoard as any).childBoardId;
 
-        // Collect elements to move (either selected elements or the dragging element)
-        const elementsToMove =
+        // Collect elements to move (either selected elements or the dragging element),
+        // excluding boards (a board can't be dropped into itself/another board here).
+        const elementsToMove = (
           selectedElementIds.size > 0
             ? Array.from(selectedElementIds)
             : draggingElement
               ? [draggingElement]
-              : [];
-
-        // Build the "occupied" list from elements already inside the target board
-        // so newly-dropped elements never overlap them or each other.
-        type Rect = { x: number; y: number; width: number; height: number };
-        const occupied: Rect[] = canvasElements
-          .filter((el) => el.boardId === targetChildBoardId && el.type !== "line" && el.type !== "connector")
-          .map((el) => ({
-            x: el.x,
-            y: el.y,
-            width: el.width || 200,
-            height: el.height || 200,
-          }));
-
-        const GRID_STEP_X = 260;
-        const GRID_STEP_Y = 220;
-        const MARGIN = 32;
-        const START_X = 80;
-        const START_Y = 80;
-        const MAX_COLS = 8;
-        const MAX_ROWS = 30;
-
-        const findEmptySlot = (width: number, height: number): { x: number; y: number } => {
-          const overlapsAny = (cx: number, cy: number) =>
-            occupied.some(
-              (p) =>
-                cx < p.x + p.width + MARGIN &&
-                cx + width + MARGIN > p.x &&
-                cy < p.y + p.height + MARGIN &&
-                cy + height + MARGIN > p.y,
-            );
-          for (let row = 0; row < MAX_ROWS; row++) {
-            for (let col = 0; col < MAX_COLS; col++) {
-              const cx = START_X + col * GRID_STEP_X;
-              const cy = START_Y + row * GRID_STEP_Y;
-              if (!overlapsAny(cx, cy)) return { x: cx, y: cy };
-            }
-          }
-          // Fallback: jittered random if grid is fully packed
-          return { x: START_X + Math.random() * 400, y: START_Y + Math.random() * 400 };
-        };
-
-        // Move elements into the target board, placing each in the next empty slot
-        elementsToMove.forEach((id) => {
+              : []
+        ).filter((id) => {
           const el = canvasElements.find((e) => e.id === id);
-          if (!el || el.type === "board") return;
-          const w = el.width || 200;
-          const h = el.height || 200;
-          const { x, y } = findEmptySlot(w, h);
-          // Reserve this slot so subsequent items in the same drop don't overlap it
-          occupied.push({ x, y, width: w, height: h });
-          updateCanvasElement(id, {
-            boardId: targetChildBoardId,
-            x,
-            y,
-          });
+          return el && el.type !== "board";
         });
+
+        if (elementsToMove.length > 1) {
+          // Ask keep-vs-distribute instead of always redistributing. The elements
+          // stay where they were dropped (still selected) until the user chooses.
+          setBoardDropChoice({
+            childBoardId: targetChildBoardId,
+            elementIds: elementsToMove,
+            screenX: lastMousePos.x,
+            screenY: lastMousePos.y,
+          });
+          setDropTargetBoardId(null);
+          setDraggingElement(null);
+          return;
+        }
+
+        // Single element → drop straight into the next empty slot.
+        moveElementsIntoBoard(elementsToMove, targetChildBoardId, "distribute");
 
         // Clear selection after move
         setSelectedElementIds(new Set());
@@ -2631,6 +2739,8 @@ export function CXDCanvas() {
     selectedElementIds,
     updateCanvasElement,
     commitDragPositionsToYjs,
+    moveElementsIntoBoard,
+    lastMousePos,
   ]);
 
   // Handle experience block drag start
@@ -2954,10 +3064,7 @@ export function CXDCanvas() {
     [enterBoard],
   );
 
-  // Track mouse position for paste
-  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
-
-  // Track mouse position for paste
+  // Track mouse position for paste (state declared earlier, near the board-drop state)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       setLastMousePos({ x: e.clientX, y: e.clientY });
@@ -5814,6 +5921,47 @@ export function CXDCanvas() {
             <span className="text-sm">Drop to place on canvas</span>
           </div>
         </div>
+      )}
+      {/* Multi-element board-drop chooser: keep current arrangement vs distribute */}
+      {boardDropChoice && (
+        <>
+          <div
+            className="fixed inset-0 z-[59]"
+            onClick={() => setBoardDropChoice(null)}
+            onContextMenu={(e) => { e.preventDefault(); setBoardDropChoice(null); }}
+          />
+          <div
+            className="fixed z-[60] w-56 p-1.5 rounded-xl bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+            style={{
+              left: Math.min(boardDropChoice.screenX, (typeof window !== 'undefined' ? window.innerWidth : 9999) - 240),
+              top: Math.min(boardDropChoice.screenY, (typeof window !== 'undefined' ? window.innerHeight : 9999) - 140),
+            }}
+          >
+            <div className="px-2.5 py-1.5 text-[11px] uppercase tracking-wide text-white/40">
+              Drop {boardDropChoice.elementIds.length} items into board
+            </div>
+            <button
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/10 transition-colors"
+              onClick={() => applyBoardDropChoice("keep")}
+            >
+              <Files className="w-4 h-4 text-violet-400" />
+              <div>
+                <div className="font-medium">Keep arrangement</div>
+                <div className="text-[11px] text-white/40">Preserve their relative layout</div>
+              </div>
+            </button>
+            <button
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-sm text-white/80 hover:bg-white/10 transition-colors"
+              onClick={() => applyBoardDropChoice("distribute")}
+            >
+              <LayoutGrid className="w-4 h-4 text-cyan-400" />
+              <div>
+                <div className="font-medium">Distribute across</div>
+                <div className="text-[11px] text-white/40">Lay out in an even grid</div>
+              </div>
+            </button>
+          </div>
+        </>
       )}
       {/* Experience Flow Timeline */}
       <ExperienceFlowDrawer />
