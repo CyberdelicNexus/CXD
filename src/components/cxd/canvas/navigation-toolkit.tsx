@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface NavigationToolkitProps {
@@ -14,6 +14,8 @@ export interface NavigationToolkitProps {
   canRedo?: boolean;
   showAlignmentGuides?: boolean;
   onToggleAlignmentGuides?: () => void;
+  gridVisible?: boolean;
+  onToggleGrid?: () => void;
 }
 
 export function NavigationToolkit({
@@ -28,11 +30,29 @@ export function NavigationToolkit({
   canRedo,
   showAlignmentGuides,
   onToggleAlignmentGuides,
+  gridVisible,
+  onToggleGrid,
 }: NavigationToolkitProps) {
   return (
-    <div className="absolute left-6 flex items-center gap-2 z-10 bottom-[56px] flex-col h-fit top-[248.8px]">
-      {/* Snap & Alignment Toggles */}
+    // Vertically centered on the page regardless of viewport height (top-1/2 +
+    // translate), pinned to the left edge — no hardcoded top/bottom offsets.
+    <div className="absolute left-6 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10 flex-col h-fit">
+      {/* Grid + Alignment Toggles */}
       <div className="flex flex-col gap-1 p-1 rounded-lg bg-card/80 backdrop-blur border border-border">
+        {onToggleGrid && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleGrid}
+            className={cn(
+              "transition-colors",
+              gridVisible && "bg-primary/20 text-primary ring-1 ring-primary/50"
+            )}
+            title={gridVisible ? "Dot Grid (On)" : "Dot Grid (Off)"}
+          >
+            <Grip className="w-4 h-4" />
+          </Button>
+        )}
         {onToggleAlignmentGuides && (
           <Button
             variant="ghost"

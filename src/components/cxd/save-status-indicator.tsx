@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Cloud, CloudOff, AlertTriangle } from 'lucide-react';
+import { Check, Loader2, CloudOff, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   SAVE_STATUS_EVENT,
@@ -87,29 +87,34 @@ export function SaveStatusIndicator() {
   if (status === 'offline') {
     return (
       <div
-        className="flex items-center gap-1.5 flex-shrink-0 px-2 py-1 rounded-md bg-amber-500/15 border border-amber-500/30"
+        className="flex items-center gap-1.5 flex-shrink-0 px-1.5 py-1 rounded-md bg-amber-500/15 border border-amber-500/30"
         title="You're offline. Changes are stored locally and will sync when you reconnect."
       >
         <CloudOff className="w-3.5 h-3.5 text-amber-400" />
-        <span className="text-xs text-amber-300 whitespace-nowrap">Offline</span>
+      </div>
+    );
+  }
+
+  // Saved / saving — icon-only and unambiguous: a spinner while a write is in
+  // flight, a subtle check when everything is persisted. Detail is in the tooltip
+  // so it stays tiny in the navbar. A brief green check flashes after recovering
+  // from an error/offline state so the user gets an explicit "it's safe now".
+  if (status === 'saving') {
+    return (
+      <div className="flex items-center flex-shrink-0 px-1" title="Saving…">
+        <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div
-      className="flex items-center gap-1.5 flex-shrink-0 px-1"
-      title={status === 'saving' ? 'Saving…' : 'All changes saved'}
-    >
-      <Cloud
+    <div className="flex items-center flex-shrink-0 px-1" title="All changes saved">
+      <Check
         className={cn(
           'w-3.5 h-3.5 transition-colors',
-          status === 'saving' ? 'text-white/50 animate-pulse' : 'text-white/25'
+          showRecovered ? 'text-emerald-400' : 'text-white/30'
         )}
       />
-      {showRecovered && (
-        <span className="text-xs text-emerald-300 whitespace-nowrap">Saved</span>
-      )}
     </div>
   );
 }

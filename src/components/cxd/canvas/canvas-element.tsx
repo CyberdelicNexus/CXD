@@ -106,6 +106,7 @@ import {
   PersonStanding,
   Zap,
   Eye,
+  EyeOff,
   Brain,
   Users,
   Inbox,
@@ -5995,6 +5996,18 @@ function FreeformCard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    onUpdate({ hideNoteTitle: !element.hideNoteTitle });
+                  }}
+                  className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                  title={element.hideNoteTitle ? "Show title" : "Hide title"}
+                  data-no-drag
+                >
+                  {element.hideNoteTitle ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setIsNoteFocusMode(true);
                   }}
                   className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
@@ -6004,17 +6017,21 @@ function FreeformCard({
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
               </div>
-              <Input
-                autoFocus={noteEditingField === "title"}
-                value={localNoteTitle}
-                onChange={(e) => setLocalNoteTitle(e.target.value)}
-                onBlur={handleNoteFieldBlur}
-                onFocus={() => setNoteEditingField("title")}
-                className="h-9 border-0 bg-transparent p-0 text-lg font-semibold focus-visible:ring-0"
-                style={{ color: textColor }}
-                data-no-drag
-              />
-              <div className="h-px bg-white/10" />
+              {!element.hideNoteTitle && (
+                <>
+                  <Input
+                    autoFocus={noteEditingField === "title"}
+                    value={localNoteTitle}
+                    onChange={(e) => setLocalNoteTitle(e.target.value)}
+                    onBlur={handleNoteFieldBlur}
+                    onFocus={() => setNoteEditingField("title")}
+                    className="h-9 border-0 bg-transparent p-0 text-lg font-semibold focus-visible:ring-0"
+                    style={{ color: textColor }}
+                    data-no-drag
+                  />
+                  <div className="h-px bg-white/10" />
+                </>
+              )}
               <div
                 className="w-full flex-1 min-h-0"
                 onMouseDown={(e) => e.stopPropagation()}
@@ -6119,6 +6136,18 @@ function FreeformCard({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
+                      onUpdate({ hideNoteTitle: !element.hideNoteTitle });
+                    }}
+                    className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
+                    title={element.hideNoteTitle ? "Show title" : "Hide title"}
+                    data-no-drag
+                  >
+                    {element.hideNoteTitle ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
                       onStartEdit();
                       setNoteEditingField("body");
                       setIsNoteFocusMode(true);
@@ -6130,19 +6159,23 @@ function FreeformCard({
                     <Maximize2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <div
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStartEdit();
-                    setNoteEditingField("title");
-                  }}
-                  className="w-full text-left text-lg font-semibold break-words rounded px-0.5 py-0.5 hover:bg-white/5 cursor-text"
-                  style={{ color: textColor, whiteSpace: "pre-wrap" }}
-                  data-no-drag
-                >
-                  {noteTitle || "Untitled Note"}
-                </div>
-                <div className="h-px bg-white/10" />
+                {!element.hideNoteTitle && (
+                  <>
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStartEdit();
+                        setNoteEditingField("title");
+                      }}
+                      className="w-full text-left text-lg font-semibold break-words rounded px-0.5 py-0.5 hover:bg-white/5 cursor-text"
+                      style={{ color: textColor, whiteSpace: "pre-wrap" }}
+                      data-no-drag
+                    >
+                      {noteTitle || "Untitled Note"}
+                    </div>
+                    <div className="h-px bg-white/10" />
+                  </>
+                )}
                 <div
                   onMouseDown={(e) => {
                     e.stopPropagation();

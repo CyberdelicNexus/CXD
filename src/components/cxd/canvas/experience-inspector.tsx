@@ -227,7 +227,14 @@ export function ExperienceInspectorRail({
 
   return (
     <div
-      className="fixed top-1/2 -translate-y-1/2 z-30 flex flex-col gap-y-6 transition-transform duration-300 ease-out"
+      // Centered vertically within the CANVAS AREA, not the full viewport: the
+      // canvas root is `fixed inset-0 top-16` (64px navbar offset), so its centre
+      // is at 50vh + 32px. Matching that keeps this right rail aligned with the
+      // left navigation toolkit (which is absolute inside that same offset
+      // container) and stops the top icons from riding up under the navbar on
+      // shorter screens. The inline translateY(-50%) is what actually re-centres
+      // the element on that top anchor (it overrides the -translate-y-1/2 class).
+      className="fixed top-[calc(50%+32px)] z-30 flex flex-col gap-y-6 transition-transform duration-300 ease-out"
       style={{
         right: "0px",
         width: `${RAIL_WIDTH}px`,

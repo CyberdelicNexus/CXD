@@ -497,7 +497,7 @@ export function CXDCanvas() {
   const NEW_COMMENT_EMOJIS = ['😊', '👍', '❤️', '🎉', '🤔', '👀', '🔥', '💯', '😂', '🙌', '✅', '💡'];
 
   // Canvas settings from user preferences
-  const { settings, zoomSensitivity } = useCanvasSettings();
+  const { settings, updateSettings, zoomSensitivity } = useCanvasSettings();
 
   // Collaboration - realtime cursors, presence, and broadcast.
   // Uses the shared CollaborationProvider channel (from page.tsx) — avoids
@@ -4671,28 +4671,27 @@ export function CXDCanvas() {
           }}
         />
       )}
-      {/* Dot grid - rendered inside canvas transform for perfect alignment */}
+      {/* Dot grid — a FIXED viewport overlay (NOT inside the canvas transform).
+          The old version scaled the whole grid layer by canvasZoom, so the dots
+          shrank to sub-pixel and vanished when zoomed out. Here the dots keep a
+          constant on-screen radius while only the SPACING scales with zoom
+          (backgroundSize = gridSize * zoom) and the pattern origin follows the pan
+          (backgroundPosition = canvasPosition). That places every dot on exactly
+          the same content-space coordinate as before (content (0,0) → screen
+          canvasPosition) but keeps them visible at every zoom level. */}
       {settings.gridVisible && (
         <div
-          className="dot-grid pointer-events-none absolute"
+          className="dot-grid pointer-events-none absolute inset-0"
           style={{
-            // Position grid to cover visible area and beyond
-            left: -10000,
-            top: -10000,
-            width: 20000,
-            height: 20000,
-            // Apply same transform as canvas content for perfect alignment
-            transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
-            transformOrigin: "0 0",
             transition: canvasTransformTransition,
-            // Layered grid: Major dots (3x grid) + Medium dots (1x grid) + Minor dots (0.5x grid)
+            // Layered grid: Major dots (3x spacing) + Medium dots (1x spacing) + Minor dots (0.5x spacing)
             backgroundImage: `
-              radial-gradient(circle, hsl(270 30% 29% / 0.6) 1.5px, transparent 1.5px),
-              radial-gradient(circle, hsl(270 30% 28% / 0.4) 1px, transparent 1px),
-              radial-gradient(circle, hsl(270 30% 22% / 0.25) 0.5px, transparent 0.5px)
+              radial-gradient(circle, hsl(270 30% 32% / 0.65) 1.5px, transparent 1.5px),
+              radial-gradient(circle, hsl(270 30% 30% / 0.45) 1px, transparent 1px),
+              radial-gradient(circle, hsl(270 30% 24% / 0.3) 0.5px, transparent 0.5px)
             `,
-            backgroundSize: `${settings.gridSize * 3}px ${settings.gridSize * 3}px, ${settings.gridSize}px ${settings.gridSize}px, ${settings.gridSize / 2}px ${settings.gridSize / 2}px`,
-            backgroundPosition: "0 0, 0 0, 0 0",
+            backgroundSize: `${settings.gridSize * 3 * canvasZoom}px ${settings.gridSize * 3 * canvasZoom}px, ${settings.gridSize * canvasZoom}px ${settings.gridSize * canvasZoom}px, ${(settings.gridSize / 2) * canvasZoom}px ${(settings.gridSize / 2) * canvasZoom}px`,
+            backgroundPosition: `${canvasPosition.x}px ${canvasPosition.y}px`,
           }}
         />
       )}
@@ -5783,6 +5782,8 @@ export function CXDCanvas() {
         canRedo={canRedo()}
         showAlignmentGuides={showAlignmentGuides}
         onToggleAlignmentGuides={() => setShowAlignmentGuides(!showAlignmentGuides)}
+        gridVisible={settings.gridVisible}
+        onToggleGrid={() => updateSettings({ gridVisible: !settings.gridVisible })}
       />
       {/* Task Inbox - for tasks created in Plan Tab */}
       <TaskInbox

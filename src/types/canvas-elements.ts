@@ -201,6 +201,7 @@ export interface FreeformElement extends CanvasElementBase {
   content: string;
   noteTitle?: string;
   noteBody?: string;
+  hideNoteTitle?: boolean;           // Note cards: hide the title row (body-only note)
   emoji?: string;
   style?: ElementStyle;
   taskMetadata?: TaskMetadata;       // Plan Tab task extension
