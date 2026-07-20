@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
-  Loader2, X, LogIn, Eye, Layers, ListTodo, Tag, Calendar, ArrowRight, Sparkles,
+  Loader2, X, LogIn, ListTodo, Calendar, Sparkles,
   ImagePlus, UserPlus, BarChart3, Pencil, Trash2, Map as MapIcon, Target, Lightbulb, RefreshCw,
 } from "lucide-react";
 import { fetchProjectById } from "@/lib/supabase-projects";
@@ -27,8 +27,6 @@ interface ProjectDetailPanelProps {
   onRename?: () => void;
   onDelete?: () => void;
 }
-
-const BAR_COLORS = ["#8B5CF6", "#22D3EE", "#F472B6", "#34D399", "#F97316"];
 
 const insightsCacheKey = (id: string) => `cxd-exp-insights:${id}`;
 
@@ -230,7 +228,7 @@ export function ProjectDetailPanel({
         e.stopPropagation();
         onClick();
       }}
-      className={`w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 text-white/70 border border-white/10 transition-colors ${hoverClass}`}
+      className={`w-7 h-7 flex items-center justify-center rounded-lg bg-black/50 text-white/80 border border-white/10 backdrop-blur-sm transition-colors ${hoverClass}`}
       title={label}
     >
       {icon}
@@ -238,7 +236,10 @@ export function ProjectDetailPanel({
   );
 
   return (
-    <div className="col-span-2 row-span-2 rounded-xl overflow-hidden bg-black/20 border border-white/10 flex flex-col">
+    // min-h-0 on the grid item stops its content from forcing the 2-row grid track
+    // taller (which pushed the whole tile grid down); the body scrolls internally
+    // instead, using the app's global dark-purple scrollbar.
+    <div className="col-span-2 row-span-2 min-h-0 rounded-xl overflow-hidden bg-black/20 border border-white/10 flex flex-col">
       <div className="relative h-28 flex-shrink-0">
         {coverImage && coverImage.startsWith("http") ? (
           <Image src={coverImage} alt={project.name} fill className="object-cover opacity-70" unoptimized />
@@ -248,17 +249,29 @@ export function ProjectDetailPanel({
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white transition-colors"
+          className="absolute top-3 right-3 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white transition-colors z-10"
           title="Close"
         >
           <X className="w-4 h-4" />
         </button>
+        {/* Quick actions — overlaid on the cover image (top-left) */}
+        <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
+          {onAddCover &&
+            iconAction("cover", "Add Cover Image", <ImagePlus className="w-4 h-4" />, onAddCover, "hover:bg-emerald-500/40 hover:text-white")}
+          {isOwner && onInvite &&
+            iconAction("invite", "Invite Collaborators", <UserPlus className="w-4 h-4" />, onInvite, "hover:bg-violet-500/40 hover:text-white")}
+          {iconAction("overview", "Project Overview", <BarChart3 className="w-4 h-4" />, () => router.push(`/cxd/overview/${project.id}`), "hover:bg-purple-500/40 hover:text-white")}
+          {onRename &&
+            iconAction("rename", "Rename", <Pencil className="w-4 h-4" />, onRename, "hover:bg-blue-500/40 hover:text-white")}
+          {isOwner && canDelete && onDelete &&
+            iconAction("delete", "Delete", <Trash2 className="w-4 h-4" />, onDelete, "hover:bg-red-500/40 hover:text-red-300")}
+        </div>
         <div className="absolute bottom-3 left-4 right-12">
           <h3 className="font-bold text-white text-xl truncate">{project.name}</h3>
         </div>
       </div>
 
-      <div className="p-4 flex-1 overflow-y-auto grid grid-cols-2 gap-3 content-start">
+      <div className="p-4 flex-1 min-h-0 overflow-y-auto grid grid-cols-2 gap-3 content-start">
         {(project.description || concept) && (
           <div className="col-span-2 space-y-2">
             {project.description && <p className="text-sm text-white/60 line-clamp-2">{project.description}</p>}
@@ -357,28 +370,6 @@ export function ProjectDetailPanel({
           </div>
         )}
 
-        {/* Sensory signature */}
-        {sensoryBars.length > 0 && (
-          <div className="col-span-2 p-3 rounded-lg bg-white/5">
-            <span className="text-xs font-medium text-white/70 flex items-center gap-1.5 mb-2">
-              <Sparkles className="w-3.5 h-3.5 text-pink-400" /> Sensory Signature
-            </span>
-            <div className="space-y-1.5">
-              {sensoryBars.map((s, i) => (
-                <div key={s.label} className="flex items-center gap-2">
-                  <span className="text-[10px] text-white/50 w-16 flex-shrink-0 truncate">{s.label}</span>
-                  <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${s.value}%`, backgroundColor: BAR_COLORS[i % BAR_COLORS.length] }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* AI insights — on-demand (spends credits), cached per project version */}
         <div className="col-span-2 p-3 rounded-lg bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20">
           <div className="flex items-center justify-between mb-2">
@@ -439,23 +430,12 @@ export function ProjectDetailPanel({
           )}
         </div>
 
-        <div className="p-2 rounded-lg bg-white/5 text-center">
-          <Layers className="w-3.5 h-3.5 text-violet-400 mx-auto mb-1" />
-          <p className="text-sm font-bold text-white">{elements.length}</p>
-          <p className="text-[9px] text-white/40">Elements</p>
-        </div>
-        <div className="p-2 rounded-lg bg-white/5 text-center">
-          <Tag className="w-3.5 h-3.5 text-emerald-400 mx-auto mb-1" />
-          <p className="text-sm font-bold text-white">{taggedCount}</p>
-          <p className="text-[9px] text-white/40">Tagged</p>
-        </div>
-
         <div className="col-span-2 flex items-center gap-1.5 text-xs text-white/40">
           <Calendar className="w-3.5 h-3.5" />
           Updated {new Date(project.updatedAt).toLocaleDateString()}
         </div>
 
-        <div className="col-span-2 flex flex-col gap-2 pt-1">
+        <div className="col-span-2 pt-1">
           <button
             onClick={() => onEnterProject(project.id)}
             className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
@@ -463,27 +443,6 @@ export function ProjectDetailPanel({
             <LogIn className="w-4 h-4" />
             Enter Canvas
           </button>
-          <button
-            onClick={() => router.push(`/cxd/overview/${project.id}`)}
-            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white text-sm font-medium transition-colors border border-white/10"
-          >
-            <Eye className="w-4 h-4" />
-            Full Overview
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Quick actions — same set as the project tile, brought in below Full Overview */}
-          <div className="flex items-center justify-center gap-1.5 pt-0.5">
-            {onAddCover &&
-              iconAction("cover", "Add Cover Image", <ImagePlus className="w-4 h-4" />, onAddCover, "hover:bg-emerald-500/30 hover:text-white hover:border-emerald-500/30")}
-            {isOwner && onInvite &&
-              iconAction("invite", "Invite Collaborators", <UserPlus className="w-4 h-4" />, onInvite, "hover:bg-violet-500/30 hover:text-white hover:border-violet-500/30")}
-            {iconAction("overview", "Project Overview", <BarChart3 className="w-4 h-4" />, () => router.push(`/cxd/overview/${project.id}`), "hover:bg-purple-500/30 hover:text-white hover:border-purple-500/30")}
-            {onRename &&
-              iconAction("rename", "Rename", <Pencil className="w-4 h-4" />, onRename, "hover:bg-blue-500/30 hover:text-white hover:border-blue-500/30")}
-            {isOwner && canDelete && onDelete &&
-              iconAction("delete", "Delete", <Trash2 className="w-4 h-4" />, onDelete, "hover:bg-red-500/30 hover:text-red-400 hover:border-red-500/30")}
-          </div>
         </div>
       </div>
     </div>
