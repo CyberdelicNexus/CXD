@@ -3309,7 +3309,7 @@ function EmojiPicker({
 }) {
   return (
     <div
-      className="absolute right-0 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-50 grid grid-cols-4 gap-1 w-[148px] left-[-5px] top-[-175px] bottom-[45px]"
+      className="absolute left-0 top-full mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-50 grid grid-cols-4 gap-1 w-[148px]"
       onClick={(e) => e.stopPropagation()}
     >
       {COMMON_EMOJIS.map((emoji) => (
@@ -5316,9 +5316,10 @@ function FreeformCard({
   const [localNoteTitle, setLocalNoteTitle] = useLocalInput(
     noteTitle,
     (v) => {
-      const safeTitle = v.trim() || "Untitled Note";
-      const combined = noteBody.trim().length > 0 ? `${safeTitle}\n${noteBody}` : safeTitle;
-      onUpdate({ noteTitle: safeTitle, noteBody, content: combined });
+      // Raw store (no trim) — see syncNoteFields for why trimming per-keystroke
+      // broke space input and jumped the caret.
+      const combined = noteBody.trim().length > 0 ? `${v}\n${noteBody}` : v;
+      onUpdate({ noteTitle: v, noteBody, content: combined });
     },
   );
   const [localTaskContent, setLocalTaskContent] = useLocalInput(
@@ -5434,10 +5435,14 @@ function FreeformCard({
 
   const syncNoteFields = useCallback(
     (nextTitle: string, nextBody: string) => {
-      const safeTitle = nextTitle.trim() || "Untitled Note";
-      const combined = nextBody.trim().length > 0 ? `${safeTitle}\n${nextBody}` : safeTitle;
+      // Store the title RAW (no trim) so a controlled <input> keeps trailing
+      // spaces and the caret never jumps: trimming on every keystroke made
+      // "abc " immediately re-render as "abc", dropping the space and sending
+      // the caret to the end. Empty/whitespace titles fall back to a display
+      // default ("Untitled Note") at render time.
+      const combined = nextBody.trim().length > 0 ? `${nextTitle}\n${nextBody}` : nextTitle;
       onUpdate({
-        noteTitle: safeTitle,
+        noteTitle: nextTitle,
         noteBody: nextBody,
         content: combined,
       });

@@ -8,7 +8,6 @@ import Image from "next/image";
 import {
   Wand2,
   Share2,
-  Download,
   ChevronLeft,
   Sparkles,
   LayoutDashboard,
@@ -384,43 +383,6 @@ export function CXDNavbar() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const { collaborators, isConnected, currentUser, followingCollaboratorId, setFollowingCollaboratorId } = useCollaborationContext();
   const { role: canvasRole } = useCanvasPermissions(project?.id || null);
-
-  const handleExportJSON = async () => {
-    if (!project) return;
-
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    const dataStr = JSON.stringify(project, null, 2);
-    const dataUri =
-      "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
-    const exportName = `${project.name.replace(/\s+/g, "_")}_cxd.json`;
-    const linkElement = document.createElement("a");
-    linkElement.setAttribute("href", dataUri);
-    linkElement.setAttribute("download", exportName);
-    linkElement.click();
-
-    // Send notification
-    if (user) {
-      await createNotification(
-        user.id,
-        'EXPORT_COMPLETE',
-        `Your project "${project.name}" has been exported as JSON`,
-        {
-          projectId: project.id,
-          projectName: project.name,
-          format: 'json',
-          fileName: exportName
-        },
-        72 // 3 days
-      );
-    }
-
-    toast({
-      title: "Export Complete",
-      description: "Your CXD map has been exported as JSON.",
-    });
-  };
 
   const handleShare = async () => {
     const token = generateShareToken();
@@ -885,33 +847,6 @@ export function CXDNavbar() {
                 >
                   <Package className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
                 </div>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <div className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group">
-                      <Download className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
-                    </div>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className="bg-zinc-900/95 backdrop-blur-xl border-white/10 p-1 shadow-2xl"
-                  >
-                    <DropdownMenuItem onClick={handleExportJSON} className="hover:bg-white/5 cursor-pointer rounded-md">
-                      Export as JSON
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="hover:bg-white/5 cursor-not-allowed text-white/40 rounded-md"
-                      onClick={() =>
-                        toast({
-                          title: "Coming Soon",
-                          description: "PDF export will be available in V1",
-                        })
-                      }
-                    >
-                      Export as PDF (Soon)
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
               </>
             )}
 

@@ -3840,6 +3840,12 @@ export function CXDCanvas() {
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
+        // Don't swallow the space keyup while typing in a field — mirror the
+        // keydown guard, otherwise space behaves oddly inside inputs/editors.
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
         e.preventDefault();
         setIsSpacePressed(false);
         if (isPanning) {
