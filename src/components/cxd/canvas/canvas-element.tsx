@@ -95,6 +95,7 @@ import {
   Crop,
   FlipHorizontal,
   FlipVertical,
+  Captions,
   RotateCcw,
   CheckCircle2,
   Plus,
@@ -6868,6 +6869,13 @@ function ImageCard({
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
   const [isCropping, setIsCropping] = useState(false);
+  // Storyboard caption: open when the element already has a description, or after
+  // the user turns it on via the toolbar. When on, the image renders as a framed
+  // storyboard cell with an editable caption underneath.
+  const [captionOpen, setCaptionOpen] = useState(
+    typeof (element as ImageElement).description === "string" &&
+      (element as ImageElement).description!.length > 0,
+  );
 
   // Notify parent when crop mode changes so resize handles can hide
   useEffect(() => {
@@ -7294,17 +7302,27 @@ function ImageCard({
 
   const resetImage = () => {
     const preCrop = element.imageEdits?.preCropBounds;
+    // Write an explicit neutral edits object rather than `undefined`: the Y.Doc
+    // serializer skips undefined values, so `imageEdits: undefined` never cleared
+    // the crop and the image kept rendering (and stretching) through the cropped
+    // path. A full-crop, un-flipped object reads as "not cropped" everywhere.
+    const neutralEdits = {
+      crop: { x: 0, y: 0, width: 100, height: 100 },
+      flipH: false,
+      flipV: false,
+    };
     if (preCrop) {
-      // Restore original element bounds
+      // Restore original (pre-crop) element bounds so the image returns to its
+      // natural aspect ratio, then object-contain renders it without stretching.
       onUpdate({
         x: preCrop.x,
         y: preCrop.y,
         width: preCrop.width,
         height: preCrop.height,
-        imageEdits: undefined,
+        imageEdits: neutralEdits,
       });
     } else {
-      onUpdate({ imageEdits: undefined });
+      onUpdate({ imageEdits: neutralEdits });
     }
     setCropBox({ x: 0, y: 0, width: 100, height: 100 });
   };
@@ -7359,13 +7377,15 @@ function ImageCard({
   };
   const flipH = element.imageEdits?.flipH || false;
   const flipV = element.imageEdits?.flipV || false;
-  const hasEdits =
-    crop.x !== 0 ||
-    crop.y !== 0 ||
-    crop.width !== 100 ||
-    crop.height !== 100 ||
-    flipH ||
-    flipV;
+  // Whether an actual crop is applied. Keyed off the crop RECT, not the presence
+  // of preCropBounds: the Y.Doc serializer can't delete a nested field, so after
+  // a reset preCropBounds lingers even though the crop is back to full — checking
+  // the rect makes reset fall through to the aspect-preserving object-contain
+  // render instead of the stretch-to-fill cropped-background render.
+  const isCropped =
+    crop.x !== 0 || crop.y !== 0 || crop.width !== 100 || crop.height !== 100;
+  const hasEdits = isCropped || flipH || flipV;
+  const isStoryboard = captionOpen || !!element.description;
 
   // Image is loaded - show clean media tile
   return (
@@ -7374,16 +7394,24 @@ function ImageCard({
       data-crop-mode={isCropping ? "true" : undefined}
     >
       <div
+        className={cn(
+          "w-full h-full flex flex-col",
+          // Storyboard frame: thick light border wrapping the image + caption.
+          isStoryboard && "rounded-md border-[6px] border-neutral-100 bg-neutral-900 shadow-xl overflow-hidden",
+        )}
+      >
+      <div
         ref={imageContainerRef}
         className={cn(
-          "w-full h-full rounded-lg transition-all relative",
+          "rounded-lg transition-all relative",
+          isStoryboard ? "flex-1 min-h-0" : "w-full h-full",
           // Only clip image content, not the crop overlay handles
           !isCropping && "overflow-hidden",
           isSelected ? "ring-0" : "",
           isCropping && "ring-2 ring-cyan-400",
         )}
       >
-        {element.imageEdits?.preCropBounds ? (
+        {isCropped ? (
           (() => {
             // Scale the background so the cropped region (crop.width% x crop.height%
             // of the original image) always fills the current element. This lets
@@ -7515,6 +7543,23 @@ function ImageCard({
           </div>
         )}
       </div>
+      {/* Storyboard caption strip — editable text under the framed image */}
+      {isStoryboard && (
+        <div className="shrink-0 border-t-[6px] border-neutral-100 bg-neutral-900 px-2 py-1.5">
+          <textarea
+            value={element.description || ""}
+            onChange={(e) => onUpdate({ description: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Add a caption…"
+            readOnly={isReadOnly}
+            data-no-drag
+            rows={2}
+            className="w-full resize-none bg-transparent text-[13px] leading-snug text-neutral-100 placeholder:text-neutral-500 outline-none border-0 focus:ring-0"
+          />
+        </div>
+      )}
+      </div>
       {/* Image edit toolbar — single icon-only pill below the image.
           Positioned at -bottom-16 to clear the rotation handle (~ -39px stem). */}
       {isSelected && !isCropping && !isReadOnly && (
@@ -7560,6 +7605,26 @@ function ImageCard({
             title="Flip vertical"
           >
             <FlipVertical className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => {
+              setCaptionOpen((v) => {
+                const next = !v;
+                // Turning the caption off clears the stored description so the
+                // frame doesn't reappear on reload.
+                if (!next) onUpdate({ description: "" });
+                return next;
+              });
+            }}
+            className={cn(
+              "p-2 rounded-md transition-colors",
+              isStoryboard
+                ? "bg-primary/20 text-primary"
+                : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
+            )}
+            title={isStoryboard ? "Remove caption" : "Add caption (storyboard)"}
+          >
+            <Captions className="w-4 h-4" />
           </button>
           {hasEdits && (
             <>
