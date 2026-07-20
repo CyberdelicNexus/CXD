@@ -195,7 +195,7 @@ export function ProjectDetailPanel({
 
   if (loading) {
     return (
-      <div className="col-span-2 row-span-2 rounded-xl bg-black/20 border border-white/10 flex items-center justify-center">
+      <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl bg-black/20 border border-white/10 flex items-center justify-center">
         <Loader2 className="w-6 h-6 text-white/40 animate-spin" />
       </div>
     );
@@ -203,7 +203,7 @@ export function ProjectDetailPanel({
 
   if (notFound || !project) {
     return (
-      <div className="col-span-2 row-span-2 rounded-xl bg-black/20 border border-white/10 flex flex-col items-center justify-center gap-3 text-white/50 text-sm">
+      <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl bg-black/20 border border-white/10 flex flex-col items-center justify-center gap-3 text-white/50 text-sm">
         Couldn&apos;t load this project.
         <button onClick={onClose} className="text-violet-400 hover:text-violet-300 transition-colors">
           Close
@@ -236,10 +236,13 @@ export function ProjectDetailPanel({
   );
 
   return (
-    // min-h-0 on the grid item stops its content from forcing the 2-row grid track
-    // taller (which pushed the whole tile grid down); the body scrolls internally
-    // instead, using the app's global dark-purple scrollbar.
-    <div className="col-span-2 row-span-2 min-h-0 rounded-xl overflow-hidden bg-black/20 border border-white/10 flex flex-col">
+    // aspect-square + self-start gives the panel a DEFINITE height equal to its
+    // own width — which, spanning 2 columns, matches the 2-square-tall area — so
+    // its (possibly long) content can never stretch the grid rows and push the
+    // tile grid down. self-start stops the grid from stretching it past that.
+    // The cover header is a flex-shrink-0 sibling of the scroll body, so it stays
+    // pinned while only the body scrolls (global dark-purple scrollbar).
+    <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl overflow-hidden bg-black/20 border border-white/10 flex flex-col">
       <div className="relative h-28 flex-shrink-0">
         {coverImage && coverImage.startsWith("http") ? (
           <Image src={coverImage} alt={project.name} fill className="object-cover opacity-70" unoptimized />

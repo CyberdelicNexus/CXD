@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { CXDProject } from "@/types/cxd-schema";
 import { RealityPlanesEditor } from "@/components/cxd/reality-planes-editor";
 import { useCXDStore } from "@/store/cxd-store";
@@ -48,6 +48,39 @@ interface InspectorSection {
   id: InspectorSectionId;
   label: string;
   icon: React.ReactNode;
+}
+
+/**
+ * Textarea that always fits its content: it grows/shrinks to the text height on
+ * every value change and can't be manually resized (no drag handle, no inner
+ * scroll). Used for every inspector field so the right rail panels read as clean
+ * blocks of text rather than fixed, resizable boxes.
+ */
+function AutoGrowTextarea({
+  value,
+  className,
+  ...props
+}: React.ComponentProps<typeof Textarea>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const resize = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+  useEffect(() => {
+    resize();
+  }, [value, resize]);
+  return (
+    <Textarea
+      ref={ref}
+      value={value}
+      onInput={resize}
+      rows={1}
+      className={cn("resize-none overflow-hidden", className)}
+      {...props}
+    />
+  );
 }
 
 export const INSPECTOR_SECTIONS: InspectorSection[] = [
@@ -391,7 +424,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="mainConcept" className="text-sm font-medium">
                 Main Concept
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="mainConcept"
                 placeholder="What is the central idea or concept?"
                 value={project.intentionCore?.mainConcept || ""}
@@ -406,7 +439,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="coreMessage" className="text-sm font-medium">
                 Core Message
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="coreMessage"
                 placeholder="What is the key message participants should take away?"
                 value={project.intentionCore?.coreMessage || ""}
@@ -427,7 +460,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="insights" className="text-sm font-medium">
                 Insights
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="insights"
                 placeholder="What insights should participants gain?"
                 value={project.desiredChange?.insights || ""}
@@ -442,7 +475,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="feelings" className="text-sm font-medium">
                 Feelings
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="feelings"
                 placeholder="What feelings should the experience evoke?"
                 value={project.desiredChange?.feelings || ""}
@@ -457,7 +490,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="states" className="text-sm font-medium">
                 States
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="states"
                 placeholder="What states should participants enter?"
                 value={project.desiredChange?.states || ""}
@@ -472,7 +505,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="knowledge" className="text-sm font-medium">
                 Knowledge
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="knowledge"
                 placeholder="What knowledge should participants acquire?"
                 value={project.desiredChange?.knowledge || ""}
@@ -493,7 +526,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="audienceNeeds" className="text-sm font-medium">
                 Audience Needs
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="audienceNeeds"
                 placeholder="What does your audience need?"
                 value={project.humanContext?.audienceNeeds || ""}
@@ -508,7 +541,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="audienceDesires" className="text-sm font-medium">
                 Audience Desires
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="audienceDesires"
                 placeholder="What does your audience desire?"
                 value={project.humanContext?.audienceDesires || ""}
@@ -523,7 +556,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="userRole" className="text-sm font-medium">
                 User Role
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="userRole"
                 placeholder="What role does the user play in this experience?"
                 value={project.humanContext?.userRole || ""}
@@ -544,7 +577,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="world" className="text-sm font-medium">
                 World
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="world"
                 placeholder="Describe the world of this experience..."
                 value={project.contextAndMeaning?.world || ""}
@@ -559,7 +592,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="story" className="text-sm font-medium">
                 Story
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="story"
                 placeholder="What is the narrative arc?"
                 value={project.contextAndMeaning?.story || ""}
@@ -574,7 +607,7 @@ export function ExperienceInspectorPanel({
               <Label htmlFor="magic" className="text-sm font-medium">
                 Magic
               </Label>
-              <Textarea
+              <AutoGrowTextarea
                 id="magic"
                 placeholder="What is the 'magic' mechanism?"
                 value={project.contextAndMeaning?.magic || ""}
@@ -734,7 +767,7 @@ export function ExperienceInspectorPanel({
                 >
                   {label}
                 </Label>
-                <Textarea
+                <AutoGrowTextarea
                   id={`state-${code}`}
                   placeholder={`Describe the ${label.toLowerCase()} state...`}
                   value={
@@ -764,7 +797,7 @@ export function ExperienceInspectorPanel({
                 >
                   {label}
                 </Label>
-                <Textarea
+                <AutoGrowTextarea
                   id={`trait-${code}`}
                   placeholder={`Describe the ${label.toLowerCase()} trait...`}
                   value={
