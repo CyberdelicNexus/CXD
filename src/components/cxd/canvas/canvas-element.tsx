@@ -96,6 +96,7 @@ import {
   FlipHorizontal,
   FlipVertical,
   Captions,
+  Move,
   RotateCcw,
   CheckCircle2,
   Plus,
@@ -7090,6 +7091,9 @@ function ImageCard({
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
   const [isCropping, setIsCropping] = useState(false);
+  // Storyboard reframe: drag the covered image to set its focal point.
+  const [isRepositioning, setIsRepositioning] = useState(false);
+  const [posPreview, setPosPreview] = useState<{ x: number; y: number } | null>(null);
 
   // Notify parent when crop mode changes so resize handles can hide
   useEffect(() => {
@@ -7607,6 +7611,35 @@ function ImageCard({
   const sbBgColor = element.storyboardBgColor || "#0f0f12";
   const sbBorderWidth = element.storyboardBorderWidth ?? 3;
   const sbTextColor = element.storyboardTextColor || "#f4f4f5";
+  const sbObjPos = posPreview || element.storyboardObjectPosition || { x: 50, y: 50 };
+
+  // Drag the covered image to reposition its focal point (object-position).
+  const startReposition = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const start = element.storyboardObjectPosition || { x: 50, y: 50 };
+    const rect = imageContainerRef.current?.getBoundingClientRect();
+    const w = rect?.width || 200;
+    const h = rect?.height || 200;
+    let latest = start;
+    const move = (ev: MouseEvent) => {
+      // Drag right → reveal the left of the image → object-position x decreases.
+      const nx = Math.max(0, Math.min(100, start.x - ((ev.clientX - startX) / w) * 100));
+      const ny = Math.max(0, Math.min(100, start.y - ((ev.clientY - startY) / h) * 100));
+      latest = { x: nx, y: ny };
+      setPosPreview(latest);
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      onUpdate({ storyboardObjectPosition: latest });
+      setPosPreview(null);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
 
   // Image is loaded - show clean media tile
   return (
@@ -7676,12 +7709,28 @@ function ImageCard({
               className={cn("absolute inset-0 w-full h-full", isStoryboard ? "object-cover" : "object-contain")}
               style={{
                 objectFit: isStoryboard ? "cover" : "contain",
+                objectPosition: isStoryboard ? `${sbObjPos.x}% ${sbObjPos.y}%` : undefined,
                 transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
               }}
               onError={() => setHasImage(false)}
               draggable={false}
               onDragStart={(e) => e.preventDefault()}
             />
+          </div>
+        )}
+
+        {/* Storyboard reframe overlay — drag to set the image's focal point */}
+        {isStoryboard && isRepositioning && isSelected && !isCropping && (
+          <div
+            className="absolute inset-0 z-20 cursor-move"
+            data-no-drag
+            onMouseDown={startReposition}
+            title="Drag to reposition the image"
+          >
+            <div className="absolute inset-0 ring-2 ring-inset ring-cyan-400/70 pointer-events-none" />
+            <div className="absolute top-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-black/60 text-[10px] text-cyan-200 pointer-events-none whitespace-nowrap">
+              Drag to reframe
+            </div>
           </div>
         )}
 
@@ -7776,6 +7825,10 @@ function ImageCard({
           style={{ borderTop: `${sbBorderWidth}px solid ${sbBorderColor}`, background: sbBgColor }}
         >
           <StoryboardCaption
+            // Remount on colour change: a textarea won't re-clip its background to
+            // the text when the background is swapped in place (it repaints as a
+            // solid block), so we give it a fresh element per colour.
+            key={sbTextColor}
             value={element.description || ""}
             onChange={(v) => onUpdate({ description: v })}
             textStyle={
@@ -7787,7 +7840,14 @@ function ImageCard({
                     color: "transparent",
                     caretColor: "#ffffff",
                   }
-                : { color: sbTextColor }
+                : {
+                    // Fully specified so React clears any prior gradient/clip.
+                    background: "none",
+                    WebkitBackgroundClip: "border-box",
+                    backgroundClip: "border-box",
+                    color: sbTextColor,
+                    caretColor: sbTextColor,
+                  }
             }
             readOnly={isReadOnly}
             resizeKey={`${element.width}x${element.height}`}
@@ -7853,6 +7913,20 @@ function ImageCard({
           >
             <Captions className="w-4 h-4" />
           </button>
+          {isStoryboard && (
+            <button
+              onClick={() => setIsRepositioning((v) => !v)}
+              className={cn(
+                "p-2 rounded-md transition-colors",
+                isRepositioning
+                  ? "bg-cyan-500/20 text-cyan-400"
+                  : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
+              )}
+              title={isRepositioning ? "Done repositioning" : "Reposition image (drag focal point)"}
+            >
+              <Move className="w-4 h-4" />
+            </button>
+          )}
           {hasEdits && (
             <>
               <div className="w-px h-5 bg-border mx-0.5" />

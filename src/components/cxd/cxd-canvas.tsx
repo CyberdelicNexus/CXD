@@ -4784,30 +4784,35 @@ export function CXDCanvas() {
           }}
         />
       )}
-      {/* Dot grid — a FIXED viewport overlay (NOT inside the canvas transform).
-          The old version scaled the whole grid layer by canvasZoom, so the dots
-          shrank to sub-pixel and vanished when zoomed out. Here the dots keep a
-          constant on-screen radius while only the SPACING scales with zoom
-          (backgroundSize = gridSize * zoom) and the pattern origin follows the pan
-          (backgroundPosition = canvasPosition). That places every dot on exactly
-          the same content-space coordinate as before (content (0,0) → screen
-          canvasPosition) but keeps them visible at every zoom level. */}
-      {settings.gridVisible && (
-        <div
-          className="dot-grid pointer-events-none absolute inset-0"
-          style={{
-            transition: canvasTransformTransition,
-            // Layered grid: Major dots (3x spacing) + Medium dots (1x spacing) + Minor dots (0.5x spacing)
-            backgroundImage: `
-              radial-gradient(circle, hsl(270 30% 32% / 0.65) 1.5px, transparent 1.5px),
-              radial-gradient(circle, hsl(270 30% 30% / 0.45) 1px, transparent 1px),
-              radial-gradient(circle, hsl(270 30% 24% / 0.3) 0.5px, transparent 0.5px)
-            `,
-            backgroundSize: `${settings.gridSize * 3 * canvasZoom}px ${settings.gridSize * 3 * canvasZoom}px, ${settings.gridSize * canvasZoom}px ${settings.gridSize * canvasZoom}px, ${(settings.gridSize / 2) * canvasZoom}px ${(settings.gridSize / 2) * canvasZoom}px`,
-            backgroundPosition: `${canvasPosition.x}px ${canvasPosition.y}px`,
-          }}
-        />
-      )}
+      {/* Dot grid — a FIXED viewport overlay (NOT inside the canvas transform), with
+          level-of-detail so it stays crisp at any zoom. Naively scaling the spacing
+          by zoom (gridSize*zoom) made the dots collapse into a dense mush when zoomed
+          far out. Instead the on-screen spacing is kept inside a comfortable band
+          [~16px, ~32px) by doubling/halving in powers of two, so the pattern looks the
+          same at every zoom (Figma/Miro-style) while the origin still follows the pan.
+          Dot radii are constant so they never turn sub-pixel. */}
+      {settings.gridVisible && (() => {
+        let spacing = settings.gridSize * canvasZoom;
+        if (!(spacing > 0)) spacing = settings.gridSize || 20;
+        while (spacing < 16) spacing *= 2;
+        while (spacing >= 32) spacing /= 2;
+        const major = spacing * 4;
+        return (
+          <div
+            className="dot-grid pointer-events-none absolute inset-0"
+            style={{
+              transition: canvasTransformTransition,
+              // Two layers: brighter "major" dots every 4th cell + finer dots.
+              backgroundImage: `
+                radial-gradient(circle, hsl(270 32% 46% / 0.5) 1.4px, transparent 1.6px),
+                radial-gradient(circle, hsl(270 26% 34% / 0.4) 1px, transparent 1.2px)
+              `,
+              backgroundSize: `${major}px ${major}px, ${spacing}px ${spacing}px`,
+              backgroundPosition: `${canvasPosition.x}px ${canvasPosition.y}px`,
+            }}
+          />
+        );
+      })()}
 
       {/* Collaborator Cursors Overlay - highest z-index */}
       {collaborators.length > 0 && (
