@@ -983,18 +983,16 @@ export function CanvasElementRenderer({
                 <Palette className="w-4 h-4" />
               </button>
               {showColorPicker && (
-                <ShapeColorPicker
-                  fillColor={(element as ImageElement).storyboardBgColor || "#0f0f12"}
-                  strokeColor={(element as ImageElement).storyboardBorderColor || "#b8b8be"}
-                  strokeWidth={(element as ImageElement).storyboardBorderWidth ?? 3}
+                <StoryboardColorPicker
+                  bgColor={(element as ImageElement).storyboardBgColor || "#0f0f12"}
+                  borderColor={(element as ImageElement).storyboardBorderColor || "#b8b8be"}
+                  borderWidth={(element as ImageElement).storyboardBorderWidth ?? 3}
                   textColor={(element as ImageElement).storyboardTextColor || "#f4f4f5"}
-                  onFillColorChange={(color) => onUpdate({ storyboardBgColor: color })}
-                  onStrokeColorChange={(color) => onUpdate({ storyboardBorderColor: color })}
-                  onStrokeWidthChange={(width) => onUpdate({ storyboardBorderWidth: width })}
-                  onFillOpacityChange={() => { /* n/a for storyboard frames */ }}
+                  onBgChange={(color) => onUpdate({ storyboardBgColor: color })}
+                  onBorderColorChange={(color) => onUpdate({ storyboardBorderColor: color })}
+                  onBorderWidthChange={(width) => onUpdate({ storyboardBorderWidth: width })}
                   onTextColorChange={(color) => onUpdate({ storyboardTextColor: color })}
                   onClose={() => setShowColorPicker(false)}
-                  defaultMode={colorPickerDefaultMode}
                 />
               )}
             </div>
@@ -2076,10 +2074,13 @@ function ResizeHandle({
         const minHeight =
           element.type === "freeform" && isResizableNote ? 300 : element.type === "freeform" ? 120 : 30;
 
-        // For images, maintain aspect ratio
+        // For images, maintain aspect ratio — EXCEPT storyboard frames, which
+        // resize freely (the image inside covers the frame) so the user can set
+        // any cell ratio. Shift still forces aspect lock for any element type.
         const isImage = element.type === "image";
-        // Shift key: maintain aspect ratio for any element type
-        const shouldMaintainAspectRatio = isImage || moveEvent.shiftKey;
+        const isStoryboardImage = isImage && !!(element as ImageElement).storyboard;
+        const shouldMaintainAspectRatio =
+          (isImage && !isStoryboardImage) || moveEvent.shiftKey;
         const aspectRatio = shouldMaintainAspectRatio ? startWidth / startHeight : null;
 
         if (position.includes("e")) {
@@ -2831,6 +2832,133 @@ function ShapeColorPicker({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Storyboard colour editor — three tabs (Border / Background / Text) using the
+ * same rich preset palette + gradients as the note cards. Border only offers
+ * SOLID colours (a gradient can't render on a `solid` border) plus a width
+ * slider; Background and Text offer the note gradients (Text applies them via
+ * background-clip in the caption).
+ */
+function StoryboardColorPicker({
+  bgColor,
+  borderColor,
+  borderWidth,
+  textColor,
+  onBgChange,
+  onBorderColorChange,
+  onBorderWidthChange,
+  onTextColorChange,
+  onClose,
+}: {
+  bgColor: string;
+  borderColor: string;
+  borderWidth: number;
+  textColor: string;
+  onBgChange: (c: string) => void;
+  onBorderColorChange: (c: string) => void;
+  onBorderWidthChange: (w: number) => void;
+  onTextColorChange: (c: string) => void;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"border" | "bg" | "text">("border");
+  const customRef = useRef<HTMLInputElement>(null);
+
+  const current = mode === "bg" ? bgColor : mode === "border" ? borderColor : textColor;
+  const apply = (c: string) => {
+    if (mode === "bg") onBgChange(c);
+    else if (mode === "border") onBorderColorChange(c);
+    else onTextColorChange(c);
+  };
+
+  // Border is solid-only; bg + text get the gradient palette.
+  const swatches: readonly string[] =
+    mode === "border"
+      ? SOLID_STROKE_COLORS
+      : mode === "bg"
+        ? PRESET_COLORS
+        : ["#f4f4f5", "#111114", "#a1a1aa", ...TEXT_GRADIENTS];
+
+  const customHex = current.startsWith("#") ? current : "#ffffff";
+
+  return (
+    <div
+      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto w-[236px] p-3"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {/* Tabs */}
+      <div className="flex gap-1 mb-3 p-0.5 bg-muted/50 rounded-md">
+        {([
+          { key: "border", label: "Border", icon: <PenLine className="w-3 h-3" /> },
+          { key: "bg", label: "Background", icon: <Paintbrush className="w-3 h-3" /> },
+          { key: "text", label: "Text", icon: <Type className="w-3 h-3" /> },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setMode(t.key)}
+            className={cn(
+              "flex-1 py-1.5 px-1.5 text-[11px] rounded transition-colors flex items-center justify-center gap-1",
+              mode === t.key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Swatches */}
+      <div className="grid grid-cols-6 gap-1.5 mb-3">
+        {swatches.map((c) => (
+          <button
+            key={c}
+            onClick={() => apply(c)}
+            className={cn(
+              "w-7 h-7 rounded-md border-2 transition-transform hover:scale-110",
+              current === c ? "border-primary" : "border-border/40",
+              c === "transparent" &&
+                "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNjY2MiLz48cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjY2NjIi8+PC9zdmc+')]",
+            )}
+            style={{ background: c === "transparent" ? undefined : c }}
+            title={c.includes("gradient") ? "Gradient" : c}
+          />
+        ))}
+        {/* Custom solid colour */}
+        <button
+          onClick={() => customRef.current?.click()}
+          className="w-7 h-7 rounded-md border-2 border-border/40 relative overflow-hidden hover:scale-110 transition-transform"
+          style={{ background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
+          title="Custom colour"
+        >
+          <input
+            ref={customRef}
+            type="color"
+            value={customHex}
+            onChange={(e) => apply(e.target.value)}
+            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+          />
+        </button>
+      </div>
+
+      {/* Border width */}
+      {mode === "border" && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground w-10">Width</span>
+          <input
+            type="range"
+            min={0}
+            max={20}
+            step={1}
+            value={borderWidth}
+            onChange={(e) => onBorderWidthChange(parseInt(e.target.value))}
+            className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
+          />
+          <span className="text-[10px] text-muted-foreground w-8 text-right">{borderWidth}px</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -6899,13 +7027,13 @@ function FreeformCard({
 function StoryboardCaption({
   value,
   onChange,
-  color,
+  textStyle,
   readOnly,
   resizeKey,
 }: {
   value: string;
   onChange: (v: string) => void;
-  color: string;
+  textStyle: React.CSSProperties;
   readOnly?: boolean;
   resizeKey: string;
 }) {
@@ -6940,7 +7068,7 @@ function StoryboardCaption({
       readOnly={readOnly}
       data-no-drag
       className="w-full h-full resize-none bg-transparent leading-snug outline-none border-0 focus:ring-0 placeholder:text-white/30"
-      style={{ color }}
+      style={textStyle}
     />
   );
 }
@@ -7542,9 +7670,12 @@ function ImageCard({
             <img
               src={element.src}
               alt={element.alt || ""}
-              className="absolute inset-0 w-full h-full object-contain"
+              // Storyboard frames COVER their image area (fill + crop) so the
+              // border hugs the image with no letterbox and the ratio is free;
+              // plain images stay object-contain (never cropped by the box).
+              className={cn("absolute inset-0 w-full h-full", isStoryboard ? "object-cover" : "object-contain")}
               style={{
-                objectFit: "contain",
+                objectFit: isStoryboard ? "cover" : "contain",
                 transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
               }}
               onError={() => setHasImage(false)}
@@ -7647,7 +7778,17 @@ function ImageCard({
           <StoryboardCaption
             value={element.description || ""}
             onChange={(v) => onUpdate({ description: v })}
-            color={sbTextColor}
+            textStyle={
+              sbTextColor.includes("gradient")
+                ? {
+                    background: sbTextColor,
+                    WebkitBackgroundClip: "text",
+                    backgroundClip: "text",
+                    color: "transparent",
+                    caretColor: "#ffffff",
+                  }
+                : { color: sbTextColor }
+            }
             readOnly={isReadOnly}
             resizeKey={`${element.width}x${element.height}`}
           />
