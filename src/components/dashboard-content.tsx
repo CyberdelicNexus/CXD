@@ -946,21 +946,44 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                           the selected tile (pinned to index 0), spanning the
                           area of a 2x2 block of tiles for real room to show
                           stats/graphs rather than a cramped external sidebar. */}
-                      {projectIndex === 0 && selectedProjectId && (
-                        <ProjectDetailPanel
-                          projectId={selectedProjectId}
-                          onClose={() => setSelectedProjectId(null)}
-                          onEnterProject={(projectId) => {
-                            const isProjectFreePrimary = isFree && freePrimaryCanvasId === projectId;
-                            const isProjectLocked = isFree && !isProjectFreePrimary;
-                            if (isProjectLocked) {
-                              router.push(`/cxd/overview/${projectId}`);
-                            } else {
-                              handleOpenProject(projectId);
-                            }
-                          }}
-                        />
-                      )}
+                      {projectIndex === 0 && selectedProjectId && (() => {
+                        const selProj = projects.find((p) => p.id === selectedProjectId);
+                        const selIsOwner = !!selProj && selProj.ownerId === userId;
+                        const selIsFreePrimary = isFree && freePrimaryCanvasId === selectedProjectId;
+                        return (
+                          <ProjectDetailPanel
+                            projectId={selectedProjectId}
+                            onClose={() => setSelectedProjectId(null)}
+                            onEnterProject={(projectId) => {
+                              const isProjectFreePrimary = isFree && freePrimaryCanvasId === projectId;
+                              const isProjectLocked = isFree && !isProjectFreePrimary;
+                              if (isProjectLocked) {
+                                router.push(`/cxd/overview/${projectId}`);
+                              } else {
+                                handleOpenProject(projectId);
+                              }
+                            }}
+                            isOwner={selIsOwner}
+                            canDelete={!selIsFreePrimary}
+                            onAddCover={selProj ? () => {
+                              setCoverImageProject({ id: selProj.id, name: selProj.name });
+                              setCoverImageUrl("");
+                            } : undefined}
+                            onInvite={selProj ? async () => {
+                              await saveProject(selProj);
+                              setInviteProject({ id: selProj.id, name: selProj.name });
+                            } : undefined}
+                            onRename={selProj ? () => {
+                              setRenameProject({ id: selProj.id, name: selProj.name });
+                              setNewRenameValue(selProj.name);
+                            } : undefined}
+                            onDelete={selProj ? () => {
+                              setProjectToDelete(selProj.id);
+                              setDeleteConfirmOpen(true);
+                            } : undefined}
+                          />
+                        );
+                      })()}
                     </React.Fragment>
                     );
                   })}
