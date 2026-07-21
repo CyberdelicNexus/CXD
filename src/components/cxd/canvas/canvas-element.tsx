@@ -952,7 +952,7 @@ export function CanvasElementRenderer({
         <div
           className={cn(
             "absolute left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl pointer-events-auto",
-            "bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
+            "bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
           )}
           style={{
             top: -57,

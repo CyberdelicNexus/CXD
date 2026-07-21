@@ -650,7 +650,7 @@ export function CanvasToolkit({
                 </button>
                 {/* Shape palette popover */}
                 {tool.type === "shape" && showShapePalette && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {SHAPE_PALETTE.map((shape) => {
                       const ShapeIcon = shape.IconComponent;
                       return (
@@ -679,7 +679,7 @@ export function CanvasToolkit({
                 )}
                 {/* Card type menu popover */}
                 {tool.type === "freeform" && showCardTypeMenu && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 flex flex-col gap-1 w-[180px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-2xl z-50 flex flex-col gap-1 w-[180px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {CARD_TYPE_OPTIONS.map((cardType) => {
                       return (
                         <button
@@ -702,7 +702,7 @@ export function CanvasToolkit({
                 )}
                 {/* Image mode menu popover — plain image vs storyboard card */}
                 {tool.type === "image" && showImageMenu && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 flex flex-col gap-1 w-[190px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-2xl z-50 flex flex-col gap-1 w-[190px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {IMAGE_MODE_OPTIONS.map((opt) => {
                       const OptIcon = opt.IconComponent;
                       return (
@@ -726,7 +726,7 @@ export function CanvasToolkit({
                 )}
                 {/* Link mode palette popover */}
                 {tool.type === "link" && showLinkPalette && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 flex flex-col gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-2xl z-50 flex flex-col gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {LINK_MODES.map((linkMode) => {
                       const ModeIcon = linkMode.IconComponent;
                       return (
