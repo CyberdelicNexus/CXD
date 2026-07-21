@@ -1056,7 +1056,11 @@ export function CXDNavbar() {
         onClose={() => setShowSettingsModal(false)}
       />
 
-      {/* Template Picker Modal — hidden until templates are production-ready */}
+      {/* Template Picker Modal */}
+      <TemplatePickerModal
+        open={showTemplatesModal}
+        onClose={() => setShowTemplatesModal(false)}
+      />
 
       {/* Version History Modal */}
       {project && (

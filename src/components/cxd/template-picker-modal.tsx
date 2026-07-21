@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useCXDStore } from '@/store/cxd-store';
-import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, remapTemplateIds } from '@/lib/templates';
+import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds } from '@/lib/templates';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
 import {
   Dialog,
@@ -62,6 +62,8 @@ function TemplateMiniPreview({ template }: { template: TemplateDefinition }) {
 
 export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps) {
   const addCanvasElements = useCXDStore((s) => s.addCanvasElements);
+  const addCanvasEdges = useCXDStore((s) => s.addCanvasEdges);
+  const setPendingCanvasFitBounds = useCXDStore((s) => s.setPendingCanvasFitBounds);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
 
   const filtered = useMemo(() => {
@@ -73,13 +75,18 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     const tpl = TEMPLATES.find((t) => t.id === templateId);
     if (!tpl) return;
 
-    const freshElements = remapTemplateIds(tpl.elements);
+    const { elements, edges } = instantiateTemplate(tpl);
 
     // Close dialog FIRST so Radix cleans up pointer-events on body,
     // then add elements after dialog unmount completes
     onClose();
     requestAnimationFrame(() => {
-      addCanvasElements(freshElements);
+      addCanvasElements(elements);
+      if (edges.length > 0) addCanvasEdges(edges);
+      // Auto-frame the inserted template so the user sees it land instead of
+      // hunting for it (consumed once by the canvas's pending-fit effect).
+      const bbox = templateBounds(elements);
+      if (bbox) setPendingCanvasFitBounds(bbox);
       // Safety: ensure Radix didn't leave pointer-events: none on body
       document.body.style.pointerEvents = '';
     });

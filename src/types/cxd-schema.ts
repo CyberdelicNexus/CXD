@@ -328,7 +328,7 @@ export interface CXDProject {
 }
 
 // Default project factory
-export function createDefaultProject(id: string, name: string, ownerId: string, initialElements?: import('./canvas-elements').CanvasElement[]): CXDProject {
+export function createDefaultProject(id: string, name: string, ownerId: string, initialElements?: import('./canvas-elements').CanvasElement[], initialEdges?: import('./canvas-elements').CanvasEdge[]): CXDProject {
   return {
     id,
     name,
@@ -426,7 +426,7 @@ export function createDefaultProject(id: string, name: string, ownerId: string, 
     // Canvas layout positions
     canvasLayout: {
       elements: initialElements ? [...initialElements] : [],
-      edges: [],
+      edges: initialEdges ? [...initialEdges] : [],
     },
 
     wizardCompleted: false,

@@ -45,7 +45,7 @@ import {
   LayoutTemplate,
   Newspaper,
 } from "lucide-react";
-import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, remapTemplateIds, type TemplateDefinition, type TemplateCategory } from "@/lib/templates";
+import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, type TemplateDefinition, type TemplateCategory } from "@/lib/templates";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
 import { useRouter } from "next/navigation";
 import { fetchUserProjects, fetchProjectById, ensureUserProfile, saveProject, updateProjectMetadata } from "@/lib/supabase-projects";
@@ -277,9 +277,9 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     if (!canCreate) { setShowUpgradeModal(true); setTemplateDialogOpen(false); return; }
     if (!selectedTemplate || !templateProjectName.trim()) return;
 
-    const freshElements = remapTemplateIds(selectedTemplate.elements);
+    const { elements: freshElements, edges: freshEdges } = instantiateTemplate(selectedTemplate);
 
-    const projectId = createProject(templateProjectName.trim(), userId, freshElements);
+    const projectId = createProject(templateProjectName.trim(), userId, freshElements, freshEdges);
     setTemplateProjectName('');
     setSelectedTemplate(null);
     setTemplateDialogOpen(false);

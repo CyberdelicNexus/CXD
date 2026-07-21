@@ -18,7 +18,7 @@ import { Plus } from 'lucide-react';
 import {
   TEMPLATES,
   TEMPLATE_CATEGORY_LABELS,
-  remapTemplateIds,
+  instantiateTemplate,
 } from '@/lib/templates';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
 import { useCXDStore } from '@/store/cxd-store';
@@ -98,7 +98,7 @@ export default function TemplatesPage() {
   const handleCreate = async () => {
     if (!selectedTemplate || !projectName.trim()) return;
 
-    const freshElements = remapTemplateIds(selectedTemplate.elements);
+    const { elements: freshElements, edges: freshEdges } = instantiateTemplate(selectedTemplate);
 
     // We need a userId — get from supabase auth state via the store or fallback
     // The createProject store action requires ownerId; use a placeholder that
@@ -106,7 +106,7 @@ export default function TemplatesPage() {
     const userId =
       useCXDStore.getState().projects[0]?.ownerId ?? 'pending';
 
-    createProject(projectName.trim(), userId, freshElements);
+    createProject(projectName.trim(), userId, freshElements, freshEdges);
     setProjectName('');
     setSelectedTemplate(null);
     setDialogOpen(false);
