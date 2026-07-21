@@ -7097,6 +7097,9 @@ function ImageCard({
   // Live preview while dragging the image/caption divider.
   const [captionRatioPreview, setCaptionRatioPreview] = useState<number | null>(null);
   const sbFrameRef = useRef<HTMLDivElement>(null);
+  // Separate hidden input for "replace image" (the first-upload input only exists
+  // in the empty state, which isn't rendered once the element has a src).
+  const replaceInputRef = useRef<HTMLInputElement>(null);
 
   // Notify parent when crop mode changes so resize handles can hide
   useEffect(() => {
@@ -7227,6 +7230,10 @@ function ImageCard({
         elementHeight = elementWidth / aspectRatio;
       }
 
+      // A storyboard frame keeps whatever cell ratio the user set (the new image
+      // just re-covers it); a plain image block adopts the new image's aspect ratio.
+      const keepBox = !!element.storyboard;
+
       onUpdate({
         src: urlData.publicUrl,
         imageMeta: {
@@ -7235,9 +7242,12 @@ function ImageCard({
           bytes: blob.size,
           originalName: file.name,
         },
-        // Update element dimensions to match image aspect ratio
-        width: Math.round(elementWidth),
-        height: Math.round(elementHeight),
+        ...(keepBox
+          ? {}
+          : { width: Math.round(elementWidth), height: Math.round(elementHeight) }),
+        // Any crop/flip/reframe belonged to the PREVIOUS image — start clean.
+        imageEdits: { crop: { x: 0, y: 0, width: 100, height: 100 }, flipH: false, flipV: false },
+        storyboardObjectPosition: { x: 50, y: 50 },
       });
       setHasImage(true);
     } catch (err) {
@@ -7960,6 +7970,28 @@ function ImageCard({
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {/* Replace the image file (storyboard keeps its cell ratio; a plain
+              image block re-fits to the new image's aspect ratio). */}
+          <input
+            ref={replaceInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <button
+            onClick={() => replaceInputRef.current?.click()}
+            className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            title="Replace image"
+            disabled={isUploading}
+          >
+            {isUploading ? (
+              <RotateCcw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4" />
+            )}
+          </button>
+          <div className="w-px h-5 bg-border mx-0.5" />
           <button
             onClick={() => {
               setIsCropping(true);
