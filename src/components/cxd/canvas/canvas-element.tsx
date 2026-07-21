@@ -963,7 +963,7 @@ export function CanvasElementRenderer({
         >
           {/* Element-specific actions */}
           {element.type === "image" && (element as ImageElement).storyboard && (
-            <div className="relative">
+            <div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1001,7 +1001,7 @@ export function CanvasElementRenderer({
           {element.type === "shape" && (
             <>
               {/* Color Picker (Fill/Stroke/Text unified) */}
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1060,7 +1060,7 @@ export function CanvasElementRenderer({
               </div>
 
               {/* Text Formatting Dropdown */}
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1099,7 +1099,7 @@ export function CanvasElementRenderer({
               <div className="w-px h-4 bg-border/50 mx-0.5" />
 
               {/* Shape Type Picker */}
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1138,7 +1138,7 @@ export function CanvasElementRenderer({
           )}
           {element.type === "freeform" && (
             <>
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1166,7 +1166,7 @@ export function CanvasElementRenderer({
                   />
                 )}
               </div>
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1267,7 +1267,7 @@ export function CanvasElementRenderer({
           {element.type === "link" &&
             (element as LinkElement).linkMode === "file" && (
               <>
-                <div className="relative">
+                <div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1307,7 +1307,7 @@ export function CanvasElementRenderer({
             )}
           {element.type === "board" && (
             <>
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1332,7 +1332,7 @@ export function CanvasElementRenderer({
                   />
                 )}
               </div>
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1395,7 +1395,7 @@ export function CanvasElementRenderer({
           )}
           {element.type === "experienceBlock" && (
             <>
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1426,7 +1426,7 @@ export function CanvasElementRenderer({
                   />
                 )}
               </div>
-              <div className="relative">
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2417,8 +2417,8 @@ function ColorPicker({
   return (
     <div
       className={cn(
-        "absolute p-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] grid grid-cols-4 gap-1 w-[148px]",
-        "top-full mt-2 left-1/2 -translate-x-1/2",
+        "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
+        "p-3 grid grid-cols-4 gap-2",
       )}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -2466,7 +2466,7 @@ function ShapeTypePicker({
 
   return (
     <div
-      className="absolute top-full mt-2 left-1/2 -translate-x-1/2 p-2 rounded-lg bg-card backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[180px]"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2515,7 +2515,7 @@ function ShapeTextStylePicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur-xl border border-border/50 shadow-lg z-[100] w-[200px] p-3 pointer-events-auto"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2696,7 +2696,7 @@ function ShapeColorPicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto w-[220px] p-3"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2887,7 +2887,7 @@ function StoryboardColorPicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto w-[236px] p-3"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3032,7 +3032,7 @@ function ContainerStylePicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] pointer-events-auto"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3237,7 +3237,7 @@ function TextColorPicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[180px] pointer-events-auto"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3366,7 +3366,7 @@ function GradientPicker({
 
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[260px] pointer-events-auto"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3414,7 +3414,7 @@ function HypercubeTagPicker({
 }) {
   return (
     <div
-      className="absolute left-0 top-full mt-2 p-3 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-[100] min-w-[220px] pointer-events-auto"
+      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
