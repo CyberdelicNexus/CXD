@@ -221,6 +221,7 @@ export interface ImageElement extends CanvasElementBase {
   storyboardBorderWidth?: number;  // Frame border width (px)
   storyboardTextColor?: string;    // Caption text color
   storyboardObjectPosition?: { x: number; y: number }; // object-position % for the covered image (drag to reframe)
+  storyboardCaptionRatio?: number; // caption strip height as a fraction of the frame (drag the divider)
   objectFit?: 'cover' | 'contain' | 'fill';
   imageMeta?: {
     width: number;

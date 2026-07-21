@@ -952,7 +952,7 @@ export function CanvasElementRenderer({
         <div
           className={cn(
             "absolute left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl pointer-events-auto",
-            "bg-white/10 backdrop-blur-3xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+            "bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
           )}
           style={{
             top: -57,
@@ -7094,6 +7094,9 @@ function ImageCard({
   // Storyboard reframe: drag the covered image to set its focal point.
   const [isRepositioning, setIsRepositioning] = useState(false);
   const [posPreview, setPosPreview] = useState<{ x: number; y: number } | null>(null);
+  // Live preview while dragging the image/caption divider.
+  const [captionRatioPreview, setCaptionRatioPreview] = useState<number | null>(null);
+  const sbFrameRef = useRef<HTMLDivElement>(null);
 
   // Notify parent when crop mode changes so resize handles can hide
   useEffect(() => {
@@ -7612,6 +7615,30 @@ function ImageCard({
   const sbBorderWidth = element.storyboardBorderWidth ?? 3;
   const sbTextColor = element.storyboardTextColor || "#f4f4f5";
   const sbObjPos = posPreview || element.storyboardObjectPosition || { x: 50, y: 50 };
+  const sbCaptionRatio = captionRatioPreview ?? element.storyboardCaptionRatio ?? 0.28;
+
+  // Drag the divider between the image and the caption to resize the caption strip.
+  const startCaptionResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const start = element.storyboardCaptionRatio ?? 0.28;
+    const frameH = sbFrameRef.current?.getBoundingClientRect().height || element.height || 200;
+    let latest = start;
+    const move = (ev: MouseEvent) => {
+      // Dragging the divider UP grows the caption.
+      latest = Math.max(0.1, Math.min(0.65, start - (ev.clientY - startY) / frameH));
+      setCaptionRatioPreview(latest);
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      onUpdate({ storyboardCaptionRatio: latest });
+      setCaptionRatioPreview(null);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
 
   // Drag the covered image to reposition its focal point (object-position).
   const startReposition = (e: React.MouseEvent) => {
@@ -7648,6 +7675,7 @@ function ImageCard({
       data-crop-mode={isCropping ? "true" : undefined}
     >
       <div
+        ref={sbFrameRef}
         className={cn("w-full h-full flex flex-col", isStoryboard && "rounded-md overflow-hidden shadow-xl")}
         style={
           isStoryboard
@@ -7658,15 +7686,65 @@ function ImageCard({
       <div
         ref={imageContainerRef}
         className={cn(
-          "rounded-lg transition-all relative",
-          isStoryboard ? "flex-1 min-h-0" : "w-full h-full",
+          "transition-all relative",
+          // No inner rounding inside a storyboard frame — the frame already rounds,
+          // and a rounded inner box clipped the reframe highlight's corners.
+          isStoryboard ? "flex-1 min-h-0" : "w-full h-full rounded-lg",
           // Only clip image content, not the crop overlay handles
           !isCropping && "overflow-hidden",
           isSelected ? "ring-0" : "",
           isCropping && "ring-2 ring-cyan-400",
         )}
       >
-        {isCropped ? (
+        {isCropped && isStoryboard ? (
+          (() => {
+            // Storyboard + crop: show the cropped region COVERING the (freely
+            // resized) image area, and keep drag-to-reframe working. Pure CSS so
+            // nothing needs measuring: an aspect-locked "crop viewport" sized with
+            // min-width/height:100% always covers the box, positioned by the
+            // object-position percentages (the standard object-position emulation),
+            // with the full image scaled inside it so the crop region exactly fills.
+            const nw = element.imageMeta?.width || 1;
+            const nh = element.imageMeta?.height || 1;
+            const cw = Math.max(0.01, crop.width);
+            const ch = Math.max(0.01, crop.height);
+            const cropAspect = (cw * nw) / (ch * nh);
+            return (
+              <div className="absolute inset-0 overflow-hidden">
+                <div
+                  style={{
+                    position: "absolute",
+                    aspectRatio: String(cropAspect),
+                    minWidth: "100%",
+                    minHeight: "100%",
+                    left: `${sbObjPos.x}%`,
+                    top: `${sbObjPos.y}%`,
+                    transform: `translate(-${sbObjPos.x}%, -${sbObjPos.y}%)`,
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={element.src}
+                    alt={element.alt || ""}
+                    style={{
+                      position: "absolute",
+                      width: `${(100 / cw) * 100}%`,
+                      height: `${(100 / ch) * 100}%`,
+                      left: `${-(crop.x / cw) * 100}%`,
+                      top: `${-(crop.y / ch) * 100}%`,
+                      maxWidth: "none",
+                      transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                    }}
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    onError={() => setHasImage(false)}
+                  />
+                </div>
+              </div>
+            );
+          })()
+        ) : isCropped ? (
           (() => {
             // Scale the background so the cropped region (crop.width% x crop.height%
             // of the original image) always fills the current element. This lets
@@ -7727,7 +7805,9 @@ function ImageCard({
             onMouseDown={startReposition}
             title="Drag to reposition the image"
           >
-            <div className="absolute inset-0 ring-2 ring-inset ring-cyan-400/70 pointer-events-none" />
+            {/* Inset a couple of px so the frame's rounded corners don't clip the
+                highlight and leave it looking notched. */}
+            <div className="absolute inset-[2px] rounded-[2px] border-2 border-cyan-400/80 pointer-events-none" />
             <div className="absolute top-1.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-black/60 text-[10px] text-cyan-200 pointer-events-none whitespace-nowrap">
               Drag to reframe
             </div>
@@ -7821,9 +7901,26 @@ function ImageCard({
           auto-shrinks to fit when long. */}
       {isStoryboard && (
         <div
-          className="shrink-0 h-[28%] min-h-[38px] max-h-[46%] px-2 py-1.5"
-          style={{ borderTop: `${sbBorderWidth}px solid ${sbBorderColor}`, background: sbBgColor }}
+          className="shrink-0 relative px-2 py-1.5"
+          style={{
+            height: `${sbCaptionRatio * 100}%`,
+            minHeight: 28,
+            borderTop: `${sbBorderWidth}px solid ${sbBorderColor}`,
+            background: sbBgColor,
+          }}
         >
+          {/* Drag the divider to resize the caption strip */}
+          {!isReadOnly && (
+            <div
+              data-no-drag
+              onMouseDown={startCaptionResize}
+              className="absolute left-0 right-0 z-30 cursor-ns-resize group/cd"
+              style={{ top: -(sbBorderWidth + 3), height: sbBorderWidth + 6 }}
+              title="Drag to resize the caption"
+            >
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-0.5 w-8 rounded-full bg-cyan-400/0 group-hover/cd:bg-cyan-400/80 transition-colors" />
+            </div>
+          )}
           <StoryboardCaption
             // Remount on colour change: a textarea won't re-clip its background to
             // the text when the background is swapped in place (it repaints as a
@@ -7902,7 +7999,26 @@ function ImageCard({
             <FlipVertical className="w-4 h-4" />
           </button>
           <button
-            onClick={() => onUpdate({ storyboard: !element.storyboard })}
+            onClick={() => {
+              if (element.storyboard) {
+                // Turning the frame OFF: the box currently holds the storyboard's
+                // free-form ratio, so restore the image's own proportions (honouring
+                // any crop) instead of leaving the element mis-shaped.
+                const nw = element.imageMeta?.width;
+                const nh = element.imageMeta?.height;
+                if (nw && nh) {
+                  const cw = Math.max(0.01, crop.width);
+                  const ch = Math.max(0.01, crop.height);
+                  const aspect = (cw * nw) / (ch * nh);
+                  onUpdate({
+                    storyboard: false,
+                    height: Math.max(20, Math.round(element.width / aspect)),
+                  });
+                  return;
+                }
+              }
+              onUpdate({ storyboard: !element.storyboard });
+            }}
             className={cn(
               "p-2 rounded-md transition-colors",
               isStoryboard

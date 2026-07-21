@@ -15,7 +15,8 @@ export interface NavigationToolkitProps {
   showAlignmentGuides?: boolean;
   onToggleAlignmentGuides?: () => void;
   gridVisible?: boolean;
-  onToggleGrid?: () => void;
+  gridMajorDots?: boolean;
+  onCycleGrid?: () => void;
 }
 
 export function NavigationToolkit({
@@ -31,7 +32,8 @@ export function NavigationToolkit({
   showAlignmentGuides,
   onToggleAlignmentGuides,
   gridVisible,
-  onToggleGrid,
+  gridMajorDots,
+  onCycleGrid,
 }: NavigationToolkitProps) {
   return (
     // Vertically centered on the page regardless of viewport height (top-1/2 +
@@ -39,18 +41,29 @@ export function NavigationToolkit({
     <div className="absolute left-6 top-1/2 -translate-y-1/2 flex items-center gap-2 z-10 flex-col h-fit">
       {/* Grid + Alignment Toggles */}
       <div className="flex flex-col gap-1 p-1 rounded-lg bg-card/80 backdrop-blur border border-border">
-        {onToggleGrid && (
+        {onCycleGrid && (
           <Button
             variant="ghost"
             size="icon"
-            onClick={onToggleGrid}
+            onClick={onCycleGrid}
             className={cn(
               "transition-colors",
-              gridVisible && "bg-primary/20 text-primary ring-1 ring-primary/50"
+              gridVisible && !gridMajorDots && "bg-primary/20 text-primary ring-1 ring-primary/50",
+              gridVisible && gridMajorDots && "bg-primary/30 text-primary ring-1 ring-primary",
             )}
-            title={gridVisible ? "Dot Grid (On)" : "Dot Grid (Off)"}
+            title={
+              !gridVisible
+                ? "Dot Grid: Off — click for dots"
+                : gridMajorDots
+                  ? "Dot Grid: Dots + accents — click to turn off"
+                  : "Dot Grid: Dots — click for accent dots"
+            }
           >
-            <Grip className="w-4 h-4" />
+            {gridVisible && gridMajorDots ? (
+              <Grid3X3 className="w-4 h-4" />
+            ) : (
+              <Grip className="w-4 h-4" />
+            )}
           </Button>
         )}
         {onToggleAlignmentGuides && (

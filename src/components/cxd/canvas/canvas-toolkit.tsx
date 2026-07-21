@@ -11,12 +11,13 @@ import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
 
 type LinkMode = 'bookmark' | 'embed' | 'file';
+type ImageMode = 'image' | 'storyboard';
 
 interface CanvasToolkitProps {
   onPlaceElement: (
     type: CanvasElementType,
     position: { x: number; y: number },
-    options?: { shapeType?: ShapeType; linkMode?: LinkMode; cardType?: "note" | "task" | "document"; width?: number; height?: number },
+    options?: { shapeType?: ShapeType; linkMode?: LinkMode; cardType?: "note" | "task" | "document"; imageMode?: ImageMode; width?: number; height?: number },
   ) => void;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   canvasPosition: { x: number; y: number };
@@ -137,6 +138,21 @@ const SHAPE_PALETTE = [
   { type: "star" as ShapeType, label: "Star", IconComponent: LucideIcons.Star },
 ];
 
+const IMAGE_MODE_OPTIONS = [
+  {
+    mode: "image" as const,
+    label: "Image",
+    IconComponent: LucideIcons.Image,
+    description: "Plain image block",
+  },
+  {
+    mode: "storyboard" as const,
+    label: "Storyboard",
+    IconComponent: LucideIcons.Clapperboard,
+    description: "Framed image with a caption",
+  },
+];
+
 const LINK_MODES = [
   {
     mode: "bookmark" as LinkMode,
@@ -183,6 +199,8 @@ export function CanvasToolkit({
     useState<LinkMode>("bookmark");
   const [showCardTypeMenu, setShowCardTypeMenu] = useState(false);
   const [selectedCardType, setSelectedCardType] = useState<"note" | "task" | "document">("note");
+  const [showImageMenu, setShowImageMenu] = useState(false);
+  const [selectedImageMode, setSelectedImageMode] = useState<ImageMode>("image");
   // Toolbar collapse state
   const [isCollapsed, setIsCollapsed] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -195,6 +213,7 @@ export function CanvasToolkit({
         setShowShapePalette(false);
         setShowLinkPalette(false);
         setShowCardTypeMenu(false);
+        setShowImageMenu(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -248,6 +267,8 @@ export function CanvasToolkit({
   selectedLinkModeRef.current = selectedLinkMode;
   const selectedCardTypeRef = useRef(selectedCardType);
   selectedCardTypeRef.current = selectedCardType;
+  const selectedImageModeRef = useRef(selectedImageMode);
+  selectedImageModeRef.current = selectedImageMode;
   const setActiveToolRef = useRef(setActiveTool);
   setActiveToolRef.current = setActiveTool;
 
@@ -277,7 +298,9 @@ export function CanvasToolkit({
           ? { linkMode: selectedLinkModeRef.current }
           : tool === "freeform"
             ? { cardType: selectedCardTypeRef.current }
-            : undefined;
+            : tool === "image"
+              ? { imageMode: selectedImageModeRef.current }
+              : undefined;
     };
 
     const handleMouseDown = (e: MouseEvent) => {
@@ -422,13 +445,23 @@ export function CanvasToolkit({
         setShowCardTypeMenu(!showCardTypeMenu);
         setShowShapePalette(false);
         setShowLinkPalette(false);
+        setShowImageMenu(false);
         if (!showCardTypeMenu) {
+          setActiveTool(null);
+        }
+      } else if (type === "image") {
+        setShowImageMenu(!showImageMenu);
+        setShowShapePalette(false);
+        setShowLinkPalette(false);
+        setShowCardTypeMenu(false);
+        if (!showImageMenu) {
           setActiveTool(null);
         }
       } else if (type === "shape") {
         setShowShapePalette(!showShapePalette);
         setShowLinkPalette(false);
         setShowCardTypeMenu(false);
+        setShowImageMenu(false);
         if (!showShapePalette) {
           setActiveTool(null);
         }
@@ -436,6 +469,7 @@ export function CanvasToolkit({
         setShowLinkPalette(!showLinkPalette);
         setShowShapePalette(false);
         setShowCardTypeMenu(false);
+        setShowImageMenu(false);
         if (!showLinkPalette) {
           setActiveTool(null);
         }
@@ -443,6 +477,7 @@ export function CanvasToolkit({
         setShowShapePalette(false);
         setShowLinkPalette(false);
         setShowCardTypeMenu(false);
+        setShowImageMenu(false);
         if (activeTool === type) {
           setActiveTool(null);
         } else {
@@ -457,6 +492,12 @@ export function CanvasToolkit({
     setSelectedCardType(cardType);
     setShowCardTypeMenu(false);
     setActiveTool("freeform");
+  }, [setActiveTool]);
+
+  const handleImageModeSelect = useCallback((mode: ImageMode) => {
+    setSelectedImageMode(mode);
+    setShowImageMenu(false);
+    setActiveTool("image");
   }, [setActiveTool]);
 
   const handleShapeSelect = useCallback((shapeType: ShapeType) => {
@@ -609,7 +650,7 @@ export function CanvasToolkit({
                 </button>
                 {/* Shape palette popover */}
                 {tool.type === "shape" && showShapePalette && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-white/10 backdrop-blur-3xl border border-white/20 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {SHAPE_PALETTE.map((shape) => {
                       const ShapeIcon = shape.IconComponent;
                       return (
@@ -638,7 +679,7 @@ export function CanvasToolkit({
                 )}
                 {/* Card type menu popover */}
                 {tool.type === "freeform" && showCardTypeMenu && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-white/10 backdrop-blur-3xl border border-white/20 shadow-2xl z-50 flex flex-col gap-1 w-[180px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 flex flex-col gap-1 w-[180px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {CARD_TYPE_OPTIONS.map((cardType) => {
                       return (
                         <button
@@ -659,9 +700,33 @@ export function CanvasToolkit({
                     })}
                   </div>
                 )}
+                {/* Image mode menu popover — plain image vs storyboard card */}
+                {tool.type === "image" && showImageMenu && (
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 flex flex-col gap-1 w-[190px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                    {IMAGE_MODE_OPTIONS.map((opt) => {
+                      const OptIcon = opt.IconComponent;
+                      return (
+                        <button
+                          key={opt.mode}
+                          onClick={() => handleImageModeSelect(opt.mode)}
+                          title={opt.description}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-2.5 rounded-lg transition-all text-sm group",
+                            "hover:bg-violet-600/20 hover:border-violet-500/50",
+                            selectedImageMode === opt.mode &&
+                            "bg-violet-600/40 border-violet-500/50 shadow-[0_0_10px_rgba(139,92,246,0.2)]",
+                          )}
+                        >
+                          <OptIcon className={cn("w-5 h-5 transition-colors", selectedImageMode === opt.mode ? "text-white" : "text-white/60 group-hover:text-white")} />
+                          <span className={cn("font-medium transition-colors", selectedImageMode === opt.mode ? "text-white" : "text-white/60 group-hover:text-white")}>{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 {/* Link mode palette popover */}
                 {tool.type === "link" && showLinkPalette && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-white/10 backdrop-blur-3xl border border-white/20 shadow-2xl z-50 flex flex-col gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/92 backdrop-blur-2xl border border-white/15 shadow-2xl z-50 flex flex-col gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {LINK_MODES.map((linkMode) => {
                       const ModeIcon = linkMode.IconComponent;
                       return (

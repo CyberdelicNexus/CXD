@@ -1911,6 +1911,7 @@ export function CXDCanvas() {
         shapeType?: ShapeType;
         linkMode?: "bookmark" | "embed" | "file";
         cardType?: "note" | "task" | "document";
+        imageMode?: "image" | "storyboard";
         width?: number;
         height?: number;
       },
@@ -1972,6 +1973,8 @@ export function CXDCanvas() {
             type: "image",
             src: "",
             objectFit: "cover",
+            // Storyboard variant: framed image with a caption strip.
+            ...(options?.imageMode === "storyboard" ? { storyboard: true } : {}),
           };
           break;
         case "shape":
@@ -4796,18 +4799,22 @@ export function CXDCanvas() {
         if (!(spacing > 0)) spacing = settings.gridSize || 20;
         while (spacing < 16) spacing *= 2;
         while (spacing >= 32) spacing /= 2;
-        const major = spacing * 4;
+        // The major multiplier MUST be odd. A radial-gradient dot sits at the
+        // centre of its tile, so with an even multiple the major dots land half a
+        // cell off the fine dots; an odd multiple makes them coincide exactly.
+        const MAJOR_EVERY = 5;
+        const major = spacing * MAJOR_EVERY;
+        const fine = `radial-gradient(circle, hsl(270 26% 34% / 0.4) 1px, transparent 1.2px)`;
+        const thick = `radial-gradient(circle, hsl(270 34% 55% / 0.65) 1.7px, transparent 1.9px)`;
         return (
           <div
             className="dot-grid pointer-events-none absolute inset-0"
             style={{
               transition: canvasTransformTransition,
-              // Two layers: brighter "major" dots every 4th cell + finer dots.
-              backgroundImage: `
-                radial-gradient(circle, hsl(270 32% 46% / 0.5) 1.4px, transparent 1.6px),
-                radial-gradient(circle, hsl(270 26% 34% / 0.4) 1px, transparent 1.2px)
-              `,
-              backgroundSize: `${major}px ${major}px, ${spacing}px ${spacing}px`,
+              backgroundImage: settings.gridMajorDots ? `${thick}, ${fine}` : fine,
+              backgroundSize: settings.gridMajorDots
+                ? `${major}px ${major}px, ${spacing}px ${spacing}px`
+                : `${spacing}px ${spacing}px`,
               backgroundPosition: `${canvasPosition.x}px ${canvasPosition.y}px`,
             }}
           />
@@ -5901,7 +5908,13 @@ export function CXDCanvas() {
         showAlignmentGuides={showAlignmentGuides}
         onToggleAlignmentGuides={() => setShowAlignmentGuides(!showAlignmentGuides)}
         gridVisible={settings.gridVisible}
-        onToggleGrid={() => updateSettings({ gridVisible: !settings.gridVisible })}
+        gridMajorDots={settings.gridMajorDots}
+        onCycleGrid={() => {
+          // off → dots → dots + accent dots → off
+          if (!settings.gridVisible) updateSettings({ gridVisible: true, gridMajorDots: false });
+          else if (!settings.gridMajorDots) updateSettings({ gridMajorDots: true });
+          else updateSettings({ gridVisible: false, gridMajorDots: false });
+        }}
       />
       {/* Task Inbox - for tasks created in Plan Tab */}
       <TaskInbox
