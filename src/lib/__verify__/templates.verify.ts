@@ -8,10 +8,11 @@
  */
 import { QUICKSTART_TEMPLATES } from '../templates-quickstart';
 import { CLASSIC_TEMPLATES } from '../templates-classics';
+import { EXPERIENCE_TEMPLATES } from '../templates-experience';
 import { TEMPLATES, instantiateTemplate } from '../templates';
 import type { CanvasElement } from '../../types/canvas-elements';
 
-const ALL_VERIFIED = [...QUICKSTART_TEMPLATES, ...CLASSIC_TEMPLATES];
+const ALL_VERIFIED = [...QUICKSTART_TEMPLATES, ...EXPERIENCE_TEMPLATES, ...CLASSIC_TEMPLATES];
 
 let pass = 0;
 let fail = 0;

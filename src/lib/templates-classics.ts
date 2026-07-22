@@ -2,7 +2,7 @@ import type { CanvasElement, TableElement } from '@/types/canvas-elements';
 import { makeEmptyTableCells } from '@/types/canvas-elements';
 import type { TemplateDefinition } from './templates';
 import {
-  title, caption, divider, note, board, container, shape, storyboard, edge, zoneHeader,
+  title, caption, divider, note, board, container, shape, storyboard, edge, zone, type Fam,
   NOTE_TEAL, NOTE_ROSE, NOTE_VIOLET, NOTE_EMERALD, WARM_SUN,
 } from './templates-quickstart';
 
@@ -10,26 +10,6 @@ import {
 // The original 8 flat templates ("boxes with prompts") were rejected once the
 // design language existed — these are their replacements, authored with the
 // same factories and rules as the quickstart set (templates.design.md).
-
-// Family palette: zone title gradient + accent divider color, matching the
-// six-family rotation used by container tints / edge gradients / hexagons.
-const FAM = {
-  violet: { grad: 'linear-gradient(90deg, #C084FC, #A78BFA)', accent: 'rgba(167,139,250,0.35)' },
-  ocean: { grad: 'linear-gradient(90deg, #60A5FA, #22D3EE)', accent: 'rgba(96,165,250,0.35)' },
-  emerald: { grad: 'linear-gradient(90deg, #34D399, #22D3EE)', accent: 'rgba(52,211,153,0.35)' },
-  sunset: { grad: 'linear-gradient(90deg, #F97316, #FB923C)', accent: 'rgba(249,115,22,0.35)' },
-  rose: { grad: 'linear-gradient(90deg, #F472B6, #FB7185)', accent: 'rgba(244,114,182,0.35)' },
-  glacier: { grad: 'linear-gradient(90deg, #22D3EE, #A78BFA)', accent: 'rgba(34,211,238,0.35)' },
-} as const;
-type Fam = keyof typeof FAM;
-
-/** Tinted zone: container + gradient title + accent divider + guidance caption. */
-function zone(prefix: string, x: number, y: number, w: number, h: number, label: string, fam: Fam, capText: string): CanvasElement[] {
-  return [
-    container(prefix, x, y, w, h, label, fam === 'glacier' ? 'glacier' : fam, true),
-    ...zoneHeader(`${prefix}-h`, x, y, w, label, FAM[fam].grad, FAM[fam].accent, capText, prefix),
-  ];
-}
 
 function runOfShowTable(id: string, x: number, y: number, containerId: string): TableElement {
   const cells = makeEmptyTableCells(3, 3);

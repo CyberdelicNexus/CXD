@@ -1,6 +1,7 @@
 import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 import { QUICKSTART_TEMPLATES } from './templates-quickstart';
 import { CLASSIC_TEMPLATES } from './templates-classics';
+import { EXPERIENCE_TEMPLATES } from './templates-experience';
 
 export type TemplateCategory = 'experience' | 'product-brand' | 'creative';
 
@@ -141,6 +142,8 @@ export const TEMPLATES: TemplateDefinition[] = [
   // edges, tinted zones, hexagon portals, experience-block anchors). Listed
   // first so they lead the picker.
   ...QUICKSTART_TEMPLATES,
+  // One per experience element + the generic flow/timeline pair.
+  ...EXPERIENCE_TEMPLATES,
   // Classic templates, rebuilt against the same design system.
   ...CLASSIC_TEMPLATES,
 ];

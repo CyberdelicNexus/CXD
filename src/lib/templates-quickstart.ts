@@ -219,16 +219,16 @@ export function edge(id: string, from: string, to: string, gradient: Gradient, f
 // clicking a hexagon lands in a ready-to-fill layout instead of a blank board.
 
 /** Stamp a set of elements into a board's coordinate space. */
-function inBoard(boardRef: string, els: CanvasElement[]): CanvasElement[] {
+export function inBoard(boardRef: string, els: CanvasElement[]): CanvasElement[] {
   return els.map((e) => ({ ...e, boardId: boardRef }));
 }
 
-function inBoardEdge(boardRef: string, e: CanvasEdge): CanvasEdge {
+export function inBoardEdge(boardRef: string, e: CanvasEdge): CanvasEdge {
   return { ...e, boardId: boardRef };
 }
 
 /** Mini storyboard sequence: 3 frames + a writable transition card. */
-function storyboardInterior(prefix: string, boardRef: string): { elements: CanvasElement[]; edges: CanvasEdge[] } {
+export function storyboardInterior(prefix: string, boardRef: string): { elements: CanvasElement[]; edges: CanvasEdge[] } {
   return {
     elements: inBoard(boardRef, [
       title(`${prefix}-t`, 60, 40, 'Storyboard', 'linear-gradient(90deg, #8B5CF6, #60A5FA)', 22),
@@ -246,7 +246,7 @@ function storyboardInterior(prefix: string, boardRef: string): { elements: Canva
 }
 
 /** 2×2 reference wall. */
-function moodboardInterior(prefix: string, boardRef: string): CanvasElement[] {
+export function moodboardInterior(prefix: string, boardRef: string): CanvasElement[] {
   return inBoard(boardRef, [
     title(`${prefix}-t`, 60, 40, 'Moodboard', 'linear-gradient(90deg, #F472B6, #A78BFA)', 22),
     storyboard(`${prefix}-s1`, 60, 140),
@@ -257,7 +257,7 @@ function moodboardInterior(prefix: string, boardRef: string): CanvasElement[] {
 }
 
 /** Evidence shelf: documents + a key-insight note. */
-function researchInterior(prefix: string, boardRef: string): CanvasElement[] {
+export function researchInterior(prefix: string, boardRef: string): CanvasElement[] {
   return inBoard(boardRef, [
     title(`${prefix}-t`, 60, 40, 'Research', 'linear-gradient(90deg, #60A5FA, #22D3EE)', 22),
     caption(`${prefix}-c`, 60, 88, 'Drop sources here — one document per finding.', 480, 12),
@@ -269,7 +269,7 @@ function researchInterior(prefix: string, boardRef: string): CanvasElement[] {
 }
 
 /** Row of inspiration frames. */
-function inspirationInterior(prefix: string, boardRef: string): CanvasElement[] {
+export function inspirationInterior(prefix: string, boardRef: string): CanvasElement[] {
   return inBoard(boardRef, [
     title(`${prefix}-t`, 60, 40, 'Inspiration', 'linear-gradient(90deg, #EC4899, #F472B6)', 22),
     storyboard(`${prefix}-s1`, 60, 140),
@@ -279,7 +279,7 @@ function inspirationInterior(prefix: string, boardRef: string): CanvasElement[] 
 }
 
 /** Persona sheet: portrait frame + bio / goals / pains notes. */
-function personaInterior(prefix: string, boardRef: string, name: string): CanvasElement[] {
+export function personaInterior(prefix: string, boardRef: string, name: string): CanvasElement[] {
   return inBoard(boardRef, [
     title(`${prefix}-t`, 60, 40, name, 'linear-gradient(90deg, #60A5FA, #34D399)', 22),
     storyboard(`${prefix}-p`, 60, 140, 260, 250),
@@ -502,3 +502,23 @@ export const QUICKSTART_TEMPLATES: TemplateDefinition[] = [
   personaEngine,
   storyboardFlow,
 ];
+
+// Family palette: zone title gradient + accent divider color, matching the
+// six-family rotation used by container tints / edge gradients / hexagons.
+export const FAM = {
+  violet: { grad: 'linear-gradient(90deg, #C084FC, #A78BFA)', accent: 'rgba(167,139,250,0.35)' },
+  ocean: { grad: 'linear-gradient(90deg, #60A5FA, #22D3EE)', accent: 'rgba(96,165,250,0.35)' },
+  emerald: { grad: 'linear-gradient(90deg, #34D399, #22D3EE)', accent: 'rgba(52,211,153,0.35)' },
+  sunset: { grad: 'linear-gradient(90deg, #F97316, #FB923C)', accent: 'rgba(249,115,22,0.35)' },
+  rose: { grad: 'linear-gradient(90deg, #F472B6, #FB7185)', accent: 'rgba(244,114,182,0.35)' },
+  glacier: { grad: 'linear-gradient(90deg, #22D3EE, #A78BFA)', accent: 'rgba(34,211,238,0.35)' },
+} as const;
+export type Fam = keyof typeof FAM;
+
+/** Tinted zone: container + gradient title + accent divider + guidance caption. */
+export function zone(prefix: string, x: number, y: number, w: number, h: number, label: string, fam: Fam, capText: string): CanvasElement[] {
+  return [
+    container(prefix, x, y, w, h, label, fam === 'glacier' ? 'glacier' : fam, true),
+    ...zoneHeader(`${prefix}-h`, x, y, w, label, FAM[fam].grad, FAM[fam].accent, capText, prefix),
+  ];
+}

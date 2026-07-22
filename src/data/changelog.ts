@@ -10,9 +10,60 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.4.0',
+    date: 'July 22, 2026',
+    isLatest: true,
+    changes: [
+      {
+        category: 'feature',
+        description: '22 redesigned templates — one for every experience element (Intention Core, Meaning Architecture, Desired Change, Human Context, Reality Planes, Sensory Domains, Presence Types, State & Trait Mapping, Experience Flow) plus personas, storyboards, UX flows, journeys, moodboards, campaigns and more. Every template is a real composition: tinted zones with guidance captions, curved gradient connectors, hexagon portals, and pre-styled cards you edit instead of blank boxes',
+      },
+      {
+        category: 'feature',
+        description: 'Multilayer templates — hexagon portals inside a template open onto their own ready-made layouts. Double-click Storyboard for a shot sequence, Moodboard for a reference wall, Research for an evidence shelf, or a Persona for a full persona sheet',
+      },
+      {
+        category: 'feature',
+        description: 'AI Composer is back — finish the framing wizard and let AI read your answers to pick and set up the best-fitting template for your project, then frame the canvas onto it',
+      },
+      {
+        category: 'feature',
+        description: 'Storyboard cards — turn any image into a framed storyboard cell with a caption, drag the image to reframe its focal point, resize the caption, and restyle the border, background and text (including gradients) from one colour editor',
+      },
+      {
+        category: 'feature',
+        description: 'Tables on the canvas — full grids with per-cell, row, column and table-wide colours and gradients, drag-to-resize rows and columns, reorderable rows and columns, and cells that grow to fit their text as you type',
+      },
+      {
+        category: 'feature',
+        description: 'Draw a container around existing elements to capture them, drop many elements into a board at once and choose whether to keep their arrangement or distribute them, and alt-drag a whole selection to duplicate it',
+      },
+      {
+        category: 'feature',
+        description: 'AI insights on the dashboard — generate a summary of any experience plus prioritized recommendations, alongside task status, roadmap progress and OKRs',
+      },
+      {
+        category: 'feature',
+        description: 'Export & Deliverables hub, plus templates now reachable from both the navbar and the account menu',
+      },
+      {
+        category: 'improvement',
+        description: 'Canvas polish — a level-of-detail dot grid that stays crisp at any zoom with a three-state toggle, connectors that inherit the colour of the flow they extend, element menus that open beside what you are editing instead of covering it, and a bigger scrollable emoji picker',
+      },
+      {
+        category: 'improvement',
+        description: 'Cleaner save indicator, note cards that can hide their title, side panels centred at any window height, and a dashboard preview that fits its grid',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed containers resizing themselves when merely clicked, template connector lines being left behind when moving a whole template, cropped images stretching instead of filling their frame, and Delete removing a shape\'s text instead of the shape',
+      },
+    ],
+  },
+  {
     version: '1.3.0',
     date: 'July 10, 2026',
-    isLatest: true,
+    isLatest: false,
     changes: [
       {
         category: 'feature',
