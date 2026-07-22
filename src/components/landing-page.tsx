@@ -24,6 +24,12 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { LandingHypercube } from '@/components/landing/landing-hypercube';
+import {
+  ElementToolkitShowcase,
+  PlanViewsShowcase,
+  TemplatesShowcase,
+  SectionHeader,
+} from '@/components/landing-interactive';
 
 // ─── Feature Sections Data ──────────────────────────────────────────────────
 
@@ -49,19 +55,6 @@ interface FeatureSection {
 }
 
 const FEATURE_SECTIONS: FeatureSection[] = [
-  {
-    id: 'framing',
-    icon: Brain,
-    label: 'Framing',
-    headline: 'Start with',
-    highlight: 'Intent',
-    description: 'A guided 11-step framework that structures your experience design from audience and context to transformation goals, before you touch the canvas.',
-    video: '/images/Gifs/V2/Dashboard%20%26%20Framing.mp4',
-    poster: '/images/Screenshot/0_canvas-screeshot.png',
-    details: [
-      { title: 'Guided Framework', description: 'Walk through audience, context, intention, and desired outcomes step by step.' },
-    ],
-  },
   {
     id: 'canvas',
     icon: LayoutGrid,
@@ -407,6 +400,99 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
   );
 }
 
+// ─── Framing Steps (scroll-animated, replaces the old framing GIF) ──────────
+// The framing story is told by the structure itself: each stage draws itself in
+// as you scroll, connected by a vertical gradient spine.
+
+const FRAMING_STAGES: { n: string; title: string; body: string; accent: string }[] = [
+  {
+    n: '01', title: 'Intention',
+    body: 'Name the concept, the core message, and the anti-vision — what this must never become.',
+    accent: '#C084FC',
+  },
+  {
+    n: '02', title: 'People & Meaning',
+    body: 'Who it is for, what they need, and the world, story and magic the experience runs on.',
+    accent: '#60A5FA',
+  },
+  {
+    n: '03', title: 'Dimensions',
+    body: 'Which layers of reality, which senses, and which kinds of presence you are designing for.',
+    accent: '#34D399',
+  },
+  {
+    n: '04', title: 'Transformation',
+    body: 'The states you trigger in the moment, and the traits people carry home afterwards.',
+    accent: '#F97316',
+  },
+  {
+    n: '05', title: 'Your canvas, composed',
+    body: 'Finish and your answers become a living canvas — or let the AI Composer pick the template that fits.',
+    accent: '#F472B6',
+  },
+];
+
+function FramingSteps() {
+  return (
+    <section className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
+      <SectionHeader icon={Brain} label="Framing" />
+
+      <div className="max-w-3xl mx-auto">
+        <motion.p
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-80px' }}
+          transition={{ duration: 0.6 }}
+          className="text-center text-white/50 text-sm md:text-base mb-14 max-w-2xl mx-auto"
+        >
+          Structure the thinking before you touch the canvas. A guided framework that turns intent into a
+          design you can actually build.
+        </motion.p>
+
+        <div className="relative">
+          {/* Vertical spine that draws itself as the section enters view */}
+          <motion.div
+            initial={{ scaleY: 0 }}
+            whileInView={{ scaleY: 1 }}
+            viewport={{ once: true, margin: '-100px' }}
+            transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
+            style={{ originY: 0 }}
+            className="absolute left-[27px] md:left-[31px] top-2 bottom-2 w-px bg-gradient-to-b from-violet-400/70 via-cyan-400/40 to-transparent"
+          />
+
+          <div className="space-y-8 md:space-y-10">
+            {FRAMING_STAGES.map((stage, i) => (
+              <motion.div
+                key={stage.n}
+                initial={{ opacity: 0, x: -24 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true, margin: '-80px' }}
+                transition={{ duration: 0.6, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+                className="relative flex gap-5 md:gap-7"
+              >
+                <div
+                  className="relative z-10 flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-2xl flex-shrink-0 border backdrop-blur-sm font-bold text-sm md:text-base"
+                  style={{
+                    background: `linear-gradient(135deg, ${stage.accent}22, transparent)`,
+                    borderColor: `${stage.accent}55`,
+                    color: stage.accent,
+                  }}
+                >
+                  {stage.n}
+                </div>
+                <div className="pt-2 min-w-0">
+                  <h4 className="text-lg md:text-xl font-bold text-white mb-1.5">{stage.title}</h4>
+                  <p className="text-white/55 text-sm md:text-base leading-relaxed">{stage.body}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─── Hypercube Concept Section ──────────────────────────────────────────────
 
 function HypercubeConcept() {
@@ -744,12 +830,21 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ─── Feature Showcase Sections ─── */}
+      {/* ─── Feature Showcase Sections ───
+          Framing now leads as a scroll-animated explainer (no video); the
+          interactive element toolkit follows the Infinite Canvas explainer,
+          templates sit before the Hypercube, and the Plan views cards follow
+          the Plan section. Canvas / Hypercube / Collaboration keep their
+          video explainers. */}
       <div id="features">
+        <FramingSteps />
         {FEATURE_SECTIONS.map((section, index) => (
           <Fragment key={section.id}>
+            {section.id === 'hypercube' && <TemplatesShowcase />}
             {section.id === 'hypercube' && <HypercubeConcept />}
             <FeatureShowcase section={section} index={index} />
+            {section.id === 'canvas' && <ElementToolkitShowcase />}
+            {section.id === 'plan' && <PlanViewsShowcase />}
           </Fragment>
         ))}
       </div>
