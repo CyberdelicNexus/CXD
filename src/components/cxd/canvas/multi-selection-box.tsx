@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { CanvasElement, PRESET_COLORS } from "@/types/canvas-elements";
+import { CanvasElement, ImageElement, ShapeElement, PRESET_COLORS } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
+import { ShapeColorPicker, StoryboardColorPicker } from "./canvas-element";
 import {
   AlignLeft,
   AlignCenter,
@@ -468,6 +469,28 @@ export function MultiSelectionBox({
             onUpdateElements(updates);
           };
 
+          // Merge a style patch into every selected element (keeps each
+          // element's other style fields).
+          const applyStylePatch = (patch: Record<string, unknown>) => {
+            const updates = new Map<string, Partial<CanvasElement>>();
+            selectedElements.forEach((el) => {
+              updates.set(el.id, { style: { ...((el as any).style || {}), ...patch } } as Partial<CanvasElement>);
+            });
+            onUpdateElements(updates);
+          };
+
+          // Merge top-level props into every selected element (storyboard fields).
+          const applyProps = (patch: Partial<CanvasElement>) => {
+            const updates = new Map<string, Partial<CanvasElement>>();
+            selectedElements.forEach((el) => updates.set(el.id, patch));
+            onUpdateElements(updates);
+          };
+
+          const firstShape = selectedElements[0] as ShapeElement;
+          const firstImage = selectedElements[0] as ImageElement;
+          const allStoryboards =
+            firstType === 'image' && selectedElements.every((el) => (el as ImageElement).storyboard);
+
           return (
             <div className="relative flex items-center gap-0.5 px-2 border-r border-border/50">
               <ToolButton
@@ -476,7 +499,41 @@ export function MultiSelectionBox({
                 onClick={() => setShowColorPicker(!showColorPicker)}
                 className={showColorPicker ? "bg-primary/20 text-primary" : ""}
               />
-              {showColorPicker && (
+              {/* Same-type selections open the element's ORIGINAL colour menu
+                  (shape picker with fill/outline/text, storyboard picker, ...)
+                  applied to every selected element at once. */}
+              {showColorPicker && firstType === 'shape' && (
+                <ShapeColorPicker
+                  fillColor={firstShape.style?.bgColor}
+                  strokeColor={firstShape.style?.borderColor}
+                  strokeWidth={firstShape.style?.borderWidth}
+                  fillOpacity={firstShape.style?.fillOpacity}
+                  textColor={firstShape.style?.textColor}
+                  fontSize={firstShape.style?.fontSize}
+                  onFillColorChange={(c) => applyStylePatch({ bgColor: c })}
+                  onStrokeColorChange={(c) => applyStylePatch({ borderColor: c })}
+                  onStrokeWidthChange={(w) => applyStylePatch({ borderWidth: w })}
+                  onFillOpacityChange={(o) => applyStylePatch({ fillOpacity: o })}
+                  onTextColorChange={(c) => applyStylePatch({ textColor: c })}
+                  onFontSizeChange={(s) => applyStylePatch({ fontSize: s })}
+                  onClose={() => setShowColorPicker(false)}
+                  defaultMode="fill"
+                />
+              )}
+              {showColorPicker && allStoryboards && (
+                <StoryboardColorPicker
+                  bgColor={firstImage.storyboardBgColor || '#0f0f12'}
+                  borderColor={firstImage.storyboardBorderColor || '#b8b8be'}
+                  borderWidth={firstImage.storyboardBorderWidth ?? 3}
+                  textColor={firstImage.storyboardTextColor || '#f4f4f5'}
+                  onBgChange={(c) => applyProps({ storyboardBgColor: c } as Partial<CanvasElement>)}
+                  onBorderColorChange={(c) => applyProps({ storyboardBorderColor: c } as Partial<CanvasElement>)}
+                  onBorderWidthChange={(w) => applyProps({ storyboardBorderWidth: w } as Partial<CanvasElement>)}
+                  onTextColorChange={(c) => applyProps({ storyboardTextColor: c } as Partial<CanvasElement>)}
+                  onClose={() => setShowColorPicker(false)}
+                />
+              )}
+              {showColorPicker && firstType !== 'shape' && !allStoryboards && (
                 <div
                   className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 p-3 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-[1001] pointer-events-auto"
                   onClick={(e) => e.stopPropagation()}
@@ -502,18 +559,6 @@ export function MultiSelectionBox({
                           />
                         );
                       })}
-                    </div>
-                  ) : firstType === 'shape' ? (
-                    /* Shape solid color swatches */
-                    <div className="flex flex-wrap gap-2 w-[190px]">
-                      {SHAPE_SOLID_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          onClick={() => { applyColor(color); setShowColorPicker(false); }}
-                          className="w-7 h-7 rounded-md border-2 border-transparent hover:border-white/50 hover:scale-110 transition-transform"
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
                     </div>
                   ) : (
                     /* Freeform / ExperienceBlock gradient swatches */

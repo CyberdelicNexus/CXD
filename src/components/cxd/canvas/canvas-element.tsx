@@ -478,19 +478,17 @@ export function CanvasElementRenderer({
 
       // Ignore modifier keys and special keys
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key.length !== 1 && e.key !== "Backspace" && e.key !== "Delete") return;
+      // Two-state delete rule: with the SHAPE selected (not editing),
+      // Delete/Backspace must delete the SHAPE — so they are deliberately NOT
+      // intercepted here (they fall through to the canvas's delete handler).
+      // Only while EDITING does Delete act on text, handled natively by the
+      // textarea. Auto-typing starts only from printable characters.
+      if (e.key.length !== 1) return;
 
       // Start editing with the typed character
       e.preventDefault();
       e.stopPropagation();
-
-      if (e.key === "Backspace" || e.key === "Delete") {
-        // Clear content and start editing
-        onUpdate({ content: "" });
-      } else {
-        // Start with the typed character
-        onUpdate({ content: e.key });
-      }
+      onUpdate({ content: e.key });
       setIsEditing(true);
     };
 
@@ -2611,7 +2609,7 @@ function ShapeTextStylePicker({
 }
 
 // Shape color picker with fill/stroke/text toggle and stroke width control
-function ShapeColorPicker({
+export function ShapeColorPicker({
   fillColor,
   strokeColor,
   strokeWidth,
@@ -2844,7 +2842,7 @@ function ShapeColorPicker({
  * slider; Background and Text offer the note gradients (Text applies them via
  * background-clip in the caption).
  */
-function StoryboardColorPicker({
+export function StoryboardColorPicker({
   bgColor,
   borderColor,
   borderWidth,
@@ -3454,18 +3452,16 @@ function HypercubeTagPicker({
 
 // Emoji picker (simple version)
 const COMMON_EMOJIS = [
-  "💡",
-  "⭐",
-  "❤️",
-  "🎯",
-  "🚀",
-  "✅",
-  "⚡",
-  "🔥",
-  "💎",
-  "🌟",
-  "📌",
-  "🎨",
+  // Marks & energy
+  "💡", "⭐", "❤️", "🎯", "🚀", "✅", "⚡", "🔥", "💎", "🌟", "📌", "🎨",
+  // Emotions & people
+  "😀", "🥹", "😮", "🤯", "😌", "😖", "🤔", "🫶", "👀", "🧠", "🫀", "🙌",
+  // Nature & atmosphere
+  "🌊", "🌙", "☀️", "🌈", "🌱", "🍄", "🌀", "❄️", "🌋", "🪐", "✨", "🌸",
+  // Objects & tools
+  "🔮", "🎧", "🎬", "📷", "🕹️", "🧭", "🗝️", "⏳", "🧪", "📖", "🛠️", "🎁",
+  // Symbols & flow
+  "♾️", "☯️", "🔺", "🟣", "🔗", "❓", "❗", "💭", "🗯️", "🎪", "🏁", "🙏",
 ];
 
 function EmojiPicker({
@@ -3476,8 +3472,10 @@ function EmojiPicker({
   onClose: () => void;
 }) {
   return (
+    // Left-side panel (same convention as the other toolbar submenus); the
+    // expanded emoji set scrolls inside a fixed-height window.
     <div
-      className="absolute left-0 top-full mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-50 grid grid-cols-4 gap-1 w-[148px]"
+      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150 p-2 grid grid-cols-6 gap-1 max-h-[264px] overflow-y-auto"
       onClick={(e) => e.stopPropagation()}
     >
       {COMMON_EMOJIS.map((emoji) => (

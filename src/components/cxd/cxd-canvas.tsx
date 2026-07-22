@@ -532,6 +532,19 @@ export function CXDCanvas() {
     broadcastUpdate({ type: 'edge_add', edge });
   }, [addCanvasEdge, broadcastUpdate, canEdit]);
 
+  // Gradient for a NEW connector: if either endpoint already has connectors,
+  // continue THEIR gradient family so a chain reads as one flow (the user can
+  // still recolor the new edge afterwards via the edge menu). Only falls back
+  // to the rotating default when both endpoints are unconnected. From-node
+  // edges win over to-node edges (extending a flow is the common gesture).
+  const inheritedGradientName = useCallback((fromNodeId: string, toNodeId: string): string | null => {
+    const edges = useCXDStore.getState().getCurrentProject()?.canvasLayout?.edges ?? [];
+    const touching = (nodeId: string) =>
+      edges.find((e) => (e.fromNodeId === nodeId || e.toNodeId === nodeId) && e.style?.gradientName);
+    const donor = touching(fromNodeId) ?? touching(toNodeId);
+    return donor?.style?.gradientName ?? null;
+  }, []);
+
   const syncRemoveEdge = useCallback((edgeId: string) => {
     if (!canEdit) return;
     removeCanvasEdge(edgeId);
@@ -1792,7 +1805,7 @@ export function CXDCanvas() {
             style: {
               thickness: 2,
               lineStyle: "solid",
-              gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+              gradientName: (inheritedGradientName(connectingFrom.elementId, hoverTargetNodeId) ?? GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length]) as GradientName,
               arrowStyle: 'end' as const,
             },
           };
@@ -3046,7 +3059,7 @@ export function CXDCanvas() {
           style: {
             thickness: 2,
             lineStyle: "solid",
-            gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+            gradientName: (inheritedGradientName(connectingFrom.elementId, toElementId) ?? GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length]) as GradientName,
             arrowStyle: 'end' as const,
           },
         };
@@ -3279,7 +3292,7 @@ export function CXDCanvas() {
         toAutoAnchor: true,
         style: {
           thickness: 2,
-          gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+          gradientName: (inheritedGradientName(sorted[i].id, sorted[i + 1].id) ?? GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length]) as GradientName,
           arrowStyle: 'end' as const,
         },
       };
@@ -4498,7 +4511,7 @@ export function CXDCanvas() {
         surface: activeSurface,
         style: {
           thickness: 2,
-          gradientName: GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length] as GradientName,
+          gradientName: (inheritedGradientName(sourceElement.id, newShape.id) ?? GRADIENT_ORDER[gradientCounterRef.current % GRADIENT_ORDER.length]) as GradientName,
           arrowStyle: 'end' as const,
         },
       };
