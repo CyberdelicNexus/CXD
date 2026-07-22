@@ -327,6 +327,42 @@ export function CXDWizard() {
   const handleComplete = (destination: 'canvas' | 'hexagon' | 'plan') => {
     completeWizard(startMode);
     setCanvasViewMode(destination);
+
+    // AI Composer: pick the best-fitting template from the framing summary and
+    // set it up on the (blank) canvas. Fire-and-forget — the canvas mounts
+    // immediately; the template lands (and the viewport auto-frames onto it)
+    // when the suggestion returns. Falls back to the Intention Core starter if
+    // the AI is unavailable, so the choice never yields an empty canvas.
+    if (startMode === 'ai-template') {
+      const state = useCXDStore.getState();
+      const project = state.getCurrentProject();
+      if (!project) return;
+      (async () => {
+        let templateId = 'qs-intention-core';
+        try {
+          const { framingSummaryPrompt } = await import('@/lib/framing-to-canvas');
+          const res = await fetch('/api/ai/suggest-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary: framingSummaryPrompt(project), provider: 'gemini' }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.templateId) templateId = data.templateId;
+          }
+        } catch {
+          // fall through to the default template
+        }
+        const { TEMPLATES, instantiateTemplate, templateBounds } = await import('@/lib/templates');
+        const tpl = TEMPLATES.find((t) => t.id === templateId) ?? TEMPLATES[0];
+        const { elements, edges } = instantiateTemplate(tpl);
+        const live = useCXDStore.getState();
+        live.addCanvasElements(elements);
+        if (edges.length > 0) live.addCanvasEdges(edges);
+        const bbox = templateBounds(elements);
+        if (bbox) live.setPendingCanvasFitBounds(bbox);
+      })();
+    }
   };
 
   const handlePrevious = () => {
@@ -1093,7 +1129,7 @@ export function CXDWizard() {
               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider text-center">
                 How should your canvas start?
               </h3>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {(
                   [
                     {
@@ -1102,6 +1138,12 @@ export function CXDWizard() {
                       label: 'Framing blocks',
                       desc: 'Your framing as a connected board: live cards, personas, and prompts',
                       badge: 'Recommended',
+                    },
+                    {
+                      id: 'ai-template' as FramingStartMode,
+                      icon: Sparkles,
+                      label: 'AI Composer',
+                      desc: 'AI reads your framing and sets up the best-fitting template',
                     },
                     {
                       id: 'blank' as FramingStartMode,

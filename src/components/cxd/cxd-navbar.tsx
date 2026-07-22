@@ -8,6 +8,7 @@ import Image from "next/image";
 import {
   Wand2,
   Share2,
+  LayoutTemplate,
   ChevronLeft,
   Sparkles,
   LayoutDashboard,
@@ -831,6 +832,15 @@ export function CXDNavbar() {
 
             {project && viewMode !== "home" && (
               <>
+                {/* Templates — also reachable from the account menu */}
+                <div
+                  className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
+                  onClick={() => setShowTemplatesModal(true)}
+                  title="Templates"
+                >
+                  <LayoutTemplate className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+                </div>
+
                 <div
                   className="cursor-pointer transition-all h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group"
                   onClick={() => setShowShareModal(true)}

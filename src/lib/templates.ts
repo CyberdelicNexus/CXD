@@ -79,7 +79,13 @@ export function instantiateTemplate(tpl: TemplateDefinition): { elements: Canvas
       remapped.childBoardId = idMap.get((el as any).childBoardId) ?? (el as any).childBoardId;
     }
     if (el.boardId && idMap.has(el.boardId)) {
+      // Multilayer templates: interior elements reference a template board's
+      // childBoardId — follow it to the fresh id.
       remapped.boardId = idMap.get(el.boardId);
+    } else if (el.boardId == null) {
+      // Root template elements: leave boardId to addCanvasElements' auto-fill
+      // so inserting while INSIDE a board lands on that board, not the root.
+      delete remapped.boardId;
     }
     return remapped as CanvasElement;
   });
@@ -87,12 +93,19 @@ export function instantiateTemplate(tpl: TemplateDefinition): { elements: Canvas
     // Drop edges whose endpoints don't resolve — a broken endpoint would render
     // a connector to nowhere.
     .filter((e) => idMap.has(e.fromNodeId) && idMap.has(e.toNodeId))
-    .map((e) => ({
-      ...e,
-      id: crypto.randomUUID(),
-      fromNodeId: idMap.get(e.fromNodeId)!,
-      toNodeId: idMap.get(e.toNodeId)!,
-    }));
+    .map((e) => {
+      const remapped: CanvasEdge = {
+        ...e,
+        id: crypto.randomUUID(),
+        fromNodeId: idMap.get(e.fromNodeId)!,
+        toNodeId: idMap.get(e.toNodeId)!,
+      };
+      // Interior edges follow their board like interior elements do.
+      if (e.boardId && idMap.has(e.boardId)) {
+        remapped.boardId = idMap.get(e.boardId)!;
+      }
+      return remapped;
+    });
   return { elements, edges };
 }
 
@@ -104,6 +117,9 @@ export function templateBounds(elements: CanvasElement[]): { minX: number; minY:
   if (elements.length === 0) return null;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const el of elements) {
+    // Interior elements (pre-seeded board contents) live in another board's
+    // coordinate space — they must not skew the root-canvas fit.
+    if (el.boardId) continue;
     if (el.type === 'line' && 'start' in el && 'end' in el) {
       const l = el as any;
       minX = Math.min(minX, l.start.x, l.end.x);

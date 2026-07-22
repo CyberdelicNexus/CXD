@@ -52,6 +52,17 @@ export const NOTE_ROSE = 'linear-gradient(135deg, #3B0764 0%, #831843 100%)';
 export const NOTE_VIOLET = 'linear-gradient(135deg, #1A1230 0%, #2B1C52 100%)';
 export const NOTE_EMERALD = 'linear-gradient(135deg, #0F2230 0%, #0F3A3A 100%)';
 
+// Transition/action shapes between storyboard frames (user-requested pattern):
+// small gradient-bordered rectangles the user writes the beat/transition into.
+export const transitionStyle = (border: string): ElementStyle => ({
+  bgColor: 'rgba(12,10,22,0.85)',
+  borderColor: border,
+  borderWidth: 2,
+  textColor: 'rgba(255,255,255,0.7)',
+  fontSize: 12,
+  textAlign: 'center',
+});
+
 export type Gradient = 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
 type Anchor = 'top' | 'right' | 'bottom' | 'left';
 
@@ -202,6 +213,82 @@ export function edge(id: string, from: string, to: string, gradient: Gradient, f
   };
 }
 
+// ─── Multilayer interiors ─────────────────────────────────────────────────────
+// Pre-seeded BOARD contents: elements stamped with boardId = the template
+// board's childBoardId (instantiateTemplate remaps both together), so double-
+// clicking a hexagon lands in a ready-to-fill layout instead of a blank board.
+
+/** Stamp a set of elements into a board's coordinate space. */
+function inBoard(boardRef: string, els: CanvasElement[]): CanvasElement[] {
+  return els.map((e) => ({ ...e, boardId: boardRef }));
+}
+
+function inBoardEdge(boardRef: string, e: CanvasEdge): CanvasEdge {
+  return { ...e, boardId: boardRef };
+}
+
+/** Mini storyboard sequence: 3 frames + a writable transition card. */
+function storyboardInterior(prefix: string, boardRef: string): { elements: CanvasElement[]; edges: CanvasEdge[] } {
+  return {
+    elements: inBoard(boardRef, [
+      title(`${prefix}-t`, 60, 40, 'Storyboard', 'linear-gradient(90deg, #8B5CF6, #60A5FA)', 22),
+      storyboard(`${prefix}-s1`, 60, 140),
+      shape(`${prefix}-tr`, 440, 205, 140, 100, 'rectangle', 'Transition', transitionStyle('linear-gradient(90deg, #60A5FA, #A78BFA)')),
+      storyboard(`${prefix}-s2`, 640, 140),
+      storyboard(`${prefix}-s3`, 1020, 140),
+    ]),
+    edges: [
+      inBoardEdge(boardRef, edge(`${prefix}-e1`, `${prefix}-s1`, `${prefix}-tr`, 'ocean')),
+      inBoardEdge(boardRef, edge(`${prefix}-e2`, `${prefix}-tr`, `${prefix}-s2`, 'ocean')),
+      inBoardEdge(boardRef, edge(`${prefix}-e3`, `${prefix}-s2`, `${prefix}-s3`, 'violet')),
+    ],
+  };
+}
+
+/** 2×2 reference wall. */
+function moodboardInterior(prefix: string, boardRef: string): CanvasElement[] {
+  return inBoard(boardRef, [
+    title(`${prefix}-t`, 60, 40, 'Moodboard', 'linear-gradient(90deg, #F472B6, #A78BFA)', 22),
+    storyboard(`${prefix}-s1`, 60, 140),
+    storyboard(`${prefix}-s2`, 404, 140),
+    storyboard(`${prefix}-s3`, 60, 414),
+    storyboard(`${prefix}-s4`, 404, 414),
+  ]);
+}
+
+/** Evidence shelf: documents + a key-insight note. */
+function researchInterior(prefix: string, boardRef: string): CanvasElement[] {
+  return inBoard(boardRef, [
+    title(`${prefix}-t`, 60, 40, 'Research', 'linear-gradient(90deg, #60A5FA, #22D3EE)', 22),
+    caption(`${prefix}-c`, 60, 88, 'Drop sources here — one document per finding.', 480, 12),
+    doc(`${prefix}-d1`, 60, 160, 'Source A'),
+    doc(`${prefix}-d2`, 200, 160, 'Source B'),
+    doc(`${prefix}-d3`, 340, 160, 'Source C'),
+    note(`${prefix}-n`, 520, 160, 'Key Insight', '💡', NOTE_TEAL, 'What do the sources agree on?'),
+  ]);
+}
+
+/** Row of inspiration frames. */
+function inspirationInterior(prefix: string, boardRef: string): CanvasElement[] {
+  return inBoard(boardRef, [
+    title(`${prefix}-t`, 60, 40, 'Inspiration', 'linear-gradient(90deg, #EC4899, #F472B6)', 22),
+    storyboard(`${prefix}-s1`, 60, 140),
+    storyboard(`${prefix}-s2`, 404, 140),
+    storyboard(`${prefix}-s3`, 748, 140),
+  ]);
+}
+
+/** Persona sheet: portrait frame + bio / goals / pains notes. */
+function personaInterior(prefix: string, boardRef: string, name: string): CanvasElement[] {
+  return inBoard(boardRef, [
+    title(`${prefix}-t`, 60, 40, name, 'linear-gradient(90deg, #60A5FA, #34D399)', 22),
+    storyboard(`${prefix}-p`, 60, 140, 260, 250),
+    note(`${prefix}-bio`, 400, 140, 'Bio', '🙂', NOTE_TEAL, 'Who are they? Age, role, context.'),
+    note(`${prefix}-goal`, 700, 140, 'Goals', '🎯', NOTE_EMERALD, 'What are they trying to achieve?'),
+    note(`${prefix}-pain`, 1000, 140, 'Pain Points', '😖', NOTE_ROSE, 'What gets in their way today?'),
+  ]);
+}
+
 /** Zone header trio: gradient title + accent divider + guidance caption,
  *  parented to the container so the whole zone moves as one unit. */
 export function zoneHeader(prefix: string, zx: number, zy: number, zw: number, text: string, gradient: string, accent: string, captionText: string, containerId: string): CanvasElement[] {
@@ -235,6 +322,9 @@ const intentionCore: TemplateDefinition = {
     divider('qic-vdiv', 1290, 160, 1290, 720, 'rgba(139,92,246,0.25)'),
     board('qic-b1', 1360, 160, 'Research', '#8B5CF6'),
     board('qic-b2', 1360, 450, 'Inspiration', '#EC4899'),
+    // Multilayer: pre-seeded interiors behind the hexagons
+    ...researchInterior('qici-r', 'qic-b1-child'),
+    ...inspirationInterior('qici-i', 'qic-b2-child'),
   ] as CanvasElement[],
   edges: [
     edge('qic-e1', 'qic-hub', 'qic-n1', 'sunset'),
@@ -246,6 +336,8 @@ const intentionCore: TemplateDefinition = {
 // ─── 2. Meaning Architecture Portals — ANCHOR + PORTAL CONTAINERS ────────────
 // block → World / Story / Magic portal walls, each a row of pre-colored hexagon
 // boards behind a gradient title.
+
+const qmaStoryboardInt = storyboardInterior('qmai-sb', 'qma-sb1-child');
 
 const meaningArchitecture: TemplateDefinition = {
   id: 'qs-meaning-architecture',
@@ -277,11 +369,17 @@ const meaningArchitecture: TemplateDefinition = {
       'The mechanism for transformation.', 'qma-magic'),
     board('qma-mb1', 586, 1220, 'Mechanics', '#A78BFA', 'qma-magic'),
     board('qma-mb2', 788, 1220, 'Rituals', '#F472B6', 'qma-magic'),
+    // Multilayer: pre-seeded interiors behind key hexagons
+    ...inspirationInterior('qmai-insp', 'qma-wb1-child'),
+    ...qmaStoryboardInt.elements,
+    ...moodboardInterior('qmai-mb', 'qma-sb2-child'),
+    ...researchInterior('qmai-r', 'qma-sb3-child'),
   ] as CanvasElement[],
   edges: [
     edge('qma-e1', 'qma-hub', 'qma-world', 'emerald'),
     edge('qma-e2', 'qma-hub', 'qma-story', 'ocean'),
     edge('qma-e3', 'qma-hub', 'qma-magic', 'rose'),
+    ...qmaStoryboardInt.edges,
   ],
 };
 
@@ -338,6 +436,10 @@ const personaEngine: TemplateDefinition = {
     board('qpe-p1', 1460, 320, 'Persona A', '#F472B6'),
     board('qpe-p2', 1460, 610, 'Persona B', '#8B5CF6'),
     board('qpe-p3', 1460, 900, 'Persona C', '#22D3EE'),
+    // Multilayer: each persona hexagon opens onto a ready persona sheet
+    ...personaInterior('qpei-a', 'qpe-p1-child', 'Persona A'),
+    ...personaInterior('qpei-b', 'qpe-p2-child', 'Persona B'),
+    ...personaInterior('qpei-c', 'qpe-p3-child', 'Persona C'),
   ] as CanvasElement[],
   edges: [
     edge('qpe-e1', 'qpe-s1', 'qpe-s2', 'violet'),
@@ -349,17 +451,6 @@ const personaEngine: TemplateDefinition = {
 // ─── 4. Storyboard Flow — BRANCHING RAIL ─────────────────────────────────────
 // opening shot → hub circle → two parallel storyboard lanes → convergence
 // diamond. Each branch takes its own gradient family (the exemplar look).
-
-// Transition/action shapes between storyboard frames (user-requested pattern):
-// small gradient-bordered rectangles the user writes the beat/transition into.
-export const transitionStyle = (border: string): ElementStyle => ({
-  bgColor: 'rgba(12,10,22,0.85)',
-  borderColor: border,
-  borderWidth: 2,
-  textColor: 'rgba(255,255,255,0.7)',
-  fontSize: 12,
-  textAlign: 'center',
-});
 
 const storyboardFlow: TemplateDefinition = {
   id: 'qs-storyboard-flow',

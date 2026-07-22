@@ -167,7 +167,9 @@ interface CXDState {
   // Actions - Wizard
   setWizardStep: (step: number) => void;
   /** startMode 'populate' (default) seeds Experience blocks; 'blank' skips generation */
-  completeWizard: (startMode?: 'populate' | 'blank') => void;
+  // 'ai-template' behaves like 'blank' here — the wizard component itself
+  // inserts the AI-chosen template after completion (see cxd-wizard.tsx).
+  completeWizard: (startMode?: 'populate' | 'blank' | 'ai-template') => void;
   setFramingType: (framingType: string) => void;
 
   // Actions - Reality Planes (Legacy percentage-based)

@@ -258,9 +258,9 @@ export function getFramingType(id: string | undefined | null): FramingType {
 /**
  * Post-wizard start modes (chosen on the completion screen).
  * A freeform "AI draft" mode was tried and retired — it produced generic,
- * unusable layouts. The plan is a curated "series of polished templates"
- * with AI selecting/filling based on the framing, once more than one
- * template variant exists. For now 'populate' (the satellite-graph
- * generator in framing-to-canvas.ts) is the single strong default.
+ * unusable layouts. Its successor is 'ai-template': the AI COMPOSER picks the
+ * best starting template from the curated design-system catalog
+ * (templates.ts) based on the framing summary — selection over generation.
+ * 'populate' remains the satellite-graph generator in framing-to-canvas.ts.
  */
-export type FramingStartMode = 'populate' | 'blank';
+export type FramingStartMode = 'populate' | 'blank' | 'ai-template';

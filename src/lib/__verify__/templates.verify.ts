@@ -55,6 +55,17 @@ for (const tpl of ALL_VERIFIED) {
     check(ids.has(e.toNodeId), `edge ${e.id}: unknown toNodeId ${e.toNodeId}`);
   }
 
+  // 2b. Interior elements/edges reference a real board's childBoardId
+  const childBoardIds = new Set(
+    tpl.elements.filter((e) => e.type === 'board').map((e) => (e as any).childBoardId as string),
+  );
+  for (const el of tpl.elements) {
+    if (el.boardId) check(childBoardIds.has(el.boardId), `${el.id}: boardId ${el.boardId} is not any template board's childBoardId`);
+  }
+  for (const e of tpl.edges ?? []) {
+    if (e.boardId) check(childBoardIds.has(e.boardId), `edge ${e.id}: boardId ${e.boardId} is not any template board's childBoardId`);
+  }
+
   // 3. containerId references exist + children within container bounds
   const byId = new Map(tpl.elements.map((el) => [el.id, el]));
   for (const el of tpl.elements) {
@@ -73,7 +84,10 @@ for (const tpl of ALL_VERIFIED) {
   //    against their own zone content is NOT allowed either — text is a real box.
   const scopes = new Map<string, CanvasElement[]>();
   for (const el of tpl.elements) {
-    const scope = el.containerId ?? '__root__';
+    // Scope by board AND container: interior (pre-seeded board) elements live in
+    // another board's coordinate space and must never be compared against root
+    // canvas elements.
+    const scope = `${el.boardId ?? '__rootboard__'}|${el.containerId ?? '__root__'}`;
     if (!scopes.has(scope)) scopes.set(scope, []);
     scopes.get(scope)!.push(el);
   }
