@@ -7,8 +7,11 @@
  * board hexes need their full 170x230, docs render ~100x130.
  */
 import { QUICKSTART_TEMPLATES } from '../templates-quickstart';
+import { CLASSIC_TEMPLATES } from '../templates-classics';
 import { TEMPLATES, instantiateTemplate } from '../templates';
 import type { CanvasElement } from '../../types/canvas-elements';
+
+const ALL_VERIFIED = [...QUICKSTART_TEMPLATES, ...CLASSIC_TEMPLATES];
 
 let pass = 0;
 let fail = 0;
@@ -32,7 +35,7 @@ function realBounds(el: CanvasElement): { x: number; y: number; w: number; h: nu
 const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
-for (const tpl of QUICKSTART_TEMPLATES) {
+for (const tpl of ALL_VERIFIED) {
   console.log(`\n▶ ${tpl.name} (${tpl.elements.length} elements, ${tpl.edges?.length ?? 0} edges)`);
 
   // 1. Unique ids (elements + childBoardIds + edges)

@@ -30,13 +30,13 @@ import type { TemplateDefinition } from './templates';
 // Ids are readable strings — instantiateTemplate() remaps everything (elements,
 // containerId, childBoardId, boardId, edge endpoints) to fresh UUIDs at insert.
 
-const NOTE_W = 260;
-const NOTE_H = 320;
-const BOARD_W = 170;
-const BOARD_H = 230;
-const BLOCK_W = 420;
+export const NOTE_W = 260;
+export const NOTE_H = 320;
+export const BOARD_W = 170;
+export const BOARD_H = 230;
+export const BLOCK_W = 420;
 
-const containerStyle: ElementStyle = {
+export const containerStyle: ElementStyle = {
   borderColor: 'rgba(255,255,255,0.15)',
   borderWidth: 1,
   borderStyle: 'dashed',
@@ -45,14 +45,14 @@ const containerStyle: ElementStyle = {
 
 // Note fills — the shared dark-gradient families (PRESET_COLORS palette) plus
 // the two bespoke warm "polarity" gradients proven in framing-to-canvas.
-const WARM_SUN = 'linear-gradient(135deg, #4A2E05 0%, #92400E 60%, #1a0f02 100%)';
-const WARM_FIRE = 'linear-gradient(135deg, #450A0A 0%, #991B1B 60%, #1a0505 100%)';
-const NOTE_TEAL = 'linear-gradient(135deg, #11202D 0%, #1E3E4D 100%)';
-const NOTE_ROSE = 'linear-gradient(135deg, #3B0764 0%, #831843 100%)';
-const NOTE_VIOLET = 'linear-gradient(135deg, #1A1230 0%, #2B1C52 100%)';
-const NOTE_EMERALD = 'linear-gradient(135deg, #0F2230 0%, #0F3A3A 100%)';
+export const WARM_SUN = 'linear-gradient(135deg, #4A2E05 0%, #92400E 60%, #1a0f02 100%)';
+export const WARM_FIRE = 'linear-gradient(135deg, #450A0A 0%, #991B1B 60%, #1a0505 100%)';
+export const NOTE_TEAL = 'linear-gradient(135deg, #11202D 0%, #1E3E4D 100%)';
+export const NOTE_ROSE = 'linear-gradient(135deg, #3B0764 0%, #831843 100%)';
+export const NOTE_VIOLET = 'linear-gradient(135deg, #1A1230 0%, #2B1C52 100%)';
+export const NOTE_EMERALD = 'linear-gradient(135deg, #0F2230 0%, #0F3A3A 100%)';
 
-type Gradient = 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
+export type Gradient = 'violet' | 'ocean' | 'emerald' | 'sunset' | 'rose' | 'glacier';
 type Anchor = 'top' | 'right' | 'bottom' | 'left';
 
 // ─── Factories ────────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ const base = (id: string, x: number, y: number, width: number, height: number, z
 });
 
 /** Gradient page/zone title — TextElement renders style.bgColor gradients as background-clip text. */
-function title(id: string, x: number, y: number, text: string, gradient: string, fontSize = 24, width = 520): TextElement {
+export function title(id: string, x: number, y: number, text: string, gradient: string, fontSize = 24, width = 520): TextElement {
   return {
     ...base(id, x, y, width, 40),
     type: 'text',
@@ -75,7 +75,7 @@ function title(id: string, x: number, y: number, text: string, gradient: string,
   };
 }
 
-function caption(id: string, x: number, y: number, text: string, width = 620, fontSize = 13): TextElement {
+export function caption(id: string, x: number, y: number, text: string, width = 620, fontSize = 13): TextElement {
   return {
     ...base(id, x, y, width, 40),
     type: 'text',
@@ -85,19 +85,22 @@ function caption(id: string, x: number, y: number, text: string, width = 620, fo
   };
 }
 
-/** Thin accent divider (straight line, locked so it never drags apart from its zone). */
-function divider(id: string, x1: number, y1: number, x2: number, y2: number, color: string): LineElement {
+/** Thin accent divider (straight line). NOT locked — locked elements are
+ *  excluded from group drags, which left template dividers behind when the
+ *  user marquee-selected a whole template and moved it. Zone dividers still
+ *  travel with their zone via containerId. */
+export function divider(id: string, x1: number, y1: number, x2: number, y2: number, color: string): LineElement {
   return {
     ...base(id, 0, 0, 0, 0),
     type: 'line',
-    locked: true,
+    locked: false,
     start: { x: x1, y: y1 },
     end: { x: x2, y: y2 },
     style: { kind: 'solid', widthPx: 2, color },
   };
 }
 
-function note(id: string, x: number, y: number, noteTitle: string, emoji: string, bg: string, body = '', containerId?: string): FreeformElement {
+export function note(id: string, x: number, y: number, noteTitle: string, emoji: string, bg: string, body = '', containerId?: string): FreeformElement {
   return {
     ...base(id, x, y, NOTE_W, NOTE_H),
     type: 'freeform',
@@ -111,7 +114,7 @@ function note(id: string, x: number, y: number, noteTitle: string, emoji: string
   };
 }
 
-function doc(id: string, x: number, y: number, docTitle: string, containerId?: string): FreeformElement {
+export function doc(id: string, x: number, y: number, docTitle: string, containerId?: string): FreeformElement {
   return {
     ...base(id, x, y, 100, 130),
     type: 'freeform',
@@ -125,7 +128,7 @@ function doc(id: string, x: number, y: number, docTitle: string, containerId?: s
   };
 }
 
-function board(id: string, x: number, y: number, boardTitle: string, hex: string, containerId?: string): BoardElement {
+export function board(id: string, x: number, y: number, boardTitle: string, hex: string, containerId?: string): BoardElement {
   return {
     ...base(id, x, y, BOARD_W, BOARD_H),
     type: 'board',
@@ -136,7 +139,7 @@ function board(id: string, x: number, y: number, boardTitle: string, hex: string
   };
 }
 
-function container(
+export function container(
   id: string, x: number, y: number, width: number, height: number,
   label: string, tint: ContainerElement['tintColor'], hideLabel = true,
 ): ContainerElement {
@@ -151,7 +154,7 @@ function container(
   };
 }
 
-function block(id: string, key: InspectorSectionId, blockTitle: string, x: number, y: number): ExperienceBlockElement {
+export function block(id: string, key: InspectorSectionId, blockTitle: string, x: number, y: number): ExperienceBlockElement {
   return {
     ...base(id, x, y, BLOCK_W, 360), // height nominal — card measures real content on mount
     type: 'experienceBlock',
@@ -162,7 +165,7 @@ function block(id: string, key: InspectorSectionId, blockTitle: string, x: numbe
 }
 
 /** Storyboard frame seed — empty src shows the upload affordance inside the framed card. */
-function storyboard(id: string, x: number, y: number, width = 320, height = 250): ImageElement {
+export function storyboard(id: string, x: number, y: number, width = 320, height = 250): ImageElement {
   return {
     ...base(id, x, y, width, height),
     type: 'image',
@@ -172,7 +175,7 @@ function storyboard(id: string, x: number, y: number, width = 320, height = 250)
   };
 }
 
-function shape(id: string, x: number, y: number, w: number, h: number, shapeType: ShapeElement['shapeType'], content: string, style: ElementStyle): ShapeElement {
+export function shape(id: string, x: number, y: number, w: number, h: number, shapeType: ShapeElement['shapeType'], content: string, style: ElementStyle): ShapeElement {
   return {
     ...base(id, x, y, w, h),
     type: 'shape',
@@ -182,7 +185,7 @@ function shape(id: string, x: number, y: number, w: number, h: number, shapeType
   };
 }
 
-function edge(id: string, from: string, to: string, gradient: Gradient, fromAnchor: Anchor = 'right', toAnchor: Anchor = 'left'): CanvasEdge {
+export function edge(id: string, from: string, to: string, gradient: Gradient, fromAnchor: Anchor = 'right', toAnchor: Anchor = 'left'): CanvasEdge {
   return {
     id,
     fromNodeId: from,
@@ -201,7 +204,7 @@ function edge(id: string, from: string, to: string, gradient: Gradient, fromAnch
 
 /** Zone header trio: gradient title + accent divider + guidance caption,
  *  parented to the container so the whole zone moves as one unit. */
-function zoneHeader(prefix: string, zx: number, zy: number, zw: number, text: string, gradient: string, accent: string, captionText: string, containerId: string): CanvasElement[] {
+export function zoneHeader(prefix: string, zx: number, zy: number, zw: number, text: string, gradient: string, accent: string, captionText: string, containerId: string): CanvasElement[] {
   return [
     { ...title(`${prefix}-title`, zx + 36, zy + 24, text, gradient, 20, Math.min(360, zw - 72)), containerId },
     { ...divider(`${prefix}-div`, zx + 36, zy + 72, zx + zw - 36, zy + 72, accent), containerId },
@@ -286,7 +289,7 @@ const meaningArchitecture: TemplateDefinition = {
 // numbered step chain across the top, four tinted research zones (each seeded
 // with one note), persona hexagon column past a divider as the output shelf.
 
-const stepStyle: ElementStyle = {
+export const stepStyle: ElementStyle = {
   bgColor: 'rgba(12,10,22,0.9)',
   borderColor: 'rgba(139,92,246,0.35)',
   borderWidth: 1,
@@ -305,10 +308,11 @@ const personaEngine: TemplateDefinition = {
     title('qpe-title', 40, 40, 'User Personas', 'linear-gradient(90deg, #60A5FA, #34D399)'),
     caption('qpe-cap', 40, 88, 'Work left to right: gather real signals in the four zones, then distill them into persona boards. Double-click a persona to build it out.'),
 
-    shape('qpe-s1', 40, 150, 220, 110, 'rectangle', '1 · Gather inputs', stepStyle),
-    shape('qpe-s2', 320, 150, 220, 110, 'rectangle', '2 · Cluster signals', stepStyle),
-    shape('qpe-s3', 600, 150, 220, 110, 'rectangle', '3 · Draft personas', stepStyle),
-    shape('qpe-s4', 880, 150, 220, 110, 'rectangle', '4 · Refine & validate', stepStyle),
+    // Compact step chain (user-tuned: three small steps, first one wired down
+    // into the Research zone).
+    shape('qpe-s1', 40, 150, 160, 70, 'rectangle', '1 · Gather inputs', stepStyle),
+    shape('qpe-s2', 240, 150, 160, 70, 'rectangle', '2 · Cluster signals', stepStyle),
+    shape('qpe-s3', 440, 150, 160, 70, 'rectangle', '3 · Draft personas', stepStyle),
 
     container('qpe-z1', 40, 320, 620, 480, 'Research findings', 'ocean'),
     ...zoneHeader('qpe-z1h', 40, 320, 620, 'Research findings', 'linear-gradient(90deg, #60A5FA, #22D3EE)', 'rgba(96,165,250,0.35)',
@@ -338,15 +342,24 @@ const personaEngine: TemplateDefinition = {
   edges: [
     edge('qpe-e1', 'qpe-s1', 'qpe-s2', 'violet'),
     edge('qpe-e2', 'qpe-s2', 'qpe-s3', 'ocean'),
-    edge('qpe-e3', 'qpe-s3', 'qpe-s4', 'emerald'),
-    edge('qpe-e4', 'qpe-s1', 'qpe-z1', 'ocean', 'bottom', 'top'),
-    edge('qpe-e5', 'qpe-s4', 'qpe-p1', 'rose'),
+    edge('qpe-e3', 'qpe-s1', 'qpe-z1', 'ocean', 'bottom', 'top'),
   ],
 };
 
 // ─── 4. Storyboard Flow — BRANCHING RAIL ─────────────────────────────────────
 // opening shot → hub circle → two parallel storyboard lanes → convergence
 // diamond. Each branch takes its own gradient family (the exemplar look).
+
+// Transition/action shapes between storyboard frames (user-requested pattern):
+// small gradient-bordered rectangles the user writes the beat/transition into.
+export const transitionStyle = (border: string): ElementStyle => ({
+  bgColor: 'rgba(12,10,22,0.85)',
+  borderColor: border,
+  borderWidth: 2,
+  textColor: 'rgba(255,255,255,0.7)',
+  fontSize: 12,
+  textAlign: 'center',
+});
 
 const storyboardFlow: TemplateDefinition = {
   id: 'qs-storyboard-flow',
@@ -356,32 +369,39 @@ const storyboardFlow: TemplateDefinition = {
   category: 'creative',
   elements: [
     title('qsf-title', 40, 40, 'Storyboard Flow', 'linear-gradient(90deg, #F472B6, #60A5FA)'),
-    caption('qsf-cap', 40, 84, 'Upload stills into each frame and caption the beat. The hub splits the narrative; the diamond is where it lands.', 600),
-    storyboard('qsf-src', 40, 320),
-    shape('qsf-hub', 460, 395, 100, 100, 'circle', '', {
+    caption('qsf-cap', 40, 84, 'Upload stills into each frame and caption the beat. Write actions or transitions into the small connector cards.', 600),
+    note('qsf-scenes', 40, 310, 'Scenes', '🎬', NOTE_VIOLET, 'List the beats you need to cover — one line per scene.'),
+    storyboard('qsf-src', 360, 320),
+    shape('qsf-hub', 760, 395, 100, 100, 'circle', '', {
       bgColor: 'linear-gradient(135deg, #24113D 0%, #3D1E66 100%)',
       borderColor: '#8B5CF6',
       borderWidth: 2,
     }),
-    storyboard('qsf-a1', 660, 120),
-    storyboard('qsf-a2', 1080, 120),
-    storyboard('qsf-b1', 660, 520),
-    storyboard('qsf-b2', 1080, 520),
-    shape('qsf-end', 1500, 370, 150, 150, 'diamond', '', {
+    storyboard('qsf-a1', 940, 120),
+    shape('qsf-ta', 1330, 190, 150, 110, 'rectangle', 'Transition', transitionStyle('linear-gradient(90deg, #60A5FA, #A78BFA)')),
+    storyboard('qsf-a2', 1560, 120),
+    storyboard('qsf-b1', 940, 520),
+    shape('qsf-tb', 1330, 590, 150, 110, 'rectangle', 'Transition', transitionStyle('linear-gradient(90deg, #F97316, #F472B6)')),
+    storyboard('qsf-b2', 1560, 520),
+    shape('qsf-end', 1960, 375, 140, 140, 'rectangle', '', {
       bgColor: 'transparent',
       borderColor: 'linear-gradient(90deg, #A78BFA, #34D399)',
       borderWidth: 3,
       fillOpacity: 0,
     }),
+    storyboard('qsf-final', 2180, 320),
   ] as CanvasElement[],
   edges: [
     edge('qsf-e1', 'qsf-src', 'qsf-hub', 'violet'),
     edge('qsf-e2', 'qsf-hub', 'qsf-a1', 'rose'),
-    edge('qsf-e3', 'qsf-a1', 'qsf-a2', 'ocean'),
-    edge('qsf-e4', 'qsf-hub', 'qsf-b1', 'emerald'),
-    edge('qsf-e5', 'qsf-b1', 'qsf-b2', 'sunset'),
-    edge('qsf-e6', 'qsf-a2', 'qsf-end', 'glacier'),
-    edge('qsf-e7', 'qsf-b2', 'qsf-end', 'violet'),
+    edge('qsf-e3', 'qsf-a1', 'qsf-ta', 'ocean'),
+    edge('qsf-e4', 'qsf-ta', 'qsf-a2', 'ocean'),
+    edge('qsf-e5', 'qsf-hub', 'qsf-b1', 'emerald'),
+    edge('qsf-e6', 'qsf-b1', 'qsf-tb', 'sunset'),
+    edge('qsf-e7', 'qsf-tb', 'qsf-b2', 'sunset'),
+    edge('qsf-e8', 'qsf-a2', 'qsf-end', 'glacier'),
+    edge('qsf-e9', 'qsf-b2', 'qsf-end', 'violet'),
+    edge('qsf-e10', 'qsf-end', 'qsf-final', 'rose'),
   ],
 };
 

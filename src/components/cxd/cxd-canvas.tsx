@@ -2597,9 +2597,28 @@ export function CXDCanvas() {
       }
     }
 
+    // A plain CLICK runs this same dragEnd path with zero movement. None of the
+    // drop side-effects below (attach/detach, container grow-to-fit, z reindex)
+    // may fire then — clicking a container must never mutate it. Compare final
+    // positions against the drag-start snapshot to detect real movement.
+    const didMove = (() => {
+      const live = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+      let moved = false;
+      dragOriginalPositionsRef.current.forEach((orig, id) => {
+        const el = live.find((e) => e.id === id);
+        if (el && (Math.abs(el.x - orig.x) > 0.5 || Math.abs(el.y - orig.y) > 0.5)) moved = true;
+      });
+      // Lines move via start/end, not x/y.
+      dragOriginalLineCoordsRef.current.forEach((orig, id) => {
+        const el = live.find((e) => e.id === id) as LineElement | undefined;
+        if (el?.start && (Math.abs(el.start.x - orig.start.x) > 0.5 || Math.abs(el.start.y - orig.start.y) > 0.5)) moved = true;
+      });
+      return moved;
+    })();
+
     // Auto-attach/detach elements to/from containers based on final position
     // Only run when there was no explicit board or container drop target
-    if (!dropTargetBoardId && !dropTargetContainerId) {
+    if (didMove && !dropTargetBoardId && !dropTargetContainerId) {
       const draggedIds =
         selectedElementIds.size > 0
           ? Array.from(selectedElementIds)
@@ -2643,7 +2662,7 @@ export function CXDCanvas() {
     // container's x/y; children keep their absolute coords so they don't move on screen.
     // A move that leaves every child within the current bounds produces no change, so
     // rearranging elements already inside a container never resizes it.
-    {
+    if (didMove) {
       const PAD = 20;
       const liveEls = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
       const containersToFit = new Set<string>();
@@ -2657,7 +2676,12 @@ export function CXDCanvas() {
         const container = liveEls.find((e) => e.id === cid);
         if (!container || container.type !== 'container' || (container as ContainerElement).collapsed) continue;
 
-        const children = liveEls.filter((e) => e.containerId === cid);
+        // Lines/connectors have no meaningful x/y/w/h box (lines live at 0,0 with
+        // start/end world coords) — including them here dragged the fit bounds to
+        // the canvas origin and blew the container up on the next drop pass.
+        const children = liveEls.filter(
+          (e) => e.containerId === cid && e.type !== 'line' && e.type !== 'connector',
+        );
         if (children.length === 0) continue;
 
         const minChildLeft = Math.min(...children.map((c) => c.x));
@@ -2689,7 +2713,7 @@ export function CXDCanvas() {
     // may have changed — recompute the container z-band so nested containers paint above
     // their parents (selectable) while staying below all elements. Skipped when no
     // container moved so ordinary element drags never touch container z-indices.
-    {
+    if (didMove) {
       const zEls = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
       const draggedIdsForZ =
         selectedElementIds.size > 0
