@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, Fragment } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform, useSpring } from 'framer-motion';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 import {
@@ -21,15 +21,17 @@ import {
   Target,
   Brain,
   User,
+  Layers,
+  Flame,
 } from 'lucide-react';
 import Image from 'next/image';
 import { LandingHypercube } from '@/components/landing/landing-hypercube';
 import {
   ElementToolkitShowcase,
   PlanViewsShowcase,
-  TemplatesShowcase,
   SectionHeader,
 } from '@/components/landing-interactive';
+import { FRAMING_TYPES } from '@/types/framing-types';
 
 // ─── Feature Sections Data ──────────────────────────────────────────────────
 
@@ -50,7 +52,6 @@ interface FeatureSection {
   video?: string; // fallback/section-level video
   poster?: string; // screenshot fallback
   details: FeatureDetail[];
-  hideLabel?: boolean; // when true, section header shows only the divider
   hideDescription?: boolean; // when true, description paragraph isn't rendered
 }
 
@@ -115,7 +116,7 @@ const FEATURE_SECTIONS: FeatureSection[] = [
 
 // ─── Sticky Feature Section Component ───────────────────────────────────────
 
-function FeatureShowcase({ section, index }: { section: FeatureSection; index: number }) {
+function FeatureShowcase({ section, index, showHeader = true }: { section: FeatureSection; index: number; showHeader?: boolean }) {
   const isEven = index % 2 === 0;
   const videoRef = useRef<HTMLVideoElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -236,7 +237,7 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
             <div className="w-2.5 h-2.5 rounded-full bg-white/15" />
             <div className="w-2.5 h-2.5 rounded-full bg-white/15" />
           </div>
-          <span className="text-xs text-white/30 ml-3">{section.label} · {activeDetail?.title}</span>
+          <span className="text-xs text-white/40 ml-3">{section.label} · {activeDetail?.title}</span>
         </div>
 
         {/* Video or poster — aspect matches the V2 crops (1920x990 ≈ 1.94:1) */}
@@ -277,7 +278,7 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
               <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                 <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 border border-white/10 backdrop-blur-sm">
                   <Play className="w-4 h-4 text-purple-400" />
-                  <span className="text-sm text-white/60">Demo coming soon</span>
+                  <span className="text-sm text-white/70">Demo coming soon</span>
                 </div>
               </div>
             </div>
@@ -303,7 +304,7 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
           </TextShimmer>
         </h2>
         {!section.hideDescription && (
-          <p className="text-white/50 text-base leading-relaxed">
+          <p className="text-white/60 text-base leading-relaxed">
             {section.description}
           </p>
         )}
@@ -331,7 +332,7 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
               <h3 className={`text-sm font-semibold mb-1 ${isActive ? 'text-white' : 'text-white/80'}`}>
                 {detail.title}
               </h3>
-              <p className="text-xs text-white/40 leading-relaxed">{detail.description}</p>
+              <p className="text-xs text-white/50 leading-relaxed">{detail.description}</p>
               {/* Progress bar (only on active) */}
               <div className="absolute left-0 right-0 bottom-0 h-[2px] bg-white/5 overflow-hidden">
                 <div
@@ -358,30 +359,28 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
   return (
     <section
       ref={sectionRef}
-      className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden"
+      className={`relative ${showHeader ? 'py-16 md:py-24' : 'pt-0 pb-16 md:pb-24'} px-4 sm:px-6 lg:px-8 overflow-x-hidden`}
     >
       {/* Section title + wide gradient divider (80vw, breaks out of max-w container) */}
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: '-120px' }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-        className="flex flex-col items-center justify-center mb-14 md:mb-20"
-      >
-        {!section.hideLabel && (
-          <>
-            {/* Icon badge — matches the section's identity icon */}
-            <div className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 via-purple-500/10 to-transparent border border-violet-500/30 shadow-[0_0_30px_-4px_rgba(139,92,246,0.35)] backdrop-blur-sm mb-5">
-              <SectionIcon className="w-7 h-7 md:w-8 md:h-8 text-violet-200" />
-            </div>
-            {/* Outlined title — same treatment as the hero "Design" / "Experiences" */}
-            <h3 className="text-outline-purple text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-center leading-[0.95] overflow-visible">
-              {section.label}
-            </h3>
-          </>
-        )}
-        <div className={`${section.hideLabel ? '' : 'mt-6'} h-px w-[80vw] max-w-[1400px] bg-gradient-to-r from-transparent via-purple-400/60 to-transparent`} />
-      </motion.div>
+      {showHeader && (
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-120px' }}
+          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          className="flex flex-col items-center justify-center mb-14 md:mb-20"
+        >
+          {/* Icon badge — matches the section's identity icon */}
+          <div className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 via-purple-500/10 to-transparent border border-violet-500/30 shadow-[0_0_30px_-4px_rgba(139,92,246,0.35)] backdrop-blur-sm mb-5">
+            <SectionIcon className="w-7 h-7 md:w-8 md:h-8 text-violet-200" />
+          </div>
+          {/* Outlined title — same treatment as the hero "Design" / "Experiences" */}
+          <h3 className="text-outline-purple text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-center leading-[0.95] overflow-visible">
+            {section.label}
+          </h3>
+          <div className="mt-6 h-px w-[80vw] max-w-[1400px] bg-gradient-to-r from-transparent via-purple-400/60 to-transparent" />
+        </motion.div>
+      )}
 
       <div className="max-w-7xl mx-auto">
         {/* Content reveal wrapper */}
@@ -404,90 +403,193 @@ function FeatureShowcase({ section, index }: { section: FeatureSection; index: n
 // The framing story is told by the structure itself: each stage draws itself in
 // as you scroll, connected by a vertical gradient spine.
 
-const FRAMING_STAGES: { n: string; title: string; body: string; accent: string }[] = [
+// Real phase names from the wizard's own progress rail (WIZARD_PHASES in
+// cxd-wizard.tsx), each carrying the actual section titles it groups
+// (WIZARD_STEPS in cxd-schema.ts) — not paraphrased landing-page copy.
+const FRAMING_STAGES: { title: string; steps: string; body: string; accent: string; icon: typeof Compass }[] = [
   {
-    n: '01', title: 'Intention',
-    body: 'Name the concept, the core message, and the anti-vision — what this must never become.',
+    title: 'Intent', steps: 'Intention Core', icon: Compass,
+    body: 'Name the project, its core concept, and the one message everything radiates from.',
     accent: '#C084FC',
   },
   {
-    n: '02', title: 'People & Meaning',
-    body: 'Who it is for, what they need, and the world, story and magic the experience runs on.',
+    title: 'Objectives', steps: 'Desired Change', icon: Target,
+    body: 'Define the transformation you are designing for — the insights, feelings, states and knowledge participants should gain.',
+    accent: '#FBBF24',
+  },
+  {
+    title: 'Audience', steps: 'Human Context', icon: Users,
+    body: 'Understand who is arriving: their needs, their desires, and the role they will play in the experience.',
     accent: '#60A5FA',
   },
   {
-    n: '03', title: 'Dimensions',
-    body: 'Which layers of reality, which senses, and which kinds of presence you are designing for.',
+    title: 'Meaning', steps: 'World · Story · Magic', icon: Sparkles,
+    body: 'Build the world the experience takes place in, the story that carries people through it, and the mechanism that makes the change happen.',
     accent: '#34D399',
   },
   {
-    n: '04', title: 'Transformation',
-    body: 'The states you trigger in the moment, and the traits people carry home afterwards.',
-    accent: '#F97316',
+    title: 'Structure', steps: 'Reality Planes · Sensory Domains · Presence Types', icon: Layers,
+    body: 'Choose which realities, senses and kinds of presence carry the experience — physical to virtual, visual to haptic, mental to embodied.',
+    accent: '#22D3EE',
   },
   {
-    n: '05', title: 'Your canvas, composed',
-    body: 'Finish and your answers become a living canvas — or let the AI Composer pick the template that fits.',
+    title: 'Transformation', steps: 'State Mapping · Trait Mapping', icon: Flame,
+    body: 'Map the transient states you will design for in the moment, and the lasting traits people carry home afterwards.',
     accent: '#F472B6',
   },
 ];
 
+// One block per stage — each computes its own scroll-linked reveal + glow
+// from the shared spine progress, so the block lights up right as the spine
+// draws into it (rather than firing once when it first scrolls into view).
+function FramingStageBlock({
+  stage,
+  index,
+  total,
+  progress,
+}: {
+  stage: (typeof FRAMING_STAGES)[number];
+  index: number;
+  total: number;
+  progress: import('framer-motion').MotionValue<number>;
+}) {
+  const t = total > 1 ? index / (total - 1) : 0;
+  const revealStart = Math.max(0, t - 0.16);
+  const opacity = useTransform(progress, [revealStart, t], [0, 1]);
+  const x = useTransform(progress, [revealStart, t], [-24, 0]);
+  const glow = useTransform(progress, [revealStart, t, Math.min(1, t + 0.06)], [0, 1, 0.45]);
+  const boxShadow = useTransform(glow, (g) => `0 0 ${Math.round(20 * g)}px ${Math.round(5 * g)}px ${stage.accent}55`);
+  const borderColor = useTransform(glow, (g) => `${stage.accent}${Math.round(40 + g * 55).toString(16).padStart(2, '0')}`);
+  const Icon = stage.icon;
+
+  return (
+    <motion.div style={{ opacity, x }} className="relative flex gap-5 md:gap-7">
+      <motion.div
+        style={{
+          background: `linear-gradient(135deg, ${stage.accent}22, transparent)`,
+          borderColor,
+          boxShadow,
+        }}
+        className="relative z-10 flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-2xl flex-shrink-0 border backdrop-blur-sm"
+      >
+        <Icon className="w-6 h-6 md:w-7 md:h-7" style={{ color: stage.accent }} />
+      </motion.div>
+      <div className="pt-2 min-w-0">
+        <h4 className="text-lg md:text-xl font-bold text-white mb-1">{stage.title}</h4>
+        <p className="text-[11px] uppercase tracking-wide font-medium mb-1.5" style={{ color: stage.accent }}>
+          {stage.steps}
+        </p>
+        <p className="text-white/65 text-sm md:text-base leading-relaxed">{stage.body}</p>
+      </div>
+    </motion.div>
+  );
+}
+
+function FramingTypePicker() {
+  const [activeId, setActiveId] = useState<string>(FRAMING_TYPES[0].id);
+
+  return (
+    <div className="mb-16 md:mb-20">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: '-60px' }}
+        transition={{ duration: 0.5 }}
+        className="text-center mb-7"
+      >
+        <h4 className="text-lg md:text-xl font-semibold text-violet-200 mb-3">Choose what you&apos;re framing</h4>
+        <p className="text-white/70 text-sm md:text-base mb-2 max-w-2xl mx-auto">
+          Structure the thinking before you touch the canvas. A guided framework that turns intent into a
+          design you can actually build.
+        </p>
+        <p className="text-white/65 text-sm max-w-xl mx-auto">
+          The methodology adapts its language to your practice — same backbone, different lens.
+        </p>
+      </motion.div>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        {FRAMING_TYPES.map((t, i) => {
+          const isActive = t.id === activeId;
+          return (
+            <motion.button
+              key={t.id}
+              type="button"
+              onMouseEnter={() => setActiveId(t.id)}
+              onFocus={() => setActiveId(t.id)}
+              onClick={() => setActiveId(t.id)}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }}
+              transition={{ duration: 0.5, delay: i * 0.08, ease: [0.22, 1, 0.36, 1] }}
+              className={`group p-4 rounded-xl border text-left transition-all duration-200 ${
+                isActive
+                  ? 'border-violet-400/50 bg-violet-500/10 shadow-[0_0_24px_rgba(168,85,247,0.08)]'
+                  : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <span className="text-2xl leading-none mt-0.5">{t.emoji}</span>
+                <div className="min-w-0">
+                  <div className={`font-semibold transition-colors ${isActive ? 'text-violet-200' : 'text-white'}`}>
+                    {t.name}
+                  </div>
+                  <p className="text-sm text-white/60 mt-0.5">{t.tagline}</p>
+                  <p className="text-[11px] text-white/40 mt-1.5">{t.audience}</p>
+                </div>
+              </div>
+            </motion.button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function FramingSteps() {
+  const timelineRef = useRef<HTMLDivElement>(null);
+  // Spine growth is tied directly to scroll position through the timeline,
+  // not a one-shot reveal — it draws in as you scroll and (slightly) redraws
+  // back out if you scroll up. Smoothed with a spring so it scrubs instead
+  // of jittering with raw scroll deltas.
+  const { scrollYProgress } = useScroll({ target: timelineRef, offset: ['start 0.8', 'end 0.55'] });
+  const progress = useSpring(scrollYProgress, { stiffness: 120, damping: 22, mass: 0.4 });
+
   return (
     <section className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
       <SectionHeader icon={Brain} label="Framing" />
 
       <div className="max-w-3xl mx-auto">
-        <motion.p
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-80px' }}
-          transition={{ duration: 0.6 }}
-          className="text-center text-white/50 text-sm md:text-base mb-14 max-w-2xl mx-auto"
-        >
-          Structure the thinking before you touch the canvas. A guided framework that turns intent into a
-          design you can actually build.
-        </motion.p>
+        <FramingTypePicker />
 
-        <div className="relative">
-          {/* Vertical spine that draws itself as the section enters view */}
+        <div ref={timelineRef} className="relative">
+          {/* Vertical spine — scale tracks scroll progress through this block */}
           <motion.div
-            initial={{ scaleY: 0 }}
-            whileInView={{ scaleY: 1 }}
-            viewport={{ once: true, margin: '-100px' }}
-            transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
-            style={{ originY: 0 }}
+            style={{ scaleY: progress, originY: 0 }}
             className="absolute left-[27px] md:left-[31px] top-2 bottom-2 w-px bg-gradient-to-b from-violet-400/70 via-cyan-400/40 to-transparent"
           />
 
           <div className="space-y-8 md:space-y-10">
             {FRAMING_STAGES.map((stage, i) => (
-              <motion.div
-                key={stage.n}
-                initial={{ opacity: 0, x: -24 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true, margin: '-80px' }}
-                transition={{ duration: 0.6, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
-                className="relative flex gap-5 md:gap-7"
-              >
-                <div
-                  className="relative z-10 flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-2xl flex-shrink-0 border backdrop-blur-sm font-bold text-sm md:text-base"
-                  style={{
-                    background: `linear-gradient(135deg, ${stage.accent}22, transparent)`,
-                    borderColor: `${stage.accent}55`,
-                    color: stage.accent,
-                  }}
-                >
-                  {stage.n}
-                </div>
-                <div className="pt-2 min-w-0">
-                  <h4 className="text-lg md:text-xl font-bold text-white mb-1.5">{stage.title}</h4>
-                  <p className="text-white/55 text-sm md:text-base leading-relaxed">{stage.body}</p>
-                </div>
-              </motion.div>
+              <FramingStageBlock
+                key={stage.title}
+                stage={stage}
+                index={i}
+                total={FRAMING_STAGES.length}
+                progress={progress}
+              />
             ))}
           </div>
         </div>
+
+        <motion.p
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-60px' }}
+          transition={{ duration: 0.6 }}
+          className="text-center text-white/50 text-sm mt-10 max-w-xl mx-auto"
+        >
+          Finish and your answers become a living canvas — or let the AI Composer pick the template that fits.
+        </motion.p>
       </div>
     </section>
   );
@@ -497,7 +599,7 @@ function FramingSteps() {
 
 function HypercubeConcept() {
   return (
-    <section className="relative py-24 md:py-32 px-4 sm:px-6 lg:px-8">
+    <div className="relative pb-16 md:pb-20">
       <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-10 md:gap-16 items-center">
         {/* Left: Interactive hypercube visualizer */}
         <div className="order-2 md:order-1">
@@ -528,7 +630,7 @@ function HypercubeConcept() {
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -797,7 +899,7 @@ export function LandingPage() {
             <span className="text-outline-purple">Experiences</span>
           </h1>
 
-          <p className="text-lg md:text-xl text-white/50 max-w-2xl mx-auto mb-10 leading-relaxed">
+          <p className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto mb-10 leading-relaxed">
             The spatial canvas for designing immersive experiences that shape states and cultivate lasting traits.
           </p>
 
@@ -831,22 +933,42 @@ export function LandingPage() {
       </section>
 
       {/* ─── Feature Showcase Sections ───
-          Framing now leads as a scroll-animated explainer (no video); the
-          interactive element toolkit follows the Infinite Canvas explainer,
-          templates sit before the Hypercube, and the Plan views cards follow
-          the Plan section. Canvas / Hypercube / Collaboration keep their
-          video explainers. */}
+          Framing leads as a scroll-animated explainer (no video). Infinite
+          Canvas, Hypercube Map, and Plan View each present their header once,
+          then their interactive options, then the video showcase below.
+          Collaboration keeps its plain video explainer. */}
       <div id="features">
         <FramingSteps />
-        {FEATURE_SECTIONS.map((section, index) => (
-          <Fragment key={section.id}>
-            {section.id === 'hypercube' && <TemplatesShowcase />}
-            {section.id === 'hypercube' && <HypercubeConcept />}
-            <FeatureShowcase section={section} index={index} />
-            {section.id === 'canvas' && <ElementToolkitShowcase />}
-            {section.id === 'plan' && <PlanViewsShowcase />}
-          </Fragment>
-        ))}
+        {FEATURE_SECTIONS.map((section, index) => {
+          if (section.id === 'canvas') {
+            return (
+              <section key={section.id} className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
+                <SectionHeader icon={section.icon} label={section.label} />
+                <ElementToolkitShowcase />
+                <FeatureShowcase section={section} index={index} showHeader={false} />
+              </section>
+            );
+          }
+          if (section.id === 'hypercube') {
+            return (
+              <section key={section.id} className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
+                <SectionHeader icon={section.icon} label={section.label} />
+                <HypercubeConcept />
+                <FeatureShowcase section={section} index={index} showHeader={false} />
+              </section>
+            );
+          }
+          if (section.id === 'plan') {
+            return (
+              <section key={section.id} className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
+                <SectionHeader icon={section.icon} label={section.label} />
+                <PlanViewsShowcase />
+                <FeatureShowcase section={section} index={index} showHeader={false} />
+              </section>
+            );
+          }
+          return <FeatureShowcase key={section.id} section={section} index={index} />;
+        })}
       </div>
 
       {/* ─── Pricing Section ─── */}
@@ -864,24 +986,24 @@ export function LandingPage() {
             <h2 className="text-4xl md:text-5xl font-bold mb-4">
               Simple<span className="text-gradient-purple"> pricing</span>
             </h2>
-            <p className="text-white/50 text-lg">Start free. Upgrade when you need more.</p>
+            <p className="text-white/60 text-lg">Start free. Upgrade when you need more.</p>
           </motion.div>
 
           <div className="grid md:grid-cols-3 gap-6">
             {/* Free */}
             <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4 }} className="pricing-card">
               <div className="mb-6">
-                <h3 className="text-lg text-white/60 mb-2">Free</h3>
+                <h3 className="text-lg text-white/70 mb-2">Free</h3>
                 <div className="flex items-baseline gap-1">
                   <span className="text-4xl font-bold">$0</span>
-                  <span className="text-white/40">/forever</span>
+                  <span className="text-white/50">/forever</span>
                 </div>
               </div>
-              <p className="text-white/50 text-sm mb-6">Perfect for exploring and designing your first experience.</p>
+              <p className="text-white/60 text-sm mb-6">Perfect for exploring and designing your first experience.</p>
               <ul className="space-y-3 mb-8">
                 {['1 Canvas', 'Infinite workspace', 'Core design tools', 'Experience flow'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
-                    <Check className="w-4 h-4 text-white/40" />
+                    <Check className="w-4 h-4 text-white/50" />
                     <span className="text-white/70">{f}</span>
                   </li>
                 ))}
@@ -898,10 +1020,10 @@ export function LandingPage() {
                 <h3 className="text-lg text-violet-400 mb-2">Pro</h3>
                 <div className="flex items-baseline gap-1">
                   <span className="text-4xl font-bold">$20</span>
-                  <span className="text-white/40">/month</span>
+                  <span className="text-white/50">/month</span>
                 </div>
               </div>
-              <p className="text-white/50 text-sm mb-4">Full power for professional experience designers.</p>
+              <p className="text-white/60 text-sm mb-4">Full power for professional experience designers.</p>
               <a
                 href="https://www.cyberdelic.nexus/signup"
                 target="_blank"
@@ -933,10 +1055,10 @@ export function LandingPage() {
                 </div>
                 <div className="flex items-baseline gap-1">
                   <span className="text-4xl font-bold">$333</span>
-                  <span className="text-white/40">/once</span>
+                  <span className="text-white/50">/once</span>
                 </div>
               </div>
-              <p className="text-white/50 text-sm mb-6">Pay once, own forever. All future versions included.</p>
+              <p className="text-white/60 text-sm mb-6">Pay once, own forever. All future versions included.</p>
               <ul className="space-y-3 mb-8">
                 {['Everything in Pro', 'Lifetime access', 'All future updates', 'All future features', 'Founding member', 'Direct founder access'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
@@ -986,7 +1108,7 @@ export function LandingPage() {
               </TextShimmer>
             </h2>
 
-            <p className="text-white/50 text-lg mb-10 max-w-xl mx-auto">
+            <p className="text-white/60 text-lg mb-10 max-w-xl mx-auto">
               Join experience designers creating meaningful, lasting change through intentional design.
             </p>
 
@@ -998,7 +1120,7 @@ export function LandingPage() {
               </button>
             </a>
 
-            <p className="text-white/30 text-sm mt-6">Free tier requires no credit card.</p>
+            <p className="text-white/40 text-sm mt-6">Free tier requires no credit card.</p>
           </motion.div>
         </div>
       </section>
@@ -1008,14 +1130,14 @@ export function LandingPage() {
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Image src="/images/CL Logo NL.png" alt="Cyberdelic Labs" width={32} height={32} className="rounded-lg opacity-70" />
-            <span className="text-white/50 text-sm">Cyberdelic Labs</span>
+            <span className="text-white/60 text-sm">Cyberdelic Labs</span>
           </div>
           <div className="flex items-center gap-x-5 gap-y-2 flex-wrap justify-center text-xs">
             <a
               href="https://www.cyberdelic.nexus/t-c"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-white/40 hover:text-white/80 transition-colors"
+              className="text-white/50 hover:text-white/80 transition-colors"
             >
               Terms &amp; Conditions
             </a>
@@ -1024,12 +1146,12 @@ export function LandingPage() {
               href="https://www.cyberdelic.nexus/privacy-notice"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-white/40 hover:text-white/80 transition-colors"
+              className="text-white/50 hover:text-white/80 transition-colors"
             >
               Privacy Notice
             </a>
           </div>
-          <p className="text-white/30 text-sm">© 2025 Cyberdelic Labs</p>
+          <p className="text-white/40 text-sm">© 2025 Cyberdelic Labs</p>
         </div>
       </footer>
     </div>

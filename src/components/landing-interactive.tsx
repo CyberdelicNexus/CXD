@@ -39,6 +39,20 @@ export function SectionHeader({
   );
 }
 
+// Lightweight subtitle — used when a section already has its own big header
+// (e.g. rendered above it by the caller) and only needs a small label for the
+// block beneath it, not a full icon+outline+divider treatment.
+export function SectionSubtitle({ icon: Icon, label }: { icon: IconType; label: string }) {
+  return (
+    <div className="flex items-center justify-center gap-2 mb-2">
+      <Icon className="w-4 h-4 text-violet-300/80" />
+      <h4 className="text-xs md:text-sm font-semibold tracking-[0.2em] uppercase text-violet-300/80">
+        {label}
+      </h4>
+    </div>
+  );
+}
+
 // ─── 1. Interactive element toolkit ─────────────────────────────────────────
 // A live replica of the canvas toolbar: hover (or tap) a tool and the panel
 // beside it explains what that element brings to the infinite canvas.
@@ -110,9 +124,7 @@ export function ElementToolkitShowcase() {
   const active = TOOLS.find((t) => t.id === activeId) ?? TOOLS[0];
 
   return (
-    <section className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
-      <SectionHeader icon={Boxes} label="Everything you can place" />
-
+    <section className="relative pt-0 pb-16 md:pb-20 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
       <motion.div
         initial={{ opacity: 0, y: 40 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -120,7 +132,8 @@ export function ElementToolkitShowcase() {
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         className="max-w-5xl mx-auto"
       >
-        <p className="text-center text-white/50 text-sm md:text-base mb-10 max-w-2xl mx-auto">
+        <SectionSubtitle icon={Boxes} label="Everything you can place" />
+        <p className="text-center text-white/60 text-sm md:text-base mb-10 max-w-2xl mx-auto">
           This is the real toolbar from the canvas. Hover any tool to see what it brings.
         </p>
 
@@ -180,7 +193,7 @@ export function ElementToolkitShowcase() {
               <p className="text-sm font-medium mb-3" style={{ color: active.accent }}>
                 {active.blurb}
               </p>
-              <p className="text-white/60 text-sm md:text-base leading-relaxed">{active.detail}</p>
+              <p className="text-white/70 text-sm md:text-base leading-relaxed">{active.detail}</p>
             </div>
           </div>
         </motion.div>
@@ -201,8 +214,8 @@ const PLAN_VIEWS = [
 
 export function PlanViewsShowcase() {
   return (
-    <section className="relative py-16 md:py-24 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
-      <SectionHeader icon={Kanban} label="Five ways to plan" />
+    <section className="relative pt-0 pb-16 md:pb-20 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
+      <SectionSubtitle icon={Kanban} label="Five ways to plan" />
 
       <div className="max-w-6xl mx-auto">
         <motion.p
@@ -210,7 +223,7 @@ export function PlanViewsShowcase() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: '-80px' }}
           transition={{ duration: 0.6 }}
-          className="text-center text-white/50 text-sm md:text-base mb-12 max-w-2xl mx-auto"
+          className="text-center text-white/60 text-sm md:text-base mb-12 max-w-2xl mx-auto"
         >
           The same tasks, five perspectives. Every view writes back to the element it came from on the canvas.
         </motion.p>
@@ -241,7 +254,7 @@ export function PlanViewsShowcase() {
                   <Icon className="w-5 h-5" style={{ color: view.accent }} />
                 </div>
                 <h4 className="text-lg font-bold text-white mb-2">{view.name}</h4>
-                <p className="text-white/55 text-sm leading-relaxed">{view.desc}</p>
+                <p className="text-white/65 text-sm leading-relaxed">{view.desc}</p>
               </motion.div>
             );
           })}
@@ -259,7 +272,7 @@ export function PlanViewsShowcase() {
               <CalendarCheck className="w-5 h-5 text-violet-200" />
             </div>
             <h4 className="text-lg font-bold text-white mb-2">Sync to your calendar</h4>
-            <p className="text-white/60 text-sm leading-relaxed">
+            <p className="text-white/70 text-sm leading-relaxed">
               Subscribe to your plan from Google Calendar, Apple Calendar or Outlook. Deadlines land in the calendar you already live in, and stay up to date automatically.
             </p>
           </motion.div>
@@ -290,7 +303,7 @@ export function TemplatesShowcase() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: '-80px' }}
           transition={{ duration: 0.6 }}
-          className="text-center text-white/50 text-sm md:text-base mb-12 max-w-2xl mx-auto"
+          className="text-center text-white/60 text-sm md:text-base mb-12 max-w-2xl mx-auto"
         >
           22 templates, one for every part of the framework. Not empty boxes — tinted zones with guidance,
           connected flows, and cards already styled for you to edit.
@@ -322,7 +335,7 @@ export function TemplatesShowcase() {
                   <Icon className="w-5 h-5" style={{ color: tpl.accent }} />
                 </div>
                 <h4 className="text-lg font-bold text-white mb-2">{tpl.name}</h4>
-                <p className="text-white/55 text-sm leading-relaxed">{tpl.desc}</p>
+                <p className="text-white/65 text-sm leading-relaxed">{tpl.desc}</p>
               </motion.div>
             );
           })}
@@ -340,7 +353,7 @@ export function TemplatesShowcase() {
               <Boxes className="w-5 h-5 text-cyan-200" />
             </div>
             <h4 className="text-lg font-bold text-white mb-2">Templates inside templates</h4>
-            <p className="text-white/60 text-sm leading-relaxed">
+            <p className="text-white/70 text-sm leading-relaxed">
               Portals inside a template open onto layouts of their own. Double-click Storyboard for a shot
               sequence, Moodboard for a reference wall, or a Persona for a full sheet — already built.
             </p>

@@ -693,7 +693,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                       <DialogHeader>
                         <DialogTitle>Create New Canvas</DialogTitle>
                         <DialogDescription className="text-white/60">
-                          Give your new CXD project a name
+                          Give your new project a name
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
@@ -752,7 +752,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   </div>
                   <h3 className="text-lg font-medium mb-2 text-white">No projects yet</h3>
                   <p className="text-white/50 text-center mb-4 max-w-md">
-                    Create your first CXD map to start designing transformational experiences.
+                    Create your first map to start designing transformational experiences.
                   </p>
                   <Button onClick={() => setIsDialogOpen(true)} className="btn-primary-glow">
                     <Plus className="w-4 h-4 mr-2" />
