@@ -10,6 +10,8 @@ import {
   STAGE_PRESENCE_TYPES,
   STATE_QUADRANTS,
   TRAIT_QUADRANTS,
+  DEFAULT_ENGAGEMENT_DISTRIBUTION,
+  DEFAULT_STAGE_PRESENCE_TYPES,
 } from '@/types/cxd-schema';
 import type { EngagementLevelCode, StagePresenceTypeCode } from '@/types/cxd-schema';
 import type { HypercubeFaceTag } from '@/types/canvas-elements';
@@ -1237,7 +1239,7 @@ function buildEngagementOption(project: CXDProject): echarts.EChartsCoreOption {
 
   if (stages.length > 0) {
     for (const stage of stages) {
-      const dist = stage.engagementDistribution;
+      const dist = stage.engagementDistribution || DEFAULT_ENGAGEMENT_DISTRIBUTION;
       avgEngagement.observer += dist.observer;
       avgEngagement.engager += dist.engager;
       avgEngagement.coCreator += dist.coCreator;
@@ -1318,7 +1320,7 @@ function buildStageEngagementStackedOption(project: CXDProject): echarts.ECharts
     name: lvl.label,
     type: 'bar' as const,
     stack: 'engagement',
-    data: stages.map((s) => s.engagementDistribution[lvl.code]),
+    data: stages.map((s) => (s.engagementDistribution || DEFAULT_ENGAGEMENT_DISTRIBUTION)[lvl.code]),
     itemStyle: { color: colors[lvl.code], borderRadius: 0 },
     barMaxWidth: 30,
   }));
@@ -1382,7 +1384,7 @@ function buildStagePresenceRadarOption(project: CXDProject): echarts.EChartsCore
   ];
 
   const data = stages.map((stage, i) => ({
-    value: STAGE_PRESENCE_TYPES.map((pt) => stage.presenceTypes[pt.code as StagePresenceTypeCode] ?? 0),
+    value: STAGE_PRESENCE_TYPES.map((pt) => (stage.presenceTypes || DEFAULT_STAGE_PRESENCE_TYPES)[pt.code as StagePresenceTypeCode] ?? 0),
     name: stage.name,
     lineStyle: {
       color: stageColors[i % stageColors.length],

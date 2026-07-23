@@ -13,6 +13,7 @@
 
 import * as Y from 'yjs';
 import type { CXDProject, ExperienceFlowStageV2 } from '@/types/cxd-schema';
+import { DEFAULT_ENGAGEMENT_DISTRIBUTION, DEFAULT_STAGE_PRESENCE_TYPES } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 import {
   YDOC_KEYS,
@@ -194,9 +195,19 @@ export function initializeYDoc(doc: Y.Doc, project: CXDProject): void {
           yStage.set(field, createYText(typeof value === 'string' ? value : ''));
         }
 
-        // Nested fields → Y.Map
+        // Nested fields → Y.Map. engagementDistribution/presenceTypes are
+        // required by ExperienceFlowStageV2, but stages built through older
+        // or partial code paths can still arrive without them — fall back to
+        // the schema defaults so the key is always written. Leaving it unset
+        // here means downstream readers (share page, exports, drawer) get
+        // `undefined` back and crash on the first `.observer`-style access
+        // instead of an empty/default distribution (2026-07-23 share-page bug).
+        const nestedDefaults: Partial<Record<(typeof STAGE_NESTED_FIELDS)[number], object>> = {
+          engagementDistribution: DEFAULT_ENGAGEMENT_DISTRIBUTION,
+          presenceTypes: DEFAULT_STAGE_PRESENCE_TYPES,
+        };
         for (const field of STAGE_NESTED_FIELDS) {
-          const value = (stage as unknown as Record<string, unknown>)[field];
+          const value = (stage as unknown as Record<string, unknown>)[field] ?? nestedDefaults[field];
           if (value && typeof value === 'object') {
             const yNested = new Y.Map<unknown>();
             for (const [nk, nv] of Object.entries(value)) {
