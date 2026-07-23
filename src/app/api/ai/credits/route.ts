@@ -26,7 +26,7 @@ function defaultCredits(userId: string, model: string = "gemini-2.0-flash") {
   periodEnd.setMonth(periodEnd.getMonth() + 1);
   return {
     userId,
-    monthlyAllowance: 50, // Free tier default
+    monthlyAllowance: 25, // Free tier monthly drip (see PLANS.FREE)
     usedThisPeriod: 0,
     addonCredits: 0,
     periodStart: now.toISOString(),
@@ -103,16 +103,27 @@ export async function GET() {
       credits = newCredits;
     }
 
-    // Check if period has expired and reset
+    // Check if period has expired and reset. The reset also RE-SYNCS the
+    // monthly allowance from the user's current plan — this is how existing
+    // rows pick up plan-config changes (e.g. the free tier's 25/month drip)
+    // and how upgrades/downgrades take effect at rollover without a backfill.
     if (credits && new Date(credits.period_end) < new Date()) {
       const now = new Date();
       const periodEnd = new Date(now);
       periodEnd.setMonth(periodEnd.getMonth() + 1);
 
+      const { data: subscription } = await supabase
+        .from('subscriptions')
+        .select('plan_id')
+        .eq('user_id', user.id)
+        .single();
+      const currentAllowance = getPlan(subscription?.plan_id || 'free').limits.monthlyAICredits;
+
       const { data: updated, error: updateError } = await supabase
         .from("ai_credits")
         .update({
           used_this_period: 0,
+          monthly_allowance: currentAllowance,
           period_start: now.toISOString(),
           period_end: periodEnd.toISOString(),
         })

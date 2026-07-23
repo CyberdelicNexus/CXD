@@ -25,6 +25,45 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { PlanId } from "@/hooks/use-subscription";
+import { useCXDStore } from "@/store/cxd-store";
+import { countQuotaObjects } from "@/lib/quota";
+
+/**
+ * Free-tier object meter. Reads only the store: objectQuota is armed by
+ * QuotaGovernor exclusively for free users on canvases they own, so this
+ * renders nothing for paid plans, collaborators, or outside the canvas.
+ */
+function QuotaMeterRow() {
+  const quota = useCXDStore((s) => s.objectQuota);
+  const used = useCXDStore((s) => {
+    if (s.objectQuota == null) return 0;
+    const p = s.projects.find((proj) => proj.id === s.currentProjectId);
+    return countQuotaObjects(p?.canvasLayout?.elements);
+  });
+
+  if (quota == null) return null;
+
+  const pct = Math.min(100, Math.round((used / quota) * 100));
+  const tone = used >= quota ? 'text-red-400' : pct >= 80 ? 'text-amber-400' : 'text-white/60';
+  const barTone = used >= quota ? 'bg-red-400' : pct >= 80 ? 'bg-amber-400' : 'bg-violet-400';
+
+  return (
+    <div className="px-4 py-2.5">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs text-white/60">Canvas objects</span>
+        <span className={cn('text-xs font-medium tabular-nums', tone)}>
+          {used} / {quota}
+        </span>
+      </div>
+      <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+        <div
+          className={cn('h-full rounded-full transition-all duration-300', barTone)}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 interface AICreditsInfo {
   remaining: number;
@@ -249,6 +288,8 @@ export function AccountMenu({
             Version History
           </DropdownMenuItem>
         )}
+
+        <QuotaMeterRow />
 
         {isFree && (
           <DropdownMenuItem

@@ -67,6 +67,7 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
   const [isCancellingSub, setIsCancellingSub] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
   const [showCalendarSync, setShowCalendarSync] = useState(false);
+  const [showCalSyncUpgrade, setShowCalSyncUpgrade] = useState(false);
 
   const {
     subscription,
@@ -537,10 +538,10 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
                   <Button
                     variant="ghost"
                     className="w-full justify-start bg-white/5 hover:bg-white/10 text-white/80"
-                    onClick={() => setShowCalendarSync(true)}
+                    onClick={() => (isFree ? setShowCalSyncUpgrade(true) : setShowCalendarSync(true))}
                   >
                     <CalendarPlus className="w-4 h-4 mr-2" />
-                    Sync to Calendar
+                    {isFree ? 'Sync to Calendar (Pro)' : 'Sync to Calendar'}
                   </Button>
                 </div>
 
@@ -590,6 +591,13 @@ export function ProfileContent({ userId, userEmail }: ProfileContentProps) {
       <UpgradeModal
         isOpen={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
+      />
+
+      {/* Calendar sync is Pro — endowment-free gate at the integration point */}
+      <UpgradeModal
+        isOpen={showCalSyncUpgrade}
+        onClose={() => setShowCalSyncUpgrade(false)}
+        feature="calendarSync"
       />
 
       {/* Credit Top-Up Modal */}

@@ -4639,6 +4639,15 @@ export function CXDCanvas() {
             contentType = "image/webp";
           }
 
+          // Free-tier upload size cap (checked on the final bytes — images
+          // are recompressed above, so an 8MB JPEG that shrinks to 1MB passes)
+          const uploadMaxBytes = useCXDStore.getState().uploadMaxBytes;
+          if (uploadMaxBytes != null && blob.size > uploadMaxBytes) {
+            syncRemoveElement(newElement.id);
+            alert(`This file is too large for the free plan (${(uploadMaxBytes / (1024 * 1024)).toFixed(0)} MB per file). Upgrade for larger uploads.`);
+            continue;
+          }
+
           // Upload to Supabase Storage
           const supabase = (await import('../../../supabase/client')).createClient();
           const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;

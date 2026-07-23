@@ -14,14 +14,17 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Plus } from 'lucide-react';
+import { Plus, Crown } from 'lucide-react';
 import {
   TEMPLATES,
   TEMPLATE_CATEGORY_LABELS,
   instantiateTemplate,
+  isTemplateFree,
 } from '@/lib/templates';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
 import { useCXDStore } from '@/store/cxd-store';
+import { useSubscription } from '@/hooks/use-subscription';
+import { UpgradeModal } from '@/components/upgrade-modal';
 
 type FilterTab = 'all' | TemplateCategory;
 
@@ -78,6 +81,11 @@ export default function TemplatesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | null>(null);
   const [projectName, setProjectName] = useState('');
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const { templateAccess } = useSubscription();
+
+  const isLocked = (templateId: string) =>
+    templateAccess !== 'full' && !isTemplateFree(templateId);
 
   const filtered = useMemo(() => {
     if (activeFilter === 'all') return TEMPLATES;
@@ -97,6 +105,10 @@ export default function TemplatesPage() {
 
   const handleCreate = async () => {
     if (!selectedTemplate || !projectName.trim()) return;
+    if (isLocked(selectedTemplate.id)) {
+      setShowUpgrade(true);
+      return;
+    }
 
     const { elements: freshElements, edges: freshEdges } = instantiateTemplate(selectedTemplate);
 
@@ -159,36 +171,57 @@ export default function TemplatesPage() {
               {group.label}
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {group.templates.map((tpl) => (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedTemplate(tpl);
-                    setProjectName(tpl.name);
-                    setDialogOpen(true);
-                  }}
-                  className="flex flex-col rounded-xl border border-white/10 bg-black/30 p-5 text-left transition-all hover:border-purple-500/40 hover:bg-purple-500/5 group"
-                >
-                  <TemplatePreview template={tpl} />
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl shrink-0">{tpl.emoji}</span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white group-hover:text-purple-200 transition-colors">
-                        {tpl.name}
-                      </p>
-                      <p className="text-xs text-white/50 mt-1 line-clamp-2">
-                        {tpl.description}
-                      </p>
+              {group.templates.map((tpl) => {
+                const locked = isLocked(tpl.id);
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => {
+                      if (locked) {
+                        setShowUpgrade(true);
+                        return;
+                      }
+                      setSelectedTemplate(tpl);
+                      setProjectName(tpl.name);
+                      setDialogOpen(true);
+                    }}
+                    className={`relative flex flex-col rounded-xl border border-white/10 bg-black/30 p-5 text-left transition-all group ${
+                      locked
+                        ? 'hover:border-amber-400/40 hover:bg-amber-500/5'
+                        : 'hover:border-purple-500/40 hover:bg-purple-500/5'
+                    }`}
+                  >
+                    {locked && (
+                      <span className="absolute top-4 right-4 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
+                        <Crown className="w-3 h-3" />
+                        Pro
+                      </span>
+                    )}
+                    <TemplatePreview template={tpl} />
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl shrink-0">{tpl.emoji}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-white group-hover:text-purple-200 transition-colors">
+                          {tpl.name}
+                        </p>
+                        <p className="text-xs text-white/50 mt-1 line-clamp-2">
+                          {tpl.description}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-auto pt-3 self-end">
-                    <span className="text-xs text-purple-400 group-hover:text-purple-300 transition-colors">
-                      Use template →
-                    </span>
-                  </div>
-                </button>
-              ))}
+                    <div className="mt-auto pt-3 self-end">
+                      <span className={`text-xs transition-colors ${
+                        locked
+                          ? 'text-amber-400/80 group-hover:text-amber-300'
+                          : 'text-purple-400 group-hover:text-purple-300'
+                      }`}>
+                        {locked ? 'Upgrade to use' : 'Use template →'}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}
@@ -249,6 +282,12 @@ export default function TemplatesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <UpgradeModal
+        isOpen={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        feature="templates"
+      />
     </div>
   );
 }

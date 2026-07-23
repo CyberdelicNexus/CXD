@@ -63,6 +63,7 @@ import { useAICredits } from "@/hooks/use-ai-credits";
 import { UpgradeModal } from "@/components/modals/upgrade-modal";
 import { SettingsModal } from "@/components/modals/settings-modal";
 import { TemplatePickerModal } from './template-picker-modal';
+import { QuotaGovernor } from './quota-governor';
 import { ShareSettingsModal } from './share/share-settings-modal';
 import { ExportHub } from './export-hub';
 import { VersionHistoryPanel } from './version-history-panel';
@@ -1071,6 +1072,9 @@ export function CXDNavbar() {
         open={showTemplatesModal}
         onClose={() => setShowTemplatesModal(false)}
       />
+
+      {/* Free-tier object quota: arms the store cap + renders the upgrade wall */}
+      <QuotaGovernor />
 
       {/* Version History Modal */}
       {project && (

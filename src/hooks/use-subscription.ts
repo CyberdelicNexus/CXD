@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/supabase/client';
-import { getPlan, hasFeatureAccess, canCreateCanvas, canAddCollaborator, getMaxCollaborators, type Plan } from '@/lib/plans';
+import { getPlan, hasFeatureAccess, canCreateCanvas, canAddCollaborator, getMaxCollaborators, getTemplateAccess, getMaxCanvasObjects, getMaxUploadBytes, type Plan, type TemplateAccess } from '@/lib/plans';
 
 export type SubscriptionStatus =
   | 'trialing'
@@ -53,6 +53,12 @@ export interface UseSubscriptionReturn {
   hasCollaboration: boolean;
   hasMasterPlan: boolean;
   maxCollaborators: number;
+  /** 'quickstart' = free tier (Quickstart templates only); 'full' = whole catalog + AI Composer */
+  templateAccess: TemplateAccess;
+  /** Counted-object cap per owned canvas (Infinity = uncapped). See src/lib/quota.ts */
+  maxCanvasObjects: number;
+  /** Per-file upload size cap in bytes (Infinity = uncapped) */
+  maxUploadBytes: number;
   canCreateCanvas: (currentCount: number) => boolean;
   canAddCollaborator: (currentCount: number) => boolean;
   freePrimaryCanvasId: string | null;
@@ -159,6 +165,9 @@ export function useSubscription(): UseSubscriptionReturn {
   const hasCollaboration = hasFeatureAccess(planId, 'collaboration');
   const hasMasterPlan = hasFeatureAccess(planId, 'masterPlan');
   const maxCollaborators = getMaxCollaborators(planId);
+  const templateAccess = getTemplateAccess(planId);
+  const maxCanvasObjects = getMaxCanvasObjects(planId);
+  const maxUploadBytes = getMaxUploadBytes(planId);
 
   const checkCanCreateCanvas = useCallback(
     (currentCount: number) => canCreateCanvas(planId, currentCount),
@@ -189,6 +198,9 @@ export function useSubscription(): UseSubscriptionReturn {
     hasCollaboration,
     hasMasterPlan,
     maxCollaborators,
+    templateAccess,
+    maxCanvasObjects,
+    maxUploadBytes,
     canCreateCanvas: checkCanCreateCanvas,
     canAddCollaborator: checkCanAddCollaborator,
     freePrimaryCanvasId: subscription?.free_primary_canvas_id ?? null,

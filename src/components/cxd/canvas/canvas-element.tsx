@@ -7178,6 +7178,15 @@ function ImageCard({
         contentType = "image/webp";
       }
 
+      // Free-tier upload size cap (checked on the final bytes — images are
+      // recompressed above, so most photos pass even on free)
+      const uploadMaxBytes = useCXDStore.getState().uploadMaxBytes;
+      if (uploadMaxBytes != null && blob.size > uploadMaxBytes) {
+        setHasImage(false);
+        alert(`This file is too large for the free plan (${(uploadMaxBytes / (1024 * 1024)).toFixed(0)} MB per file). Upgrade for larger uploads.`);
+        return;
+      }
+
       // Upload to Supabase Storage
       const supabase = createClient();
       const fileName = `canvas-images/${Date.now()}-${file.name.replace(/\.[^/.]+$/, "")}.${ext}`;
@@ -9124,6 +9133,13 @@ function LinkCard({
 
   // File upload handling
   const uploadFileToStorage = async (file: File) => {
+    // Free-tier upload size cap — raw files upload uncompressed
+    const uploadMaxBytes = useCXDStore.getState().uploadMaxBytes;
+    if (uploadMaxBytes != null && file.size > uploadMaxBytes) {
+      setUrlError(`Files over ${(uploadMaxBytes / (1024 * 1024)).toFixed(0)} MB need a Pro plan`);
+      return;
+    }
+
     setIsUploading(true);
     try {
       const supabase = createClient();

@@ -6,7 +6,8 @@ import { createClient } from "@/supabase/server";
 import { getModelInstance, getModelConfig } from "@/lib/ai/provider-registry";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
-import { TEMPLATES } from "@/lib/templates";
+import { TEMPLATES, FREE_TEMPLATE_IDS } from "@/lib/templates";
+import { getTemplateAccess } from "@/lib/plans";
 import type { AIProviderKey } from "@/types/ai-types";
 import { CREDIT_COSTS } from "@/types/ai-types";
 
@@ -114,8 +115,14 @@ export async function POST(request: Request) {
       }
     }
 
-    // 5. Prompt — catalog is authoritative on the server, never from the client
-    const catalog = TEMPLATES.map(
+    // 5. Prompt — catalog is authoritative on the server, never from the
+    // client. Free-tier callers only see the quickstart set: the Composer
+    // must never recommend a template the caller can't insert.
+    const availableTemplates =
+      getTemplateAccess(callerPlan) === "full"
+        ? TEMPLATES
+        : TEMPLATES.filter((t) => FREE_TEMPLATE_IDS.has(t.id));
+    const catalog = availableTemplates.map(
       (t) => `- id: ${t.id} | ${t.name} (${t.category}) — ${t.description}`,
     ).join("\n");
     const prompt = [
@@ -154,8 +161,10 @@ export async function POST(request: Request) {
       releaseConcurrency();
     }
 
-    // 7. Sanitize: the id must exist in the catalog
-    const chosen = TEMPLATES.find((t) => t.id === result.object.templateId);
+    // 7. Sanitize: the id must exist in the caller's AVAILABLE catalog —
+    // validating against the full list would let a hallucinated Pro id
+    // slip through to a free user.
+    const chosen = availableTemplates.find((t) => t.id === result.object.templateId);
     if (!chosen) {
       return NextResponse.json(
         { error: "Model chose an unknown template.", templateId: null },

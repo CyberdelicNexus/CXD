@@ -27,6 +27,8 @@ import { useCXDStore } from "@/store/cxd-store";
 import { queryTasks } from "@/utils/task-engine";
 import { ERDGenerator } from "./canvas/erd-generator";
 import { CalendarSyncDialog } from "@/components/calendar-sync-dialog";
+import { UpgradeModal } from "@/components/upgrade-modal";
+import { useSubscription } from "@/hooks/use-subscription";
 import { ROLE_BUNDLES, buildRoleBriefMarkdown } from "@/lib/exports/role-briefs";
 import { buildFacilitationMarkdown } from "@/lib/exports/facilitation-sheet";
 import { buildPitchHTML, buildPitchDeckHTML } from "@/lib/exports/pitch-one-pager";
@@ -520,7 +522,11 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
 
   const [erdOpen, setErdOpen] = useState(false);
   const [calSyncOpen, setCalSyncOpen] = useState(false);
+  const [calSyncUpgradeOpen, setCalSyncUpgradeOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Calendar sync stays Pro — it's the classic power-user integration whose
+  // absence is invisible to casual users but valuable to organized pros.
+  const { isFree } = useSubscription();
 
   // Customize popups
   const [pitchBuilderOpen, setPitchBuilderOpen] = useState(false);
@@ -761,7 +767,11 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
                   description="Subscribe to task due dates and milestones as an ICS feed in your calendar."
                   accent="text-emerald-300"
                   actions={[
-                    { label: "Sync to calendar", icon: CalendarDays, onClick: () => setCalSyncOpen(true) },
+                    {
+                      label: isFree ? "Sync to calendar (Pro)" : "Sync to calendar",
+                      icon: CalendarDays,
+                      onClick: () => (isFree ? setCalSyncUpgradeOpen(true) : setCalSyncOpen(true)),
+                    },
                   ]}
                 />
               </div>
@@ -779,6 +789,7 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
 
       {/* Calendar sync: shared dialog, also used by Master Plan and Profile */}
       <CalendarSyncDialog open={calSyncOpen} onClose={() => setCalSyncOpen(false)} />
+      <UpgradeModal isOpen={calSyncUpgradeOpen} onClose={() => setCalSyncUpgradeOpen(false)} feature="calendarSync" />
 
       {/* Pitch builder popup (Gamma-style) */}
       {pitchBuilderOpen && project && (

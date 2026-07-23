@@ -24,6 +24,7 @@ import {
 } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
 import type { Comment, CommentThread } from '@/types/comment-types';
+import { countQuotaObjects, isQuotaCounted } from '@/lib/quota';
 import {
   Version, OKR, KeyResult, Objective, VersionStatus,
   createDefaultVersion, createDefaultOKR, createDefaultObjective, createDefaultKeyResult,
@@ -244,6 +245,16 @@ interface CXDState {
   // Actions - Canvas Layout
   updateCanvasLayout: (elementId: string, position: { x: number; y: number }) => void;
 
+  // Free-tier object quota (see src/lib/quota.ts). Armed by QuotaGovernor
+  // only when the current user OWNS this canvas on the free plan; null = no
+  // cap (paid plans, collaborators, share views). Enforcement is add-time
+  // only — never blocks editing/moving/deleting existing content.
+  objectQuota: number | null;
+  uploadMaxBytes: number | null;
+  quotaWallOpen: boolean;
+  setQuotaConfig: (config: { objectQuota: number | null; uploadMaxBytes: number | null }) => void;
+  setQuotaWallOpen: (open: boolean) => void;
+
   // Actions - Canvas Elements
   addCanvasElement: (element: CanvasElement) => void;
   addCanvasElements: (elements: CanvasElement[]) => void;
@@ -386,6 +397,11 @@ export const useCXDStore = create<CXDState>()(
       yDoc: null,
       canvasUndoManager: null,
       designUndoManager: null,
+      objectQuota: null,
+      uploadMaxBytes: null,
+      quotaWallOpen: false,
+      setQuotaConfig: ({ objectQuota, uploadMaxBytes }) => set({ objectQuota, uploadMaxBytes }),
+      setQuotaWallOpen: (open) => set({ quotaWallOpen: open }),
       setYDoc: (doc) => {
         // Destroy previous undo managers if any
         const prev = get();
@@ -1527,6 +1543,17 @@ export const useCXDStore = create<CXDState>()(
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
 
+        // Free-tier quota: block only NEW counted objects; structure
+        // (containers, lines, text, shapes, boards…) is always allowed.
+        const quota = get().objectQuota;
+        if (quota != null && isQuotaCounted(element.type)) {
+          const used = countQuotaObjects(currentProject.canvasLayout?.elements);
+          if (used >= quota) {
+            set({ quotaWallOpen: true });
+            return;
+          }
+        }
+
         // Ensure element has the correct boardId and surface
         const elementWithBoardAndSurface = {
           ...element,
@@ -1561,6 +1588,18 @@ export const useCXDStore = create<CXDState>()(
       addCanvasElements: (elements) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
+
+        // Free-tier quota: a batch (template insert, AI draft) is all-or-
+        // nothing — inserting half a template is worse than inserting none.
+        const quota = get().objectQuota;
+        if (quota != null) {
+          const used = countQuotaObjects(currentProject.canvasLayout?.elements);
+          const incoming = countQuotaObjects(elements);
+          if (incoming > 0 && used + incoming > quota) {
+            set({ quotaWallOpen: true });
+            return;
+          }
+        }
 
         const activeBoardId = get().activeBoardId;
         const activeSurface = get().activeSurface;
@@ -1804,6 +1843,17 @@ export const useCXDStore = create<CXDState>()(
       duplicateCanvasElement: (elementId) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return null;
+
+        // Free-tier quota — duplicating a counted object creates one.
+        const quota = get().objectQuota;
+        if (quota != null) {
+          const source = currentProject.canvasLayout?.elements?.find(el => el.id === elementId);
+          if (source && isQuotaCounted(source.type)
+            && countQuotaObjects(currentProject.canvasLayout?.elements) >= quota) {
+            set({ quotaWallOpen: true });
+            return null;
+          }
+        }
 
         const { yDoc } = get();
         if (yDoc) {

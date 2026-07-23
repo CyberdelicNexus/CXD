@@ -147,3 +147,18 @@ export const TEMPLATES: TemplateDefinition[] = [
   // Classic templates, rebuilt against the same design system.
   ...CLASSIC_TEMPLATES,
 ];
+
+/**
+ * Templates insertable on the free tier (templateAccess 'quickstart').
+ * The full catalog stays VISIBLE to free users in the picker — deliberately,
+ * as a showroom — but only these ids can be inserted. The AI Composer route
+ * (/api/ai/suggest-template) filters its candidate catalog with this same
+ * set so it never recommends a template the caller can't insert.
+ */
+export const FREE_TEMPLATE_IDS: ReadonlySet<string> = new Set(
+  QUICKSTART_TEMPLATES.map((t) => t.id),
+);
+
+export function isTemplateFree(templateId: string): boolean {
+  return FREE_TEMPLATE_IDS.has(templateId);
+}

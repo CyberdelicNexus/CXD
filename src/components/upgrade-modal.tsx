@@ -8,7 +8,7 @@ import { useSubscription } from '@/hooks/use-subscription';
 interface UpgradeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  feature?: 'ai' | 'planView' | 'templates' | 'unlimitedCanvases' | 'collaboration';
+  feature?: 'ai' | 'planView' | 'templates' | 'unlimitedCanvases' | 'collaboration' | 'objects' | 'calendarSync';
 }
 
 const featureMessages: Record<string, { title: string; description: string }> = {
@@ -31,6 +31,14 @@ const featureMessages: Record<string, { title: string; description: string }> = 
   collaboration: {
     title: 'Team Collaboration',
     description: 'Work together with up to 3 team members on the same canvas in real-time.',
+  },
+  objects: {
+    title: 'Your canvas is full',
+    description: 'You’ve used all 100 free objects on this canvas — everything you’ve built stays yours. Upgrade to keep adding cards, images, links and tables without limits, or delete a few to free up room.',
+  },
+  calendarSync: {
+    title: 'Calendar Sync',
+    description: 'Subscribe to your plan from Google Calendar, Apple Calendar or Outlook — deadlines land in the calendar you already live in, and stay up to date automatically.',
   },
 };
 

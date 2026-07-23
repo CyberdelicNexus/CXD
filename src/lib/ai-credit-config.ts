@@ -120,16 +120,20 @@ export function isModelVisible(id: ModelId): boolean {
  * Tier Credit Allowances
  *
  * Credit allocation philosophy:
- * - Free: 0 monthly + 50 signup bonus (one-time), limited to cheapest models
+ * - Free: 25 monthly drip + 50 signup bonus (one-time), standard models only.
+ *   The drip (vs. one-time-and-dead) keeps the AI surface alive month after
+ *   month — a monthly re-activation ping and a recurring moment of hitting
+ *   the ceiling while engaged, which is where upgrades happen. Costs ~nothing
+ *   (25 credits ≈ 12-25 cheap-model chats).
  * - Pro: 500 monthly credits for professional daily use
  * - Lifetime: 0 monthly + 1000 one-time credits + BYOK option
  * - Beta Tester: Early supporter benefit (Pro equivalent)
  */
 export const TIER_CREDIT_ALLOWANCES = {
   free: {
-    monthlyCredits: 0,  // No monthly credits
+    monthlyCredits: 25,  // Monthly drip — keep in sync with PLANS.FREE.limits.monthlyAICredits
     signupBonusCredits: 50,  // One-time 50 credit signup bonus
-    allowedModels: ['gemini-2.0-flash'] as ModelId[],
+    allowedModels: ['gemini-2.0-flash', 'kimi'] as ModelId[],  // Standard models only
     canBYOK: false,
   },
   pro: {
