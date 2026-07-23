@@ -1001,7 +1001,7 @@ export function LandingPage() {
               </div>
               <p className="text-white/60 text-sm mb-6">Perfect for exploring and designing your first experience.</p>
               <ul className="space-y-3 mb-8">
-                {['1 canvas · 100 objects', 'All Plan views', 'Quickstart templates', '25 AI credits/month', 'Public share links'].map((f, i) => (
+                {['1 canvas · 100 objects, unlimited structure', 'All 5 Plan views (Kanban, Gantt, Calendar…)', '4 Quickstart templates (18 more with Pro)', '25 AI credits/month + 50 to start', 'Public share links'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
                     <Check className="w-4 h-4 text-white/50" />
                     <span className="text-white/70">{f}</span>
@@ -1072,6 +1072,16 @@ export function LandingPage() {
               </button>
             </motion.div>
           </div>
+
+          <motion.p
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="text-center text-white/40 text-xs mt-8 max-w-xl mx-auto"
+          >
+            The free object count only tracks cards, images, links and tables — shapes, text, connectors, containers and boards are always unlimited, on every plan.
+          </motion.p>
         </div>
       </section>
 
