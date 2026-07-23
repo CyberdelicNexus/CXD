@@ -1001,7 +1001,7 @@ export function LandingPage() {
               </div>
               <p className="text-white/60 text-sm mb-6">Perfect for exploring and designing your first experience.</p>
               <ul className="space-y-3 mb-8">
-                {['1 canvas · 100 objects, unlimited structure', 'All 5 Plan views (Kanban, Gantt, Calendar…)', '4 Quickstart templates (18 more with Pro)', '25 AI credits/month + 50 to start', 'Public share links'].map((f, i) => (
+                {['1 canvas · 100 objects, unlimited structure', 'Project Management Tools', '4 Quickstart templates (18 more with Pro)', '25 AI credits/month + 50 to start', 'Public share links'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
                     <Check className="w-4 h-4 text-white/50" />
                     <span className="text-white/70">{f}</span>
