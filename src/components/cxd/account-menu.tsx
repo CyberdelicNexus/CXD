@@ -14,6 +14,7 @@ import {
   CreditCard,
   LayoutTemplate,
   History,
+  MoreVertical,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -128,7 +129,7 @@ export function AccountMenu({
         <button
           className="relative flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] group transition-all"
         >
-          <User className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+          <MoreVertical className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
           {/* Notification dot for trial expiring soon */}
           {isTrialing && trialDaysRemaining !== null && trialDaysRemaining <= 3 && (
             <span className="absolute top-1 right-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse" />

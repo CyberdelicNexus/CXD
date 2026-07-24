@@ -87,8 +87,12 @@ export function UpgradeModal({ isOpen, onClose, feature }: UpgradeModalProps) {
         onClick={onClose}
       />
 
-      {/* Modal */}
-      <div className="relative w-full max-w-3xl bg-zinc-900/95 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+      {/* Modal — capped to the viewport with internal scroll. Without this,
+          `items-center` on the fixed backdrop centers overflowing content by
+          pushing it equally above AND below the viewport with no way to
+          scroll to the clipped part (looked like the modal rendered outside
+          the browser on short/zoomed viewports). */}
+      <div className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-zinc-900/95 border border-white/10 rounded-2xl shadow-2xl">
         {/* Close button */}
         <button
           onClick={onClose}

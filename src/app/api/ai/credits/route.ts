@@ -134,6 +134,32 @@ export async function GET() {
       if (!updateError && updated) {
         credits = updated;
       }
+    } else if (credits) {
+      // Self-heal mid-period drift: the row's allowance can go stale relative
+      // to plans.ts (a subscription-table DB trigger also writes this column
+      // independently — see 20260724000001_free_tier_monthly_credit_drip.sql
+      // for the class of bug this guards against). Patch just the allowance,
+      // not used/period fields, so a config bump takes effect immediately
+      // without granting an unearned mid-period usage reset.
+      const { data: subscription } = await supabase
+        .from('subscriptions')
+        .select('plan_id')
+        .eq('user_id', user.id)
+        .single();
+      const currentAllowance = getPlan(subscription?.plan_id || 'free').limits.monthlyAICredits;
+
+      if (currentAllowance !== credits.monthly_allowance) {
+        const { data: updated, error: updateError } = await supabase
+          .from("ai_credits")
+          .update({ monthly_allowance: currentAllowance })
+          .eq("user_id", user.id)
+          .select()
+          .single();
+
+        if (!updateError && updated) {
+          credits = updated;
+        }
+      }
     }
 
     return NextResponse.json({

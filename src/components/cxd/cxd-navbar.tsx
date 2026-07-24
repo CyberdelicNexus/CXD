@@ -68,6 +68,7 @@ import { ShareSettingsModal } from './share/share-settings-modal';
 import { ExportHub } from './export-hub';
 import { VersionHistoryPanel } from './version-history-panel';
 import { SaveStatusIndicator } from './save-status-indicator';
+import { CanvasObjectCount } from './canvas-object-count';
 import { Lock } from "lucide-react";
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
@@ -788,6 +789,9 @@ export function CXDNavbar() {
 
           {/* Save status — always visible while a project is open */}
           {project && viewMode !== "home" && <SaveStatusIndicator />}
+
+          {/* Free-tier object count, numbers only — renders nothing on paid plans */}
+          {project && viewMode !== "home" && <CanvasObjectCount />}
 
           {/* Toggle button for collapsible toolbar — first icon from left */}
           <button

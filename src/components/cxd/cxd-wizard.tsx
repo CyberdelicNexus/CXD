@@ -56,10 +56,13 @@ import {
   Palette,
   LayoutGrid,
   Square,
+  Crown,
 } from "lucide-react";
 import { FRAMING_TYPES, getFramingType, type FramingStartMode } from "@/types/framing-types";
 import { createPortal } from "react-dom";
 import { NoteRichTextEditor } from "@/components/cxd/canvas/note-rich-text-editor";
+import { useSubscription } from "@/hooks/use-subscription";
+import { UpgradeModal } from "@/components/upgrade-modal";
 
 const stepIcons: Record<string, React.ReactNode> = {
   "Intention Core": <Target className="w-5 h-5" />,
@@ -289,6 +292,12 @@ export function CXDWizard() {
   const framingTypeDef = getFramingType(project?.framingType);
   const needsTypePick = !!project && !project.framingType && !project.wizardCompleted;
   const [startMode, setStartMode] = useState<FramingStartMode>('populate');
+  // AI Composer picks across the full template catalog — Pro only. Free
+  // users see it locked with a Pro badge, same treatment as the template
+  // picker's non-Quickstart cards, rather than silently degrading it to a
+  // Quickstart-only suggestion (confusing: "why did it only offer one thing?").
+  const { templateAccess } = useSubscription();
+  const [showAiComposerUpgrade, setShowAiComposerUpgrade] = useState(false);
 
   const sectionSteps = WIZARD_STEPS.filter((s) => s.sectionId === currentStepData.sectionId);
   const stepIdxInSection = sectionSteps.findIndex((s) => s.id === currentStepData.id);
@@ -1155,24 +1164,32 @@ export function CXDWizard() {
                 ).map((opt) => {
                   const OptIcon = opt.icon;
                   const selected = startMode === opt.id;
+                  const locked = opt.id === 'ai-template' && templateAccess !== 'full';
                   return (
                     <button
                       key={opt.id}
-                      onClick={() => setStartMode(opt.id)}
+                      onClick={() => (locked ? setShowAiComposerUpgrade(true) : setStartMode(opt.id))}
                       className={cn(
                         "relative p-3 rounded-xl border text-left transition-all duration-200",
-                        selected
-                          ? "border-violet-500/60 bg-violet-500/10 shadow-[0_0_16px_rgba(139,92,246,0.15)]"
-                          : "border-border/50 bg-secondary/40 hover:bg-secondary/70 hover:border-border",
+                        locked
+                          ? "border-border/50 bg-secondary/40 hover:border-amber-400/40 hover:bg-amber-500/5"
+                          : selected
+                            ? "border-violet-500/60 bg-violet-500/10 shadow-[0_0_16px_rgba(139,92,246,0.15)]"
+                            : "border-border/50 bg-secondary/40 hover:bg-secondary/70 hover:border-border",
                       )}
                     >
-                      {opt.badge && (
+                      {locked ? (
+                        <span className="absolute -top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide bg-amber-500/80 text-white rounded-full">
+                          <Crown className="w-2.5 h-2.5" />
+                          Pro
+                        </span>
+                      ) : opt.badge && (
                         <span className="absolute -top-2 right-2 px-1.5 py-0.5 text-[9px] font-medium bg-violet-500/80 text-white rounded-full">
                           {opt.badge}
                         </span>
                       )}
-                      <OptIcon className={cn("w-4 h-4 mb-1.5", selected ? "text-violet-400" : "text-muted-foreground")} />
-                      <div className={cn("text-xs font-semibold", selected ? "text-foreground" : "text-foreground/80")}>
+                      <OptIcon className={cn("w-4 h-4 mb-1.5", locked ? "text-amber-400/70" : selected ? "text-violet-400" : "text-muted-foreground")} />
+                      <div className={cn("text-xs font-semibold", locked ? "text-foreground/70" : selected ? "text-foreground" : "text-foreground/80")}>
                         {opt.label}
                       </div>
                       <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{opt.desc}</p>
@@ -1275,6 +1292,12 @@ export function CXDWizard() {
           </div>
         </div>
       )}
+
+      <UpgradeModal
+        isOpen={showAiComposerUpgrade}
+        onClose={() => setShowAiComposerUpgrade(false)}
+        feature="templates"
+      />
     </div>
   );
 }
