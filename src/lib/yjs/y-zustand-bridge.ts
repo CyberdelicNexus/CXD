@@ -285,13 +285,21 @@ export class YjsZustandBridge {
           }
         });
 
-        // Skip duplicate IDs (defensive check for sync issues)
+        // Self-heal: drop orphan entries left behind by the pre-fix reorder/move bug
+        // (a re-inserted, tombstoned Y.Map deserializes to `{id:undefined,name:undefined}`
+        // and later crashes rendering via `stage.name.toLowerCase()`).
         const stageId = stage.id as string;
-        if (stageId && seenIds.has(stageId)) {
+        if (!stageId) {
+          console.warn('[YjsZustandBridge] Dropping orphan experience-flow stage (no id)');
+          continue;
+        }
+        // Skip duplicate IDs (defensive check for sync issues)
+        if (seenIds.has(stageId)) {
           console.warn('[YjsZustandBridge] Skipping duplicate stage ID:', stageId);
           continue;
         }
-        if (stageId) seenIds.add(stageId);
+        seenIds.add(stageId);
+        if (typeof stage.name !== 'string') stage.name = 'Untitled Stage';
 
         stages.push(stage as unknown as NonNullable<CXDProject['experienceFlowStages']>[number]);
       }

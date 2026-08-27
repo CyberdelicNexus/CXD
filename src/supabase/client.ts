@@ -35,6 +35,28 @@ export const createClient = () => {
 
   const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
+  // Coalesce concurrent auth.getUser() calls into ONE in-flight request.
+  // Multiple components (page restore, profile load, project sync, permissions,
+  // collaboration) call getUser() near-simultaneously on canvas load. Each acquires
+  // the GoTrue navigator Web Lock; under contention one request "steals" the lock and
+  // the others reject with:
+  //   'Lock "lock:sb-<ref>-auth-token" was released because another request stole it'
+  // Deduping to a single shared promise removes the concurrency (and the steal) without
+  // caching a stale user — the promise clears as soon as it settles, so the next call
+  // after it resolves hits the network/lock fresh.
+  {
+    const originalGetUser = supabase.auth.getUser.bind(supabase.auth);
+    let inFlight: ReturnType<typeof originalGetUser> | null = null;
+    supabase.auth.getUser = ((...args: Parameters<typeof originalGetUser>) => {
+      // Only dedupe the common no-arg call (session-token path). A getUser(jwt) with an
+      // explicit token must not share a cached promise keyed to a different token.
+      if (args.length > 0 && args[0]) return originalGetUser(...args);
+      if (inFlight) return inFlight;
+      inFlight = originalGetUser(...args).finally(() => { inFlight = null; });
+      return inFlight;
+    }) as typeof supabase.auth.getUser;
+  }
+
   // Tempo preview URLs may not be allow-listed in Supabase Auth settings,
   // which can cause `auth.getUser()` to throw "TypeError: Failed to fetch".
   // To prevent the app from crashing/noisy logs in preview, gracefully degrade.

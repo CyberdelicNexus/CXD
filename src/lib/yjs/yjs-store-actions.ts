@@ -350,6 +350,30 @@ export function yjsRemoveExperienceFlowStage(doc: Y.Doc, stageId: string): void 
   }, 'local');
 }
 
+// Deep-clone a stage Y.Map into a BRAND-NEW, un-integrated Y.Map. Yjs forbids
+// re-inserting an already-integrated shared type: after `yArray.delete()` the item
+// is tombstoned, and re-inserting the same instance throws inside `YMap._integrate`
+// ("Cannot read properties of null (reading 'forEach')"), aborting the transaction
+// mid-flight and leaving an orphan `{id:undefined,name:undefined}` entry that gets
+// persisted and later crashes rendering via `stage.name.toLowerCase()`. Any reorder
+// that removes-then-reinserts MUST clone first. See `yjsReorderRealityPlanes` for the
+// same pattern applied to reality planes.
+function cloneStageYMap(yStage: Y.Map<unknown>): Y.Map<unknown> {
+  const clone = new Y.Map<unknown>();
+  yStage.forEach((value, key) => {
+    if (value instanceof Y.Text) {
+      clone.set(key, createYText(value.toString()));
+    } else if (value instanceof Y.Map) {
+      const nested = new Y.Map<unknown>();
+      value.forEach((nv, nk) => { nested.set(nk, nv); });
+      clone.set(key, nested);
+    } else {
+      clone.set(key, value);
+    }
+  });
+  return clone;
+}
+
 export function yjsMoveExperienceFlowStage(
   doc: Y.Doc,
   stageId: string,
@@ -370,10 +394,11 @@ export function yjsMoveExperienceFlowStage(
     const newIndex = direction === 'left' ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= yStages.length) return;
 
-    // Y.Array doesn't have a native swap — delete and re-insert
-    const item = yStages.get(index);
+    // Y.Array has no native move — delete then re-insert a fresh CLONE (never the
+    // original integrated instance, which Yjs cannot re-integrate; see cloneStageYMap).
+    const clone = cloneStageYMap(yStages.get(index) as Y.Map<unknown>);
     yStages.delete(index, 1);
-    yStages.insert(newIndex, [item]);
+    yStages.insert(newIndex, [clone]);
   }, 'local');
 }
 
@@ -454,9 +479,10 @@ export function yjsReorderExperienceFlowStage(
     if (oldIndex === -1 || oldIndex === newIndex) return;
     if (newIndex < 0 || newIndex >= yStages.length) return;
 
-    const item = yStages.get(oldIndex);
+    // Re-insert a fresh CLONE, not the tombstoned original (see cloneStageYMap).
+    const clone = cloneStageYMap(yStages.get(oldIndex) as Y.Map<unknown>);
     yStages.delete(oldIndex, 1);
-    yStages.insert(newIndex, [item]);
+    yStages.insert(newIndex, [clone]);
   }, 'local');
 }
 

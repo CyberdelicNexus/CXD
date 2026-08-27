@@ -179,16 +179,17 @@ export function ExperienceFlowDrawer() {
 
   const handleDeleteStage = (stageId: string) => {
     if (stages.length <= 1) return;
+    // Pick the neighbour to activate BEFORE removing, from the surviving stages
+    // (deriving it from the post-delete array avoids landing on a stale/removed id).
+    const survivors = stages.filter((s) => s.id !== stageId);
     const deletedIndex = stages.findIndex((s) => s.id === stageId);
+    const nextActive =
+      activeStageId === stageId
+        ? survivors[Math.max(0, deletedIndex - 1)]?.id ?? survivors[0]?.id ?? null
+        : activeStageId;
     removeExperienceFlowStage(stageId);
     setShowDeleteConfirm(null);
-    // Select adjacent stage
-    if (activeStageId === stageId) {
-      const newIndex = Math.max(0, deletedIndex - 1);
-      setActiveStageId(
-        stages[newIndex === deletedIndex ? newIndex + 1 : newIndex]?.id || null,
-      );
-    }
+    setActiveStageId(nextActive);
   };
 
   const handleAddStage = () => {
@@ -671,7 +672,7 @@ export function ExperienceFlowDrawer() {
                     <div className="space-y-3">
                       <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50 mb-1 block">Experience Script</Label>
                       <Textarea
-                        placeholder={`What happens during ${currentStage.name.toLowerCase()}?`}
+                        placeholder={`What happens during ${(currentStage.name || 'this stage').toLowerCase()}?`}
                         value={currentStage.narrativeNotes}
                         onChange={(e) =>
                           activeStageId &&

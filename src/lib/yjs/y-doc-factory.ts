@@ -451,6 +451,11 @@ export function yDocToProject(doc: Y.Doc): CXDProject {
       }
     });
 
+    // Self-heal: skip orphan entries (no id) left by the pre-fix reorder/move bug,
+    // and guarantee `name` is a string so `stage.name.toLowerCase()` never throws.
+    if (!stage.id) continue;
+    if (typeof stage.name !== 'string') stage.name = 'Untitled Stage';
+
     experienceFlowStages.push(stage as unknown as ExperienceFlowStageV2);
   }
 
