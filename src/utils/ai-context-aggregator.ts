@@ -12,6 +12,7 @@ import {
   PlanContext,
   FaceContext,
 } from "@/types/ai-types";
+import type { CanvasInventory } from "@/types/ai-operations";
 import { calculateFaceIntensities } from "@/utils/diagnostic-engine";
 import { generateDiagnostics } from "@/utils/diagnostic-engine";
 
@@ -361,10 +362,60 @@ function buildPlanContext(elements: CanvasElement[]): PlanContext {
 }
 
 // ============================================================
+// Canvas inventory (for the Canvas Assistant operations route)
+// ============================================================
+
+const INVENTORY_CAP = 150;
+
+/**
+ * Bounded, model-facing element inventory. Unlike buildCanvasContext (counts +
+ * prose digest), this carries ids and geometry so the model can target specific
+ * elements. Priority when over the cap: selected elements first, then canvas-
+ * surface elements, then most recently listed — so the selection always
+ * survives truncation.
+ */
+export function buildCanvasInventory(
+  elements: CanvasElement[],
+  selectedIds: string[],
+): CanvasInventory {
+  const selectedSet = new Set(selectedIds);
+  const content = elements.filter((el) => el.type !== "line" && el.type !== "connector");
+
+  const scored = content.map((el, idx) => ({
+    el,
+    idx,
+    score: selectedSet.has(el.id) ? 2 : el.surface === "canvas" ? 1 : 0,
+  }));
+  scored.sort((a, b) => b.score - a.score || b.idx - a.idx);
+
+  const kept = scored.slice(0, INVENTORY_CAP).map(({ el }) => ({
+    id: el.id,
+    type: el.type,
+    title: getElementTitle(el),
+    x: Math.round(el.x),
+    y: Math.round(el.y),
+    width: Math.round(el.width),
+    height: Math.round(el.height),
+    ...(el.containerId ? { containerId: el.containerId } : {}),
+    ...(el.hypercubeTags && el.hypercubeTags.length > 0 ? { tags: el.hypercubeTags as string[] } : {}),
+    ...(selectedSet.has(el.id) ? { selected: true } : {}),
+  }));
+
+  const contentIds = new Set(content.map((el) => el.id));
+
+  return {
+    totalCount: content.length,
+    truncated: content.length > INVENTORY_CAP,
+    selectedIds: selectedIds.filter((id) => contentIds.has(id)),
+    elements: kept,
+  };
+}
+
+// ============================================================
 // Helpers
 // ============================================================
 
-function getElementTitle(element: CanvasElement): string {
+export function getElementTitle(element: CanvasElement): string {
   switch (element.type) {
     case "freeform":
     case "text": {
