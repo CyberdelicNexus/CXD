@@ -1,10 +1,11 @@
 "use client";
 
-// Canvas Assistant: floating launcher (bottom-right, hypercube icon inside an
+// Canvas Assistant: floating launcher (bottom-right, CXD logo inside an
 // animated gradient ring) plus the docked AIChatPanel in canvas mode.
 
-import { useState } from "react";
-import { HypercubeLogo } from "@/components/icons/hypercube-logo";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import Image from "next/image";
 import { AIChatPanel } from "./ai-chat-panel";
 import { useCXDStore } from "@/store/cxd-store";
 import { cn } from "@/lib/utils";
@@ -17,18 +18,23 @@ interface CanvasAssistantProps {
 
 export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const projectId = useCXDStore((s) => s.currentProjectId);
 
-  if (!projectId) return null;
+  // Portal target only exists in the browser; render nothing during SSR.
+  useEffect(() => setMounted(true), []);
 
-  return (
-    // The canvas container is `fixed inset-0 top-16 ... h-full`: `top-16` plus a
-    // full 100vh height puts its bottom edge 4rem BELOW the viewport, and its
-    // overflow-hidden clips whatever sits there. This layer subtracts that
-    // overhang so bottom-anchored children land on screen. It stays `absolute`
-    // (not `fixed`) so it also respects the container's inline right margin
-    // when a side panel narrows the canvas.
-    <div className="absolute inset-x-0 top-0 bottom-16 z-[70] pointer-events-none">
+  if (!projectId || !mounted) return null;
+
+  // Portaled to <body> on purpose. The canvas container is
+  // `fixed inset-0 top-16 ... h-full`, so its box overhangs the viewport and
+  // its overflow-hidden clips bottom-anchored children — and its height shifts
+  // as panels open, which dragged this launcher up the screen. Anchoring to the
+  // viewport from outside that subtree makes the position unconditional.
+  return createPortal(
+    // z sits above canvas chrome (toolkits, inbox) but below modals/expanded
+    // chat (z-[120]). The layer is click-through except for its two children.
+    <div className="fixed inset-0 z-[80] pointer-events-none">
       {open && (
         <div className="pointer-events-auto absolute bottom-24 right-6 w-[420px] max-w-[calc(100vw-48px)]">
           <AIChatPanel
@@ -74,8 +80,15 @@ export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
             maskComposite: "exclude",
           }}
         />
-        <HypercubeLogo size={30} />
+        <Image
+          src="/images/CXD Logo 2.png"
+          alt=""
+          width={30}
+          height={30}
+          className="object-contain relative"
+        />
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
