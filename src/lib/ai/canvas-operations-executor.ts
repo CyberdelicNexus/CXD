@@ -137,8 +137,11 @@ export function translateForApply(
           tintColor: "violet",
           collapsed: false,
           locked: false,
-          boardId: null,
-          surface: "canvas",
+          // Inherit the members' board/surface: a container placed on the root
+          // board while its children stay on another board would be invisible
+          // where the user asked for it, and its containerId links cross-board.
+          boardId: members[0].boardId ?? null,
+          surface: members[0].surface,
           containerId: undefined,
           style: groupContainerStyle,
         };
@@ -173,5 +176,7 @@ export function translateForApply(
   batch.removeElementIds = Array.from(removed);
   batch.removeEdgeIds = Array.from(new Set(batch.removeEdgeIds));
 
-  return { batch, tasks, notes, skippedRowIds };
+  // One row can produce several ops (a multi-target update), so dedupe before
+  // reporting "N change(s) skipped" to the user.
+  return { batch, tasks, notes, skippedRowIds: Array.from(new Set(skippedRowIds)) };
 }

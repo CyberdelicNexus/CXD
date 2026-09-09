@@ -26,6 +26,7 @@ import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elem
 import type { Comment, CommentThread } from '@/types/comment-types';
 import { countQuotaObjects, isQuotaCounted } from '@/lib/quota';
 import type { CanvasBatchMutation } from '@/types/ai-operations';
+import { splitPatchForYDoc } from '@/lib/yjs/element-serializers';
 import {
   Version, OKR, KeyResult, Objective, VersionStatus,
   createDefaultVersion, createDefaultOKR, createDefaultObjective, createDefaultKeyResult,
@@ -1767,7 +1768,15 @@ export const useCXDStore = create<CXDState>()(
         if (yDoc) {
           yDoc.transact(() => {
             preparedAdds.forEach(el => yjsAddElement(yDoc, el));
-            updateMap.forEach((updates, id) => yjsUpdateElement(yDoc, id, updates));
+            updateMap.forEach((updates, id) => {
+              // A patch key set to undefined means "clear this field". The
+              // serializer skips undefined, so those keys must be deleted from
+              // the Y.Map or the Zustand spread and the authoritative doc
+              // diverge — an orphan-healed containerId would come back on reload.
+              const { defined, cleared } = splitPatchForYDoc(updates);
+              if (Object.keys(defined).length > 0) yjsUpdateElement(yDoc, id, defined);
+              cleared.forEach(field => yjsDeleteElementField(yDoc, id, field));
+            });
             batch.removeElementIds.forEach(id => yjsRemoveElement(yDoc, id));
             preparedEdges.forEach(e => yjsAddEdge(yDoc, e));
             batch.removeEdgeIds.forEach(id => yjsRemoveEdge(yDoc, id));

@@ -337,13 +337,15 @@ export function AIChatPanel({
       if (isStreaming || ops.isProposing) return;
       const text = input.trim();
       if (!text) return;
+      // A failure notice belongs to the turn that produced it.
+      ops.clearProposeError();
       // Canvas assistant only: route change requests to the operations path.
-      // A proposal that comes back empty falls through to the chat stream, so a
-      // routing false-positive never dead-ends in a blank approval card.
+      // "empty" (model read it as conversation) and "failed" both fall through
+      // to the chat stream, so a message is never silently swallowed.
       if (canvasOps && (actMode || isActionableMessage(text))) {
         setInput("");
-        void ops.propose(text).then((produced) => {
-          if (!produced) sendMessage(text);
+        void ops.propose(text).then((outcome) => {
+          if (outcome !== "proposed") sendMessage(text);
         });
         return;
       }

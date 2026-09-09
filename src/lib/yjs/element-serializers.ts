@@ -150,6 +150,29 @@ export function yMapToCanvasElement(yEl: Y.Map<unknown>): CanvasElement {
 }
 
 /**
+ * Split a patch into fields to write and fields to clear.
+ *
+ * applyElementUpdates skips `undefined` values, so a patch meaning "clear this
+ * field" (e.g. orphan-healing `containerId` when its container is deleted)
+ * would apply to a Zustand object spread but be silently dropped from the
+ * authoritative Y.Doc — the two universes then disagree and the stale value
+ * wins on reload. Callers that can emit cleared fields must delete those keys
+ * from the Y.Map explicitly (yjsDeleteElementField).
+ */
+export function splitPatchForYDoc(updates: Partial<CanvasElement>): {
+  defined: Partial<CanvasElement>;
+  cleared: string[];
+} {
+  const defined: Record<string, unknown> = {};
+  const cleared: string[] = [];
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined) cleared.push(key);
+    else defined[key] = value;
+  }
+  return { defined: defined as Partial<CanvasElement>, cleared };
+}
+
+/**
  * Apply partial updates to an existing element Y.Map.
  * Only modifies the specified keys, preserving other properties.
  * Handles Y.Text and nested Y.Map correctly.

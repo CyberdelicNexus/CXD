@@ -35,10 +35,12 @@ export function useCanvasOperations({ provider, selectedElementIds }: UseCanvasO
   const [proposeError, setProposeError] = useState<string | null>(null);
   const { syncAddElement } = useCollaborationContext();
 
-  /** Returns true when a non-empty proposal was produced; false means the
-   *  caller should fall through to the conversational chat path. */
+  /** "proposed" — an approval card is showing.
+   *  "empty" — the model read this as conversation; caller should answer in chat.
+   *  "failed" — the request errored; caller should still answer in chat, and
+   *  proposeError explains why no change set appeared. */
   const propose = useCallback(
-    async (instruction: string, groundingText?: string): Promise<boolean> => {
+    async (instruction: string, groundingText?: string): Promise<"proposed" | "empty" | "failed"> => {
       setIsProposing(true);
       setProposeError(null);
       try {
@@ -49,23 +51,23 @@ export function useCanvasOperations({ provider, selectedElementIds }: UseCanvasO
         });
         if (!result.success || !result.proposal) {
           setProposeError(result.error || "Couldn't build a change set.");
-          return false;
+          return "failed";
         }
-        // Zero rows means the model read this as conversation, not a change
-        // request — let the caller answer it in chat instead of showing an
-        // empty approval card.
-        if (result.proposal.rows.length === 0) return false;
+        if (result.proposal.rows.length === 0) return "empty";
         setProposals((prev) => [
           ...prev,
           { id: crypto.randomUUID(), instruction, proposal: result.proposal!, status: "pending" },
         ]);
-        return true;
+        return "proposed";
       } finally {
         setIsProposing(false);
       }
     },
     [provider, selectedElementIds],
   );
+
+  /** Clear a stale failure notice — it must not outlive the turn it belongs to. */
+  const clearProposeError = useCallback(() => setProposeError(null), []);
 
   const apply = useCallback(
     async (entryId: string, selectedRowIds: Set<string>) => {
@@ -102,10 +104,14 @@ export function useCanvasOperations({ provider, selectedElementIds }: UseCanvasO
           : " Task creation failed.";
       }
       if (canvasOk && plan.notes.length > 0) {
+        let noteOk = 0;
         for (const note of plan.notes) {
-          await createNoteFromAI(note, { chatMessageId: entryId, sourceFaces: [] }, syncAddElement);
+          const r = await createNoteFromAI(note, { chatMessageId: entryId, sourceFaces: [] }, syncAddElement);
+          if (r.success) noteOk++;
         }
-        sideNotes += ` ${plan.notes.length} note(s) added to Inbox.`;
+        sideNotes += noteOk === plan.notes.length
+          ? ` ${noteOk} note(s) added to Inbox.`
+          : ` ${noteOk}/${plan.notes.length} note(s) added to Inbox (some failed).`;
       }
       if (canvasOk && plan.skippedRowIds.length > 0) {
         sideNotes += ` ${plan.skippedRowIds.length} change(s) skipped (elements changed since the proposal).`;
@@ -130,5 +136,5 @@ export function useCanvasOperations({ provider, selectedElementIds }: UseCanvasO
     );
   }, []);
 
-  return { proposals, isProposing, proposeError, propose, apply, discard };
+  return { proposals, isProposing, proposeError, propose, apply, discard, clearProposeError };
 }
