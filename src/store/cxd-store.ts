@@ -25,6 +25,7 @@ import {
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
 import type { Comment, CommentThread } from '@/types/comment-types';
 import { countQuotaObjects, isQuotaCounted } from '@/lib/quota';
+import type { CanvasBatchMutation } from '@/types/ai-operations';
 import {
   Version, OKR, KeyResult, Objective, VersionStatus,
   createDefaultVersion, createDefaultOKR, createDefaultObjective, createDefaultKeyResult,
@@ -258,6 +259,10 @@ interface CXDState {
   // Actions - Canvas Elements
   addCanvasElement: (element: CanvasElement) => void;
   addCanvasElements: (elements: CanvasElement[]) => void;
+  /** Canvas Assistant: apply one confirmed AI batch (creates/updates/deletes)
+   *  as ONE Zustand set + ONE 'ai-apply' Y.Doc transaction (= one Ctrl+Z step).
+   *  Returns false when the free-tier quota wall blocks the creates. */
+  applyCanvasBatch: (batch: CanvasBatchMutation) => boolean;
   updateCanvasElement: (elementId: string, updates: Partial<CanvasElement>) => void;
   removeCanvasElement: (elementId: string) => void;
   /** Write positions directly to Zustand without touching Yjs (used during drag for instant visual feedback). */
@@ -1686,6 +1691,89 @@ export const useCXDStore = create<CXDState>()(
             });
           }, 'template-batch');
         }
+      },
+
+      applyCanvasBatch: (batch) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return false;
+
+        // Free-tier quota: an AI batch is all-or-nothing — applying half a
+        // reviewed change set is worse than applying none.
+        const quota = get().objectQuota;
+        if (quota != null && batch.addElements.length > 0) {
+          const used = countQuotaObjects(currentProject.canvasLayout?.elements);
+          const incoming = countQuotaObjects(batch.addElements);
+          if (incoming > 0 && used + incoming > quota) {
+            set({ quotaWallOpen: true });
+            return false;
+          }
+        }
+
+        const activeBoardId = get().activeBoardId;
+        const activeSurface = get().activeSurface;
+        const preparedAdds = batch.addElements.map(el => ({
+          ...el,
+          boardId: el.boardId !== undefined ? el.boardId : activeBoardId,
+          surface: el.surface !== undefined ? el.surface : activeSurface,
+        }));
+        const preparedEdges = batch.addEdges.map(e => ({
+          ...e,
+          boardId: e.boardId !== undefined ? e.boardId : activeBoardId,
+          surface: e.surface !== undefined ? e.surface : activeSurface,
+        }));
+        const removeSet = new Set(batch.removeElementIds);
+        const removeEdgeSet = new Set(batch.removeEdgeIds);
+        // Deletes win over updates for the same id, so a stale update can never
+        // resurrect fields on an element this batch is removing.
+        const updateMap = new Map(
+          batch.updates.filter(u => !removeSet.has(u.id)).map(u => [u.id, u.updates]),
+        );
+
+        // Snapshot for the no-yDoc fallback history path.
+        get().pushCanvasHistory();
+
+        // ONE direct Zustand set — no per-element Yjs observer cascade.
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  elements: [
+                    ...(p.canvasLayout?.elements || [])
+                      .filter(el => !removeSet.has(el.id))
+                      .map(el => updateMap.has(el.id)
+                        ? ({ ...el, ...updateMap.get(el.id) } as typeof el)
+                        : el),
+                    ...preparedAdds,
+                  ],
+                  edges: [
+                    ...(p.canvasLayout?.edges || []).filter(e => !removeEdgeSet.has(e.id)),
+                    ...preparedEdges,
+                  ],
+                },
+                updatedAt: new Date().toISOString(),
+              }
+              : p
+          ),
+        }));
+
+        // ONE 'ai-apply' transaction: the nested helper transacts reuse this
+        // already-open one, so the whole batch keeps the outer origin — the
+        // canvas UndoManager captures it as a single step and both bridge
+        // observers skip their re-flush (Zustand is already correct above).
+        const { yDoc } = get();
+        if (yDoc) {
+          yDoc.transact(() => {
+            preparedAdds.forEach(el => yjsAddElement(yDoc, el));
+            updateMap.forEach((updates, id) => yjsUpdateElement(yDoc, id, updates));
+            batch.removeElementIds.forEach(id => yjsRemoveElement(yDoc, id));
+            preparedEdges.forEach(e => yjsAddEdge(yDoc, e));
+            batch.removeEdgeIds.forEach(id => yjsRemoveEdge(yDoc, id));
+          }, 'ai-apply');
+        }
+        return true;
       },
 
       updateCanvasElement: (elementId, updates) => {

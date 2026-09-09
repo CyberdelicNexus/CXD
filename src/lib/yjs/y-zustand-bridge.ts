@@ -127,9 +127,10 @@ export class YjsZustandBridge {
       // 'drag-commit' transactions are written by commitDragPositionsToYjs after
       // the drag ends. Zustand was already updated directly (updateElementsPositionLocal)
       // throughout the drag, so skipping the bridge flush here avoids a redundant
-      // Zustand setState with identical data.
+      // Zustand setState with identical data. 'ai-apply' (applyCanvasBatch) is the
+      // same shape: Zustand is set directly before the Y.Doc transaction.
       const origin = events[0]?.transaction?.origin;
-      if (origin === 'drag-commit' || origin === 'template-batch') return;
+      if (origin === 'drag-commit' || origin === 'template-batch' || origin === 'ai-apply') return;
 
       for (const event of events) {
         if (event.target === yElements) {
@@ -172,9 +173,11 @@ export class YjsZustandBridge {
       // redundant setState with identical data, mirroring the same guard on
       // the element observer above (see its comment: this is exactly the
       // mechanism that previously caused "Maximum update depth exceeded" for
-      // large batches before it was skipped there).
+      // large batches before it was skipped there). 'ai-apply' (applyCanvasBatch)
+      // writes elements and edges in one transaction and needs the same guard on
+      // BOTH observers — these two handlers do not share their skip lists.
       const origin = events[0]?.transaction?.origin;
-      if (origin === 'drag-commit' || origin === 'template-batch') return;
+      if (origin === 'drag-commit' || origin === 'template-batch' || origin === 'ai-apply') return;
 
       for (const event of events) {
         if (event.target === yEdges) {
