@@ -65,5 +65,54 @@ check("question is not actionable", !isActionableMessage("What should I focus on
 check("'can you add' is actionable", isActionableMessage("can you add a summary card"));
 check("empty is not actionable", !isActionableMessage(""));
 
+// ── Negative / hardening coverage (review round 2) ──────────────────
+
+// 6a. Long edgeLabel on an existing-id connect is capped to 40 chars
+const p6a = sanitizeCanvasOperations({
+  reply: "ok",
+  operations: [
+    { op: "connect", summary: "Link A to B", fromRef: "e1", toRef: "e2", edgeLabel: "x".repeat(5000), kind: null, ref: null, parentRef: null, label: null, content: null, tint: null, shapeType: null, hypercubeTags: null, x: null, y: null, width: null, height: null, targetIds: null, newContent: null, newLabel: null, newX: null, newY: null, newWidth: null, newHeight: null, addTags: null, removeTags: null, groupTitle: null, taskTitle: null, taskDescription: null, taskPriority: null, taskDueDate: null },
+  ],
+}, inventory);
+const connect6a = p6a.ops.find((o) => o.kind === "connect");
+check("long edgeLabel on existing-id connect is capped to <=40 chars", !!connect6a && connect6a.kind === "connect" && (connect6a.label?.length ?? 0) <= 40);
+
+// 6b. Multi-target update applies to ALL known ids under ONE rowId, summary suffixed
+const p6b = sanitizeCanvasOperations({
+  reply: "ok",
+  operations: [
+    { op: "update", summary: "Rename cards", targetIds: ["e1", "e2"], newContent: "Updated", kind: null, ref: null, parentRef: null, label: null, content: null, tint: null, shapeType: null, hypercubeTags: null, x: null, y: null, width: null, height: null, newLabel: null, newX: null, newY: null, newWidth: null, newHeight: null, addTags: null, removeTags: null, groupTitle: null, fromRef: null, toRef: null, edgeLabel: null, taskTitle: null, taskDescription: null, taskPriority: null, taskDueDate: null },
+  ],
+}, inventory);
+const updateOps6b = p6b.ops.filter((o) => o.kind === "update");
+const updateRow6b = p6b.rows.find((r) => r.kind === "update");
+check("multi-target update produces TWO ops sharing one rowId", updateOps6b.length === 2 && updateOps6b[0].rowId === updateOps6b[1].rowId);
+check("multi-target update row summary suffixed with element count", !!updateRow6b && updateRow6b.summary.endsWith("(2 elements)"));
+
+// 6c. Create row whose ref collides with an inventory id is dropped; droppedCount reflects it
+const p6c = sanitizeCanvasOperations({
+  reply: "ok",
+  operations: [
+    { op: "create", summary: "Sneaky create", kind: "text", ref: "e1", parentRef: null, label: null, content: "Hi", tint: null, shapeType: null, hypercubeTags: null, x: 10, y: 10, width: 200, height: 80, targetIds: null, newContent: null, newLabel: null, newX: null, newY: null, newWidth: null, newHeight: null, addTags: null, removeTags: null, groupTitle: null, fromRef: null, toRef: null, edgeLabel: null, taskTitle: null, taskDescription: null, taskPriority: null, taskDueDate: null },
+  ],
+}, inventory);
+check("create row with ref colliding with inventory id is dropped", p6c.creates === null);
+check("droppedCount reflects the collided create row", p6c.droppedCount === 1);
+
+// 6d. Invalid taskDueDate is dropped from metadata while the task itself survives
+const p6d = sanitizeCanvasOperations({
+  reply: "ok",
+  operations: [
+    { op: "task", summary: "Add a task", taskTitle: "Follow up", taskDescription: null, taskPriority: null, taskDueDate: "next tuesday-ish", kind: null, ref: null, parentRef: null, label: null, content: null, tint: null, shapeType: null, hypercubeTags: null, x: null, y: null, width: null, height: null, targetIds: null, newContent: null, newLabel: null, newX: null, newY: null, newWidth: null, newHeight: null, addTags: null, removeTags: null, groupTitle: null, fromRef: null, toRef: null, edgeLabel: null },
+  ],
+}, inventory);
+const taskOp6d = p6d.ops.find((o) => o.kind === "task");
+check("task survives despite malformed taskDueDate", !!taskOp6d && taskOp6d.kind === "task" && taskOp6d.task.title === "Follow up");
+check("malformed taskDueDate is dropped from metadata", !!taskOp6d && taskOp6d.kind === "task" && taskOp6d.task.metadata?.dueDate === undefined);
+
+// 6e. Polite "could you ..." imperative is actionable; plain questions still are not
+check("'could you delete' is actionable", isActionableMessage("could you delete the empty cards"));
+check("'What should I focus on next?' remains not actionable", !isActionableMessage("What should I focus on next?"));
+
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log("\nALL PASS");

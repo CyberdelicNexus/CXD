@@ -51,6 +51,8 @@ export interface SanitizedProposal {
   /** All create-type rows collapse into one converted batch (fresh UUIDs, clamped) */
   creates: { rowId: string; elements: CanvasElement[]; edges: CanvasEdge[] } | null;
   ops: SemanticOp[];
+  /** Rows the sanitizer discarded — unknown ids, malformed fields; lets the route log model hallucination */
+  droppedCount: number;
 }
 
 // ─── Batch mutation (executor → store.applyCanvasBatch) ────────────

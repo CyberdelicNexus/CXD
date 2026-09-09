@@ -28,7 +28,8 @@ const COORD_LIMIT = 50000;
 export const canvasOpRowSchema = z.object({
   op: z.enum(["create", "update", "delete", "tag", "group", "connect", "task", "note"]),
   summary: z.string().describe('Short human-readable description of this change, e.g. "Delete 2 empty cards"'),
-  // create fields (op=create only, null otherwise)
+  // create fields (op=create only, null otherwise) — note: 'content' is also
+  // reused as the note body for op=note
   kind: z.enum(["container", "text", "shape"]).nullable(),
   ref: z.string().nullable().describe('Unique short ref for created elements, e.g. "c1", "t2"'),
   parentRef: z.string().nullable(),
@@ -42,15 +43,15 @@ export const canvasOpRowSchema = z.object({
   width: z.number().nullable(),
   height: z.number().nullable(),
   // targeting fields (update/delete/tag/group)
-  targetIds: z.array(z.string()).nullable().describe("Existing element ids from the inventory ONLY"),
+  targetIds: z.array(z.string()).max(60).nullable().describe("Existing element ids from the inventory ONLY"),
   newContent: z.string().nullable(),
   newLabel: z.string().nullable(),
   newX: z.number().nullable(),
   newY: z.number().nullable(),
   newWidth: z.number().nullable(),
   newHeight: z.number().nullable(),
-  addTags: z.array(z.enum(HYPERCUBE_TAG_VALUES)).nullable(),
-  removeTags: z.array(z.enum(HYPERCUBE_TAG_VALUES)).nullable(),
+  addTags: z.array(z.enum(HYPERCUBE_TAG_VALUES)).max(7).nullable(),
+  removeTags: z.array(z.enum(HYPERCUBE_TAG_VALUES)).max(7).nullable(),
   groupTitle: z.string().nullable(),
   // connect fields — an existing id, or the ref of an element created in THIS proposal
   fromRef: z.string().nullable(),
@@ -99,17 +100,25 @@ export function sanitizeCanvasOperations(
   let rowSeq = 0;
   const nextRowId = () => `row-${++rowSeq}`;
 
-  for (const r of (raw.operations || []).slice(0, MAX_OPS)) {
+  // Telemetry: attempted vs. kept at raw-row granularity (see droppedCount below).
+  const attemptedRows = (raw.operations || []).slice(0, MAX_OPS);
+  let keptNonCreate = 0;
+  const DUE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  for (const r of attemptedRows) {
     const summary = (r.summary || "").trim().slice(0, MAX_SUMMARY);
     switch (r.op) {
       case "create": {
         if (!r.kind || !r.ref) break;
+        // A ref colliding with a real inventory id could silently redirect a
+        // ref-connect onto an unrelated existing element — drop the row.
+        if (knownIds.has(r.ref)) break;
         createRows.push(r);
         break;
       }
       case "update": {
-        const id = (r.targetIds || []).find((t) => knownIds.has(t));
-        if (!id) break;
+        const ids = Array.from(new Set((r.targetIds || []).filter((t) => knownIds.has(t))));
+        if (ids.length === 0) break;
         const patch: { content?: string; label?: string; x?: number; y?: number; width?: number; height?: number } = {};
         if (typeof r.newContent === "string" && r.newContent.trim()) patch.content = r.newContent.slice(0, MAX_TEXT);
         if (typeof r.newLabel === "string" && r.newLabel.trim()) patch.label = r.newLabel.slice(0, 120);
@@ -118,35 +127,49 @@ export function sanitizeCanvasOperations(
         if (r.newWidth != null) patch.width = clampNum(r.newWidth, 20, 4000, 300);
         if (r.newHeight != null) patch.height = clampNum(r.newHeight, 20, 4000, 100);
         if (Object.keys(patch).length === 0) break;
+        // One row covers ALL surviving target ids — the approval checkbox
+        // must not silently narrow to just the first id.
         const rowId = nextRowId();
-        ops.push({ rowId, kind: "update", id, patch });
-        rows.push({ rowId, kind: "update", summary: summary || `Update element`, destructive: false });
+        for (const id of ids) {
+          ops.push({ rowId, kind: "update", id, patch });
+        }
+        const base = summary || "Update element";
+        rows.push({
+          rowId,
+          kind: "update",
+          summary: ids.length > 1 ? `${base} (${ids.length} elements)` : base,
+          destructive: false,
+        });
+        keptNonCreate++;
         break;
       }
       case "delete": {
-        const ids = (r.targetIds || []).filter((t) => knownIds.has(t));
+        const ids = Array.from(new Set((r.targetIds || []).filter((t) => knownIds.has(t))));
         if (ids.length === 0) break;
         const rowId = nextRowId();
         ops.push({ rowId, kind: "delete", ids });
         rows.push({ rowId, kind: "delete", summary: summary || `Delete ${ids.length} element(s)`, destructive: true });
+        keptNonCreate++;
         break;
       }
       case "tag": {
-        const ids = (r.targetIds || []).filter((t) => knownIds.has(t));
+        const ids = Array.from(new Set((r.targetIds || []).filter((t) => knownIds.has(t))));
         const add = validTags(r.addTags);
         const remove = validTags(r.removeTags);
         if (ids.length === 0 || (add.length === 0 && remove.length === 0)) break;
         const rowId = nextRowId();
         ops.push({ rowId, kind: "tag", ids, add, remove });
         rows.push({ rowId, kind: "tag", summary: summary || `Retag ${ids.length} element(s)`, destructive: false });
+        keptNonCreate++;
         break;
       }
       case "group": {
-        const ids = (r.targetIds || []).filter((t) => knownIds.has(t));
+        const ids = Array.from(new Set((r.targetIds || []).filter((t) => knownIds.has(t))));
         if (ids.length < 2) break;
         const rowId = nextRowId();
         ops.push({ rowId, kind: "group", ids, title: (r.groupTitle || "Group").slice(0, 120) });
         rows.push({ rowId, kind: "group", summary: summary || `Group ${ids.length} elements`, destructive: false });
+        keptNonCreate++;
         break;
       }
       case "connect": {
@@ -155,8 +178,10 @@ export function sanitizeCanvasOperations(
         const toExisting = knownIds.has(r.toRef);
         if (fromExisting && toExisting) {
           const rowId = nextRowId();
-          ops.push({ rowId, kind: "connect", fromId: r.fromRef, toId: r.toRef, ...(r.edgeLabel ? { label: r.edgeLabel } : {}) });
+          const label = (r.edgeLabel || "").trim().slice(0, 40);
+          ops.push({ rowId, kind: "connect", fromId: r.fromRef, toId: r.toRef, ...(label ? { label } : {}) });
           rows.push({ rowId, kind: "connect", summary: summary || "Connect two elements", destructive: false });
+          keptNonCreate++;
         } else if (!fromExisting && !toExisting) {
           // both are refs of created elements — resolved by generatedToCanvas below
           refConnects.push({ from: r.fromRef, to: r.toRef, label: r.edgeLabel ?? null });
@@ -167,6 +192,7 @@ export function sanitizeCanvasOperations(
       case "task": {
         const title = (r.taskTitle || "").trim();
         if (!title) break;
+        const dueDateValid = typeof r.taskDueDate === "string" && DUE_DATE_RE.test(r.taskDueDate);
         const rowId = nextRowId();
         ops.push({
           rowId,
@@ -176,12 +202,18 @@ export function sanitizeCanvasOperations(
             description: (r.taskDescription || "").slice(0, MAX_TEXT),
             suggestedFaces: [],
             isSubtask: false,
-            ...(r.taskPriority || r.taskDueDate
-              ? { metadata: { ...(r.taskPriority ? { priority: r.taskPriority } : {}), ...(r.taskDueDate ? { dueDate: r.taskDueDate } : {}) } }
+            ...(r.taskPriority || dueDateValid
+              ? {
+                  metadata: {
+                    ...(r.taskPriority ? { priority: r.taskPriority } : {}),
+                    ...(dueDateValid ? { dueDate: r.taskDueDate as string } : {}),
+                  },
+                }
               : {}),
           },
         });
         rows.push({ rowId, kind: "task", summary: summary || `Add task: ${title.slice(0, 60)}`, destructive: false });
+        keptNonCreate++;
         break;
       }
       case "note": {
@@ -190,6 +222,7 @@ export function sanitizeCanvasOperations(
         const rowId = nextRowId();
         ops.push({ rowId, kind: "note", content: content.slice(0, MAX_TEXT) });
         rows.push({ rowId, kind: "note", summary: summary || "Add note to Inbox", destructive: false });
+        keptNonCreate++;
         break;
       }
     }
@@ -225,7 +258,13 @@ export function sanitizeCanvasOperations(
     }
   }
 
-  return { reply: (raw.reply || "").slice(0, 1200), rows, creates, ops };
+  // A create row counts as "kept" only when the batch it fed actually produced
+  // elements — createRows entries lost inside generatedToCanvas (e.g. all
+  // malformed) are not individually reconciled; this stays row-level and exact.
+  const keptCreateRows = creates !== null ? createRows.length : 0;
+  const droppedCount = attemptedRows.length - (keptNonCreate + keptCreateRows);
+
+  return { reply: (raw.reply || "").slice(0, 1200), rows, creates, ops, droppedCount };
 }
 
 // Re-export for executor convenience
@@ -233,15 +272,19 @@ export { buildConnectorEdge };
 
 // ─── Client-side routing heuristic ─────────────────────────────────
 
-const QUESTION_PREFIX_RE = /^(what|why|how|should|could|would|do you|can you explain|explain|tell me|help me think)/i;
-const ACTION_RE = /\b(add|create|make|build|place|put|insert|delete|remove|clear|move|arrange|align|organi[sz]e|group|ungroup|tag|untag|label|connect|link|rename|resize|duplicate|split|merge|reorder|clean\s?up|lay\s?out)\b/i;
+const QUESTION_PREFIX_RE = /^(what|why|how|should|do you|can you explain|explain|tell me|help me think)/i;
+// "Could/would/can you ..." reads as a polite imperative when an action verb
+// follows — it should not be disqualified the way "What should I..." is.
+const POLITE_REQUEST_RE = /^(could|would|can)\s+you\b/i;
+const ACTION_RE = /\b(add|create|make|build|place|put|insert|delete|remove|clear|move|arrange|align|organi[sz]e|group|ungroup|tag|untag|label|connect|link|rename|resize|duplicate|split|merge|reorder|clean\s?up|lay\s?out|change|set|write|sort|distribute|swap|tidy)\b/i;
 
 /** True when a message reads as a canvas instruction rather than a question. */
 export function isActionableMessage(text: string): boolean {
   const trimmed = (text || "").trim();
   if (!trimmed) return false;
-  if (QUESTION_PREFIX_RE.test(trimmed)) return false;
-  return ACTION_RE.test(trimmed);
+  const isActionVerbPresent = ACTION_RE.test(trimmed);
+  if (QUESTION_PREFIX_RE.test(trimmed) && !(POLITE_REQUEST_RE.test(trimmed) && isActionVerbPresent)) return false;
+  return isActionVerbPresent;
 }
 
 // ─── Prompt guide appended to the ops-route system prompt ──────────
