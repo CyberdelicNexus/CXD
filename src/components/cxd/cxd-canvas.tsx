@@ -13,6 +13,7 @@ import { ExperienceInspector } from "./canvas/experience-inspector";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
 import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
+import { CanvasAssistant } from "./canvas/canvas-assistant";
 import { MultiSelectionBox } from "./canvas/multi-selection-box";
 import { Button } from "@/components/ui/button";
 import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid, SmilePlus } from "lucide-react";
@@ -5977,6 +5978,10 @@ export function CXDCanvas() {
         onGoToPlanTab={() => setCanvasViewMode('plan')}
         canvasZoom={canvasZoom}
       />
+      {/* Canvas AI Assistant — canvas view only, edit mode only */}
+      {canEdit && (
+        <CanvasAssistant selectedElementIds={Array.from(selectedElementIds)} />
+      )}
       {/* Drag preview for inbox items */}
       {draggingInboxItem && inboxDragPos && (
         <div

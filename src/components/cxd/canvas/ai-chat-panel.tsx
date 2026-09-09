@@ -14,9 +14,15 @@ import {
   Clock,
   Maximize2,
   Minimize2,
+  Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAIChat } from "@/hooks/use-ai-chat";
+import { useCanvasOperations } from "@/hooks/use-canvas-operations";
+import { isActionableMessage } from "@/lib/ai/canvas-operations";
+import { CanvasOperationsPreview } from "./canvas-operations-preview";
+import { useCXDStore } from "@/store/cxd-store";
+import { getElementTitle } from "@/utils/ai-context-aggregator";
 import { useAICredits } from "@/hooks/use-ai-credits";
 import { AIChatHistory } from "./ai-chat-history";
 import { StreamingMarkdown } from "./ai-chat-markdown";
@@ -106,6 +112,17 @@ function getAllPromptSuggestions(faceKey: string): string[] {
       "How can we test the core hypothesis?",
       "What would be lost if we removed each dimension?",
     ],
+    canvas: [
+      "Summarize what's on my canvas right now",
+      "Group my selected cards into a container",
+      "Tag the selected elements to the right hypercube faces",
+      "Add a 3-stage onboarding flow as containers",
+      "Connect the related concepts with arrows",
+      "Clean up: delete my empty cards",
+      "Turn my latest notes into tasks in the Plan tab",
+      "What's missing from this canvas composition?",
+      "Add a note to my inbox summarizing today's direction",
+    ],
     general: [
       "Help me clarify the core intention of this experience",
       "What's missing from my current design approach?",
@@ -146,6 +163,8 @@ interface AIChatPanelProps {
   sizeVariant?: "default" | "assistant";
   /** Called when a history entry from a different face is clicked */
   onNavigateToFace?: (faceKey: string) => void;
+  /** Canvas assistant: enables the direct-manipulation (operations) path */
+  canvasOps?: { selectedElementIds: string[] };
 }
 
 export function AIChatPanel({
@@ -164,6 +183,7 @@ export function AIChatPanel({
   provider: providerProp,
   sizeVariant = "default",
   onNavigateToFace,
+  canvasOps,
 }: AIChatPanelProps) {
   const [isFocused, setIsFocused] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -218,6 +238,26 @@ export function AIChatPanel({
   const { selectedModel } = useAICredits();
   const provider = providerProp || selectedModel || "gemini";
 
+  // Selection titles for the chat persona. Read through getState() rather than
+  // subscribing: getCurrentProject() mutates in place, so a [project] dep here
+  // would loop (see the inbox-items note in MEMORY.md).
+  const selectedIdsKey = canvasOps?.selectedElementIds.join(",") ?? "";
+  const canvasSelection = useMemo(() => {
+    if (!canvasOps || canvasOps.selectedElementIds.length === 0) return undefined;
+    const els = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
+    const titles = canvasOps.selectedElementIds
+      .map((id) => els.find((e) => e.id === id))
+      .filter((el): el is NonNullable<typeof el> => !!el)
+      .map((el) => getElementTitle(el));
+    return { count: titles.length, titles };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIdsKey]);
+
+  const extraContext = useMemo(
+    () => (canvasSelection ? { canvasSelection } : undefined),
+    [canvasSelection],
+  );
+
   const {
     messages,
     sendMessage,
@@ -229,7 +269,13 @@ export function AIChatPanel({
     starMessage,
     newSession,
     isLoadingHistory,
-  } = useAIChat({ faceKey, projectId, provider, enabled: true, faceLabel: faceName, faceHue: accentHue });
+  } = useAIChat({ faceKey, projectId, provider, enabled: true, faceLabel: faceName, faceHue: accentHue, extraContext });
+
+  const [actMode, setActMode] = useState(false);
+  const ops = useCanvasOperations({
+    provider: typeof provider === "string" ? provider : undefined,
+    selectedElementIds: canvasOps?.selectedElementIds ?? [],
+  });
 
   // Auto-scroll when new messages arrive or streaming
   useEffect(() => {
@@ -288,10 +334,22 @@ export function AIChatPanel({
   const onSubmit = useCallback(
     (e?: React.FormEvent) => {
       if (e) e.preventDefault();
-      if (isStreaming) return;
+      if (isStreaming || ops.isProposing) return;
+      const text = input.trim();
+      if (!text) return;
+      // Canvas assistant only: route change requests to the operations path.
+      // A proposal that comes back empty falls through to the chat stream, so a
+      // routing false-positive never dead-ends in a blank approval card.
+      if (canvasOps && (actMode || isActionableMessage(text))) {
+        setInput("");
+        void ops.propose(text).then((produced) => {
+          if (!produced) sendMessage(text);
+        });
+        return;
+      }
       handleSubmit(e);
     },
-    [handleSubmit, isStreaming],
+    [handleSubmit, isStreaming, input, canvasOps, actMode, ops, sendMessage, setInput],
   );
 
   const handleNewSession = useCallback(async () => {
@@ -354,6 +412,24 @@ export function AIChatPanel({
 
         {/* Right-side buttons */}
         <div className="flex items-center gap-1">
+          {canvasOps && (
+            <button
+              onClick={() => setActMode(!actMode)}
+              className={cn(
+                "p-1.5 rounded-md transition-colors",
+                actMode
+                  ? "bg-violet-500/25 text-violet-300"
+                  : "hover:bg-white/10 text-muted-foreground/60 hover:text-foreground",
+              )}
+              title={
+                actMode
+                  ? "Act on canvas: ON — every message proposes changes"
+                  : "Act on canvas: auto — detected from your wording"
+              }
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+            </button>
+          )}
           {/* Session toolbar */}
           <button
             onClick={() => {
@@ -473,7 +549,7 @@ export function AIChatPanel({
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/50" />
               </div>
-            ) : messages.length === 0 ? (
+            ) : messages.length === 0 && ops.proposals.length === 0 && !ops.isProposing ? (
               <div className="flex flex-col items-center justify-center h-full text-center py-6">
                 <MessageSquare
                   className="w-10 h-10 mb-3"
@@ -583,6 +659,9 @@ export function AIChatPanel({
                                 // Phase 2: Note creation
                                 console.log('[AIChatPanel] Note added to Canvas Inbox');
                               }}
+                              onProposeChanges={canvasOps ? (content) => {
+                                void ops.propose("Apply the concrete changes described in this answer.", content);
+                              } : undefined}
                             />
                           </div>
                         </div>
@@ -601,6 +680,27 @@ export function AIChatPanel({
                     </div>
                   </div>
                 )}
+
+                {canvasOps && ops.proposals.map((entry) => (
+                  <CanvasOperationsPreview
+                    key={entry.id}
+                    entry={entry}
+                    onApply={ops.apply}
+                    onDiscard={ops.discard}
+                  />
+                ))}
+                {canvasOps && ops.isProposing && (
+                  <div className="flex justify-start">
+                    <div className="bg-white/5 border border-border/40 rounded-xl px-4 py-2.5 flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-300" />
+                      <span className="text-xs text-muted-foreground">Drafting changes…</span>
+                    </div>
+                  </div>
+                )}
+                {canvasOps && ops.proposeError && (
+                  <p className="text-xs text-red-400 px-1">{ops.proposeError}</p>
+                )}
+
                 <div ref={chatEndRef} />
               </div>
             )}

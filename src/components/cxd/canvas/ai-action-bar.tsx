@@ -23,6 +23,8 @@ export interface AIActionBarProps {
   onTasksAdded?: () => void;
   onNoteCreated?: () => void;
   onElementsPlaced?: (count: number) => void;
+  /** Canvas assistant: propose concrete canvas changes grounded on this reply */
+  onProposeChanges?: (content: string) => void;
 }
 
 type ButtonState = 'idle' | 'loading' | 'success' | 'error';
@@ -37,7 +39,8 @@ export function AIActionBar({
   provider,
   onTasksAdded,
   onNoteCreated,
-  onElementsPlaced
+  onElementsPlaced,
+  onProposeChanges
 }: AIActionBarProps) {
   const { syncAddElement } = useCollaborationContext();
   const [taskButtonState, setTaskButtonState] = useState<ButtonState>('idle');
@@ -227,6 +230,22 @@ export function AIActionBar({
               {draftButtonState === 'success' && '✓ Placed on Canvas'}
               {draftButtonState === 'error' && '✗ Failed, try again'}
             </span>
+          </button>
+        )}
+
+        {/* Canvas assistant: turn this answer into a reviewable change set */}
+        {onProposeChanges && messageContent && (
+          <button
+            onClick={() => onProposeChanges(messageContent)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              "min-h-[44px] min-w-[44px]",
+              "bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30",
+              "text-violet-300 hover:text-violet-200 hover:scale-[1.02] active:scale-95",
+            )}
+          >
+            <LayoutGrid className="w-4 h-4" />
+            <span>Make these changes</span>
           </button>
         )}
       </div>
