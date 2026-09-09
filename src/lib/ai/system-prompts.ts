@@ -314,6 +314,29 @@ ${fullContext.plan.upcomingDeadlines.length > 0
 }
 
 /**
+ * Canvas Assistant persona: the general assistant, docked in the Canvas view,
+ * aware that a separate operations pipeline can turn its guidance into
+ * reviewable canvas changes.
+ */
+export function getCanvasSystemPrompt(
+  fullContext: AIProjectContext,
+  selection?: { count: number; titles: string[] },
+): string {
+  const selectionBlock = selection && selection.count > 0
+    ? `\n### Current Selection\nThe designer has ${selection.count} element(s) selected: ${selection.titles.slice(0, 10).join("; ")}. "This/these" likely refers to the selection.`
+    : "";
+
+  return `${getGeneralSystemPrompt(fullContext)}
+
+## Canvas Assistant Mode
+
+You are docked inside the Canvas view. Beyond conversation, the app can turn your guidance into concrete canvas changes: when the designer asks you to add, arrange, tag, group, connect, or remove things, a separate mechanism proposes reviewable changes for them to approve. So:
+- When asked to make changes, respond with a crisp, concrete plan of WHAT you would change (the app handles the how).
+- Refer to canvas elements by their visible titles.
+- Keep replies focused on the canvas composition, the inbox, and the plan.${selectionBlock}`;
+}
+
+/**
  * Build the deep analysis prompt for a specific face.
  */
 export function getAnalysisPrompt(faceId: string, faceContext: FaceContext, fullContext: AIProjectContext): string {

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { createClient } from "@/supabase/server";
 import { getModelConfig, getModelInstance, getModelInstanceByModelId, MODEL_ID_MAP } from "@/lib/ai/provider-registry";
-import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt } from "@/lib/ai/system-prompts";
+import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt, getCanvasSystemPrompt } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { canBringOwnKeys, type ModelId } from "@/lib/ai-credit-config";
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
@@ -40,11 +40,13 @@ export async function POST(request: Request) {
       faceKey,
       projectContext,
       faceContext,
+      canvasSelection,
     }: {
       messages: Array<{ id?: string; role: string; parts?: Array<{ type: string; text?: string }>; content?: string }>;
       faceKey: string;
       projectContext: AIProjectContext;
       faceContext?: FaceContext;
+      canvasSelection?: { count: number; titles: string[] };
     } = body;
 
     if (!rawMessages || !faceKey || !projectContext) {
@@ -240,6 +242,8 @@ export async function POST(request: Request) {
       systemPrompt = getGeneralSystemPrompt(projectContext);
     } else if (faceKey === "core") {
       systemPrompt = getCoreSystemPrompt(projectContext);
+    } else if (faceKey === "canvas") {
+      systemPrompt = getCanvasSystemPrompt(projectContext, canvasSelection);
     } else if (faceContext) {
       systemPrompt = getFaceSystemPrompt(faceKey, faceContext, projectContext);
     } else {
