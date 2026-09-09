@@ -103,6 +103,26 @@ const shapeStyle: ElementStyle = {
 const clamp = (v: number, min: number, max: number) =>
   Number.isFinite(v) ? Math.min(Math.max(v, min), max) : min;
 
+/** Standard AI-authored connector between two existing element ids. */
+export function buildConnectorEdge(fromId: string, toId: string, label?: string): CanvasEdge {
+  const trimmed = label?.trim();
+  return {
+    id: crypto.randomUUID(),
+    fromNodeId: fromId,
+    toNodeId: toId,
+    fromAnchor: 'right',
+    toAnchor: 'left',
+    fromAutoAnchor: true,
+    toAutoAnchor: true,
+    fromAnchorOffset: 0.5,
+    toAnchorOffset: 0.5,
+    boardId: null,
+    surface: 'canvas',
+    style: { thickness: 2, lineStyle: 'solid', gradientName: 'violet', arrowStyle: 'end' },
+    ...(trimmed ? { label: { text: trimmed.slice(0, MAX_EDGE_LABEL_LEN) } } : {}),
+  };
+}
+
 /** Keep only real face tags, deduped. Returns undefined when nothing valid. */
 function sanitizeTags(tags: HypercubeFaceTag[] | null | undefined): HypercubeFaceTag[] | undefined {
   if (!tags || tags.length === 0) return undefined;
@@ -208,22 +228,7 @@ export function generatedToCanvas(
     const key = `${fromId}->${toId}`;
     if (seenEdge.has(key)) continue;
     seenEdge.add(key);
-    const label = e.label?.trim();
-    edges.push({
-      id: crypto.randomUUID(),
-      fromNodeId: fromId,
-      toNodeId: toId,
-      fromAnchor: 'right',
-      toAnchor: 'left',
-      fromAutoAnchor: true,
-      toAutoAnchor: true,
-      fromAnchorOffset: 0.5,
-      toAnchorOffset: 0.5,
-      boardId: null,
-      surface: 'canvas',
-      style: { thickness: 2, lineStyle: 'solid', gradientName: 'violet', arrowStyle: 'end' },
-      ...(label ? { label: { text: label.slice(0, MAX_EDGE_LABEL_LEN) } } : {}),
-    });
+    edges.push(buildConnectorEdge(fromId, toId, e.label ?? undefined));
   }
 
   return { elements, edges };
