@@ -28,6 +28,12 @@ import {
   ElementStyle,
 } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
+import {
+  useShapeStylePresets,
+  addStylePreset,
+  removeStylePreset,
+  type ShapeStylePreset,
+} from "@/lib/style-presets";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -1027,6 +1033,10 @@ export function CanvasElementRenderer({
                     fillOpacity={(element as ShapeElement).style?.fillOpacity}
                     textColor={(element as ShapeElement).style?.textColor}
                     fontSize={(element as ShapeElement).style?.fontSize}
+                    currentStyle={(element as ShapeElement).style}
+                    onApplyStyle={(partial) =>
+                      onUpdate({ style: { ...element.style, ...partial } })
+                    }
                     onFillColorChange={(color) =>
                       onUpdate({ style: { ...element.style, bgColor: color } })
                     }
@@ -1765,9 +1775,13 @@ export function CanvasElementRenderer({
         // into the canvas transform layer (the element wrapper's parent) as a high-z
         // sibling of every element wrapper: it escapes the negative stacking context and
         // paints above all elements, yet still tracks pan/zoom because it lives inside the
-        // same transformed layer. Non-container elements pop to z 2e9 when selected, so
-        // their in-place toolbar is already on top, so leave that path untouched.
-        if (element.type === "container" && typeof document !== "undefined") {
+        // same transformed layer.
+        //
+        // Text elements need the same escape hatch: their toolbar/submenus were rendering
+        // behind neighbouring elements (the in-place z 2e9 pop was not enough — the text
+        // wrapper's own stacking context trapped the left-opening colour/font popovers).
+        // Portaling is strictly safe: it can only raise the toolbar, never lower it.
+        if ((element.type === "container" || element.type === "text") && typeof document !== "undefined") {
           const layer = elementRef.current?.parentElement;
           if (layer) {
             return createPortal(
@@ -1777,8 +1791,11 @@ export function CanvasElementRenderer({
                   left: element.x,
                   top: element.y,
                   width: element.width,
-                  height: (element as ContainerElement).collapsed ? 28 : element.height,
-                  zIndex: 2000000001,
+                  height:
+                    element.type === "container" && (element as ContainerElement).collapsed
+                      ? 28
+                      : element.height,
+                  zIndex: 2000000002,
                   transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined,
                 }}
               >
@@ -2609,6 +2626,110 @@ function ShapeTextStylePicker({
 }
 
 // Shape color picker with fill/stroke/text toggle and stroke width control
+// A single preset shown as a ring swatch: the border (gradient or solid) forms the
+// outer ring, the fill sits in the middle — a mini preview of what applying it does.
+function PresetSwatch({
+  preset,
+  onApply,
+  onRemove,
+}: {
+  preset: ShapeStylePreset;
+  onApply: () => void;
+  onRemove?: () => void;
+}) {
+  const s = preset.style;
+  const ringBg =
+    s.borderColor && s.borderColor !== "transparent" ? s.borderColor : "rgba(255,255,255,0.15)";
+  const fillBg = !s.bgColor || s.bgColor === "transparent" ? "transparent" : s.bgColor;
+  return (
+    <div className="relative group/preset">
+      <button
+        type="button"
+        onClick={onApply}
+        title={preset.name || "Saved preset"}
+        className="w-6 h-6 rounded-full flex items-center justify-center transition-transform hover:scale-110"
+        style={{ background: ringBg }}
+      >
+        <span
+          className="w-3.5 h-3.5 rounded-full border border-black/20"
+          style={{
+            background: fillBg,
+            // Show a subtle checker for transparent fills so an outline preset reads.
+            backgroundImage:
+              fillBg === "transparent"
+                ? "linear-gradient(45deg,#3f3f46 25%,transparent 25%,transparent 75%,#3f3f46 75%),linear-gradient(45deg,#3f3f46 25%,transparent 25%,transparent 75%,#3f3f46 75%)"
+                : undefined,
+            backgroundSize: fillBg === "transparent" ? "6px 6px" : undefined,
+            backgroundPosition: fillBg === "transparent" ? "0 0,3px 3px" : undefined,
+          }}
+        />
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          title="Remove preset"
+          className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-zinc-800 border border-white/20 text-white/80 text-[9px] leading-none flex items-center justify-center opacity-0 group-hover/preset:opacity-100 transition-opacity"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Preset strip for the colour popover: built-in + user-saved fill/border/font
+// combinations, plus a "+" that saves the element's current style as a new preset.
+function StylePresetStrip({
+  currentStyle,
+  onApply,
+}: {
+  currentStyle?: ShapeElement["style"];
+  onApply: (partial: ShapeStylePreset["style"]) => void;
+}) {
+  const { presets } = useShapeStylePresets();
+  const saveCurrent = () => {
+    const s = currentStyle || {};
+    addStylePreset({
+      bgColor: s.bgColor,
+      borderColor: s.borderColor,
+      borderWidth: s.borderWidth,
+      fillOpacity: s.fillOpacity,
+      borderStyle: s.borderStyle,
+      textColor: s.textColor,
+      fontFamily: s.fontFamily,
+    });
+  };
+  return (
+    <div className="mb-3">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">
+        Presets
+      </div>
+      <div className="flex items-center flex-wrap gap-1.5">
+        {presets.map((p) => (
+          <PresetSwatch
+            key={p.id}
+            preset={p}
+            onApply={() => onApply(p.style)}
+            onRemove={p.builtIn ? undefined : () => removeStylePreset(p.id)}
+          />
+        ))}
+        <button
+          type="button"
+          onClick={saveCurrent}
+          title="Save current fill, border & font as a preset"
+          className="w-6 h-6 rounded-full border border-dashed border-white/25 text-white/60 hover:text-white hover:border-white/50 flex items-center justify-center transition-colors text-sm leading-none"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ShapeColorPicker({
   fillColor,
   strokeColor,
@@ -2616,12 +2737,14 @@ export function ShapeColorPicker({
   fillOpacity,
   textColor,
   fontSize,
+  currentStyle,
   onFillColorChange,
   onStrokeColorChange,
   onStrokeWidthChange,
   onFillOpacityChange,
   onTextColorChange,
   onFontSizeChange,
+  onApplyStyle,
   onClose,
   defaultMode,
 }: {
@@ -2631,12 +2754,14 @@ export function ShapeColorPicker({
   fillOpacity?: number;
   textColor?: string;
   fontSize?: number;
+  currentStyle?: ShapeElement["style"];
   onFillColorChange: (color: string) => void;
   onStrokeColorChange: (color: string) => void;
   onStrokeWidthChange: (width: number) => void;
   onFillOpacityChange: (opacity: number) => void;
   onTextColorChange?: (color: string) => void;
   onFontSizeChange?: (size: number) => void;
+  onApplyStyle?: (partial: ShapeStylePreset["style"]) => void;
   onClose: () => void;
   defaultMode?: "fill" | "stroke" | "text";
 }) {
@@ -2698,6 +2823,23 @@ export function ShapeColorPicker({
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {/* Style presets — built-in (incl. gradient ring) + user-saved, with "+" to save */}
+      <StylePresetStrip
+        currentStyle={currentStyle}
+        onApply={(partial) => {
+          if (onApplyStyle) {
+            onApplyStyle(partial);
+            return;
+          }
+          // Fallback: apply field-by-field via the individual handlers.
+          if (partial.bgColor !== undefined) onFillColorChange(partial.bgColor);
+          if (partial.borderColor !== undefined) onStrokeColorChange(partial.borderColor);
+          if (partial.borderWidth !== undefined) onStrokeWidthChange(partial.borderWidth);
+          if (partial.fillOpacity !== undefined) onFillOpacityChange(partial.fillOpacity);
+          if (partial.textColor !== undefined) onTextColorChange?.(partial.textColor);
+        }}
+      />
+
       {/* Mode tabs: Fill / Outline / Text */}
       <div className="flex gap-1 mb-3 p-0.5 bg-muted/50 rounded-md">
         <button

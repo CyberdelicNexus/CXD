@@ -2567,6 +2567,13 @@ export function CXDCanvas() {
       }
     }
 
+    // Containers that an element NEWLY ENTERED during this drop. Grow-to-fit below
+    // runs ONLY for these — never for a container a child merely already lived in.
+    // That is what lets an element be dragged out: a still-attached child poking past
+    // an edge (mid-removal, or left attached after an undo) must not make the container
+    // chase/expand to swallow it back.
+    const enteredContainers = new Set<string>();
+
     // Check if elements were dropped into a container (support multi-drop)
     if (dropTargetContainerId) {
       const targetContainer = canvasElements.find(
@@ -2607,6 +2614,8 @@ export function CXDCanvas() {
         elementsToDrop.forEach((id) => {
           syncAddNodeToContainer(id, targetContainer.id);
         });
+        // Explicit drop into a container is an intentional "put INTO" → grow to fit it.
+        enteredContainers.add(targetContainer.id);
       }
     }
 
@@ -2659,6 +2668,7 @@ export function CXDCanvas() {
         if (foundContainer && el.containerId !== foundContainer) {
           // Attach to new container
           syncAddNodeToContainer(id, foundContainer);
+          enteredContainers.add(foundContainer);
         } else if (!foundContainer && el.containerId) {
           // Detach from old container
           syncRemoveNodeFromContainer(id);
@@ -2668,22 +2678,18 @@ export function CXDCanvas() {
 
     // ── Container grow-to-fit — the ONLY place containers auto-resize (drop time only) ──
     // Runs after attach/detach has settled, so each dragged element's containerId is final.
-    // Affected containers = the explicit drop target plus whatever container each dragged
-    // element now lives in (covers both "element entered a container" and "an internal
-    // element was released overlapping an edge"). For each, grow EXPAND-ONLY on whichever
-    // side(s) a child pokes past the current edge (+ padding). Growing left/top shifts the
-    // container's x/y; children keep their absolute coords so they don't move on screen.
-    // A move that leaves every child within the current bounds produces no change, so
-    // rearranging elements already inside a container never resizes it.
-    if (didMove) {
+    // Affected containers = ONLY those an element newly ENTERED this drop (see
+    // `enteredContainers`). For each, grow EXPAND-ONLY on whichever side(s) a child pokes
+    // past the current edge (+ padding). Growing left/top shifts the container's x/y;
+    // children keep their absolute coords so they don't move on screen.
+    // Deliberately NOT the "container each dragged element already lived in": that made a
+    // container chase a child being dragged out (and resize after an undo left the child
+    // attached). Rearranging or removing elements already inside never resizes the container.
+    if (didMove && enteredContainers.size > 0) {
       const PAD = 20;
       const liveEls = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
-      const containersToFit = new Set<string>();
+      const containersToFit = new Set<string>(enteredContainers);
       if (dropTargetContainerId) containersToFit.add(dropTargetContainerId);
-      dragOriginalPositionsRef.current.forEach((_, id) => {
-        const el = liveEls.find((e) => e.id === id);
-        if (el?.containerId) containersToFit.add(el.containerId);
-      });
 
       for (const cid of Array.from(containersToFit)) {
         const container = liveEls.find((e) => e.id === cid);
