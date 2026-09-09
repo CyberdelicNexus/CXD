@@ -35,8 +35,24 @@ export interface ProposalRow {
   destructive: boolean;
 }
 
+/** Fields an update op may change. Applied per element type by the executor —
+ *  `content` never lands on a container, `label` never on a text card, etc. */
+export interface UpdatePatch {
+  content?: string;
+  label?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  emoji?: string;
+  noteTitle?: string;
+  noteBody?: string;
+  tintColor?: "violet" | "ocean" | "emerald" | "sunset" | "rose" | "glacier";
+  shapeType?: string;
+}
+
 export type SemanticOp =
-  | { rowId: string; kind: "update"; id: string; patch: Partial<{ content: string; label: string; x: number; y: number; width: number; height: number }> }
+  | { rowId: string; kind: "update"; id: string; patch: UpdatePatch }
   | { rowId: string; kind: "delete"; ids: string[] }
   | { rowId: string; kind: "tag"; ids: string[]; add: HypercubeFaceTag[]; remove: HypercubeFaceTag[] }
   | { rowId: string; kind: "group"; ids: string[]; title: string }

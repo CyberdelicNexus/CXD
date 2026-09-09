@@ -22,9 +22,15 @@ export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
   if (!projectId) return null;
 
   return (
-    <>
+    // The canvas container is `fixed inset-0 top-16 ... h-full`: `top-16` plus a
+    // full 100vh height puts its bottom edge 4rem BELOW the viewport, and its
+    // overflow-hidden clips whatever sits there. This layer subtracts that
+    // overhang so bottom-anchored children land on screen. It stays `absolute`
+    // (not `fixed`) so it also respects the container's inline right margin
+    // when a side panel narrows the canvas.
+    <div className="absolute inset-x-0 top-0 bottom-16 z-[70] pointer-events-none">
       {open && (
-        <div className="absolute bottom-24 right-6 z-[70] w-[420px] max-w-[calc(100vw-48px)]">
+        <div className="pointer-events-auto absolute bottom-24 right-6 w-[420px] max-w-[calc(100vw-48px)]">
           <AIChatPanel
             faceKey="canvas"
             projectId={projectId}
@@ -43,7 +49,7 @@ export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
         onClick={() => setOpen(!open)}
         data-tour-id="canvas-assistant-launcher"
         className={cn(
-          "absolute bottom-6 right-6 z-[70] w-14 h-14 rounded-full flex items-center justify-center",
+          "pointer-events-auto absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center",
           "transition-transform hover:scale-105 active:scale-95",
         )}
         title={open ? "Close Canvas Assistant" : "Canvas Assistant"}
@@ -70,6 +76,6 @@ export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
         />
         <HypercubeLogo size={30} />
       </button>
-    </>
+    </div>
   );
 }

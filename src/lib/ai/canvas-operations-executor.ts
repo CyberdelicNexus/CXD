@@ -77,6 +77,17 @@ export function translateForApply(
         if (op.patch.y !== undefined) updates.y = op.patch.y;
         if (op.patch.width !== undefined) updates.width = op.patch.width;
         if (op.patch.height !== undefined) updates.height = op.patch.height;
+        // Presentation edits, each only on the types that actually carry them.
+        if (op.patch.emoji !== undefined && el.type === "freeform") updates.emoji = op.patch.emoji;
+        if (op.patch.noteTitle !== undefined && el.type === "freeform") updates.noteTitle = op.patch.noteTitle;
+        if (op.patch.noteBody !== undefined && el.type === "freeform") updates.noteBody = op.patch.noteBody;
+        if (op.patch.tintColor !== undefined && el.type === "container") updates.tintColor = op.patch.tintColor;
+        if (op.patch.shapeType !== undefined && el.type === "shape") updates.shapeType = op.patch.shapeType;
+        // A note card's visible title lives in noteTitle, not label — let a
+        // plain "rename this card" instruction land where the user can see it.
+        if (op.patch.label !== undefined && el.type === "freeform" && op.patch.noteTitle === undefined) {
+          updates.noteTitle = op.patch.label;
+        }
         if (Object.keys(updates).length === 0) { skippedRowIds.push(op.rowId); break; }
         queueUpdate(op.id, updates);
         break;

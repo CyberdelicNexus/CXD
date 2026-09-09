@@ -9,6 +9,9 @@ import type {
   ContainerElement,
   TextElement,
   ShapeElement,
+  FreeformElement,
+  ImageElement,
+  LineElement,
   ElementStyle,
   CanvasEdge,
   HypercubeFaceTag,
@@ -22,7 +25,7 @@ export const SHAPE_TYPES = ['rectangle', 'circle', 'diamond', 'triangle', 'hexag
 const HYPERCUBE_TAG_VALUES = HYPERCUBE_FACE_TAGS as [HypercubeFaceTag, ...HypercubeFaceTag[]];
 
 export const generatedElementSchema = z.object({
-  kind: z.enum(['container', 'text', 'shape']),
+  kind: z.enum(['container', 'text', 'shape', 'freeform', 'image', 'line']),
   ref: z.string().describe('Unique short reference within this response, e.g. "c1", "t2"'),
   parentRef: z
     .string()
@@ -45,6 +48,17 @@ export const generatedElementSchema = z.object({
   y: z.number(),
   width: z.number(),
   height: z.number(),
+  // Type-specific extras as a JSON object string. Kept as one field rather than
+  // ~15 more typed columns because Anthropic's structured output caps both
+  // union-typed (<=16) and optional (<=24) parameters per schema; every value
+  // is whitelisted server-side in generatedToCanvas, so this loosens the
+  // schema, never the validation.
+  props: z
+    .string()
+    .nullable()
+    .describe(
+      'JSON object of extra properties for this kind. freeform: {"emoji":"💡","noteTitle":"...","noteBody":"...","cardType":"note"}. image: {"storyboard":true,"description":"caption"}. line: {"gradientName":"violet","widthPx":2,"kind":"solid"}. Omit or null when not needed.',
+    ),
 });
 
 // Optional connectors between elements, for mind-map / flow structures.
@@ -54,12 +68,16 @@ export const generatedEdgeSchema = z.object({
   label: z.string().nullable().describe('Optional short connector label (1-3 words)'),
 });
 
+// NOTE: no .min()/.max() on these arrays. Anthropic's structured output rejects
+// minItems/maxItems ("For 'array' type, property 'maxItems' is not supported"),
+// which failed EVERY generateObject call for Claude users. The bounds are
+// enforced in generatedToCanvas (MAX_ELEMENTS / MAX_EDGES) instead, and the
+// route already 422s when zero usable elements come back.
 export const generateElementsSchema = z.object({
   title: z.string().describe('Short name for the generated structure'),
-  elements: z.array(generatedElementSchema).min(1).max(60),
+  elements: z.array(generatedElementSchema).describe('1 to 60 elements'),
   edges: z
     .array(generatedEdgeSchema)
-    .max(80)
     .nullable()
     .optional()
     .describe(
@@ -73,6 +91,9 @@ export type GeneratedEdge = z.infer<typeof generatedEdgeSchema>;
 export interface GeneratedToCanvasResult {
   elements: CanvasElement[];
   edges: CanvasEdge[];
+  /** ref -> real element id, for callers that must wire generated elements to
+   *  something outside this batch (e.g. connecting a new node to an existing one). */
+  idByRef: Map<string, string>;
 }
 
 const MAX_ELEMENTS = 60;
@@ -102,6 +123,36 @@ const shapeStyle: ElementStyle = {
 
 const clamp = (v: number, min: number, max: number) =>
   Number.isFinite(v) ? Math.min(Math.max(v, min), max) : min;
+
+/** Card fill gradients per tint family (templates.design.md §3). */
+const TINT_GRADIENTS: Record<(typeof TINT_COLORS)[number], string> = {
+  violet: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)',
+  ocean: 'linear-gradient(135deg, #06243D 0%, #0B3D63 50%, #0A2540 100%)',
+  emerald: 'linear-gradient(135deg, #052E22 0%, #0B5138 50%, #052E2E 100%)',
+  sunset: 'linear-gradient(135deg, #3D1405 0%, #6B2E0B 50%, #45150B 100%)',
+  rose: 'linear-gradient(135deg, #3D0A22 0%, #6B1B3E 50%, #3D0B2C 100%)',
+  glacier: 'linear-gradient(135deg, #0A2A3D 0%, #17506B 50%, #10333F 100%)',
+};
+
+/** Parse the model's `props` JSON bag. Malformed input yields an empty bag —
+ *  a bad extras blob must never cost us the element itself. */
+function parseProps(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw || typeof raw !== 'string') return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+const str = (v: unknown, max: number): string | undefined =>
+  typeof v === 'string' && v.trim() ? v.slice(0, max) : undefined;
+const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
+const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined =>
+  typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
 
 /** Standard AI-authored connector between two existing element ids. */
 export function buildConnectorEdge(fromId: string, toId: string, label?: string): CanvasEdge {
@@ -202,7 +253,7 @@ export function generatedToCanvas(
         textAlign: 'left',
       };
       elements.push(text);
-    } else {
+    } else if (g.kind === 'shape') {
       const shape: ShapeElement = {
         ...base,
         type: 'shape',
@@ -212,6 +263,58 @@ export function generatedToCanvas(
         style: shapeStyle,
       };
       elements.push(shape);
+    } else if (g.kind === 'freeform') {
+      // Note seed (templates.design.md §4): the editable starter card. Mirrors
+      // the shape note-creation-service produces so AI notes and user notes are
+      // indistinguishable once placed.
+      const p = parseProps(g.props);
+      const tint = g.tint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
+      const noteTitle = str(p.noteTitle, MAX_LABEL_LEN) ?? str(g.label, MAX_LABEL_LEN) ?? 'Note';
+      const noteBody = str(p.noteBody, MAX_TEXT_LEN) ?? str(g.content, MAX_TEXT_LEN) ?? '';
+      const freeform: FreeformElement = {
+        ...base,
+        type: 'freeform',
+        zIndex: 1,
+        cardType: oneOf(p.cardType, ['note', 'task'] as const) ?? 'note',
+        content: '',
+        noteTitle,
+        noteBody,
+        ...(bool(p.hideNoteTitle) !== undefined ? { hideNoteTitle: bool(p.hideNoteTitle) } : {}),
+        ...(str(p.emoji, 8) ? { emoji: str(p.emoji, 8) } : {}),
+        style: { bgColor: TINT_GRADIENTS[tint], textColor: '#ffffff' },
+      };
+      elements.push(freeform);
+    } else if (g.kind === 'image') {
+      // Storyboard seed: empty src renders the upload affordance already framed.
+      const p = parseProps(g.props);
+      const image: ImageElement = {
+        ...base,
+        type: 'image',
+        zIndex: 1,
+        src: '',
+        alt: str(g.label, MAX_LABEL_LEN) ?? 'Image',
+        storyboard: bool(p.storyboard) ?? true,
+        description: str(p.description, MAX_LABEL_LEN) ?? str(g.content, MAX_LABEL_LEN) ?? '',
+        objectFit: 'cover',
+      };
+      elements.push(image);
+    } else {
+      // Divider / rule (templates.design.md §2). Lines carry their own
+      // start/end world coords rather than width/height.
+      const p = parseProps(g.props);
+      const line: LineElement = {
+        ...base,
+        type: 'line',
+        zIndex: 1,
+        start: { x: base.x, y: base.y },
+        end: { x: base.x + base.width, y: base.y },
+        style: {
+          kind: oneOf(p.kind, ['solid', 'dashed', 'dotted'] as const) ?? 'solid',
+          widthPx: typeof p.widthPx === 'number' ? clamp(p.widthPx, 1, 12) : 2,
+          ...(oneOf(p.gradientName, TINT_COLORS) ? { gradientName: oneOf(p.gradientName, TINT_COLORS) } : {}),
+        },
+      };
+      elements.push(line);
     }
     elementIds.add(base.id);
   }
@@ -231,7 +334,13 @@ export function generatedToCanvas(
     edges.push(buildConnectorEdge(fromId, toId, e.label ?? undefined));
   }
 
-  return { elements, edges };
+  // Only expose refs that actually produced an element.
+  const liveIdByRef = new Map<string, string>();
+  idByRef.forEach((id, ref) => {
+    if (elementIds.has(id)) liveIdByRef.set(ref, id);
+  });
+
+  return { elements, edges, idByRef: liveIdByRef };
 }
 
 /** Back-compat thin wrapper: elements only (edges dropped). */
@@ -247,6 +356,9 @@ You generate elements for a spatial design canvas. Rules:
 - Child elements (text, shapes) reference their container via parentRef and must sit fully inside the parent's bounds with at least 24px padding on every side. The first 56px below a container's top edge is reserved for its header.
 - Text elements hold the actual content (questions, prompts, notes): usually 280-440px wide, 40-120px tall, fontSize is fixed at 14 so about 60 characters fit per line.
 - Shapes (circle, diamond, hexagon...) are small accents 40-80px, content is a single emoji or 1-3 words.
+- PREFER 'freeform' note cards over bare 'text' for anything the designer will edit and build on — they are the primary card type on this canvas. Size ~300x300. Give every zone at least one seeded note card rather than leaving it empty. Use props: {"emoji":"💡","noteTitle":"Names the move","noteBody":"Concrete starter content","cardType":"note"}. Pick an emoji that fits the idea (🔆 🔥 💡 🎯 🧭 🌊 …).
+- 'image' seeds a storyboard frame (empty upload slot + caption): ~320x260, props {"storyboard":true,"description":"caption placeholder"}.
+- 'line' is a divider/underline only — never a connection between elements (use edges for that). It spans from (x,y) to (x+width, y); props {"gradientName":"violet","widthPx":2}. A thin divider under a container title is the house style.
 - Prefer a clear structure: a grid or left-to-right flow of containers, each seeded with 2-5 text elements of concrete, useful starter content (never generic filler like "Add text here").
 - Use each ref exactly once, like c1, c2, t1, t2, s1.
 - Hypercube face tags: set 'hypercubeTags' ONLY on containers and top-level elements, and only from this exact list: ${HYPERCUBE_FACE_TAGS.join(', ')}. Tag a CONTAINER with the union of the faces its children relate to — do NOT tag the child text/shape elements individually (children inherit their container's tags automatically). Most elements need no tags; add them only when the semantic fit is clear.
