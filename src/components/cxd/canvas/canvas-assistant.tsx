@@ -36,7 +36,7 @@ export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
     // chat (z-[120]). The layer is click-through except for its two children.
     <div className="fixed inset-0 z-[80] pointer-events-none">
       {open && (
-        <div className="pointer-events-auto absolute bottom-24 right-6 w-[420px] max-w-[calc(100vw-48px)]">
+        <div className="pointer-events-auto absolute bottom-20 right-3 w-[420px] max-w-[calc(100vw-24px)]">
           <AIChatPanel
             faceKey="canvas"
             projectId={projectId}
@@ -55,7 +55,10 @@ export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
         onClick={() => setOpen(!open)}
         data-tour-id="canvas-assistant-launcher"
         className={cn(
-          "pointer-events-auto absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center",
+          // Sized and inset to sit in the experience-inspector rail's column:
+          // that rail is a 64px-wide strip flush right (px-3 + w-10 buttons),
+          // so 40px at right-3 puts this exactly under it.
+          "pointer-events-auto absolute bottom-6 right-3 w-10 h-10 rounded-full flex items-center justify-center",
           "transition-transform hover:scale-105 active:scale-95",
         )}
         title={open ? "Close Canvas Assistant" : "Canvas Assistant"}
@@ -83,8 +86,8 @@ export function CanvasAssistant({ selectedElementIds }: CanvasAssistantProps) {
         <Image
           src="/images/CXD Logo 2.png"
           alt=""
-          width={30}
-          height={30}
+          width={22}
+          height={22}
           className="object-contain relative"
         />
       </button>
