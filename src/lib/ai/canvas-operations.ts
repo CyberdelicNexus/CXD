@@ -371,8 +371,8 @@ EVERY field must be present on every row. When a field does not apply to the op,
 
 FIELD MAPPING (the same few fields mean different things per op):
 - op=create: 'kind' + unique 'ref' (c1, t1, n1...), 'x'/'y'/'width'/'height', optional 'parentRef', 'label', 'content', plus 'props'.
-- op=update: 'targetIds' + 'label'/'content' when those should change. Everything else that should change goes in 'props': {"x":100,"y":200,"width":300,"height":140,"emoji":"🔥","noteTitle":"...","noteBody":"...","tint":"ocean","shapeType":"circle"}. Include ONLY the keys you want changed — omitted keys are left alone. Leave the top-level x/y/width/height at 0 for updates.
-- op=group: 'targetIds' + 'label' (the new container's title).
+- op=update: 'targetIds' + 'label'/'content' when those should change. Cannot move an element into or out of a container — use op=group for that. Everything else that should change goes in 'props': {"x":100,"y":200,"width":300,"height":140,"emoji":"🔥","noteTitle":"...","noteBody":"...","tint":"ocean","shapeType":"circle"}. Include ONLY the keys you want changed — omitted keys are left alone. Leave the top-level x/y/width/height at 0 for updates.
+- op=group: 'targetIds' + 'label' (the new container's title). This is the ONLY way to put EXISTING elements inside a container — it creates the container, sizes it around them, and reparents them in one step. Do NOT instead emit op=create for a container plus op=update rows: update cannot change an element's parent, so that leaves the elements sitting loose on top of an empty box.
 - op=connect: 'fromRef'/'toRef' + optional 'label' (edge label). Either side may be an existing inventory id OR a ref you create in this same proposal — mixing the two is fine (e.g. connect a zone you just created to an existing card).
 - op=task: 'label' is the task title, 'content' the description, props {"priority":"high","dueDate":"2026-09-30"}.
 - op=note: 'content' is the note body.

@@ -8,6 +8,7 @@ import type { CanvasElement, CanvasEdge, ContainerElement, ElementStyle, Hypercu
 import type { SanitizedProposal, CanvasBatchMutation } from "@/types/ai-operations";
 import type { ExtractedTask } from "@/lib/ai/ai-response-classifier";
 import { buildConnectorEdge } from "./canvas-operations";
+import { realBounds, overlaps, GRID_PX, type Box } from "@/lib/canvas-layout-rules";
 
 export interface ApplyPlan {
   batch: CanvasBatchMutation;
@@ -21,12 +22,92 @@ const GROUP_PADDING = 40;
 // Matches the reserved header band the canvas generation guide assumes.
 const GROUP_HEADER = 56;
 
+const TINT_FAMILIES = ["violet", "ocean", "emerald", "sunset", "rose", "glacier"] as const;
+type Tint = (typeof TINT_FAMILIES)[number];
+
+/**
+ * templates.design.md §3: adjacent zones never share a tint. Pick the first
+ * family no neighbouring container is already using.
+ */
+function pickTint(liveElements: CanvasElement[], box: Box): Tint {
+  const NEIGHBOUR_GAP = 140;
+  const taken = new Set<string>();
+  for (const el of liveElements) {
+    if (el.type !== "container") continue;
+    const b = realBounds(el);
+    if (!b) continue;
+    const gapX = Math.max(0, Math.max(b.x, box.x) - Math.min(b.x + b.w, box.x + box.w));
+    const gapY = Math.max(0, Math.max(b.y, box.y) - Math.min(b.y + b.h, box.y + box.h));
+    if (gapX < NEIGHBOUR_GAP && gapY < NEIGHBOUR_GAP) {
+      const t = (el as unknown as { tintColor?: string }).tintColor;
+      if (t) taken.add(t);
+    }
+  }
+  return TINT_FAMILIES.find((t) => !taken.has(t)) ?? "violet";
+}
+
 const groupContainerStyle: ElementStyle = {
   borderColor: "rgba(255,255,255,0.15)",
   borderWidth: 1,
   borderStyle: "dashed",
   bgColor: "rgba(255,255,255,0.03)",
 };
+
+/** templates.design.md §8: zones sit 80-140px apart. */
+const ZONE_GUTTER = 140;
+
+/**
+ * Keep a freshly generated batch off the user's existing work.
+ *
+ * The model is given the canvas inventory and asked to place new content in
+ * clear space, but it does that unreliably — it cannot really see the canvas,
+ * and dropping a new zone on top of existing cards is the most destructive-
+ * looking mistake it makes. Detect the collision and slide the WHOLE batch
+ * (preserving its internal layout) to the right of everything that exists.
+ * Mutates the given elements.
+ */
+function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): void {
+  if (created.length === 0 || live.length === 0) return;
+
+  const createdIds = new Set(created.map((e) => e.id));
+  // Only elements that land on the shared canvas can collide with live ones;
+  // children of a container created in this same batch travel with it.
+  const exposed = created.filter((e) => !e.containerId || !createdIds.has(e.containerId));
+  const liveRoot = live.filter((e) => !e.containerId);
+
+  const hit = exposed.some((a) => {
+    const ab = realBounds(a);
+    if (!ab) return false;
+    return liveRoot.some((b) => {
+      const bb = realBounds(b);
+      return bb ? overlaps(ab, bb) : false;
+    });
+  });
+  if (!hit) return;
+
+  const liveBoxes = liveRoot.map(realBounds).filter((b): b is Box => !!b);
+  const createdBoxes = created.map(realBounds).filter((b): b is Box => !!b);
+  if (liveBoxes.length === 0 || createdBoxes.length === 0) return;
+
+  const liveRight = Math.max(...liveBoxes.map((b) => b.x + b.w));
+  const batchLeft = Math.min(...createdBoxes.map((b) => b.x));
+  const batchTop = Math.min(...createdBoxes.map((b) => b.y));
+  const liveTop = Math.min(...liveBoxes.map((b) => b.y));
+
+  const snap = (n: number) => Math.round(n / GRID_PX) * GRID_PX;
+  const dx = snap(liveRight + ZONE_GUTTER - batchLeft);
+  const dy = snap(liveTop - batchTop);
+
+  for (const el of created) {
+    el.x += dx;
+    el.y += dy;
+    if (el.type === 'line') {
+      const line = el as unknown as { start: { x: number; y: number }; end: { x: number; y: number } };
+      line.start = { x: line.start.x + dx, y: line.start.y + dy };
+      line.end = { x: line.end.x + dx, y: line.end.y + dy };
+    }
+  }
+}
 
 export function translateForApply(
   proposal: SanitizedProposal,
@@ -56,7 +137,11 @@ export function translateForApply(
   };
 
   if (proposal.creates && selectedRowIds.has(proposal.creates.rowId)) {
-    batch.addElements.push(...proposal.creates.elements);
+    // Clone before relocating: the proposal is React state and must not be
+    // mutated by previewing an apply.
+    const created = proposal.creates.elements.map((e) => ({ ...e }) as CanvasElement);
+    relocateIfColliding(created, liveElements);
+    batch.addElements.push(...created);
     batch.addEdges.push(...proposal.creates.edges);
   }
 
@@ -132,20 +217,29 @@ export function translateForApply(
           .map((id) => liveById.get(id))
           .filter((el): el is CanvasElement => !!el);
         if (members.length < 2) { skippedRowIds.push(op.rowId); break; }
-        const minX = Math.min(...members.map((el) => el.x));
-        const minY = Math.min(...members.map((el) => el.y));
-        const maxX = Math.max(...members.map((el) => el.x + el.width));
-        const maxY = Math.max(...members.map((el) => el.y + el.height));
+        // Wrap the members' RENDERED footprints — a note card stored at 140px
+        // paints 300px tall and would otherwise hang out of its own container.
+        const boxes = members.map((el) => realBounds(el) ?? { x: el.x, y: el.y, w: el.width, h: el.height });
+        const minX = Math.min(...boxes.map((b) => b.x));
+        const minY = Math.min(...boxes.map((b) => b.y));
+        const maxX = Math.max(...boxes.map((b) => b.x + b.w));
+        const maxY = Math.max(...boxes.map((b) => b.y + b.h));
+        // Snap outward to the 20px grid (templates.design.md §8) so the zone
+        // lines up with everything else on the canvas.
+        const gx = Math.floor((minX - GROUP_PADDING) / GRID_PX) * GRID_PX;
+        const gy = Math.floor((minY - GROUP_PADDING - GROUP_HEADER) / GRID_PX) * GRID_PX;
+        const gw = Math.ceil((maxX + GROUP_PADDING - gx) / GRID_PX) * GRID_PX;
+        const gh = Math.ceil((maxY + GROUP_PADDING - gy) / GRID_PX) * GRID_PX;
         const container: ContainerElement = {
           id: crypto.randomUUID(),
           type: "container",
-          x: minX - GROUP_PADDING,
-          y: minY - GROUP_PADDING - GROUP_HEADER,
-          width: maxX - minX + GROUP_PADDING * 2,
-          height: maxY - minY + GROUP_PADDING * 2 + GROUP_HEADER,
+          x: gx,
+          y: gy,
+          width: gw,
+          height: gh,
           zIndex: 0,
           label: op.title,
-          tintColor: "violet",
+          tintColor: pickTint(liveElements, { x: gx, y: gy, w: gw, h: gh }),
           collapsed: false,
           locked: false,
           // Inherit the members' board/surface: a container placed on the root

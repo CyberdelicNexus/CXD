@@ -17,6 +17,7 @@ import type {
   HypercubeFaceTag,
 } from '@/types/canvas-elements';
 import { HYPERCUBE_FACE_TAGS } from '@/types/canvas-elements';
+import { RENDER_FLOORS, realBounds, overlaps, GRID_PX, CONTAINER_HEADER_PX } from '@/lib/canvas-layout-rules';
 
 export const TINT_COLORS = ['violet', 'ocean', 'emerald', 'sunset', 'rose', 'glacier'] as const;
 export const SHAPE_TYPES = ['rectangle', 'circle', 'diamond', 'triangle', 'hexagon', 'star'] as const;
@@ -182,6 +183,97 @@ function sanitizeTags(tags: HypercubeFaceTag[] | null | undefined): HypercubeFac
   return Array.from(new Set(valid)).slice(0, HYPERCUBE_FACE_TAGS.length);
 }
 
+const SIDE_PADDING = 24;
+const CHILD_GUTTER = 24;
+
+/**
+ * Deterministic layout repair, applied to every AI-generated batch.
+ *
+ * Models are unreliable at spatial arithmetic: they size a container for the
+ * dimensions they *stated* rather than the ones that *render* (a note card
+ * stored at 140px paints 300px), so children escape their zone and collide.
+ * Asking harder in the prompt does not fix this — measuring does. Anything the
+ * rubric in canvas-layout-rules.ts can detect, this repairs before the user
+ * ever sees a proposal.
+ *
+ * Conservative on purpose: children are only re-stacked when they ACTUALLY
+ * collide or escape, so a deliberate multi-column arrangement survives.
+ * Mutates in place.
+ */
+export function repairLayout(elements: CanvasElement[]): void {
+  const snap = (n: number) => Math.round(n / GRID_PX) * GRID_PX;
+
+  // 1. Everything on the 20px grid (templates.design.md §8).
+  for (const el of elements) {
+    if (el.type === 'line' || el.type === 'connector') continue;
+    el.x = snap(el.x);
+    el.y = snap(el.y);
+  }
+
+  // 2. Per container: make the zone actually contain its children.
+  const containers = elements.filter((el) => el.type === 'container');
+  for (const c of containers) {
+    const children = elements.filter((el) => el.containerId === c.id);
+    if (children.length === 0) continue;
+
+    const boxOf = (el: CanvasElement) => realBounds(el) ?? { x: el.x, y: el.y, w: el.width, h: el.height };
+    const escapes = children.some((el) => {
+      const b = boxOf(el);
+      return b.x < c.x || b.y < c.y || b.x + b.w > c.x + c.width || b.y + b.h > c.y + c.height;
+    });
+    const collide = children.some((a, i) =>
+      children.some((b, j) => j > i && overlaps(boxOf(a), boxOf(b))),
+    );
+
+    if (escapes || collide) {
+      // Re-stack in one column below the reserved header band.
+      let cursor = c.y + CONTAINER_HEADER_PX + CHILD_GUTTER;
+      for (const child of children) {
+        const b = boxOf(child);
+        child.x = snap(c.x + SIDE_PADDING);
+        child.y = snap(cursor);
+        cursor = child.y + b.h + CHILD_GUTTER;
+      }
+    }
+
+    // 3. Grow the zone to enclose whatever the children now occupy. Never
+    //    shrink: the model may have sized it generously for room to grow.
+    let maxRight = c.x + c.width;
+    let maxBottom = c.y + c.height;
+    for (const child of children) {
+      const b = boxOf(child);
+      maxRight = Math.max(maxRight, b.x + b.w + SIDE_PADDING);
+      maxBottom = Math.max(maxBottom, b.y + b.h + CHILD_GUTTER);
+    }
+    c.width = snap(maxRight - c.x);
+    c.height = snap(maxBottom - c.y);
+  }
+
+  // 4. De-overlap top-level siblings. Free-floating layouts (mind maps, flows)
+  //    are spaced by the model for the sizes it stated, so note cards -- which
+  //    paint 300px tall whatever is stored -- routinely collide. Push each
+  //    colliding element straight down rather than re-stacking, so a
+  //    hub-and-spoke or left-to-right structure survives the repair.
+  const boxOfAny = (el: CanvasElement) =>
+    realBounds(el) ?? { x: el.x, y: el.y, w: el.width, h: el.height };
+  const roots = elements.filter(
+    (el) => !el.containerId && el.type !== 'line' && el.type !== 'connector',
+  );
+  const placed: CanvasElement[] = [];
+  for (const el of roots) {
+    let guard = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (guard++ < 200) {
+      const b = boxOfAny(el);
+      const clash = placed.find((p) => overlaps(b, boxOfAny(p)));
+      if (!clash) break;
+      const cb = boxOfAny(clash);
+      el.y = snap(cb.y + cb.h + CHILD_GUTTER);
+    }
+    placed.push(el);
+  }
+}
+
 /**
  * Convert validated AI output into real CanvasElement[] + CanvasEdge[]: fresh
  * UUIDs, ref→id remapping, coordinate/size/length clamping, template-idiom
@@ -271,11 +363,18 @@ export function generatedToCanvas(
       const tint = g.tint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
       const noteTitle = str(p.noteTitle, MAX_LABEL_LEN) ?? str(g.label, MAX_LABEL_LEN) ?? 'Note';
       const noteBody = str(p.noteBody, MAX_TEXT_LEN) ?? str(g.content, MAX_TEXT_LEN) ?? '';
+      const cardType = oneOf(p.cardType, ['note', 'task'] as const) ?? 'note';
+      // Note cards paint at a CSS floor of 200x300 whatever we store. Storing
+      // anything smaller makes every downstream layout calculation (overlap
+      // checks, container bounds, the user's own eye) disagree with the screen.
+      const floor = cardType === 'note' ? RENDER_FLOORS.noteCard : { width: 0, height: 0 };
       const freeform: FreeformElement = {
         ...base,
+        width: Math.max(base.width, floor.width),
+        height: Math.max(base.height, floor.height),
         type: 'freeform',
         zIndex: 1,
-        cardType: oneOf(p.cardType, ['note', 'task'] as const) ?? 'note',
+        cardType,
         content: '',
         noteTitle,
         noteBody,
@@ -333,6 +432,8 @@ export function generatedToCanvas(
     seenEdge.add(key);
     edges.push(buildConnectorEdge(fromId, toId, e.label ?? undefined));
   }
+
+  repairLayout(elements);
 
   // Only expose refs that actually produced an element.
   const liveIdByRef = new Map<string, string>();
