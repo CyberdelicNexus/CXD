@@ -8,6 +8,7 @@ import { useState } from "react";
 import type { ComponentType } from "react";
 import {
   Check, X, Loader2, Trash2, Plus, Pencil, Tag, FolderPlus, Link2, CheckSquare, FileText,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ProposalEntry } from "@/hooks/use-canvas-operations";
@@ -21,6 +22,7 @@ const KIND_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   connect: Link2,
   task: CheckSquare,
   note: FileText,
+  comment: MessageSquare,
 };
 
 interface CanvasOperationsPreviewProps {

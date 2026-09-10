@@ -44,9 +44,12 @@ const COORD_LIMIT = 50000;
 // whereas an absent JSON key is unambiguous. Creates use the typed numbers,
 // where an explicit position is always wanted anyway.
 export const canvasOpRowSchema = z.object({
-  op: z.enum(["create", "update", "delete", "tag", "group", "connect", "task", "note"]),
+  op: z.enum(["create", "update", "delete", "tag", "group", "connect", "task", "note", "comment"]),
   summary: z.string().describe('Short human-readable description of this change, e.g. "Delete 2 empty cards"'),
-  kind: z.enum(["container", "text", "shape", "freeform", "image", "line", "none"])
+  kind: z.enum([
+    "container", "text", "shape", "freeform", "image", "line",
+    "table", "link", "board", "experienceBlock", "none",
+  ])
     .describe("Element type for op=create ('none' for every other op). Prefer 'freeform' for editable cards."),
   ref: z.string().describe('op=create: unique short ref, e.g. "c1", "n2". "" otherwise.'),
   parentRef: z.string().describe('op=create: ref of the container this element sits inside. "" otherwise.'),
@@ -225,7 +228,7 @@ export function sanitizeCanvasOperations(
           keptNonCreate++;
         } else if (!fromExisting && !toExisting) {
           // both are refs of created elements — resolved by generatedToCanvas below
-          refConnects.push({ from: r.fromRef, to: r.toRef, label: r.label ?? null });
+          refConnects.push({ from: r.fromRef, to: r.toRef, label: r.label ?? null, props: r.props ?? null });
           absorbedConnects++;
         } else {
           // Mixed: one side is a brand-new element, the other already exists
@@ -276,6 +279,16 @@ export function sanitizeCanvasOperations(
         const rowId = nextRowId();
         ops.push({ rowId, kind: "note", content: content.slice(0, MAX_TEXT) });
         rows.push({ rowId, kind: "note", summary: summary || "Add note to Inbox", destructive: false });
+        keptNonCreate++;
+        break;
+      }
+      case "comment": {
+        const content = (r.content || "").trim();
+        if (!content) break;
+        const anchorId = (r.targetIds || []).find((t) => knownIds.has(t));
+        const rowId = nextRowId();
+        ops.push({ rowId, kind: "comment", content: content.slice(0, MAX_TEXT), ...(anchorId ? { anchorId } : {}) });
+        rows.push({ rowId, kind: "comment", summary: summary || "Leave a review comment", destructive: false });
         keptNonCreate++;
         break;
       }
@@ -376,6 +389,7 @@ FIELD MAPPING (the same few fields mean different things per op):
 - op=connect: 'fromRef'/'toRef' + optional 'label' (edge label). Either side may be an existing inventory id OR a ref you create in this same proposal — mixing the two is fine (e.g. connect a zone you just created to an existing card).
 - op=task: 'label' is the task title, 'content' the description, props {"priority":"high","dueDate":"2026-09-30"}.
 - op=note: 'content' is the note body.
+- op=comment: 'content' is the review note, 'targetIds' the single element it is about (omit to pin in open space). Use this ONLY when the user asks you to review, critique or leave notes on their canvas — never volunteer comments on a normal change request, and keep them to the few points that genuinely matter.
 - op=tag: 'targetIds' + props {"addTags":[...],"removeTags":[...]}.
 - op=delete: 'targetIds' only.
 
@@ -386,6 +400,15 @@ ELEMENT KINDS for op=create (props is a JSON OBJECT STRING):
 - 'shape' — small accent/waypoint, 40-80px. props: {"shapeType":"circle"} (rectangle, circle, diamond, triangle, hexagon, star).
 - 'image' — storyboard frame seed (empty upload slot + caption), ~320x260. props: {"storyboard":true,"description":"caption"}.
 - 'line' — a DIVIDER only, spanning (x,y) to (x+width,y). props: {"gradientName":"violet","widthPx":2}. Never use a line to connect elements — use op=connect.
+- 'table' — a real editable data grid. USE THIS whenever the user asks for a table, matrix, comparison or grid. props: {"cells":[["Header A","Header B"],["row 1a","row 1b"]],"headerRow":true}. Size roughly 160px per column and 48px per row. Never fake a table out of containers and cards.
+- 'link' — a URL bookmark card. props: {"url":"https://...","linkMode":"bookmark"}; 'label' is the title. ~320x120.
+- 'board' — a hexagon portal opening into a nested canvas, for anything deep (research, moodboards, personas). 'label' is its title. props: {"icon":"grid","hexColor":"#4B1B6B"}. Needs ~170x230.
+- 'experienceBlock' — anchors the layout to live framing data. props: {"componentKey":"intentionCore"} — one of intentionCore, desiredChange, humanContext, contextAndMeaning, realityPlanes, sensoryDomains, presenceTypes, stateMapping, traitMapping. Place one at the origin of a flow when the content maps to a framing section.
+
+FLOW DIAGRAMS AND MIND MAPS:
+- Nodes are 'freeform' cards (or small 'shape' waypoints: rectangle, circle, diamond, triangle, hexagon, star). Connect them with op=connect, never with 'line'.
+- Style each connector through props: {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end","bend":40}. Rotate gradientName per branch so parallel paths read apart, and give edges a gentle bend rather than leaving every line straight.
+- Mind map: one central hub node with branches radiating out. Flow: left-to-right lanes with a diamond shape at each decision point.
 
 HOUSE STYLE (this canvas has a design system):
 - Tints rotate violet -> ocean -> emerald -> sunset -> rose -> glacier; adjacent zones never share a tint.

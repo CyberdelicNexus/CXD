@@ -113,6 +113,10 @@ export function useCanvasOperations({ provider, selectedElementIds }: UseCanvasO
           ? ` ${noteOk} note(s) added to Inbox.`
           : ` ${noteOk}/${plan.notes.length} note(s) added to Inbox (some failed).`;
       }
+      if (canvasOk && plan.comments.length > 0) {
+        for (const c of plan.comments) state.addComment(c.content, c.position);
+        sideNotes += ` ${plan.comments.length} comment(s) pinned.`;
+      }
       if (canvasOk && plan.skippedRowIds.length > 0) {
         sideNotes += ` ${plan.skippedRowIds.length} change(s) skipped (elements changed since the proposal).`;
       }

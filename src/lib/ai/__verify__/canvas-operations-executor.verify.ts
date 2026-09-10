@@ -47,10 +47,40 @@ check("tag merge respects live tags",
   r.batch.updates.some(u => u.id === "e2" && JSON.stringify((u.updates as { hypercubeTags?: string[] }).hypercubeTags) === JSON.stringify(["Sensory Domains"])));
 check("group creates container + reparents members",
   r.batch.addElements.length === 1 && r.batch.updates.filter(u => ["e1", "e2"].includes(u.id)).length === 2);
-check("group bbox wraps members", (() => {
+check("group repositions its members into the cluster",
+  r.batch.updates.filter(u => ["e1", "e2"].includes(u.id) && "x" in u.updates && "y" in u.updates).length === 2);
+check("grouped members end up inside the container", (() => {
   const c = r.batch.addElements[0];
-  return c.x < 100 && c.y < 100 && c.x + c.width > 400 && c.y + c.height > 360;
+  return ["e1", "e2"].every((id) => {
+    const pos = r.batch.updates.find(u => u.id === id)!.updates as { x: number; y: number };
+    const src = live.find(e => e.id === id)!;
+    return pos.x >= c.x && pos.y >= c.y
+      && pos.x + src.width <= c.x + c.width
+      && pos.y + src.height <= c.y + c.height;
+  });
 })());
+
+// Gather-then-wrap exists so an unrelated element sitting between far-apart
+// members is NOT swallowed by the new zone — the failure the layout eval found.
+{
+  const mk = (id: string, x: number, y: number): CanvasElement =>
+    ({ id, type: "text", x, y, width: 300, height: 100, zIndex: 1, content: id, locked: false, boardId: null, surface: "canvas", style: {} }) as CanvasElement;
+  const spread = [mk("m1", 0, 0), mk("bystander", 400, 400), mk("m2", 900, 900)];
+  const gp: SanitizedProposal = {
+    reply: "", droppedCount: 0,
+    rows: [{ rowId: "g", kind: "group", summary: "Group far-apart", destructive: false }],
+    creates: null,
+    ops: [{ rowId: "g", kind: "group", ids: ["m1", "m2"], title: "Far" }],
+  };
+  const gr = translateForApply(gp, new Set(["g"]), spread, []);
+  const c = gr.batch.addElements[0];
+  const by = spread[1];
+  const enclosed = by.x >= c.x && by.y >= c.y
+    && by.x + by.width <= c.x + c.width && by.y + by.height <= c.y + c.height;
+  check("bystander between far-apart members is not enclosed", !enclosed);
+  check("far-apart members are gathered, not wrapped in place",
+    gr.batch.updates.filter(u => ["m1", "m2"].includes(u.id)).length === 2);
+}
 check("stale id op is skipped, not applied",
   r.skippedRowIds.includes("row-4") && !r.batch.updates.some(u => u.id === "ghost"));
 

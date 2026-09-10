@@ -30,7 +30,7 @@ export interface CanvasInventory {
 
 export interface ProposalRow {
   rowId: string;
-  kind: "create" | "update" | "delete" | "tag" | "group" | "connect" | "task" | "note";
+  kind: "create" | "update" | "delete" | "tag" | "group" | "connect" | "task" | "note" | "comment";
   summary: string;
   destructive: boolean;
 }
@@ -58,7 +58,10 @@ export type SemanticOp =
   | { rowId: string; kind: "group"; ids: string[]; title: string }
   | { rowId: string; kind: "connect"; fromId: string; toId: string; label?: string }
   | { rowId: string; kind: "task"; task: ExtractedTask }
-  | { rowId: string; kind: "note"; content: string };
+  | { rowId: string; kind: "note"; content: string }
+  /** A review pin. `anchorId` is the element being commented on; without one
+   *  the comment lands in open canvas space. */
+  | { rowId: string; kind: "comment"; content: string; anchorId?: string };
 
 export interface SanitizedProposal {
   /** 1-3 sentence model explanation, displayed above the rows */

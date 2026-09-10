@@ -1730,6 +1730,21 @@ export const useCXDStore = create<CXDState>()(
           batch.updates.filter(u => !removeSet.has(u.id)).map(u => [u.id, u.updates]),
         );
 
+        // A hexagon portal is meaningless without the board it opens into, so
+        // mint the matching records here rather than in a second write.
+        const now = new Date().toISOString();
+        const newBoards = preparedAdds
+          .filter((el) => el.type === 'board')
+          .map((el) => ({
+            id: (el as { childBoardId: string }).childBoardId,
+            parentBoardId: activeBoardId,
+            title: (el as { title?: string }).title || 'Board',
+            nodes: [],
+            edges: [],
+            createdAt: now,
+            updatedAt: now,
+          }));
+
         // Snapshot for the no-yDoc fallback history path.
         get().pushCanvasHistory();
 
@@ -1741,6 +1756,9 @@ export const useCXDStore = create<CXDState>()(
                 ...p,
                 canvasLayout: {
                   ...(p.canvasLayout || {}),
+                  ...(newBoards.length
+                    ? { boards: [...(p.canvasLayout?.boards || []), ...newBoards] }
+                    : {}),
                   elements: [
                     ...(p.canvasLayout?.elements || [])
                       .filter(el => !removeSet.has(el.id))

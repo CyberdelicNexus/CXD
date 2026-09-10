@@ -12,6 +12,12 @@ import type {
   FreeformElement,
   ImageElement,
   LineElement,
+  TableElement,
+  TableCell,
+  LinkElement,
+  BoardElement,
+  ExperienceBlockElement,
+  InspectorSectionId,
   ElementStyle,
   CanvasEdge,
   HypercubeFaceTag,
@@ -26,7 +32,10 @@ export const SHAPE_TYPES = ['rectangle', 'circle', 'diamond', 'triangle', 'hexag
 const HYPERCUBE_TAG_VALUES = HYPERCUBE_FACE_TAGS as [HypercubeFaceTag, ...HypercubeFaceTag[]];
 
 export const generatedElementSchema = z.object({
-  kind: z.enum(['container', 'text', 'shape', 'freeform', 'image', 'line']),
+  kind: z.enum([
+    'container', 'text', 'shape', 'freeform', 'image', 'line',
+    'table', 'link', 'board', 'experienceBlock',
+  ]),
   ref: z.string().describe('Unique short reference within this response, e.g. "c1", "t2"'),
   parentRef: z
     .string()
@@ -67,6 +76,12 @@ export const generatedEdgeSchema = z.object({
   from: z.string().describe('ref of the source element (e.g. the central hub of a mind map)'),
   to: z.string().describe('ref of the target element (a branch or child idea)'),
   label: z.string().nullable().describe('Optional short connector label (1-3 words)'),
+  props: z
+    .string()
+    .nullable()
+    .describe(
+      'JSON object of connector styling. {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"both","bend":40}. Rotate gradientName per branch so parallel paths read apart; bend curves the line (0 = straight).',
+    ),
 });
 
 // NOTE: no .min()/.max() on these arrays. Anthropic's structured output rejects
@@ -125,6 +140,22 @@ const shapeStyle: ElementStyle = {
 const clamp = (v: number, min: number, max: number) =>
   Number.isFinite(v) ? Math.min(Math.max(v, min), max) : min;
 
+/** Hexagon portal fills per tint family (templates.design.md §5). */
+const BOARD_HEX_COLORS: Record<(typeof TINT_COLORS)[number], string> = {
+  violet: '#4B1B6B',
+  ocean: '#0B3D63',
+  emerald: '#0B5138',
+  sunset: '#6B2E0B',
+  rose: '#6B1B3E',
+  glacier: '#17506B',
+};
+
+/** Framing sections an experienceBlock may anchor to. */
+const INSPECTOR_SECTION_IDS = [
+  'intentionCore', 'desiredChange', 'humanContext', 'contextAndMeaning',
+  'realityPlanes', 'sensoryDomains', 'presenceTypes', 'stateMapping', 'traitMapping',
+] as const satisfies readonly InspectorSectionId[];
+
 /** Card fill gradients per tint family (templates.design.md §3). */
 const TINT_GRADIENTS: Record<(typeof TINT_COLORS)[number], string> = {
   violet: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)',
@@ -155,9 +186,23 @@ const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : 
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined =>
   typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
 
-/** Standard AI-authored connector between two existing element ids. */
-export function buildConnectorEdge(fromId: string, toId: string, label?: string): CanvasEdge {
+/**
+ * Standard AI-authored connector between two existing element ids.
+ * `props` is the model's optional styling bag (see generatedEdgeSchema);
+ * every value is whitelisted here, and anything unrecognised falls back to the
+ * house default of a violet solid arrow (templates.design.md §6).
+ */
+export function buildConnectorEdge(
+  fromId: string,
+  toId: string,
+  label?: string,
+  props?: string | null,
+): CanvasEdge {
   const trimmed = label?.trim();
+  const p = parseProps(props);
+  const bend = typeof p.bend === 'number' && Number.isFinite(p.bend)
+    ? clamp(p.bend, -400, 400)
+    : 0;
   return {
     id: crypto.randomUUID(),
     fromNodeId: fromId,
@@ -170,7 +215,13 @@ export function buildConnectorEdge(fromId: string, toId: string, label?: string)
     toAnchorOffset: 0.5,
     boardId: null,
     surface: 'canvas',
-    style: { thickness: 2, lineStyle: 'solid', gradientName: 'violet', arrowStyle: 'end' },
+    style: {
+      thickness: typeof p.thickness === 'number' ? clamp(p.thickness, 1, 8) : 2,
+      lineStyle: oneOf(p.lineStyle, ['solid', 'dashed', 'dotted'] as const) ?? 'solid',
+      gradientName: oneOf(p.gradientName, TINT_COLORS) ?? 'violet',
+      arrowStyle: oneOf(p.arrowStyle, ['none', 'start', 'end', 'both'] as const) ?? 'end',
+    },
+    ...(bend !== 0 ? { bend: { x: 0, y: bend } } : {}),
     ...(trimmed ? { label: { text: trimmed.slice(0, MAX_EDGE_LABEL_LEN) } } : {}),
   };
 }
@@ -397,6 +448,82 @@ export function generatedToCanvas(
         objectFit: 'cover',
       };
       elements.push(image);
+    } else if (g.kind === 'table') {
+      // Grid of editable cells. The model supplies a row-major string matrix;
+      // it is normalised to exactly rows x cols so the renderer never indexes
+      // past the end of a ragged row.
+      const p = parseProps(g.props);
+      const raw = Array.isArray(p.cells) ? (p.cells as unknown[]) : [];
+      const grid = raw
+        .filter((r): r is unknown[] => Array.isArray(r))
+        .map((r) => r.map((c) => (typeof c === 'string' ? c.slice(0, 200) : '')));
+      const rows = clamp(grid.length || (typeof p.rows === 'number' ? p.rows : 3), 1, 30);
+      const cols = clamp(
+        grid[0]?.length || (typeof p.cols === 'number' ? p.cols : 3),
+        1,
+        12,
+      );
+      const cells: TableCell[][] = Array.from({ length: rows }, (_, r) =>
+        Array.from({ length: cols }, (_, c) => ({ text: grid[r]?.[c] ?? '' })),
+      );
+      const table: TableElement = {
+        ...base,
+        type: 'table',
+        zIndex: 1,
+        rows,
+        cols,
+        cells,
+        headerRow: bool(p.headerRow) ?? true,
+        lineWidth: 1,
+        lineColor: 'rgba(255,255,255,0.14)',
+        tableBg: 'rgba(255,255,255,0.03)',
+      };
+      elements.push(table);
+    } else if (g.kind === 'link') {
+      const p = parseProps(g.props);
+      const url = str(p.url, 500);
+      if (!url) continue; // a link with no destination is not a link
+      const link: LinkElement = {
+        ...base,
+        type: 'link',
+        zIndex: 1,
+        url,
+        linkMode: oneOf(p.linkMode, ['bookmark', 'embed', 'file'] as const) ?? 'bookmark',
+        title: str(g.label, MAX_LABEL_LEN) ?? str(p.title, MAX_LABEL_LEN) ?? url.slice(0, 60),
+        description: str(g.content, MAX_LABEL_LEN) ?? '',
+      };
+      elements.push(link);
+    } else if (g.kind === 'board') {
+      // Portal into a nested canvas (templates.design.md §5). childBoardId is
+      // minted here; the client registers the matching board record when the
+      // batch is applied, so the hexagon always opens into something real.
+      const p = parseProps(g.props);
+      const tint = g.tint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
+      const board: BoardElement = {
+        ...base,
+        type: 'board',
+        zIndex: 1,
+        childBoardId: crypto.randomUUID(),
+        title: (str(g.label, MAX_LABEL_LEN) ?? str(g.content, MAX_LABEL_LEN) ?? 'Board'),
+        icon: str(p.icon, 40) ?? 'grid',
+        hexColor: str(p.hexColor, 40) ?? BOARD_HEX_COLORS[tint],
+      };
+      elements.push(board);
+    } else if (g.kind === 'experienceBlock') {
+      // Anchor onto live framing data (templates.design.md §9) — the handoff
+      // that makes a layout part of the pipeline instead of a dead diagram.
+      const p = parseProps(g.props);
+      const componentKey = oneOf(p.componentKey, INSPECTOR_SECTION_IDS);
+      if (!componentKey) continue; // without a real section it anchors to nothing
+      const block: ExperienceBlockElement = {
+        ...base,
+        type: 'experienceBlock',
+        zIndex: 1,
+        componentKey,
+        title: str(g.label, MAX_LABEL_LEN) ?? componentKey,
+        viewMode: oneOf(p.viewMode, ['compact', 'inline'] as const) ?? 'compact',
+      };
+      elements.push(block);
     } else {
       // Divider / rule (templates.design.md §2). Lines carry their own
       // start/end world coords rather than width/height.
@@ -430,7 +557,7 @@ export function generatedToCanvas(
     const key = `${fromId}->${toId}`;
     if (seenEdge.has(key)) continue;
     seenEdge.add(key);
-    edges.push(buildConnectorEdge(fromId, toId, e.label ?? undefined));
+    edges.push(buildConnectorEdge(fromId, toId, e.label ?? undefined, e.props));
   }
 
   repairLayout(elements);
@@ -460,6 +587,11 @@ You generate elements for a spatial design canvas. Rules:
 - PREFER 'freeform' note cards over bare 'text' for anything the designer will edit and build on — they are the primary card type on this canvas. Size ~300x300. Give every zone at least one seeded note card rather than leaving it empty. Use props: {"emoji":"💡","noteTitle":"Names the move","noteBody":"Concrete starter content","cardType":"note"}. Pick an emoji that fits the idea (🔆 🔥 💡 🎯 🧭 🌊 …).
 - 'image' seeds a storyboard frame (empty upload slot + caption): ~320x260, props {"storyboard":true,"description":"caption placeholder"}.
 - 'line' is a divider/underline only — never a connection between elements (use edges for that). It spans from (x,y) to (x+width, y); props {"gradientName":"violet","widthPx":2}. A thin divider under a container title is the house style.
+- 'table' is a real editable grid — use it for any table, matrix or comparison instead of faking one from cards. props {"cells":[["Header A","Header B"],["1a","1b"]],"headerRow":true}; size ~160px per column, ~48px per row.
+- 'link' is a URL bookmark card (~320x120): props {"url":"https://...","linkMode":"bookmark"}, label is the title.
+- 'board' is a hexagon portal into a nested canvas for anything deep (research, moodboard, personas) — needs ~170x230; label is the title, props {"icon":"grid"}.
+- 'experienceBlock' anchors the layout to live framing data: props {"componentKey":"intentionCore"} (or desiredChange, humanContext, contextAndMeaning, realityPlanes, sensoryDomains, presenceTypes, stateMapping, traitMapping). Place one at a flow's origin when the content maps to a framing section.
+- Connectors carry their own styling: edge props {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end","bend":40}. Rotate the gradient family per branch and prefer a gentle bend to a bare straight line.
 - Prefer a clear structure: a grid or left-to-right flow of containers, each seeded with 2-5 text elements of concrete, useful starter content (never generic filler like "Add text here").
 - Use each ref exactly once, like c1, c2, t1, t2, s1.
 - Hypercube face tags: set 'hypercubeTags' ONLY on containers and top-level elements, and only from this exact list: ${HYPERCUBE_FACE_TAGS.join(', ')}. Tag a CONTAINER with the union of the faces its children relate to — do NOT tag the child text/shape elements individually (children inherit their container's tags automatically). Most elements need no tags; add them only when the semantic fit is clear.

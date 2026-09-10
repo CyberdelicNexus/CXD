@@ -98,6 +98,14 @@ const CORPUS: Case[] = [
   { name: "storyboard", instruction: "add a storyboard strip of three frames for the opening sequence", expectKinds: ["create"] },
   { name: "mindmap", instruction: "build a small mind map of five sensory ideas branching from a central hub", expectKinds: ["create"] },
   { name: "conversational", instruction: "what is missing from this canvas?", expectKinds: [] },
+  // Element types the assistant used to lack — it previously claimed tables
+  // did not exist and faked one out of containers and cards.
+  { name: "table", instruction: "use the table element to make a 3x3 comparison table of our tech options", expectKinds: ["create"] },
+  { name: "link", instruction: "add a link card pointing to https://cyberdelic.nexus for the research reference", expectKinds: ["create"] },
+  { name: "board", instruction: "add a hexagon board portal called Research for deeper material", expectKinds: ["create"] },
+  { name: "experience-block", instruction: "anchor an intention core block at the start of the flow", expectKinds: ["create"] },
+  { name: "flow-diagram", instruction: "draw a flow diagram: intake, then a decision diamond branching to approve and reject, connected with arrows", expectKinds: ["create"] },
+  { name: "review-comments", instruction: "review my canvas and leave comments on what needs work", expectKinds: ["comment"] },
 ];
 
 // ─── Runner ─────────────────────────────────────────────────────────

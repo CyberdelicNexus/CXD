@@ -14,6 +14,8 @@ export interface ApplyPlan {
   batch: CanvasBatchMutation;
   tasks: ExtractedTask[];
   notes: string[];
+  /** Review pins, already resolved to canvas coordinates. */
+  comments: { content: string; position: { x: number; y: number } }[];
   /** rows whose targets no longer exist (reported to the user, never silently applied) */
   skippedRowIds: string[];
 }
@@ -125,6 +127,7 @@ export function translateForApply(
   };
   const tasks: ExtractedTask[] = [];
   const notes: string[] = [];
+  const comments: ApplyPlan["comments"] = [];
   const skippedRowIds: string[] = [];
   // Patches are field bags that never carry `type`. Accumulating them as
   // Partial<CanvasElement> would spread into a cross-product of the element
@@ -217,19 +220,51 @@ export function translateForApply(
           .map((id) => liveById.get(id))
           .filter((el): el is CanvasElement => !!el);
         if (members.length < 2) { skippedRowIds.push(op.rowId); break; }
-        // Wrap the members' RENDERED footprints — a note card stored at 140px
-        // paints 300px tall and would otherwise hang out of its own container.
-        const boxes = members.map((el) => realBounds(el) ?? { x: el.x, y: el.y, w: el.width, h: el.height });
-        const minX = Math.min(...boxes.map((b) => b.x));
-        const minY = Math.min(...boxes.map((b) => b.y));
-        const maxX = Math.max(...boxes.map((b) => b.x + b.w));
-        const maxY = Math.max(...boxes.map((b) => b.y + b.h));
-        // Snap outward to the 20px grid (templates.design.md §8) so the zone
-        // lines up with everything else on the canvas.
-        const gx = Math.floor((minX - GROUP_PADDING) / GRID_PX) * GRID_PX;
-        const gy = Math.floor((minY - GROUP_PADDING - GROUP_HEADER) / GRID_PX) * GRID_PX;
-        const gw = Math.ceil((maxX + GROUP_PADDING - gx) / GRID_PX) * GRID_PX;
-        const gh = Math.ceil((maxY + GROUP_PADDING - gy) / GRID_PX) * GRID_PX;
+        // Gather, then wrap. Wrapping members where they lie would swallow any
+        // unrelated element sitting between them, so the members are first
+        // packed into a tidy column and the zone is drawn around THAT. Uses
+        // rendered footprints: a note card stored at 140px paints 300px tall.
+        const boxes = new Map(
+          members.map((el) => [el.id, realBounds(el) ?? { x: el.x, y: el.y, w: el.width, h: el.height }] as const),
+        );
+        const widest = Math.max(...members.map((el) => boxes.get(el.id)!.w));
+        const stackHeight =
+          members.reduce((sum, el) => sum + boxes.get(el.id)!.h, 0) +
+          GROUP_PADDING * (members.length - 1);
+
+        const snapDown = (n: number) => Math.floor(n / GRID_PX) * GRID_PX;
+        const snapUp = (n: number) => Math.ceil(n / GRID_PX) * GRID_PX;
+
+        // Anchor the cluster at the top-left member so the zone appears where
+        // the user was already working rather than jumping across the canvas.
+        const anchorX = Math.min(...members.map((el) => boxes.get(el.id)!.x));
+        const anchorY = Math.min(...members.map((el) => boxes.get(el.id)!.y));
+
+        let gx = snapDown(anchorX - GROUP_PADDING);
+        let gy = snapDown(anchorY - GROUP_PADDING - GROUP_HEADER);
+        const gw = snapUp(widest + GROUP_PADDING * 2);
+        const gh = snapUp(stackHeight + GROUP_PADDING * 2 + GROUP_HEADER);
+
+        // Gathering shrinks the footprint, so the zone can land on elements the
+        // members used to straddle. Keep it clear of everything that isn't a
+        // member, matching how generated batches are placed.
+        const memberIds = new Set(members.map((m) => m.id));
+        const obstacles = liveElements
+          .filter((e) => !memberIds.has(e.id) && !e.containerId)
+          .map(realBounds)
+          .filter((b): b is Box => !!b);
+        if (obstacles.some((o) => overlaps({ x: gx, y: gy, w: gw, h: gh }, o))) {
+          gx = snapUp(Math.max(...obstacles.map((o) => o.x + o.w)) + ZONE_GUTTER);
+          gy = snapDown(Math.min(...obstacles.map((o) => o.y)));
+        }
+
+        // Re-lay the members down the column, inside the zone we just sized.
+        let cursor = gy + GROUP_HEADER + GROUP_PADDING;
+        for (const m of members) {
+          const mb = boxes.get(m.id)!;
+          queueUpdate(m.id, { x: snapDown(gx + GROUP_PADDING), y: snapDown(cursor) });
+          cursor += mb.h + GROUP_PADDING;
+        }
         const container: ContainerElement = {
           id: crypto.randomUUID(),
           type: "container",
@@ -270,6 +305,17 @@ export function translateForApply(
       case "note":
         notes.push(op.content);
         break;
+      case "comment": {
+        // Pin just off the anchor's top-right corner so it points at the
+        // element without covering it. Unanchored comments go to the origin.
+        const anchor = op.anchorId ? liveById.get(op.anchorId) : undefined;
+        const box = anchor ? realBounds(anchor) : null;
+        comments.push({
+          content: op.content,
+          position: box ? { x: box.x + box.w + 12, y: box.y } : { x: 0, y: 0 },
+        });
+        break;
+      }
     }
   }
 
@@ -283,5 +329,5 @@ export function translateForApply(
 
   // One row can produce several ops (a multi-target update), so dedupe before
   // reporting "N change(s) skipped" to the user.
-  return { batch, tasks, notes, skippedRowIds: Array.from(new Set(skippedRowIds)) };
+  return { batch, tasks, notes, comments, skippedRowIds: Array.from(new Set(skippedRowIds)) };
 }
