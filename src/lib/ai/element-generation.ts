@@ -186,23 +186,46 @@ const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : 
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined =>
   typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
 
+export interface EdgeGeometry {
+  from: { x: number; y: number; w: number; h: number };
+  to: { x: number; y: number; w: number; h: number };
+}
+
 /**
- * Standard AI-authored connector between two existing element ids.
- * `props` is the model's optional styling bag (see generatedEdgeSchema);
- * every value is whitelisted here, and anything unrecognised falls back to the
- * house default of a violet solid arrow (templates.design.md §6).
+ * World-space control point for a quadratic connector: the midpoint between
+ * the two element centres, pushed `offset` px along the perpendicular.
+ * CanvasEdge.bend is a WORLD coordinate, not an offset.
+ */
+export function bendPoint(g: EdgeGeometry, offset: number): { x: number; y: number } {
+  const ax = g.from.x + g.from.w / 2;
+  const ay = g.from.y + g.from.h / 2;
+  const bx = g.to.x + g.to.w / 2;
+  const by = g.to.y + g.to.h / 2;
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  return {
+    x: (ax + bx) / 2 + (-(by - ay) / len) * offset,
+    y: (ay + by) / 2 + ((bx - ax) / len) * offset,
+  };
+}
+
+/**
+ * Standard AI-authored connector between two element ids. `props` is the
+ * model's optional styling bag; every value is whitelisted here, with a violet
+ * solid arrow as the house default (templates.design.md §6). A requested bend
+ * is only applied when `geometry` is known, because the control point must be
+ * placed in world space.
  */
 export function buildConnectorEdge(
   fromId: string,
   toId: string,
   label?: string,
   props?: string | null,
+  geometry?: EdgeGeometry,
 ): CanvasEdge {
   const trimmed = label?.trim();
   const p = parseProps(props);
-  const bend = typeof p.bend === 'number' && Number.isFinite(p.bend)
-    ? clamp(p.bend, -400, 400)
-    : 0;
+  const offset = typeof p.bend === 'number' && Number.isFinite(p.bend) ? clamp(p.bend, -400, 400) : 0;
+  const bend = offset !== 0 && geometry ? bendPoint(geometry, offset) : null;
   return {
     id: crypto.randomUUID(),
     fromNodeId: fromId,
@@ -221,7 +244,7 @@ export function buildConnectorEdge(
       gradientName: oneOf(p.gradientName, TINT_COLORS) ?? 'violet',
       arrowStyle: oneOf(p.arrowStyle, ['none', 'start', 'end', 'both'] as const) ?? 'end',
     },
-    ...(bend !== 0 ? { bend: { x: 0, y: bend } } : {}),
+    ...(bend ? { bend } : {}),
     ...(trimmed ? { label: { text: trimmed.slice(0, MAX_EDGE_LABEL_LEN) } } : {}),
   };
 }
@@ -545,8 +568,13 @@ export function generatedToCanvas(
     elementIds.add(base.id);
   }
 
+  repairLayout(elements);
+
   // Second pass: remap edges ref→id, keeping only well-formed, non-duplicate
   // connectors between two distinct elements that actually made it into the batch.
+  // Edges are built from FINAL positions: bends are world-space points, and
+  // repairLayout may have moved elements.
+  const boxById = new Map(elements.map((el) => [el.id, realBounds(el) ?? { x: el.x, y: el.y, w: el.width, h: el.height }]));
   const edges: CanvasEdge[] = [];
   const seenEdge = new Set<string>();
   for (const e of (generatedEdges || []).slice(0, MAX_EDGES)) {
@@ -557,10 +585,8 @@ export function generatedToCanvas(
     const key = `${fromId}->${toId}`;
     if (seenEdge.has(key)) continue;
     seenEdge.add(key);
-    edges.push(buildConnectorEdge(fromId, toId, e.label ?? undefined, e.props));
+    edges.push(buildConnectorEdge(fromId, toId, e.label ?? undefined, e.props, { from: boxById.get(fromId)!, to: boxById.get(toId)! }));
   }
-
-  repairLayout(elements);
 
   // Only expose refs that actually produced an element.
   const liveIdByRef = new Map<string, string>();

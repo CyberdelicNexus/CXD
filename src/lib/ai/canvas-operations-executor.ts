@@ -68,8 +68,8 @@ const ZONE_GUTTER = 140;
  * (preserving its internal layout) to the right of everything that exists.
  * Mutates the given elements.
  */
-function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): void {
-  if (created.length === 0 || live.length === 0) return;
+function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): { dx: number; dy: number } {
+  if (created.length === 0 || live.length === 0) return { dx: 0, dy: 0 };
 
   const createdIds = new Set(created.map((e) => e.id));
   // Only elements that land on the shared canvas can collide with live ones;
@@ -85,11 +85,11 @@ function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): v
       return bb ? overlaps(ab, bb) : false;
     });
   });
-  if (!hit) return;
+  if (!hit) return { dx: 0, dy: 0 };
 
   const liveBoxes = liveRoot.map(realBounds).filter((b): b is Box => !!b);
   const createdBoxes = created.map(realBounds).filter((b): b is Box => !!b);
-  if (liveBoxes.length === 0 || createdBoxes.length === 0) return;
+  if (liveBoxes.length === 0 || createdBoxes.length === 0) return { dx: 0, dy: 0 };
 
   const liveRight = Math.max(...liveBoxes.map((b) => b.x + b.w));
   const batchLeft = Math.min(...createdBoxes.map((b) => b.x));
@@ -107,8 +107,11 @@ function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): v
       const line = el as unknown as { start: { x: number; y: number }; end: { x: number; y: number } };
       line.start = { x: line.start.x + dx, y: line.start.y + dy };
       line.end = { x: line.end.x + dx, y: line.end.y + dy };
+      const bent = el as unknown as { bend?: { x: number; y: number } };
+      if (bent.bend) bent.bend = { x: bent.bend.x + dx, y: bent.bend.y + dy };
     }
   }
+  return { dx, dy };
 }
 
 export function translateForApply(
@@ -143,9 +146,15 @@ export function translateForApply(
     // Clone before relocating: the proposal is React state and must not be
     // mutated by previewing an apply.
     const created = proposal.creates.elements.map((e) => ({ ...e }) as CanvasElement);
-    relocateIfColliding(created, liveElements);
+    const shift = relocateIfColliding(created, liveElements);
+    const createdIds = new Set(created.map((e) => e.id));
     batch.addElements.push(...created);
-    batch.addEdges.push(...proposal.creates.edges);
+    // Bends are world-space: edges wholly inside the moved batch move with it.
+    batch.addEdges.push(...proposal.creates.edges.map((e) =>
+      e.bend && createdIds.has(e.fromNodeId) && createdIds.has(e.toNodeId)
+        ? { ...e, bend: { x: e.bend.x + shift.dx, y: e.bend.y + shift.dy } }
+        : e,
+    ));
   }
 
   for (const op of proposal.ops) {
