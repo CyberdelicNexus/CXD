@@ -111,7 +111,12 @@ async function main() {
     check("GET meta from localhost is 200", (await meta.GET(req("/api/lab/meta"))).status === 200);
     check("GET meta via 127.0.0.1 is 200", (await meta.GET(req("/api/lab/meta", { headers: { host: "127.0.0.1:3001" } }))).status === 200);
     check("GET meta via [::1] is 200", (await meta.GET(req("/api/lab/meta", { headers: { host: "[::1]:3001", "x-forwarded-for": "::1" } }))).status === 200);
-    check("GET leaderboard from localhost is 200", (await leaderboard.GET(req("/api/lab/leaderboard"))).status === 200);
+    const lbDefault = await leaderboard.GET(req("/api/lab/leaderboard"));
+    const lbBody = (await lbDefault.json()) as { leaderboard: { promptVersion: string | null }; currentPromptVersion: string };
+    check("GET leaderboard defaults to the current prompt version",
+      lbDefault.status === 200 && lbBody.leaderboard.promptVersion === lbBody.currentPromptVersion && !!lbBody.currentPromptVersion);
+    const lbAll = (await (await leaderboard.GET(req("/api/lab/leaderboard?versions=all"))).json()) as typeof lbBody;
+    check("GET leaderboard?versions=all counts every version", lbAll.leaderboard.promptVersion === null);
     check("GET pair from localhost is 200", (await pair.GET(req("/api/lab/pair"))).status === 200);
     check("GET inputs from localhost is 200", (await inputs.GET(req("/api/lab/inputs"))).status === 200);
     check("GET runs from localhost is 200", (await runs.GET(req("/api/lab/runs"))).status === 200);

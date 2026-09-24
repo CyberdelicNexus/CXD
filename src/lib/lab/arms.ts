@@ -2,10 +2,9 @@
 // graph that the deterministic engine lays out; the baseline is today's
 // assistant path, where the model places coordinates itself.
 import type { CanvasElement, CanvasEdge } from "@/types/canvas-elements";
-import { canvasOperationsSchema, sanitizeCanvasOperations, CANVAS_OPERATIONS_GUIDE } from "@/lib/ai/canvas-operations";
+import { canvasOperationsSchema, sanitizeCanvasOperations } from "@/lib/ai/canvas-operations";
 import { translateForApply } from "@/lib/ai/canvas-operations-executor";
 import { checkMapStructure } from "@/lib/maps/catalog";
-import { EXEMPLARS } from "@/lib/maps/exemplars";
 import { buildMapGuide } from "@/lib/maps/prompt";
 import { renderMap } from "@/lib/maps/render";
 import { mapGraphSchema } from "@/lib/maps/schema";
@@ -13,6 +12,7 @@ import type { MapGraph, MapType } from "@/lib/maps/types";
 import type { CostMeter } from "./cost-meter";
 import { generateStructured, type StructuredResult } from "./model-client";
 import { cardsAsElements, cardsAsInventory, formatInput } from "./format-input";
+import { BASELINE_SYSTEM, baselinePrompt, critiquePrompt, exemplarBlock, TASK } from "./prompts";
 import type { ArmId, LabInput } from "./types";
 
 export interface ArmResult {
@@ -25,8 +25,6 @@ export interface ArmResult {
   costUsd: number;
   latencyMs: number;
 }
-
-const TASK = "Organise this into the clearest thinking map for the canvas.";
 
 function usageOf(calls: StructuredResult<unknown>[]) {
   return {
@@ -50,23 +48,6 @@ function finish(graph: MapGraph, calls: StructuredResult<unknown>[]): ArmResult 
 const draftGraph = (modelId: string, system: string, prompt: string, meter?: CostMeter) =>
   generateStructured({ modelId, system, prompt, schema: mapGraphSchema, meter });
 
-function exemplarBlock(): string {
-  return "\n\nEXAMPLES of well-formed graphs:\n" +
-    EXEMPLARS.map((e) => `${e.note}\n${JSON.stringify(e.graph)}`).join("\n\n");
-}
-
-function critiquePrompt(inputText: string, draft: MapGraph): string {
-  const violations = checkMapStructure(draft);
-  return `${TASK}
-
-${inputText}
-
-YOUR DRAFT:
-${JSON.stringify(draft)}
-
-${violations.length ? `STRUCTURAL PROBLEMS FOUND:\n- ${violations.join("\n- ")}\n\n` : ""}Critique the draft, then return a complete improved graph. Check: Is this the best map type for what the input needs? Are siblings distinct, and do they cover the topic together? Are branches balanced? Are labels short and specific? Are relations labelled where they carry meaning? Is anything unfaithful to the input, invented or dropped? Fix every problem.`;
-}
-
 /** Existing canvas after the baseline's changes: what the user would actually see. */
 function materialise(existing: CanvasElement[], plan: ReturnType<typeof translateForApply>): CanvasElement[] {
   const removed = new Set(plan.batch.removeElementIds);
@@ -80,13 +61,10 @@ function materialise(existing: CanvasElement[], plan: ReturnType<typeof translat
 async function runBaseline(input: LabInput, modelId: string, meter?: CostMeter): Promise<ArmResult> {
   const existing = cardsAsElements(input.cards);
   const inventory = cardsAsInventory(input.cards);
-  const prompt =
-    `Canvas inventory (${inventory.totalCount} elements total):\n${JSON.stringify(inventory.elements)}` +
-    `\n\nSelected element ids: []\n\nInstruction:\n${TASK}\n\n${formatInput(input)}`;
   const res = await generateStructured({
     modelId,
-    system: "You are the CXD canvas assistant.\n" + CANVAS_OPERATIONS_GUIDE,
-    prompt,
+    system: BASELINE_SYSTEM,
+    prompt: baselinePrompt(inventory.totalCount, JSON.stringify(inventory.elements), formatInput(input)),
     schema: canvasOperationsSchema,
     meter,
   });
@@ -123,7 +101,7 @@ export async function runArm(arm: ArmId, input: LabInput, modelId: string, force
     }
     case "graphCritique": {
       const draft = await draftGraph(modelId, guide, `${TASK}\n\n${inputText}`, meter);
-      const revised = await draftGraph(modelId, guide, critiquePrompt(inputText, draft.object), meter);
+      const revised = await draftGraph(modelId, guide, critiquePrompt(inputText, JSON.stringify(draft.object), checkMapStructure(draft.object)), meter);
       return finish(revised.object, [draft, revised]);
     }
   }

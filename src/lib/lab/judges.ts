@@ -4,10 +4,10 @@ import { z } from "zod";
 import { checkLayout } from "@/lib/canvas-layout-rules";
 import { checkMapStructure } from "@/lib/maps/catalog";
 import { connectorCrossings } from "@/lib/maps/connector-geometry";
-import { getElementTitle } from "@/utils/ai-context-aggregator";
 import { JUDGE_MODELS } from "./config";
 import type { CostMeter } from "./cost-meter";
 import { generateStructured } from "./model-client";
+import { describeRendered } from "./describe";
 import { formatInput } from "./format-input";
 import type { Cell, Dimension, JudgeId, JudgeScore, LabInput } from "./types";
 import { JUDGE_DIMENSIONS } from "./types";
@@ -91,12 +91,13 @@ const JUDGE_SYSTEM = `You grade thinking maps made from a person's input. Score 
 - faithfulness: does it stay true to the input without inventing or dropping key points?
 Be strict and calibrated: 3 is acceptable, 5 is exceptional. notes: one sentence naming the single biggest improvement.`;
 
-function describeResult(cell: JudgeContext["cell"]): string {
-  if (cell.graph) return JSON.stringify(cell.graph);
-  const lines = cell.elements
-    .filter((e) => e.type !== "line")
-    .map((e) => `- ${e.type}: ${getElementTitle(e)}${e.containerId ? ` (inside ${e.containerId})` : ""}`);
-  return `Canvas elements (${lines.length}):\n${lines.join("\n")}\nConnectors: ${cell.edges.length}`;
+/**
+ * Every arm is shown to the LLM judges the same way: described from its
+ * rendered elements and edges (describe.ts), never from a graph's JSON, which
+ * would state its mapType and give graph arms information baselines lack.
+ */
+export function judgePrompt(input: LabInput, cell: JudgeContext["cell"]): string {
+  return `INPUT:\n${formatInput(input)}\n\nRESULT (the map as drawn on the canvas):\n${describeRendered(cell.elements, cell.edges)}`;
 }
 
 function llmJudge(id: JudgeId, label: string, modelId: string): Judge {
@@ -111,7 +112,7 @@ function llmJudge(id: JudgeId, label: string, modelId: string): Judge {
       const res = await generateStructured({
         modelId,
         system: JUDGE_SYSTEM,
-        prompt: `INPUT:\n${formatInput(input)}\n\nRESULT:\n${describeResult(cell)}`,
+        prompt: judgePrompt(input, cell),
         schema: judgeSchema,
         maxTokens: 4000,
         meter,

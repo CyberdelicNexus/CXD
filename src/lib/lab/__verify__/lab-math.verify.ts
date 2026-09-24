@@ -2,7 +2,8 @@
 import {
   buildLeaderboard, computeElo, estimateRunCost, expectedScore, judgeAgreement, pickPair, selfConsistency,
 } from "../lab-math";
-import type { Cell, Vote } from "../types";
+import { JUDGE_MODELS } from "../config";
+import { parseVariantKey, type Cell, type Vote } from "../types";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -79,6 +80,59 @@ const byId = new Map([a, b].map((c) => [c.id, c]));
   check("cost per win uses generation cost only", near(g.costPerWin!, 0.03) && near(g.genCostUsd, 0.03) && near(g.judgeCostUsd, 0.02));
   check("total cost still includes judges", near(g.costUsd, 0.05));
   check("legacy cell: generation = costUsd, judge = 0", near(bl.genCostUsd, 0.04) && bl.judgeCostUsd === 0 && near(bl.costPerWin!, 0.04));
+}
+
+{
+  // M2: only clean maps are votable, including legacy done cells whose rubric flagged crossings.
+  const crossedLegacy: Cell = { ...cell("x1", "graph", "m2"), judges: [{ judgeId: "rubric", overall: 3, pass: false, scores: {}, notes: "1 connector crossing(s)", costUsd: 0 }] };
+  check("legacy done cell with a failing rubric (crossings) is not paired", pickPair([a, crossedLegacy], [], () => 0.3) === null);
+  const violated: Cell = { ...cell("x2", "graph", "m2"), structureViolations: ["connector crossing: ..."] };
+  check("cell with structure violations is not paired", pickPair([a, violated], [], () => 0.3) === null);
+  const passing: Cell = { ...cell("x3", "graph", "m2"), judges: [{ judgeId: "rubric", overall: 5, pass: true, scores: {}, notes: "", costUsd: 0 }] };
+  check("cell with a passing rubric is paired", pickPair([a, passing], [], () => 0.3) !== null);
+}
+{
+  // I6: prompt versions and forced types.
+  const cur = (id: string, arm: Cell["arm"], extra: Partial<Cell> = {}): Cell => ({ ...cell(id, arm, "m1"), promptVersion: "v2", ...extra });
+  const n1 = cur("n1", "graph");
+  const n2 = cur("n2", "baseline");
+  const old1 = { ...cell("o1", "graph", "m1"), promptVersion: "v1" };
+  const legacy1 = cell("g1", "baseline", "m1"); // no promptVersion: legacy
+  const forced = cur("f1", "graph", { forcedType: "tree" });
+  const votes = [vote("n1", "n2", "left"), vote("o1", "g1", "right"), vote("n1", "o1", "left"), vote("f1", "n2", "left")];
+  const all = [n1, n2, old1, legacy1, forced];
+
+  const def = buildLeaderboard(all, votes, { promptVersion: "v2" });
+  check("default leaderboard counts only current-version votes", def.totalVotes === 2 && def.excludedVotes === 2);
+  check("legacy and old-version cells are excluded by default", def.excludedCells === 2 && def.promptVersion === "v2");
+  const forcedRow = def.rows.find((r) => r.forcedType === "tree");
+  check("forced-type cells form their own variant", !!forcedRow && forcedRow.variant === "graph|m1|forced:tree" && forcedRow.wins === 1);
+  check("unforced variant is separate from the forced one", def.rows.find((r) => r.variant === "graph|m1")?.wins === 1);
+  check("variant key round-trips", parseVariantKey("graph|m1|forced:tree").forcedType === "tree" && parseVariantKey("graph|m1").forcedType === null);
+
+  const everything = buildLeaderboard(all, votes);
+  check("all versions: every vote counts", everything.totalVotes === 4 && everything.excludedCells === 0 && everything.promptVersion === null);
+
+  check("pickPair with a version only pairs cells of that version",
+    pickPair([n1, old1, legacy1], [], () => 0.3, { promptVersion: "v2" }) === null &&
+    pickPair([n1, n2, old1], [], () => 0.3, { promptVersion: "v2" }) !== null);
+  check("pickPair pairs forced and unforced cells as different variants", pickPair([n1, forced], [], () => 0.3) !== null);
+}
+{
+  // M10: agreement excluding the judge's own model.
+  const strong = JUDGE_MODELS.strong;
+  const sj = (id: string, modelId: string, overall: number): Cell =>
+    ({ ...cell(id, "graph", modelId), arm: modelId === strong ? "graph" : "baseline", judges: [{ judgeId: "llmStrong", overall, pass: true, scores: {}, notes: "", costUsd: 0 }] });
+  const own = sj("own", strong, 5);
+  const other1 = sj("o-1", "m-x", 1);
+  const other2 = { ...sj("o-2", "m-y", 2), arm: "graphCritique" as const };
+  const votes = [vote("own", "o-1", "right"), vote("o-2", "o-1", "left")];
+  const lb = buildLeaderboard([own, other1, other2], votes);
+  const row = lb.judges.find((j) => j.judgeId === "llmStrong")!;
+  check("agreement counts every vote", row.compared === 2 && near(row.agreement!, 0.5));
+  check("excl. own model skips votes involving the judge's model", row.comparedExSelf === 1 && near(row.agreementExSelf!, 1));
+  const rubricRow = lb.judges.find((j) => j.judgeId === "rubric")!;
+  check("non-LLM judges have identical excl. figures", rubricRow.comparedExSelf === rubricRow.compared);
 }
 
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }

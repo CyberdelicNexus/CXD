@@ -34,7 +34,13 @@ async function main() {
   let calls = 0;
   let costPerCell = 0;
   let judgeCost = 0;
-  const failInputs = new Map<string, "throw" | "structure" | "billed">();
+  const failInputs = new Map<string, "throw" | "structure" | "billed" | "crossing">();
+  const { cardsAsElements } = await import("../format-input");
+  const { autoEdge, connectorCrossings } = await import("@/lib/maps/connector-geometry");
+  const { PROMPT_VERSION } = await import("../prompts");
+  // Three cards in a row with a connector from the first to the third: it paints over the middle one.
+  const rowCards = cardsAsElements([{ title: "A", body: "" }, { title: "Middle card", body: "" }, { title: "C", body: "" }]);
+  const crossingEdges = [autoEdge(rowCards[0], rowCards[2])];
   const originalSave = runner.runnerDeps.saveRun;
 
   runner.runnerDeps.runArm = async (_arm, input: LabInput, _model, _forced, meter): Promise<ArmResult> => {
@@ -51,6 +57,7 @@ async function main() {
         throw new Error("hit max_tokens before the object was complete");
       }
       const base = { graph, inputTokens: 1, outputTokens: 1, costUsd: costPerCell, latencyMs: 20 };
+      if (mode === "crossing") return { ...base, elements: rowCards, edges: crossingEdges, structureViolations: [] };
       if (mode === "structure") return { ...base, elements: [], edges: [], structureViolations: ["radial: needs a centre"] };
       return { ...base, elements: rendered.elements, edges: rendered.edges, structureViolations: [] };
     } finally {
@@ -205,6 +212,25 @@ async function main() {
     calls = 0;
     await Promise.all([runner.retryCell(r7b.id, r7b.cells[0].id), runner.retryCell(r7b.id, r7b.cells[0].id)]);
     check("two retries of the same cell run it once", calls === 1);
+
+    // 9. M2: a rendered map with connector crossings is not ok and never votable.
+    check("crossing fixture really crosses", connectorCrossings(rowCards, crossingEdges).length > 0);
+    failInputs.clear();
+    failInputs.set(CORPUS[0].id, "crossing");
+    const r9 = await waitDone((await runner.startRun({ ...cfg(2, 100), forcedType: "flow" })).id);
+    const crossed = r9.cells.find((c) => c.inputId === CORPUS[0].id)!;
+    check("crossing cell is failed", crossed.status === "failed");
+    check("crossing is recorded in its violations",
+      crossed.structureViolations.some((v) => /connector crossing/.test(v) && v.includes("Middle card")) && /connector crossing/.test(crossed.error ?? ""));
+    const { pickPair } = await import("../lab-math");
+    const clean = r9.cells.find((c) => c.inputId === CORPUS[1].id)!;
+    check("crossing cell is never offered for voting",
+      pickPair([crossed, { ...clean, inputId: crossed.inputId, arm: "baseline" }], [], () => 0.3) === null);
+
+    // 10. I6: cells are stamped with the prompt version and the forced type.
+    check("cells carry the current prompt version", r9.cells.every((c) => c.promptVersion === PROMPT_VERSION));
+    check("cells carry the run's forced type", r9.cells.every((c) => c.forcedType === "flow") && r5.cells.every((c) => c.forcedType === null));
+    failInputs.clear();
 
     // 8. M8: a failed save is not assumed to have persisted.
     runner.runnerDeps.saveRun = async () => { throw new Error("disk full"); };

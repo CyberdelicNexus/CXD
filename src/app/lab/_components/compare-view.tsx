@@ -131,7 +131,10 @@ export function CompareView({ meta }: { meta: LabMeta }) {
         testId="no-pairs"
         icon={Scale}
         title="Nothing to compare yet. Finish a run first."
-        detail={totalVotes > 0 ? `Every pair has been judged (${totalVotes} votes). Run more arms or models to create new pairs.` : undefined}
+        detail={
+          (totalVotes > 0 ? `Every pair has been judged (${totalVotes} votes). Run more arms or models to create new pairs. ` : "") +
+          "Only clean maps made with the current prompts are offered; runs from older prompt versions need re-running."
+        }
         action={<LabButton tone="ghost" onClick={() => void next()}>Check again</LabButton>}
       />
     );

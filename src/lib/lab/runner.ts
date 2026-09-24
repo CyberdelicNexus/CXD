@@ -2,11 +2,14 @@
 // halting new cells once spend reaches the confirmed budget. Server-only; runs
 // continue in the background of the Next dev process while the UI polls.
 import { checkLayout } from "@/lib/canvas-layout-rules";
+import { connectorCrossings } from "@/lib/maps/connector-geometry";
 import { CORPUS } from "./corpus";
 import { RUN_CONCURRENCY } from "./config";
 import { runArm } from "./arms";
 import { CostMeter } from "./cost-meter";
+import { elementText } from "./describe";
 import { JUDGES } from "./judges";
+import { PROMPT_VERSION } from "./prompts";
 import { estimateRunCost } from "./lab-math";
 import { listRuns as listStoredRuns, readCustomInputs, readRun, saveRun } from "./store";
 import type { Cell, LabInput, Run, RunConfig } from "./types";
@@ -105,9 +108,11 @@ export async function listRuns(): Promise<Run[]> {
   return Promise.all(stored.map((r) => live.get(r.id) ?? reconcileOrphan(r)));
 }
 
-function blankCell(runId: string, inputId: string, arm: Cell["arm"], modelId: string): Cell {
+/** A fresh cell, stamped with the prompts and forced type it will be generated under. */
+function blankCell(runId: string, inputId: string, arm: Cell["arm"], modelId: string, forcedType: RunConfig["forcedType"]): Cell {
   return {
     id: crypto.randomUUID(), runId, inputId, arm, modelId, status: "pending",
+    promptVersion: PROMPT_VERSION, forcedType,
     mapType: null, graph: null, elements: [], edges: [],
     structureViolations: [], rubricErrors: [], rubricWarnings: [], judges: [],
     latencyMs: 0, costUsd: 0, genCostUsd: 0, judgeCostUsd: 0, error: null,
@@ -123,7 +128,7 @@ export async function startRun(config: RunConfig): Promise<Run> {
   const cells: Cell[] = [];
   for (const inputId of config.inputIds) {
     for (const arm of config.arms) {
-      for (const modelId of config.modelIds) cells.push(blankCell(id, inputId, arm, modelId));
+      for (const modelId of config.modelIds) cells.push(blankCell(id, inputId, arm, modelId, config.forcedType));
     }
   }
   const run: Run = {
@@ -199,8 +204,17 @@ async function runCell(run: Run, cell: Cell, input: LabInput): Promise<void> {
     cell.mapType = out.graph?.mapType ?? null;
     cell.elements = out.elements;
     cell.edges = out.edges;
-    cell.structureViolations = out.structureViolations;
     cell.latencyMs = out.latencyMs;
+    // A connector painted through an unrelated card hides its content: that map
+    // is not ok, exactly like a structure violation, and is never offered for voting.
+    const byId = new Map(out.elements.map((e) => [e.id, e]));
+    const crossings = connectorCrossings(out.elements, out.edges).map((x) => {
+      const through = byId.get(x.throughId);
+      const text = through ? elementText(through) : "";
+      return `connector crossing: ${x.by === "label" ? "a connector label" : "a connector"} paints over ` +
+        `${through?.type ?? "an element"}${text ? ` "${text.slice(0, 60)}"` : ""}`;
+    });
+    cell.structureViolations = [...out.structureViolations, ...crossings];
 
     const v = checkLayout(out.elements, out.edges, { includeDesignSystemRules: true });
     cell.rubricErrors = v.filter((x) => x.severity === "error").map((x) => `[${x.rule}] ${x.message}`);
@@ -293,7 +307,7 @@ export async function retryCell(runId: string, cellId: string): Promise<Run | nu
     }
     const input = inputs.find((i) => i.id === cell.inputId);
     if (!input) return run;
-    Object.assign(cell, blankCell(run.id, cell.inputId, cell.arm, cell.modelId), { id: cell.id });
+    Object.assign(cell, blankCell(run.id, cell.inputId, cell.arm, cell.modelId, run.config.forcedType), { id: cell.id });
     st.reserved += estimate;
     try {
       await runCell(run, cell, input);

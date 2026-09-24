@@ -69,6 +69,10 @@ export interface Cell {
   genCostUsd?: number;
   /** LLM judges only. Missing on runs stored before it existed: read via cellCosts(). */
   judgeCostUsd?: number;
+  /** PROMPT_VERSION (prompts.ts) the cell was generated with. Missing = "legacy" (before stamping). */
+  promptVersion?: string;
+  /** The run's forced map type, if any. Missing on legacy cells (read as null). */
+  forcedType?: MapType | null;
   error: string | null;
 }
 
@@ -123,4 +127,17 @@ export function cellCosts(c: Pick<Cell, "costUsd" | "genCostUsd" | "judgeCostUsd
   return { gen: c.genCostUsd ?? c.costUsd, judge: c.judgeCostUsd ?? 0 };
 }
 
-export const variantKey = (c: Pick<Cell, "arm" | "modelId">) => `${c.arm}|${c.modelId}`;
+export const LEGACY_PROMPT_VERSION = "legacy";
+export const promptVersionOf = (c: Pick<Cell, "promptVersion">) => c.promptVersion ?? LEGACY_PROMPT_VERSION;
+
+/**
+ * "arm|model", plus "|forced:<type>" for cells from a run with a forced map
+ * type: forcing the type changes the task, so those cells are their own variant.
+ */
+export const variantKey = (c: Pick<Cell, "arm" | "modelId" | "forcedType">) =>
+  c.forcedType ? `${c.arm}|${c.modelId}|forced:${c.forcedType}` : `${c.arm}|${c.modelId}`;
+
+export function parseVariantKey(key: string): { arm: string; modelId: string; forcedType: string | null } {
+  const [arm, modelId, forced] = key.split("|");
+  return { arm, modelId, forcedType: forced?.startsWith("forced:") ? forced.slice("forced:".length) : null };
+}
