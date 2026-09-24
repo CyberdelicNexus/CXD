@@ -21,7 +21,11 @@ export interface Footprint { w: number; h: number }
 export interface PlacedNode { node: MapNode; x: number; y: number; w: number; h: number }
 export interface LayoutEdge { from: string; to: string; label: string; gradient: Tint; bend: number; arrow: "none" | "end" }
 export interface Point { x: number; y: number }
-export interface LayoutLine { start: Point; end: Point; bend: Point | null; gradient: Tint }
+export interface LayoutLine {
+  start: Point; end: Point; bend: Point | null; gradient: Tint;
+  /** Arrowhead at `end`; lines render caps, connectors render arrowStyle. */
+  endCap?: "arrow";
+}
 export interface LayoutResult { placed: PlacedNode[]; edges: LayoutEdge[]; lines: LayoutLine[] }
 export type LayoutEngine = (graph: MapGraph) => LayoutResult;
 
