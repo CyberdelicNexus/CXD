@@ -68,3 +68,6 @@ e2e/global.setup.ts
 
 # Sentry build artifacts
 .sentryclirc
+
+# Structure Lab local results (runs, votes, custom inputs)
+lab-data/
