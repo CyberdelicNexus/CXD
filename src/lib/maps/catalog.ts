@@ -299,7 +299,7 @@ export function checkMapStructure(g: MapGraph): string[] {
   }
   const siblingLabels = new Map<string, Set<string>>();
   for (const x of g.nodes) {
-    const key = siblingKey(g.mapType, x);
+    const key = siblingKey(g, x);
     const label = x.label.trim().toLowerCase();
     if (!siblingLabels.has(key)) siblingLabels.set(key, new Set());
     const set = siblingLabels.get(key)!;
@@ -311,18 +311,39 @@ export function checkMapStructure(g: MapGraph): string[] {
 
 /**
  * Groups nodes into the "sibling" set duplicate labels are compared against.
- * What counts as a sibling differs by map type: hierarchical maps (tree,
- * spider, brace) group by parent; doubleBubble groups by topic-vs-quality;
- * multiFlow keeps cause and effect separate (they may legitimately share
- * wording, e.g. a "Delay" that is both a cause and an effect elsewhere); the
- * remaining flat maps require every label in the whole graph to be distinct.
+ * What counts as a sibling differs by map type: doubleBubble groups by
+ * topic-vs-quality; multiFlow keeps cause and effect separate (they may
+ * legitimately share wording, e.g. a "Delay" that is both a cause and an
+ * effect elsewhere); the remaining flat maps require every label in the
+ * whole graph to be distinct.
+ *
+ * Tree, spider and brace group by parent, with one wrinkle: a spider branch
+ * (or brace part) may be written with parent "" OR the center/whole's id —
+ * both mean "hangs off the hub" and are drawn identically, so they must land
+ * in the same sibling group. The center/whole itself is put in its own
+ * "__root__" group so it is never treated as a sibling of its own
+ * branches/parts (a branch may legitimately echo the center's label).
  */
-function siblingKey(mapType: MapType, x: MapNode): string {
-  switch (mapType) {
+function siblingKey(g: MapGraph, x: MapNode): string {
+  switch (g.mapType) {
     case "tree":
-    case "spider":
-    case "brace":
       return x.parent;
+    case "spider": {
+      if (x.role === "center") return "__root__";
+      if (x.role === "branch") {
+        const center = byRole(g, "center")[0];
+        return x.parent === "" ? (center?.id ?? "") : x.parent;
+      }
+      return x.parent; // leaf: keyed by its branch
+    }
+    case "brace": {
+      if (x.role === "whole") return "__root__";
+      if (x.role === "part") {
+        const whole = byRole(g, "whole")[0];
+        return x.parent === "" ? (whole?.id ?? "") : x.parent;
+      }
+      return x.parent; // subpart: keyed by its part
+    }
     case "doubleBubble":
       return x.role === "leftTopic" || x.role === "rightTopic" ? "topics" : "qualities";
     case "multiFlow":

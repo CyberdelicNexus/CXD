@@ -116,5 +116,44 @@ check("brace rule text is truthful about the empty-parent allowance",
 { const g: MapGraph = { mapType: "toString" as unknown as MapType, title: "T", relations: [], nodes: [n("a", "concept")] };
   check("unrecognized mapType is rejected without throwing", violates(g, "unknown mapType")); }
 
+// ── Re-review of e996856: implicit ("") and explicit (center/whole id)
+// parent forms must be the SAME sibling group, or duplicates slip through.
+
+{ // spider: a branch parented to "" and one explicitly parented to the center
+  // are drawn identically, so they must be compared as siblings.
+  const g: MapGraph = { mapType: "spider", title: "T", relations: [],
+    nodes: [
+      n("c", "center", "", "card", "{}", "Trip"),
+      n("b1", "branch", "", "card", "{}", "Needs"),
+      n("b2", "branch", "c", "card", "{}", "Needs"),
+    ] };
+  check("spider: implicit and explicit center-parent branches sharing a label rejected", violates(g, "duplicate label"));
+}
+
+{ // brace: same ambiguity for parts hanging off the whole.
+  const g: MapGraph = { mapType: "brace", title: "T", relations: [],
+    nodes: [
+      n("w", "whole"),
+      n("p1", "part", "", "card", "{}", "Engine"),
+      n("p2", "part", "w", "card", "{}", "Engine"),
+    ] };
+  check("brace: implicit and explicit whole-parent parts sharing a label rejected", violates(g, "duplicate label"));
+}
+
+{ // spider: the center is never a sibling of its own branches, so a branch
+  // may share the center's label — with an EXPLICIT center parent.
+  const g = clone(VALID.spider);
+  g.nodes.find((x) => x.id === "b3")!.label = g.nodes.find((x) => x.id === "c")!.label;
+  check("spider: branch label may equal the center's label (explicit center parent)", checkMapStructure(g).length === 0);
+}
+
+{ // ...and with an IMPLICIT ("") center parent — same acceptance either way.
+  const g = clone(VALID.spider);
+  const b3 = g.nodes.find((x) => x.id === "b3")!;
+  b3.parent = "";
+  b3.label = g.nodes.find((x) => x.id === "c")!.label;
+  check("spider: branch label may equal the center's label (implicit empty parent)", checkMapStructure(g).length === 0);
+}
+
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log("\nALL PASS");
