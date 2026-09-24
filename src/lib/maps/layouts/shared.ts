@@ -2,6 +2,8 @@
 // multiples of the 20px grid, so cumulative placements stay on-grid and
 // "correct by construction" arguments hold exactly.
 import { GRID_PX } from "@/lib/canvas-layout-rules";
+import type { CanvasElement, LineElement } from "@/types/canvas-elements";
+import { autoEdge, connectorHull, connectorPath, linePath } from "../connector-geometry";
 import { TINT_COLORS, INSPECTOR_SECTION_IDS } from "@/lib/ai/element-generation";
 import type { MapGraph, MapNode, NodeKind } from "../types";
 
@@ -155,4 +157,137 @@ export function boundsOf(placed: PlacedNode[]): { minX: number; minY: number; ma
     maxX: Math.max(...placed.map((p) => p.x + p.w)),
     maxY: Math.max(...placed.map((p) => p.y + p.h)),
   };
+}
+
+// ─── Connector legibility ───────────────────────────────────────────
+// The canvas draws every connector ABOVE all elements from auto anchors: the
+// sides facing each other along the dominant axis between the two centres
+// (horizontal when |dx| > |dy|). Engines keep each connector's hull clear of
+// unrelated boxes, so no connector paints over a card.
+
+/** Slack by which one axis must dominate the other, so grid snapping can never flip an anchor side. */
+export const DOMINANCE = 40;
+
+export interface Box { x0: number; y0: number; x1: number; y1: number }
+
+export const centerOf = (p: { x: number; y: number; w: number; h: number }): Point => ({ x: p.x + p.w / 2, y: p.y + p.h / 2 });
+export const boxOf = (p: { x: number; y: number; w: number; h: number }): Box => ({ x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.h });
+
+/** Strict interior overlap of two boxes, each grown by `margin`. */
+export const boxesMeet = (a: Box, b: Box, margin = 0): boolean =>
+  a.x0 - margin < b.x1 && b.x0 - margin < a.x1 && a.y0 - margin < b.y1 && b.y0 - margin < a.y1;
+
+export function unionBox(boxes: Box[]): Box {
+  return {
+    x0: Math.min(...boxes.map((b) => b.x0)), y0: Math.min(...boxes.map((b) => b.y0)),
+    x1: Math.max(...boxes.map((b) => b.x1)), y1: Math.max(...boxes.map((b) => b.y1)),
+  };
+}
+
+/** Just enough of a canvas element for anchor geometry; portals render as boards (hexagon anchors). */
+function anchorElement(p: PlacedNode): CanvasElement {
+  return {
+    id: p.node.id, type: effectiveKind(p.node) === "portal" ? "board" : "freeform",
+    x: p.x, y: p.y, width: p.w, height: p.h,
+  } as unknown as CanvasElement;
+}
+
+/** Box containing the whole drawn connector from `a` to `b`. */
+export function hullOf(a: PlacedNode, b: PlacedNode): Box {
+  const fa = anchorElement(a);
+  const fb = anchorElement(b);
+  return connectorHull(autoEdge(fa, fb), fa, fb);
+}
+
+/** The connector from `a` to `b`, drawn exactly as the canvas draws it, sampled at 200 points. */
+export function connectorSamples(a: PlacedNode, b: PlacedNode): Point[] {
+  const fa = anchorElement(a);
+  const fb = anchorElement(b);
+  return connectorPath(autoEdge(fa, fb), fa, fb).sample(200);
+}
+
+/**
+ * Every (edge, unrelated placed box) pair where the connector, drawn exactly
+ * as the canvas draws it (sampled), enters the box shrunk by 4px, or where a
+ * layout line does. The same test the property harness applies to the
+ * rendered map, run on the engine's own boxes.
+ */
+export function pathConflicts(r: LayoutResult): { edge: number; node: string }[] {
+  const byId = new Map(r.placed.map((p) => [p.node.id, p]));
+  const out: { edge: number; node: string }[] = [];
+  const test = (i: number, pts: Point[], skip: (p: PlacedNode) => boolean) => {
+    for (const p of r.placed) {
+      if (skip(p)) continue;
+      if (pts.some((q) => q.x > p.x + 4 && q.x < p.x + p.w - 4 && q.y > p.y + 4 && q.y < p.y + p.h - 4)) out.push({ edge: i, node: p.node.id });
+    }
+  };
+  r.edges.forEach((e, i) => {
+    const a = byId.get(e.from);
+    const b = byId.get(e.to);
+    if (!a || !b) return;
+    test(i, connectorSamples(a, b), (p) => p === a || p === b);
+  });
+  r.lines.forEach((l, i) => {
+    const line = { start: l.start, end: l.end, bend: l.bend ?? undefined } as LineElement;
+    test(r.edges.length + i, linePath(line).sample(200), () => false);
+  });
+  return out;
+}
+
+/**
+ * The aspect the rendered map will have: renderMap adds a title band
+ * (60px gap + 60px title, as wide as the map up to 1200px) above it.
+ */
+export function renderedAspect(placed: PlacedNode[]): number {
+  const b = boundsOf(placed);
+  const w = Math.max(b.maxX - b.minX, 280);
+  const h = b.maxY - b.minY + 120;
+  return Math.max(w / h, h / w);
+}
+
+export type FootprintFn = (node: MapNode) => Footprint;
+
+/**
+ * Run a layout written for one orientation in the other: the engine lays out
+ * with every footprint's width and height swapped, and the result is mirrored
+ * across the diagonal (x <-> y). Auto anchors pick sides by the dominant axis,
+ * which the mirror swaps too, so every clearance argument carries over.
+ */
+export function transposed(run: (fp: FootprintFn) => LayoutResult): LayoutResult {
+  const out = run((node) => { const f = footprint(node); return { w: f.h, h: f.w }; });
+  const flip = (p: Point): Point => ({ x: p.y, y: p.x });
+  return {
+    placed: out.placed.map((p) => ({ node: p.node, x: p.y, y: p.x, w: p.h, h: p.w })),
+    edges: out.edges,
+    lines: out.lines.map((l) => ({ ...l, start: flip(l.start), end: flip(l.end), bend: l.bend && flip(l.bend) })),
+  };
+}
+
+/**
+ * True when no two boxes come within `margin` of each other and no connector
+ * or line crosses an unrelated box: the drawn map is overlap- and crossing-free.
+ */
+export function isClean(r: LayoutResult, margin = GAP): boolean {
+  const p = r.placed;
+  for (let a = 0; a < p.length; a++) {
+    for (let b = a + 1; b < p.length; b++) if (boxesMeet(boxOf(p[a]), boxOf(p[b]), margin / 2)) return false;
+  }
+  return pathConflicts(r).length === 0;
+}
+
+/**
+ * The first candidate whose rendered aspect is at most `limit`, else the
+ * squarest. Candidates after the first must pass isClean to be considered;
+ * the first is the engine's by-construction layout and always qualifies.
+ */
+export function squarest(candidates: (() => LayoutResult)[], limit: number): LayoutResult {
+  let best: { r: LayoutResult; a: number } | null = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const r = candidates[i]();
+    if (i > 0 && !isClean(r)) continue;
+    const a = renderedAspect(r.placed);
+    if (a <= limit) return r;
+    if (!best || a < best.a - 0.01) best = { r, a };
+  }
+  return best!.r;
 }
