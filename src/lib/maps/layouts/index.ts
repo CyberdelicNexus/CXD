@@ -1,5 +1,6 @@
 import type { MapType } from "../types";
 import type { LayoutEngine } from "./shared";
+import { braceLayout } from "./brace";
 import { doubleBubbleLayout } from "./double-bubble";
 import { flowLayout } from "./flow";
 import { multiFlowLayout } from "./multi-flow";
@@ -16,4 +17,5 @@ export const LAYOUTS: Partial<Record<MapType, LayoutEngine>> = {
   doubleBubble: doubleBubbleLayout,
   flow: flowLayout,
   multiFlow: multiFlowLayout,
+  brace: braceLayout,
 };
