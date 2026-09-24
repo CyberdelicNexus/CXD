@@ -14,7 +14,7 @@ import { VALID } from "./fixtures";
 import { mulberry32, randomGraph } from "./random-graphs";
 
 /** Types that MUST have an engine. Each engine task adds its type. */
-const REQUIRED: MapType[] = ["radial", "bubble", "spider", "tree", "doubleBubble", "flow"];
+const REQUIRED: MapType[] = ["radial", "bubble", "spider", "tree", "doubleBubble", "flow", "multiFlow"];
 const SEEDS = 200;
 /** Types whose relations are drawn; every relation must reach the canvas. */
 const DRAWS_RELATIONS: MapType[] = ["flow", "multiFlow", "conceptMap"];

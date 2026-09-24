@@ -2,6 +2,7 @@ import type { MapType } from "../types";
 import type { LayoutEngine } from "./shared";
 import { doubleBubbleLayout } from "./double-bubble";
 import { flowLayout } from "./flow";
+import { multiFlowLayout } from "./multi-flow";
 import { radialLayout } from "./radial";
 import { spiderLayout } from "./spider";
 import { treeLayout } from "./tree";
@@ -14,4 +15,5 @@ export const LAYOUTS: Partial<Record<MapType, LayoutEngine>> = {
   tree: treeLayout,
   doubleBubble: doubleBubbleLayout,
   flow: flowLayout,
+  multiFlow: multiFlowLayout,
 };
