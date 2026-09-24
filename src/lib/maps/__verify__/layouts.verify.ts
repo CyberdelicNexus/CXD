@@ -17,7 +17,7 @@ import { checkMapStructure } from "../catalog";
 import { connectorCrossings } from "../connector-geometry";
 import { LAYOUTS } from "../layouts";
 import { normalizeGraph, renderMap } from "../render";
-import type { LayoutResult } from "../layouts/shared";
+import { ASPECT_MAX, type LayoutResult } from "../layouts/shared";
 import { MAP_TYPES, type MapGraph, type MapType } from "../types";
 import { VALID } from "./fixtures";
 import { mulberry32, randomGraph } from "./random-graphs";
@@ -35,15 +35,26 @@ const DRAWS_RELATIONS: MapType[] = ["flow", "multiFlow", "conceptMap"];
  */
 const EDGE_PER_NODE: MapType[] = ["radial", "bubble", "spider", "tree", "doubleBubble", "multiFlow"];
 /**
- * Types whose rendered connectors and lines must never pass through an
- * unrelated box. Every type: concept maps included, since the layered engine
- * (barycentre ordering, dominance-sized row gaps, pushing concepts off
- * spanning connectors) reaches zero on every generated graph.
+ * Types whose rendered connectors, lines and label pills must never pass
+ * through an unrelated box. Every type, on the generator's normal-size graphs
+ * (concept maps of 4-10 concepts). Dense concept maps are the stress tier below.
  */
 const CROSSING_FREE: MapType[] = [...MAP_TYPES];
 /** Types whose rendered aspect (either orientation) must stay at or under ASPECT_MAX. */
 const ASPECT_CAPPED: MapType[] = ["radial", "bubble", "spider", "tree", "doubleBubble"];
-const ASPECT_MAX = 3;
+/**
+ * Concept-map stress tier: up to MAX_NODES concepts and up to one extra
+ * relation per concept. Arbitrary dense relations cannot always be drawn
+ * crossing-free with one cubic per relation, so maps of at most
+ * STRESS_HARD_MAX_NODES concepts must still be clean, and the rest are held
+ * to a ceiling the engine must beat (14/200 when set; the first
+ * crossing-free engine had 61/200 and the original 186/200 under this check).
+ */
+const STRESS_SEEDS = 200;
+const STRESS_HARD_MAX_NODES = 20;
+const STRESS_CROSSING_CEILING = 16;
+/** Largest rendered side (px) a stress-tier map may reach. */
+const STRESS_MAX_EXTENT = 26000;
 
 /** Rendered width/height over every box (title included), >= 1 in either orientation. */
 function aspectOf(elements: CanvasElement[]): number {
@@ -66,6 +77,7 @@ function rawProblems(type: MapType, g: MapGraph, layout: LayoutResult): string[]
       }
     }
   }
+  if (layout.residualConflicts) out.push(`residual-conflicts: engine reports ${layout.residualConflicts} crossing(s) it could not remove`);
   const placedIds = new Set(p.map((x) => x.node.id));
   for (const e of layout.edges) {
     if (!placedIds.has(e.from) || !placedIds.has(e.to)) out.push(`dangling-edge: ${e.from}->${e.to}`);
@@ -136,7 +148,7 @@ MAP_TYPES.forEach((type, typeIndex) => {
       crossingGraphs++;
       if (CROSSING_FREE.includes(type)) {
         const through = rendered.elements.find((e) => e.id === crossings[0].throughId);
-        fail(`${type} graph #${i}: ${crossings.length} connector crossing(s), first: [connector-crossing] ${crossings[0].edgeId} passes through ${through?.type} ${crossings[0].throughId}`);
+        fail(`${type} graph #${i}: ${crossings.length} connector crossing(s), first: [connector-crossing] ${crossings[0].edgeId} ${crossings[0].by === "label" ? "label pill covers" : "passes through"} ${through?.type} ${crossings[0].throughId}`);
         typeFailed = true; break;
       }
     }
@@ -155,19 +167,83 @@ MAP_TYPES.forEach((type, typeIndex) => {
   }
 });
 
-// The crossing rule itself: a connector from the first to the third of three
-// cards in a row runs straight through the middle one; a neighbour pair does not.
+// Dense concept maps: hard for up to STRESS_HARD_MAX_NODES concepts, a
+// ceiling above that; size and time are reported (and size bounded).
+if (!LAYOUTS.conceptMap) console.log("  SKIP conceptMap stress (no engine yet)");
+else {
+  let crossing = 0;
+  let hardFailed = false;
+  const extents: number[] = [];
+  const times: number[] = [];
+  const byK = new Map<string, [number, number]>();
+  for (let s = 0; s < STRESS_SEEDS && !hardFailed; s++) {
+    const g = randomGraph("conceptMap", mulberry32(s * 7919 + 77), { tier: "stress" });
+    const t0 = performance.now();
+    const rendered = renderMap(g);
+    times.push(performance.now() - t0);
+    if (rendered.edges.length !== normalizeGraph(g).relations.length) { fail(`conceptMap stress #${s}: an edge was dropped`); hardFailed = true; break; }
+    const boxes = rendered.elements.filter((e) => e.type !== "line");
+    extents.push(Math.max(
+      Math.max(...boxes.map((e) => e.x + e.width)) - Math.min(...boxes.map((e) => e.x)),
+      Math.max(...boxes.map((e) => e.y + e.height)) - Math.min(...boxes.map((e) => e.y)),
+    ));
+    const k = g.nodes.length;
+    const band = k <= 10 ? "4-10" : k <= 20 ? "11-20" : k <= 30 ? "21-30" : "31-40";
+    const tally = byK.get(band) ?? [0, 0];
+    tally[1]++;
+    byK.set(band, tally);
+    if (connectorCrossings(rendered.elements, rendered.edges).length === 0) continue;
+    crossing++;
+    tally[0]++;
+    if (k <= STRESS_HARD_MAX_NODES) { fail(`conceptMap stress #${s} (${k} concepts): connector crossing on a map of <= ${STRESS_HARD_MAX_NODES} concepts`); hardFailed = true; }
+  }
+  const maxExtent = Math.max(...extents);
+  if (!hardFailed && crossing > STRESS_CROSSING_CEILING) fail(`conceptMap stress: ${crossing}/${STRESS_SEEDS} graphs cross, ceiling ${STRESS_CROSSING_CEILING}`);
+  else if (!hardFailed && maxExtent > STRESS_MAX_EXTENT) fail(`conceptMap stress: a map reached ${maxExtent}px, bound ${STRESS_MAX_EXTENT}`);
+  else if (!hardFailed) {
+    const sorted = [...times].sort((a, b) => a - b);
+    const bands = Array.from(byK.entries()).sort().map(([band, [c, n]]) => `${band}: ${c}/${n}`).join(", ");
+    console.log(`  PASS conceptMap stress: ${crossing}/${STRESS_SEEDS} graphs cross (ceiling ${STRESS_CROSSING_CEILING}; by concepts ${bands}), 0 at <= ${STRESS_HARD_MAX_NODES} concepts`);
+    console.log(`       size: largest side ${maxExtent}px (bound ${STRESS_MAX_EXTENT}); render time median ${sorted[sorted.length >> 1].toFixed(0)}ms, max ${sorted[sorted.length - 1].toFixed(0)}ms`);
+  }
+}
+
+// The crossing rule itself, on hand-built canvases.
 {
-  const card = (id: string, x: number) =>
-    ({ id, type: "freeform", x, y: 0, width: 260, height: 300, zIndex: 1, locked: false, boardId: null, surface: "canvas" }) as unknown as CanvasElement;
-  const els = [card("a", 0), card("b", 400), card("c", 800)];
-  const edge = (from: string, to: string) => ({
+  const el = (id: string, type: string, x: number, y: number, width: number, height: number, extra: object = {}) =>
+    ({ id, type, x, y, width, height, zIndex: 1, locked: false, boardId: null, surface: "canvas", ...extra }) as unknown as CanvasElement;
+  const card = (id: string, x: number, y = 0) => el(id, "freeform", x, y, 260, 300);
+  const edge = (from: string, to: string, label?: string) => ({
     id: `${from}${to}`, fromNodeId: from, toNodeId: to, fromAnchor: "right" as const, toAnchor: "left" as const,
     fromAutoAnchor: true, toAutoAnchor: true, fromAnchorOffset: 0.5, toAnchorOffset: 0.5,
+    ...(label ? { label: { text: label } } : {}),
   });
-  const hits = connectorCrossings(els, [edge("a", "c"), edge("a", "b")]);
-  if (hits.length !== 1 || hits[0].edgeId !== "ac" || hits[0].throughId !== "b") fail(`connector-crossing self-test: got ${JSON.stringify(hits)}`);
-  else console.log("  PASS connector-crossing rule detects a connector through a card");
+  const got = (els: CanvasElement[], edges: ReturnType<typeof edge>[]) =>
+    connectorCrossings(els, edges).map((c) => `${c.edgeId}>${c.throughId}${c.by === "label" ? ":label" : ""}`).sort().join(",");
+  const cases: [string, string, string][] = [
+    // Straight: a -> c runs through b; the neighbour pair a -> b does not.
+    ["straight connector through a card", got([card("a", 0), card("b", 400), card("c", 800)], [edge("a", "c"), edge("a", "b")]), "ac>b"],
+    // Cubic: horizontal anchors with a 400px drop; its middle crosses m.
+    ["cubic connector through a card", got([card("a", 0), el("m", "shape", 460, 300, 140, 140), card("c", 1000, 600)], [edge("a", "c")]), "ac>m"],
+    // A small box between two samples of a long straight connector is still caught.
+    ["small box on a long connector", got([card("a", 0), el("w", "shape", 5000, 130, 40, 40), card("c", 10000)], [edge("a", "c")]), "ac>w"],
+    // A line element: a quadratic sagging through a card below its chord.
+    ["line element through a card", got([el("l", "line", 0, 0, 1000, 1, { start: { x: 0, y: 0 }, end: { x: 1000, y: 0 }, bend: { x: 500, y: 600 } }), card("b", 370, 150)], []), "l>b"],
+    // Zones: an edge into a seed card may cross the seed's own zone; one
+    // passing over an unrelated zone is flagged by the zone itself.
+    ["own zone excluded, unrelated zone flagged", got([
+      card("a", 0, 40),
+      el("z", "container", 400, 0, 340, 420), el("s", "freeform", 440, 80, 260, 300, { containerId: "z" }),
+      el("z2", "container", 1200, 0, 340, 420), el("s2", "freeform", 1240, 80, 260, 300, { containerId: "z2" }),
+      card("c", 1800, 40),
+    ], [edge("a", "s"), edge("s", "c")]), "sc>s2,sc>z2"],
+    // A label pill is opaque: it may not cover an unrelated box the stroke misses.
+    ["label pill over a card", got([card("a", 0, 0), el("t", "shape", 610, 152, 40, 20), card("c", 1000, 0)], [edge("a", "c", "causes")]), "ac>t:label"],
+  ];
+  for (const [name, actual, expected] of cases) {
+    if (actual !== expected) fail(`connector-crossing self-test "${name}": got [${actual}], expected [${expected}]`);
+  }
+  if (cases.every(([, a, e]) => a === e)) console.log(`  PASS connector-crossing rule self-tests (${cases.length} cases: straight, cubic, small box, line, zones, label pill)`);
 }
 
 // The map lands at the requested origin (title's top-left).

@@ -92,7 +92,17 @@ function hubRelations(center: MapNode, satellites: MapNode[], rng: Rng): MapRela
   return out;
 }
 
-export function randomGraph(type: MapType, rng: Rng): MapGraph {
+export interface GraphOptions {
+  /**
+   * "normal" keeps each type's everyday sizes. "stress" widens concept maps
+   * to the catalog ceiling: up to MAX_NODES concepts and up to one extra
+   * relation per concept (dense, cyclic, long-spanning).
+   */
+  tier?: "normal" | "stress";
+}
+
+export function randomGraph(type: MapType, rng: Rng, opts: GraphOptions = {}): MapGraph {
+  const stress = opts.tier === "stress";
   const b = new Builder(rng);
   const relations: MapRelation[] = [];
   switch (type) {
@@ -161,10 +171,10 @@ export function randomGraph(type: MapType, rng: Rng): MapGraph {
       break;
     }
     case "conceptMap": {
-      const k = int(rng, 4, 10);
+      const k = stress ? int(rng, 4, MAX_NODES) : int(rng, 4, 10);
       const cs = Array.from({ length: k }, () => b.add("concept"));
       for (let i = 1; i < k; i++) relations.push({ from: cs[int(rng, 0, i - 1)].id, to: cs[i].id, label: "relates to" });
-      for (let e = 0, extra = int(rng, 0, 3); e < extra; e++) {
+      for (let e = 0, extra = int(rng, 0, stress ? k : 3); e < extra; e++) {
         const a = int(rng, 0, k - 1);
         const c = int(rng, 0, k - 1);
         if (a !== c) relations.push({ from: cs[a].id, to: cs[c].id, label: "influences" });
