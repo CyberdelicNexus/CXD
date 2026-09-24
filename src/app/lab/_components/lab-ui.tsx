@@ -56,6 +56,7 @@ export const LabButton = forwardRef<HTMLButtonElement, LabButtonProps>(
   ({ tone = "secondary", busy = false, className, children, disabled, size = "sm", ...props }, ref) => (
     <Button
       ref={ref}
+      variant="ghost"
       size={size}
       disabled={disabled || busy}
       className={cn(
