@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const gate = labGate();
+  const gate = labGate(request);
   if (gate) return gate;
   const parsed = z.object({ cellId: z.string().min(1) }).safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "cellId required" }, { status: 400 });

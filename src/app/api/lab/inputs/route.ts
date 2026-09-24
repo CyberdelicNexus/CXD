@@ -7,8 +7,8 @@ import { saveCustomInput } from "@/lib/lab/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const gate = labGate();
+export async function GET(request: Request) {
+  const gate = labGate(request);
   if (gate) return gate;
   return NextResponse.json({ inputs: await getInputs() });
 }
@@ -21,7 +21,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const gate = labGate();
+  const gate = labGate(request);
   if (gate) return gate;
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "invalid input" }, { status: 400 });

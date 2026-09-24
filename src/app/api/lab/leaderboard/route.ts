@@ -6,8 +6,8 @@ import { allCells, readVotes } from "@/lib/lab/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const gate = labGate();
+export async function GET(request: Request) {
+  const gate = labGate(request);
   if (gate) return gate;
   const [cells, votes] = await Promise.all([allCells(), readVotes()]);
   return NextResponse.json({ leaderboard: buildLeaderboard(cells, votes) });

@@ -16,7 +16,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const gate = labGate();
+  const gate = labGate(request);
   if (gate) return gate;
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid vote" }, { status: 400 });
