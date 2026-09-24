@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "clean": "node -e \"['.next','.next-dev','node_modules/.cache'].forEach(p=>require('fs').rmSync(p,{recursive:true,force:true}))\"",
-    "email": "email dev --dir emails --port 3001"
+    "email": "email dev --dir emails --port 3001",
+    "lab:e2e": "node scripts/lab-e2e.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.41",
