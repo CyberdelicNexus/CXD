@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { labGate } from "@/lib/lab/http";
 import { allCells, appendVote } from "@/lib/lab/store";
+import type { Cell } from "@/lib/lab/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,5 +27,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "cells not found or not comparable" }, { status: 400 });
   }
   await appendVote({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), inputId: left.inputId, ...parsed.data });
-  return NextResponse.json({ ok: true }, { status: 201 });
+  // The pair was shown blind; once the vote is stored, reveal who made each map.
+  const reveal = (c: Cell) => ({ arm: c.arm, modelId: c.modelId, mapType: c.mapType, costUsd: c.costUsd });
+  return NextResponse.json({ ok: true, reveal: { left: reveal(left), right: reveal(right) } }, { status: 201 });
 }
