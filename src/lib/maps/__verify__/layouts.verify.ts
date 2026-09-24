@@ -3,9 +3,18 @@
 // any node or edge. The engine's RAW output is checked too: renderMap runs
 // repairLayout, which pushes overlapping boxes apart, so checkLayout alone
 // cannot see overlaps an engine creates.
+//
+// Legibility is checked on the rendered map too. The canvas draws connectors
+// ABOVE every element, so a connector (or a layout line) whose drawn path
+// passes through an unrelated box paints over its content: connectorCrossings
+// mirrors the canvas's path exactly and must find none. Aspect ratio
+// (rendered width/height, either orientation) is reported per type and
+// capped where a compact shape is always achievable.
 // Run: npx tsx src/lib/maps/__verify__/layouts.verify.ts
 import { checkLayout } from "@/lib/canvas-layout-rules";
+import type { CanvasElement } from "@/types/canvas-elements";
 import { checkMapStructure } from "../catalog";
+import { connectorCrossings } from "../connector-geometry";
 import { LAYOUTS } from "../layouts";
 import { normalizeGraph, renderMap } from "../render";
 import type { LayoutResult } from "../layouts/shared";
@@ -25,6 +34,24 @@ const DRAWS_RELATIONS: MapType[] = ["flow", "multiFlow", "conceptMap"];
  * brackets as lines, so it is not listed.
  */
 const EDGE_PER_NODE: MapType[] = ["radial", "bubble", "spider", "tree", "doubleBubble", "multiFlow"];
+/**
+ * Types whose rendered connectors and lines must never pass through an
+ * unrelated box. Every type: concept maps included, since the layered engine
+ * (barycentre ordering, dominance-sized row gaps, pushing concepts off
+ * spanning connectors) reaches zero on every generated graph.
+ */
+const CROSSING_FREE: MapType[] = [...MAP_TYPES];
+/** Types whose rendered aspect (either orientation) must stay at or under ASPECT_MAX. */
+const ASPECT_CAPPED: MapType[] = ["radial", "bubble", "spider", "tree", "doubleBubble"];
+const ASPECT_MAX = 3;
+
+/** Rendered width/height over every box (title included), >= 1 in either orientation. */
+function aspectOf(elements: CanvasElement[]): number {
+  const boxes = elements.filter((e) => e.type !== "line");
+  const w = Math.max(...boxes.map((e) => e.x + e.width)) - Math.min(...boxes.map((e) => e.x));
+  const h = Math.max(...boxes.map((e) => e.y + e.height)) - Math.min(...boxes.map((e) => e.y));
+  return Math.max(w / h, h / w);
+}
 
 /** Violations in the engine's own output, before any repair. */
 function rawProblems(type: MapType, g: MapGraph, layout: LayoutResult): string[] {
@@ -68,6 +95,8 @@ MAP_TYPES.forEach((type, typeIndex) => {
     return;
   }
   let typeFailed = false;
+  let crossingGraphs = 0;
+  const aspects: number[] = [];
   const graphs = [VALID[type], ...Array.from({ length: SEEDS }, (_, s) => randomGraph(type, mulberry32(s * 9973 + typeIndex)))];
   for (let i = 0; i < graphs.length && !typeFailed; i++) {
     const g = graphs[i];
@@ -102,9 +131,44 @@ MAP_TYPES.forEach((type, typeIndex) => {
       fail(`${type} graph #${i}: rendered ${boxes} elements, expected ${expected} (a node was dropped)`);
       typeFailed = true; break;
     }
+    const crossings = connectorCrossings(rendered.elements, rendered.edges);
+    if (crossings.length) {
+      crossingGraphs++;
+      if (CROSSING_FREE.includes(type)) {
+        const through = rendered.elements.find((e) => e.id === crossings[0].throughId);
+        fail(`${type} graph #${i}: ${crossings.length} connector crossing(s), first: [connector-crossing] ${crossings[0].edgeId} passes through ${through?.type} ${crossings[0].throughId}`);
+        typeFailed = true; break;
+      }
+    }
+    const aspect = aspectOf(rendered.elements);
+    aspects.push(aspect);
+    if (ASPECT_CAPPED.includes(type) && aspect > ASPECT_MAX) {
+      fail(`${type} graph #${i}: [aspect] rendered aspect ${aspect.toFixed(2)} exceeds ${ASPECT_MAX}`);
+      typeFailed = true; break;
+    }
   }
-  if (!typeFailed) console.log(`  PASS ${type}: ${graphs.length} graphs, 0 raw overlaps, 0 layout errors, no dropped nodes or edges`);
+  if (!typeFailed) {
+    console.log(`  PASS ${type}: ${graphs.length} graphs, 0 raw overlaps, 0 layout errors, no dropped nodes or edges, 0 connector crossings`);
+    const sorted = [...aspects].sort((a, b) => a - b);
+    const cap = ASPECT_CAPPED.includes(type) ? ` (cap ${ASPECT_MAX})` : " (reported only)";
+    console.log(`       aspect ${type}: worst ${sorted[sorted.length - 1].toFixed(2)}, median ${sorted[sorted.length >> 1].toFixed(2)}${cap}; crossing graphs ${crossingGraphs}/${graphs.length}`);
+  }
 });
+
+// The crossing rule itself: a connector from the first to the third of three
+// cards in a row runs straight through the middle one; a neighbour pair does not.
+{
+  const card = (id: string, x: number) =>
+    ({ id, type: "freeform", x, y: 0, width: 260, height: 300, zIndex: 1, locked: false, boardId: null, surface: "canvas" }) as unknown as CanvasElement;
+  const els = [card("a", 0), card("b", 400), card("c", 800)];
+  const edge = (from: string, to: string) => ({
+    id: `${from}${to}`, fromNodeId: from, toNodeId: to, fromAnchor: "right" as const, toAnchor: "left" as const,
+    fromAutoAnchor: true, toAutoAnchor: true, fromAnchorOffset: 0.5, toAnchorOffset: 0.5,
+  });
+  const hits = connectorCrossings(els, [edge("a", "c"), edge("a", "b")]);
+  if (hits.length !== 1 || hits[0].edgeId !== "ac" || hits[0].throughId !== "b") fail(`connector-crossing self-test: got ${JSON.stringify(hits)}`);
+  else console.log("  PASS connector-crossing rule detects a connector through a card");
+}
 
 // The map lands at the requested origin (title's top-left).
 {

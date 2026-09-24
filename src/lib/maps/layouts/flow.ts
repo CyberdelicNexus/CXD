@@ -4,11 +4,13 @@
 // and first step would cut straight through every step in between. The line
 // runs bottom-centre to bottom-centre; a quadratic peaks at half its control
 // offset, so a control point 2*LOOP_DROP below the lowest bottom sags the curve
-// LOOP_DROP px under the row. Its label is dropped (lines carry none).
+// LOOP_DROP px under the row (deeper when needed to clear a taller step next
+// to either end). Its label is dropped (lines carry none).
 import { orderFlowSteps } from "../catalog";
-import { footprint, LEVEL_GAP, relationLabel, snapDown, tintAt, type LayoutEdge, type LayoutEngine, type LayoutLine, type PlacedNode } from "./shared";
+import { footprint, LEVEL_GAP, pathConflicts, relationLabel, snapDown, tintAt, type LayoutEdge, type LayoutEngine, type LayoutLine, type PlacedNode } from "./shared";
 
 const LOOP_DROP = 80;
+const LOOP_DROP_MAX = 4000;
 
 export const flowLayout: LayoutEngine = (g) => {
   const order = orderFlowSteps(g);
@@ -33,11 +35,16 @@ export const flowLayout: LayoutEngine = (g) => {
     const start = { x: from.x + from.w / 2, y: from.y + from.h + 2 };
     const end = { x: to.x + to.w / 2, y: to.y + to.h + 2 };
     const lowest = Math.max(...placed.map((p) => p.y + p.h));
-    lines.push({
+    const loop = (drop: number): LayoutLine => ({
       start, end,
-      bend: { x: (start.x + end.x) / 2, y: 2 * (lowest + LOOP_DROP) - (start.y + end.y) / 2 },
+      bend: { x: (start.x + end.x) / 2, y: 2 * (lowest + drop) - (start.y + end.y) / 2 },
       gradient: "sunset", endCap: "arrow",
     });
+    // A shorter step at either end leaves a taller neighbour hanging below its
+    // bottom; sag deeper until the curve clears every step it passes under.
+    let drop = LOOP_DROP;
+    while (drop < LOOP_DROP_MAX && pathConflicts({ placed, edges: [], lines: [loop(drop)] }).length > 0) drop += 20;
+    lines.push(loop(drop));
   }
   return { placed, edges, lines };
 };
