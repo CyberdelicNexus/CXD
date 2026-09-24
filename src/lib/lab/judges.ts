@@ -6,6 +6,7 @@ import { checkMapStructure } from "@/lib/maps/catalog";
 import { connectorCrossings } from "@/lib/maps/connector-geometry";
 import { getElementTitle } from "@/utils/ai-context-aggregator";
 import { JUDGE_MODELS } from "./config";
+import type { CostMeter } from "./cost-meter";
 import { generateStructured } from "./model-client";
 import { formatInput } from "./format-input";
 import type { Cell, Dimension, JudgeId, JudgeScore, LabInput } from "./types";
@@ -14,6 +15,8 @@ import { JUDGE_DIMENSIONS } from "./types";
 export interface JudgeContext {
   input: LabInput;
   cell: Pick<Cell, "graph" | "elements" | "edges">;
+  /** Receives billed usage even when the judge call then fails. */
+  meter?: CostMeter;
 }
 
 export interface Judge {
@@ -101,7 +104,7 @@ function llmJudge(id: JudgeId, label: string, modelId: string): Judge {
     id,
     label,
     enabled: true,
-    async judge({ input, cell }) {
+    async judge({ input, cell, meter }) {
       if (cell.elements.length === 0) {
         return { judgeId: id, overall: null, pass: false, scores: {}, notes: "nothing was rendered", costUsd: 0 };
       }
@@ -111,6 +114,7 @@ function llmJudge(id: JudgeId, label: string, modelId: string): Judge {
         prompt: `INPUT:\n${formatInput(input)}\n\nRESULT:\n${describeResult(cell)}`,
         schema: judgeSchema,
         maxTokens: 4000,
+        meter,
       });
       const clamp = (n: number) => Math.min(5, Math.max(1, Math.round(n)));
       const scores = Object.fromEntries(JUDGE_DIMENSIONS.map((d) => [d, clamp(res.object[d])])) as Record<Dimension, number>;

@@ -44,8 +44,11 @@ export async function POST(request: Request) {
   if (estimateUsd > CONFIRM_THRESHOLD_USD && !confirmed) {
     return NextResponse.json({ needsConfirmation: true, estimateUsd }, { status: 409 });
   }
+  // Without an explicit confirmation the run may never spend more than the
+  // confirmation threshold, whatever budget the request asked for.
+  const budgetUsd = confirmed ? config.budgetUsd : Math.min(config.budgetUsd, CONFIRM_THRESHOLD_USD);
   try {
-    const run = await startRun(config);
+    const run = await startRun({ ...config, budgetUsd });
     return NextResponse.json({ run: summarise(run) }, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });

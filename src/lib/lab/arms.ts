@@ -10,6 +10,7 @@ import { buildMapGuide } from "@/lib/maps/prompt";
 import { renderMap } from "@/lib/maps/render";
 import { mapGraphSchema } from "@/lib/maps/schema";
 import type { MapGraph, MapType } from "@/lib/maps/types";
+import type { CostMeter } from "./cost-meter";
 import { generateStructured, type StructuredResult } from "./model-client";
 import { cardsAsElements, cardsAsInventory, formatInput } from "./format-input";
 import type { ArmId, LabInput } from "./types";
@@ -46,8 +47,8 @@ function finish(graph: MapGraph, calls: StructuredResult<unknown>[]): ArmResult 
   return { graph, elements: rendered.elements, edges: rendered.edges, structureViolations: [], ...usageOf(calls) };
 }
 
-const draftGraph = (modelId: string, system: string, prompt: string) =>
-  generateStructured({ modelId, system, prompt, schema: mapGraphSchema });
+const draftGraph = (modelId: string, system: string, prompt: string, meter?: CostMeter) =>
+  generateStructured({ modelId, system, prompt, schema: mapGraphSchema, meter });
 
 function exemplarBlock(): string {
   return "\n\nEXAMPLES of well-formed graphs:\n" +
@@ -76,7 +77,7 @@ function materialise(existing: CanvasElement[], plan: ReturnType<typeof translat
   ];
 }
 
-async function runBaseline(input: LabInput, modelId: string): Promise<ArmResult> {
+async function runBaseline(input: LabInput, modelId: string, meter?: CostMeter): Promise<ArmResult> {
   const existing = cardsAsElements(input.cards);
   const inventory = cardsAsInventory(input.cards);
   const prompt =
@@ -87,6 +88,7 @@ async function runBaseline(input: LabInput, modelId: string): Promise<ArmResult>
     system: "You are the CXD canvas assistant.\n" + CANVAS_OPERATIONS_GUIDE,
     prompt,
     schema: canvasOperationsSchema,
+    meter,
   });
   const proposal = sanitizeCanvasOperations(res.object, inventory);
   const plan = translateForApply(proposal, new Set(proposal.rows.map((r) => r.rowId)), existing, []);
@@ -99,23 +101,29 @@ async function runBaseline(input: LabInput, modelId: string): Promise<ArmResult>
   };
 }
 
-export async function runArm(arm: ArmId, input: LabInput, modelId: string, forcedType: MapType | null): Promise<ArmResult> {
+/**
+ * Run one arm. `meter` receives the billed usage of every model call as it is
+ * billed, so when the arm throws part-way (max_tokens, refusal, unparseable
+ * output, a critique revision failing after its draft) the caller can still
+ * charge what was spent. On success its total equals the result's costUsd.
+ */
+export async function runArm(arm: ArmId, input: LabInput, modelId: string, forcedType: MapType | null, meter?: CostMeter): Promise<ArmResult> {
   const inputText = formatInput(input);
   const guide = buildMapGuide(forcedType);
   switch (arm) {
     case "baseline":
-      return runBaseline(input, modelId);
+      return runBaseline(input, modelId, meter);
     case "graph": {
-      const res = await draftGraph(modelId, guide, `${TASK}\n\n${inputText}`);
+      const res = await draftGraph(modelId, guide, `${TASK}\n\n${inputText}`, meter);
       return finish(res.object, [res]);
     }
     case "graphExemplars": {
-      const res = await draftGraph(modelId, guide + exemplarBlock(), `${TASK}\n\n${inputText}`);
+      const res = await draftGraph(modelId, guide + exemplarBlock(), `${TASK}\n\n${inputText}`, meter);
       return finish(res.object, [res]);
     }
     case "graphCritique": {
-      const draft = await draftGraph(modelId, guide, `${TASK}\n\n${inputText}`);
-      const revised = await draftGraph(modelId, guide, critiquePrompt(inputText, draft.object));
+      const draft = await draftGraph(modelId, guide, `${TASK}\n\n${inputText}`, meter);
+      const revised = await draftGraph(modelId, guide, critiquePrompt(inputText, draft.object), meter);
       return finish(revised.object, [draft, revised]);
     }
   }

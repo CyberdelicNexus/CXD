@@ -1,7 +1,7 @@
 // Pure maths for the lab: no I/O, no SDK imports (safe in client components).
 import { costOf, getLabModel, JUDGE_MODELS } from "./config";
 import type { ArmId, Cell, JudgeId, RunConfig, Vote } from "./types";
-import { JUDGE_IDS, variantKey } from "./types";
+import { cellCosts, JUDGE_IDS, variantKey } from "./types";
 
 export const ELO_START = 1000;
 export const ELO_K = 32;
@@ -143,7 +143,11 @@ export interface LeaderboardRow {
   cells: number;
   failures: number;
   failureRate: number;
+  /** Generation + judges. */
   costUsd: number;
+  genCostUsd: number;
+  judgeCostUsd: number;
+  /** Generation cost per win: what the variant costs to produce, not to grade. */
   costPerWin: number | null;
 }
 
@@ -160,14 +164,16 @@ export function buildLeaderboard(cells: Cell[], votes: Vote[]): Leaderboard {
   const cellsById = new Map(cells.map((c) => [c.id, c]));
   const elo = computeElo(votes, cellsById);
 
-  const perVariant = new Map<string, { cells: number; failures: number; cost: number; arm: string; modelId: string }>();
+  const perVariant = new Map<string, { cells: number; failures: number; gen: number; judge: number; arm: string; modelId: string }>();
   for (const c of cells) {
     if (c.status === "pending" || c.status === "running" || c.status === "skipped") continue;
     const key = variantKey(c);
-    const e = perVariant.get(key) || { cells: 0, failures: 0, cost: 0, arm: c.arm, modelId: c.modelId };
+    const e = perVariant.get(key) || { cells: 0, failures: 0, gen: 0, judge: 0, arm: c.arm, modelId: c.modelId };
     e.cells++;
     if (c.status === "failed" || c.status === "error") e.failures++;
-    e.cost += c.costUsd;
+    const cost = cellCosts(c);
+    e.gen += cost.gen;
+    e.judge += cost.judge;
     perVariant.set(key, e);
   }
 
@@ -177,7 +183,8 @@ export function buildLeaderboard(cells: Cell[], votes: Vote[]): Leaderboard {
       variant, arm: v.arm, modelId: v.modelId,
       rating: Math.round(r.rating), games: r.games, wins: r.wins, ties: r.ties,
       cells: v.cells, failures: v.failures, failureRate: v.cells ? v.failures / v.cells : 0,
-      costUsd: v.cost, costPerWin: r.wins ? v.cost / r.wins : null,
+      costUsd: v.gen + v.judge, genCostUsd: v.gen, judgeCostUsd: v.judge,
+      costPerWin: r.wins ? v.gen / r.wins : null,
     };
   }).sort((x, y) => y.rating - x.rating || y.wins - x.wins);
 

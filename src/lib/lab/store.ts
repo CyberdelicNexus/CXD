@@ -38,16 +38,23 @@ async function writeAtomic(file: string, data: string): Promise<void> {
 
 const writeQueues = new Map<string, Promise<void>>();
 
+/**
+ * Queue a write of the run as it is now (serialised synchronously). Rejects
+ * when the write fails, so callers never assume an unsaved run persisted; a
+ * failure does not block later writes in the queue, and since each write holds
+ * the whole run, the next successful one captures everything.
+ */
 export function saveRun(run: Run): Promise<void> {
   const data = JSON.stringify(run);
   const file = path.join(runsDir(), `${run.id}.json`);
   const prev = writeQueues.get(run.id) ?? Promise.resolve();
-  const next = prev.then(async () => {
+  const next = prev.catch(() => undefined).then(async () => {
     await ensureDirs();
     await writeAtomic(file, data);
-  }).catch((e) => console.error("[lab] saveRun failed", e));
+  });
   writeQueues.set(run.id, next);
-  void next.then(() => { if (writeQueues.get(run.id) === next) writeQueues.delete(run.id); });
+  const settle = () => { if (writeQueues.get(run.id) === next) writeQueues.delete(run.id); };
+  next.then(settle, settle);
   return next;
 }
 

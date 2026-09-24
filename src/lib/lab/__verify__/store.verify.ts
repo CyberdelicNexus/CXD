@@ -40,6 +40,16 @@ async function main() {
     const list = await store.listRuns();
     check("listRuns ignores tmp files and sorts newest first", list.map((r) => r.id).join(",") === "run-b,run-a");
 
+    // M8: a failed write rejects (never silently "succeeds") and does not block later writes.
+    await fs.mkdir(path.join(runsDir, "run-blocked.json"), { recursive: true });
+    const failed = await store.saveRun(run("run-blocked", 1)).then(() => null, (e: Error) => e);
+    check("a failed save rejects", failed instanceof Error);
+    await store.saveRun(run("run-after", 2));
+    check("writes after a failed one still land", (await store.readRun("run-after"))?.spentUsd === 2);
+    await fs.rm(path.join(runsDir, "run-blocked.json"), { recursive: true, force: true });
+    const queued = await Promise.allSettled([store.saveRun(run("run-q", 1)), store.saveRun(run("run-q", 2))]);
+    check("queued saves after recovery resolve", queued.every((r) => r.status === "fulfilled") && (await store.readRun("run-q"))?.spentUsd === 2);
+
     check("readRun rejects path-like ids", (await store.readRun("../x")) === null);
     check("readRun of missing run is null", (await store.readRun("nope")) === null);
 

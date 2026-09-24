@@ -43,10 +43,28 @@ async function main() {
 
   const runner = await import("../runner");
   // Belt and braces: if any request below were to start a run, it must not call a model.
+  const { EXEMPLARS } = await import("@/lib/maps/exemplars");
+  const { renderMap } = await import("@/lib/maps/render");
+  const { CORPUS } = await import("../corpus");
+  const { CONFIRM_THRESHOLD_USD } = await import("../config");
+  const rendered = renderMap(EXEMPLARS[0].graph);
   let armCalls = 0;
+  let allowArm = false;
   runner.runnerDeps.runArm = async () => {
     armCalls++;
-    throw new Error("offline verify: no model calls");
+    if (!allowArm) throw new Error("offline verify: no model calls");
+    return {
+      graph: EXEMPLARS[0].graph, elements: rendered.elements, edges: rendered.edges, structureViolations: [],
+      inputTokens: 0, outputTokens: 0, costUsd: 0, latencyMs: 1,
+    };
+  };
+  const waitSettled = async (id: string) => {
+    for (let i = 0; i < 200; i++) {
+      const r = await runner.getRun(id);
+      if (r && r.status !== "running") return r;
+      await new Promise((res) => setTimeout(res, 20));
+    }
+    throw new Error("run did not settle");
   };
 
   // A config that fails validation (no inputs), so a request that passes the gate stops at 400.
@@ -98,6 +116,36 @@ async function main() {
     check("GET inputs from localhost is 200", (await inputs.GET(req("/api/lab/inputs"))).status === 200);
     check("GET runs from localhost is 200", (await runs.GET(req("/api/lab/runs"))).status === 200);
     check("no model was called", armCalls === 0);
+
+    // ── M3: declining confirmation caps the budget server-side ──
+    allowArm = true;
+    const cheap = (confirmed: boolean, budgetUsd: number) => ({
+      confirmed,
+      config: { inputIds: [CORPUS[0].id], arms: ["graph"], modelIds: ["gemini-3.8-flash"], forcedType: null, judges: ["rubric"], budgetUsd },
+    });
+    const unconfirmed = await runs.POST(req("/api/lab/runs", json(cheap(false, 150))));
+    const uBody = (await unconfirmed.json()) as { run: { id: string; config: { budgetUsd: number } } };
+    check(`unconfirmed run budget is clamped to $${CONFIRM_THRESHOLD_USD} (${uBody.run?.config.budgetUsd})`,
+      unconfirmed.status === 201 && uBody.run.config.budgetUsd === CONFIRM_THRESHOLD_USD);
+    const confirmedRes = await runs.POST(req("/api/lab/runs", json(cheap(true, 150))));
+    const cBody = (await confirmedRes.json()) as { run: { id: string; config: { budgetUsd: number } } };
+    check("confirmed run keeps its budget", confirmedRes.status === 201 && cBody.run.config.budgetUsd === 150);
+    const under = await runs.POST(req("/api/lab/runs", json(cheap(false, 1))));
+    const underBody = (await under.json()) as typeof uBody;
+    check("unconfirmed budget under the threshold is kept", underBody.run.config.budgetUsd === 1);
+    await waitSettled(underBody.run.id);
+
+    // ── I2: retry refusals surface as 409 with a message ──
+    const settled = await waitSettled(uBody.run.id);
+    const doneCell = settled.cells.find((c) => c.status === "done");
+    check("clamped run completed a cell", !!doneCell);
+    const refused = await retry.POST(req(`/api/lab/runs/${settled.id}/retry`, json({ cellId: doneCell!.id })), { params: { id: settled.id } });
+    const refusedBody = (await refused.json()) as { error?: string };
+    check("retrying a done cell is 409 with a message", refused.status === 409 && /already succeeded/.test(refusedBody.error ?? ""));
+    const missingRun = await retry.POST(req("/api/lab/runs/run-nope/retry", json({ cellId: "c" })), { params: { id: "run-nope" } });
+    check("retrying in an unknown run is 404", missingRun.status === 404);
+    await waitSettled(cBody.run.id);
+    allowArm = false;
   } finally {
     process.chdir(originalCwd);
     await new Promise((r) => setTimeout(r, 100));

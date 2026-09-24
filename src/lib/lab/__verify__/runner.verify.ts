@@ -33,9 +33,11 @@ async function main() {
   let maxInFlight = 0;
   let calls = 0;
   let costPerCell = 0;
-  const failInputs = new Map<string, "throw" | "structure">();
+  let judgeCost = 0;
+  const failInputs = new Map<string, "throw" | "structure" | "billed">();
+  const originalSave = runner.runnerDeps.saveRun;
 
-  runner.runnerDeps.runArm = async (_arm, input: LabInput): Promise<ArmResult> => {
+  runner.runnerDeps.runArm = async (_arm, input: LabInput, _model, _forced, meter): Promise<ArmResult> => {
     calls++;
     inFlight++;
     maxInFlight = Math.max(maxInFlight, inFlight);
@@ -43,6 +45,11 @@ async function main() {
       await sleep(20);
       const mode = failInputs.get(input.id);
       if (mode === "throw") throw new Error("model exploded (HTTP 500)");
+      if (mode === "billed") {
+        // The provider billed the call, then it failed (e.g. max_tokens).
+        meter?.add(0.05, 1000, 16000);
+        throw new Error("hit max_tokens before the object was complete");
+      }
       const base = { graph, inputTokens: 1, outputTokens: 1, costUsd: costPerCell, latencyMs: 20 };
       if (mode === "structure") return { ...base, elements: [], edges: [], structureViolations: ["radial: needs a centre"] };
       return { ...base, elements: rendered.elements, edges: rendered.edges, structureViolations: [] };
@@ -53,9 +60,13 @@ async function main() {
   JUDGES.llmCheap = {
     ...JUDGES.llmCheap,
     enabled: true,
-    async judge({ input }) {
-      if (input.id === CORPUS[2].id) throw new Error("judge timed out");
-      return { judgeId: "llmCheap", overall: 4, pass: true, scores: {}, notes: "", costUsd: 0 };
+    async judge({ input, meter }) {
+      if (input.id === CORPUS[2].id) {
+        meter?.add(judgeCost * 1.5);
+        throw new Error("judge timed out");
+      }
+      meter?.add(judgeCost);
+      return { judgeId: "llmCheap", overall: 4, pass: true, scores: {}, notes: "", costUsd: judgeCost };
     },
   };
 
@@ -135,6 +146,89 @@ async function main() {
     check("orphan reconciliation is persisted", persisted.status === "stopped" && persisted.cells[0].status === "error");
     const healed = await runner.retryCell(orphanId, stuck!.id);
     check("orphaned cell retries to done", healed?.cells[0].status === "done" && healed.status === "stopped");
+
+    const readDisk = async (id: string) =>
+      JSON.parse(await fs.readFile(path.join(tmp, "lab-data", "runs", `${id}.json`), "utf8")) as Run;
+    const settle = () => sleep(60);
+
+    // 5. I3 + I5: calls billed before a failure are charged; generation and judge cost are split.
+    failInputs.clear();
+    failInputs.set(CORPUS[0].id, "billed");
+    costPerCell = 0.01;
+    judgeCost = 0.002;
+    const r5 = await waitDone((await runner.startRun(cfg(3, 100))).id);
+    const [b0, b1, b2] = CORPUS.slice(0, 3).map((i) => r5.cells.find((c) => c.inputId === i.id)!);
+    const near = (a: number | undefined, b: number) => a !== undefined && Math.abs(a - b) < 1e-12;
+    check("failed arm is charged what the provider billed", b0.status === "error" && near(b0.genCostUsd, 0.05) && near(b0.costUsd, 0.05));
+    check("failed arm has no judge cost", near(b0.judgeCostUsd, 0));
+    check("done cell splits generation and judge cost", near(b1.genCostUsd, 0.01) && near(b1.judgeCostUsd, 0.002) && near(b1.costUsd, 0.012));
+    check("a judge that fails after billing is charged",
+      near(b2.judgeCostUsd, 0.003) && b2.judges.find((j) => j.judgeId === "llmCheap")?.costUsd === 0.003);
+    check(`run spend includes failed calls (${r5.spentUsd.toFixed(4)})`, near(r5.spentUsd, 0.05 + 0.012 + 0.013));
+    await settle();
+    check("cost split is persisted", near((await readDisk(r5.id)).cells.find((c) => c.id === b1.id)?.judgeCostUsd, 0.002));
+
+    // 6. I2: retries respect the budget and never replace a done cell.
+    calls = 0;
+    const doneRetry = await runner.retryCell(r5.id, b1.id).then(() => null, (e: Error) => e);
+    check("retrying a done cell is refused (conflict)", doneRetry instanceof runner.LabConflictError && /already succeeded/.test(doneRetry.message));
+    check("refused done retry left the cell alone", calls === 0 && (await runner.getRun(r5.id))?.cells.find((c) => c.id === b1.id)?.status === "done");
+    const oneCell = estimateRunCost(cfg(1, 0));
+    const tight = await waitDone((await runner.startRun(cfg(1, 0.05 + oneCell / 2))).id);
+    check("tight run spent the billed failure", tight.cells[0].status === "error" && near(tight.spentUsd, 0.05));
+    calls = 0;
+    const overBudget = await runner.retryCell(tight.id, tight.cells[0].id).then(() => null, (e: Error) => e);
+    check("retry that would exceed the budget is refused (conflict)",
+      overBudget instanceof runner.LabConflictError && /exceed/.test(overBudget.message) && /budget/.test(overBudget.message));
+    check("refused budget retry made no model call and spent nothing", calls === 0 && near((await runner.getRun(tight.id))!.spentUsd, 0.05));
+
+    // 7. I4: concurrent retries on a run that is not live both persist.
+    failInputs.clear();
+    failInputs.set(CORPUS[0].id, "throw");
+    failInputs.set(CORPUS[1].id, "throw");
+    costPerCell = 0;
+    judgeCost = 0;
+    const r7 = await waitDone((await runner.startRun(cfg(2, 100))).id);
+    await settle();
+    failInputs.clear();
+    calls = 0;
+    const [x7, y7] = r7.cells;
+    await Promise.all([runner.retryCell(r7.id, x7.id), runner.retryCell(r7.id, y7.id)]);
+    await settle();
+    const disk7 = await readDisk(r7.id);
+    check("both concurrent retries persisted", disk7.cells.every((c) => c.status === "done") && calls === 2);
+    // Same cell twice at once: one model call, not two.
+    failInputs.set(CORPUS[0].id, "throw");
+    const r7b = await waitDone((await runner.startRun(cfg(1, 100))).id);
+    await settle();
+    failInputs.clear();
+    calls = 0;
+    await Promise.all([runner.retryCell(r7b.id, r7b.cells[0].id), runner.retryCell(r7b.id, r7b.cells[0].id)]);
+    check("two retries of the same cell run it once", calls === 1);
+
+    // 8. M8: a failed save is not assumed to have persisted.
+    runner.runnerDeps.saveRun = async () => { throw new Error("disk full"); };
+    calls = 0;
+    const refusedStart = await runner.startRun(cfg(1, 100)).then(() => null, (e: Error) => e);
+    check("a run that cannot be saved is not started", !!refusedStart && /could not save/.test(refusedStart.message) && calls === 0);
+    runner.runnerDeps.saveRun = originalSave;
+    failInputs.set(CORPUS[0].id, "throw");
+    failInputs.set(CORPUS[1].id, "throw");
+    const r8 = await waitDone((await runner.startRun(cfg(2, 100))).id);
+    await settle();
+    failInputs.clear();
+    runner.runnerDeps.saveRun = async () => { throw new Error("disk full"); };
+    const afterFail = await runner.retryCell(r8.id, r8.cells[0].id);
+    check("failed save is recorded on the run", /disk full/.test(afterFail?.persistError ?? ""));
+    const stillLive = await runner.getRun(r8.id);
+    check("unsaved run stays live in memory (authoritative)", stillLive === afterFail && stillLive?.cells[0].status === "done");
+    check("disk still has the old state", (await readDisk(r8.id)).cells[0].status === "error");
+    runner.runnerDeps.saveRun = originalSave;
+    const healed8 = await runner.retryCell(r8.id, r8.cells[1].id);
+    await settle();
+    const disk8 = await readDisk(r8.id);
+    check("next good save clears the error and persists everything",
+      healed8?.persistError === null && disk8.cells.every((c) => c.status === "done") && !disk8.persistError);
   } finally {
     process.chdir(originalCwd);
     await sleep(100); // let any trailing writes land before removing the dir

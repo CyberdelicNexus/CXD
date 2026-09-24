@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { estimateRunCost } from "@/lib/lab/lab-math";
 import type { ArmId, Cell, InputType, JudgeId, LabInput, Run, RunConfig, RunSummary } from "@/lib/lab/types";
+import { cellCosts } from "@/lib/lab/types";
 import type { MapType } from "@/lib/maps/types";
 import { cn } from "@/lib/utils";
 import type { LabMeta } from "./lab-app";
@@ -488,7 +489,11 @@ function RunDetail({ runId, meta, inputsById, onChanged }: {
     setRetryErrors((m) => { const n = { ...m }; delete n[cellId]; return n; });
     setRun((r) => r && { ...r, cells: r.cells.map((c) => (c.id === cellId ? { ...c, status: "running", error: null } : c)) });
     try {
-      const { data } = await fetchJson<{ run: Run }>(`/api/lab/runs/${encodeURIComponent(runId)}/retry`, postJson({ cellId }));
+      const { status, data } = await fetchJson<{ run?: Run; error?: string }>(
+        `/api/lab/runs/${encodeURIComponent(runId)}/retry`, postJson({ cellId }),
+      );
+      // 409: refused (over budget, or the cell already succeeded). Shown inline on the cell.
+      if (status === 409 || !data.run) throw new Error(data.error ?? "retry refused");
       setRun(data.run);
       onChanged();
     } catch (e) {
@@ -535,6 +540,7 @@ function RunDetail({ runId, meta, inputsById, onChanged }: {
         </dl>
       </div>
       {error && <InlineError message={`Refresh failed: ${error}`} onRetry={() => void load()} />}
+      {run.persistError && <InlineError message={`Not saved to disk: ${run.persistError}. The lab keeps this run in memory until a save succeeds.`} />}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {run.cells.map((c) => (
@@ -585,7 +591,14 @@ function CellTile({ cell: c, title, armLabel, modelLabel, retrying, retryError, 
 
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-zinc-400">
         {c.latencyMs > 0 && <span>{(c.latencyMs / 1000).toFixed(1)}s</span>}
-        {c.costUsd > 0 && <span>{usd(c.costUsd, 4)}</span>}
+        {c.costUsd > 0 && (() => {
+          const cost = cellCosts(c);
+          return (
+            <span title={`Total ${usd(c.costUsd, 4)}: generation ${usd(cost.gen, 4)}, judges ${usd(cost.judge, 4)}`}>
+              gen {usd(cost.gen, 4)} · judge {usd(cost.judge, 4)}
+            </span>
+          );
+        })()}
         {c.judges.map((j) => (
           <span key={j.judgeId} title={j.notes || undefined}>{j.judgeId} {j.overall === null ? "-" : j.overall.toFixed(1)}</span>
         ))}

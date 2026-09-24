@@ -63,7 +63,12 @@ export interface Cell {
   rubricWarnings: string[];
   judges: JudgeScore[];
   latencyMs: number;
+  /** Total billed for this cell (generation + judges): what counts against the budget. */
   costUsd: number;
+  /** Generation only. Missing on runs stored before it existed: read via cellCosts(). */
+  genCostUsd?: number;
+  /** LLM judges only. Missing on runs stored before it existed: read via cellCosts(). */
+  judgeCostUsd?: number;
   error: string | null;
 }
 
@@ -84,6 +89,11 @@ export interface Run {
   spentUsd: number;
   status: "running" | "done" | "stopped";
   cells: Cell[];
+  /**
+   * Set while the latest save of this run failed: what is on disk is stale and
+   * the in-memory run (kept live) is authoritative. Cleared by the next good save.
+   */
+  persistError?: string | null;
 }
 
 export interface RunSummary {
@@ -106,6 +116,11 @@ export interface Vote {
   winner: "left" | "right" | "tie";
   reason: string;
   repeat: boolean;
+}
+
+/** Generation vs judge cost; old stored cells (no split) count entirely as generation. */
+export function cellCosts(c: Pick<Cell, "costUsd" | "genCostUsd" | "judgeCostUsd">): { gen: number; judge: number } {
+  return { gen: c.genCostUsd ?? c.costUsd, judge: c.judgeCostUsd ?? 0 };
 }
 
 export const variantKey = (c: Pick<Cell, "arm" | "modelId">) => `${c.arm}|${c.modelId}`;

@@ -65,7 +65,7 @@ export function LeaderboardView({ meta }: { meta: LabMeta }) {
 
       <section className={cn(panelClass, "overflow-x-auto pt-3")} aria-labelledby="lb-variants">
         <h2 id="lb-variants" className="px-3 pb-3 text-sm font-semibold text-zinc-100">Variants</h2>
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-[860px] text-sm">
           <thead>
             <tr className="text-left">
               <th className={cn(th, "w-10", num)}>#</th>
@@ -73,8 +73,9 @@ export function LeaderboardView({ meta }: { meta: LabMeta }) {
               <th className={cn(th, num)}>Elo</th>
               <th className={cn(th, num)} title="Wins / losses / ties">W / L / T</th>
               <th className={cn(th, num)}>Failure rate</th>
-              <th className={cn(th, num)}>Spend</th>
-              <th className={cn(th, num)}>Cost per win</th>
+              <th className={cn(th, num)} title="What generating this variant's maps cost">Gen spend</th>
+              <th className={cn(th, num)} title="What the LLM judges cost to grade them">Judge spend</th>
+              <th className={cn(th, num)} title="Generation spend per win (judge cost excluded)">Cost per win</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
@@ -90,7 +91,8 @@ export function LeaderboardView({ meta }: { meta: LabMeta }) {
                 <td className={cn("px-3 py-2.5", num, r.failureRate > 0.2 && "text-amber-400")}>
                   {pct(r.failureRate)} <span className="text-zinc-400">({r.failures}/{r.cells})</span>
                 </td>
-                <td className={cn("px-3 py-2.5", num)}>{usd(r.costUsd, 3)}</td>
+                <td className={cn("px-3 py-2.5", num)}>{usd(r.genCostUsd, 3)}</td>
+                <td className={cn("px-3 py-2.5", num)}>{usd(r.judgeCostUsd, 3)}</td>
                 <td className={cn("px-3 py-2.5", num)}>{r.costPerWin === null ? "-" : usd(r.costPerWin, 3)}</td>
               </tr>
             ))}

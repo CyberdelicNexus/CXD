@@ -69,5 +69,17 @@ const byId = new Map([a, b].map((c) => [c.id, c]));
   check("leaderboard reports judge agreement", lb.judges.some((j) => j.judgeId === "llmCheap" && j.agreement === 1));
 }
 
+{
+  // I5: cost per win counts generation only; old cells without the split read as all generation.
+  const split: Cell = { ...cell("s", "graph", "m1"), costUsd: 0.05, genCostUsd: 0.03, judgeCostUsd: 0.02 };
+  const legacy: Cell = { ...cell("l", "baseline", "m1"), costUsd: 0.04 };
+  const lb = buildLeaderboard([split, legacy], [vote("s", "l", "left"), vote("l", "s", "left")]);
+  const g = lb.rows.find((r) => r.variant === "graph|m1")!;
+  const bl = lb.rows.find((r) => r.variant === "baseline|m1")!;
+  check("cost per win uses generation cost only", near(g.costPerWin!, 0.03) && near(g.genCostUsd, 0.03) && near(g.judgeCostUsd, 0.02));
+  check("total cost still includes judges", near(g.costUsd, 0.05));
+  check("legacy cell: generation = costUsd, judge = 0", near(bl.genCostUsd, 0.04) && bl.judgeCostUsd === 0 && near(bl.costPerWin!, 0.04));
+}
+
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log("\nALL PASS");
