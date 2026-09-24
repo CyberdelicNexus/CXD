@@ -10,7 +10,7 @@ export function expectedScore(ra: number, rb: number): number {
   return 1 / (1 + 10 ** ((rb - ra) / 400));
 }
 
-export interface EloEntry { rating: number; games: number; wins: number }
+export interface EloEntry { rating: number; games: number; wins: number; ties: number }
 
 const byTime = (votes: Vote[]) => [...votes].sort((x, y) => x.createdAt.localeCompare(y.createdAt));
 
@@ -18,7 +18,7 @@ export function computeElo(votes: Vote[], cellsById: Map<string, Cell>, k = ELO_
   const table = new Map<string, EloEntry>();
   const entry = (key: string) => {
     let e = table.get(key);
-    if (!e) { e = { rating: ELO_START, games: 0, wins: 0 }; table.set(key, e); }
+    if (!e) { e = { rating: ELO_START, games: 0, wins: 0, ties: 0 }; table.set(key, e); }
     return e;
   };
   for (const v of byTime(votes)) {
@@ -38,6 +38,7 @@ export function computeElo(votes: Vote[], cellsById: Map<string, Cell>, k = ELO_
     b.games++;
     if (sa === 1) a.wins++;
     if (sa === 0) b.wins++;
+    if (sa === 0.5) { a.ties++; b.ties++; }
   }
   return table;
 }
@@ -138,6 +139,7 @@ export interface LeaderboardRow {
   rating: number;
   games: number;
   wins: number;
+  ties: number;
   cells: number;
   failures: number;
   failureRate: number;
@@ -170,10 +172,10 @@ export function buildLeaderboard(cells: Cell[], votes: Vote[]): Leaderboard {
   }
 
   const rows: LeaderboardRow[] = Array.from(perVariant.entries()).map(([variant, v]) => {
-    const r = elo.get(variant) || { rating: ELO_START, games: 0, wins: 0 };
+    const r = elo.get(variant) || { rating: ELO_START, games: 0, wins: 0, ties: 0 };
     return {
       variant, arm: v.arm, modelId: v.modelId,
-      rating: Math.round(r.rating), games: r.games, wins: r.wins,
+      rating: Math.round(r.rating), games: r.games, wins: r.wins, ties: r.ties,
       cells: v.cells, failures: v.failures, failureRate: v.cells ? v.failures / v.cells : 0,
       costUsd: v.cost, costPerWin: r.wins ? v.cost / r.wins : null,
     };
