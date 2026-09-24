@@ -149,8 +149,26 @@ async function main() {
     check("retrying a done cell is 409 with a message", refused.status === 409 && /already succeeded/.test(refusedBody.error ?? ""));
     const missingRun = await retry.POST(req("/api/lab/runs/run-nope/retry", json({ cellId: "c" })), { params: { id: "run-nope" } });
     check("retrying in an unknown run is 404", missingRun.status === 404);
-    await waitSettled(cBody.run.id);
+    const confirmedRun = await waitSettled(cBody.run.id);
     allowArm = false;
+
+    // ── M4: vote validation ──
+    const failedRes = await runs.POST(req("/api/lab/runs", json(cheap(true, 5))));
+    const failedRun = await waitSettled(((await failedRes.json()) as typeof uBody).run.id);
+    const errorCell = failedRun.cells[0];
+    const otherDone = confirmedRun.cells.find((c) => c.status === "done")!;
+    const castVote = async (leftCellId: string, rightCellId: string) => {
+      const res = await votes.POST(req("/api/lab/votes", json({ leftCellId, rightCellId, winner: "left" })));
+      return { status: res.status, error: ((await res.json()) as { error?: string }).error ?? "" };
+    };
+    const self = await castVote(doneCell!.id, doneCell!.id);
+    check("vote with left === right is 400", self.status === 400 && /itself/.test(self.error));
+    const unknown = await castVote(doneCell!.id, "no-such-cell");
+    check("vote with an unknown cell id is 400", unknown.status === 400 && /unknown/.test(unknown.error));
+    const notDone = await castVote(doneCell!.id, errorCell.id);
+    check(`vote on a cell that is not done (${errorCell.status}) is 400`, errorCell.status === "error" && notDone.status === 400 && /done/.test(notDone.error));
+    const ok = await castVote(doneCell!.id, otherDone.id);
+    check("valid vote on two done cells is 201", ok.status === 201);
   } finally {
     process.chdir(originalCwd);
     await new Promise((r) => setTimeout(r, 100));
