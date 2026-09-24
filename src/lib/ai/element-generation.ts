@@ -151,7 +151,7 @@ const BOARD_HEX_COLORS: Record<(typeof TINT_COLORS)[number], string> = {
 };
 
 /** Framing sections an experienceBlock may anchor to. */
-const INSPECTOR_SECTION_IDS = [
+export const INSPECTOR_SECTION_IDS = [
   'intentionCore', 'desiredChange', 'humanContext', 'contextAndMeaning',
   'realityPlanes', 'sensoryDomains', 'presenceTypes', 'stateMapping', 'traitMapping',
 ] as const satisfies readonly InspectorSectionId[];
