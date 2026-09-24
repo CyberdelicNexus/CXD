@@ -7,9 +7,13 @@ export const radialLayout: LayoutEngine = (g) => {
   const centers = ringCenters(footprint(center), satellites.map(footprint));
   const placed: PlacedNode[] = [placeCentered(center, 0, 0)];
   const edges: LayoutEdge[] = [];
+  const n = satellites.length;
+  // The ring wraps: when the last satellite would repeat the first one's tint
+  // (n = 7 with six tints), step it on so ring neighbours always differ.
+  const tint = (i: number) => (i === n - 1 && n > 1 && tintAt(i) === tintAt(0) ? tintAt(i + 1) : tintAt(i));
   satellites.forEach((s, i) => {
     placed.push(placeCentered(s, centers[i].x, centers[i].y));
-    edges.push({ from: center.id, to: s.id, label: relationLabel(g, center.id, s.id), gradient: tintAt(i), bend: 0, arrow: "none" });
+    edges.push({ from: center.id, to: s.id, label: relationLabel(g, center.id, s.id), gradient: tint(i), bend: 0, arrow: "none" });
   });
   return { placed, edges, lines: [] };
 };

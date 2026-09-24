@@ -16,6 +16,13 @@ const TITLE_H = 60;
 const TITLE_GAP = 60;
 /** Seed card inside a zone: inside the container, below its 56px header band. */
 const ZONE_SEED = { dx: 40, dy: 80, w: 260, h: 300 };
+/** Longest title that fits the fixed 60px title box without spilling onto the divider. */
+const TITLE_MAX = 80;
+
+function clampTitle(raw: string): string {
+  const t = raw.trim() || "Map";
+  return t.length <= TITLE_MAX ? t : `${t.slice(0, TITLE_MAX - 1).trimEnd()}…`;
+}
 
 /**
  * Clamp table data so the rendered grid matches the footprint engines assumed,
@@ -33,7 +40,7 @@ export function normalizeGraph(graph: MapGraph): MapGraph {
   return {
     ...graph,
     relations,
-    title: graph.title.trim() || "Map",
+    title: clampTitle(graph.title),
     nodes: graph.nodes.map((node) => {
       if (node.kind !== "table") return node;
       const p = parseProps(node.props);
@@ -43,8 +50,10 @@ export function normalizeGraph(graph: MapGraph): MapGraph {
           .slice(0, TABLE_MAX_ROWS)
           .map((row) => (row as unknown[]).slice(0, TABLE_MAX_COLS));
       }
-      if (typeof p.rows === "number") p.rows = Math.min(Math.max(p.rows, 1), TABLE_MAX_ROWS);
-      if (typeof p.cols === "number") p.cols = Math.min(Math.max(p.cols, 1), TABLE_MAX_COLS);
+      // Round before clamping: {"rows": 2.5} would otherwise give a table whose
+      // rows field disagrees with its cell grid.
+      if (typeof p.rows === "number") p.rows = Math.min(Math.max(Math.round(p.rows), 1), TABLE_MAX_ROWS);
+      if (typeof p.cols === "number") p.cols = Math.min(Math.max(Math.round(p.cols), 1), TABLE_MAX_COLS);
       return { ...node, props: JSON.stringify(p) };
     }),
   };

@@ -1,7 +1,7 @@
 // Seeded generator of VALID graphs per map type, exercising every node kind
 // and wide label/size ranges. The layout property test asserts every one of
 // these renders with zero rubric errors.
-import { MAX_NODES } from "../catalog";
+import { MAX_NODES, MAX_ZONES } from "../catalog";
 import { NODE_KINDS, type MapGraph, type MapNode, type MapRelation, type MapRole, type MapType, type NodeKind } from "../types";
 
 export type Rng = () => number;
@@ -18,19 +18,29 @@ export function mulberry32(seed: number): Rng {
 
 const int = (rng: Rng, min: number, max: number) => min + Math.floor(rng() * (max - min + 1));
 
+/** A table up to 12x8 — past the 10x6 clamp — given as cells or as numeric rows/cols (sometimes fractional). */
+function tableProps(rng: Rng): string {
+  const rows = int(rng, 1, 12);
+  const cols = int(rng, 1, 8);
+  if (rng() < 0.5) {
+    return JSON.stringify({ cells: Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => `r${r}c${c}`)) });
+  }
+  const frac = () => (rng() < 0.3 ? 0.5 : 0);
+  return JSON.stringify({ rows: rows + frac(), cols: cols + frac() });
+}
+
 const KIND_PROPS: Record<NodeKind, (rng: Rng) => string> = {
   card: () => JSON.stringify({ emoji: "💡" }),
   bubble: () => "{}",
-  waypoint: () => "{}",
+  // The circle variant is chosen by props.shapeType; the default is a diamond.
+  waypoint: (rng) => (rng() < 0.5 ? JSON.stringify({ shapeType: "circle" }) : "{}"),
   portal: () => JSON.stringify({ icon: "grid" }),
-  anchor: () => JSON.stringify({ componentKey: "intentionCore" }),
-  table: (rng) => {
-    const rows = int(rng, 1, 4);
-    const cols = int(rng, 1, 4);
-    return JSON.stringify({ cells: Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => `r${r}c${c}`)) });
-  },
+  // An invalid componentKey exercises effectiveKind's anchor -> card fallback.
+  anchor: (rng) => JSON.stringify({ componentKey: rng() < 0.25 ? "notARealSection" : "intentionCore" }),
+  table: tableProps,
   frame: () => JSON.stringify({ storyboard: true }),
-  link: () => JSON.stringify({ url: "https://example.com" }),
+  // An empty url exercises effectiveKind's link -> card fallback.
+  link: (rng) => JSON.stringify({ url: rng() < 0.25 ? "" : "https://example.com" }),
   caption: () => "{}",
   zone: () => "{}",
 };
@@ -38,14 +48,18 @@ const KIND_PROPS: Record<NodeKind, (rng: Rng) => string> = {
 class Builder {
   nodes: MapNode[] = [];
   private zones = 0;
-  constructor(private rng: Rng) {}
+  /** Some graphs lean heavily on zones so the MAX_ZONES ceiling is reached. */
+  private zoneHeavy: boolean;
+  constructor(private rng: Rng) {
+    this.zoneHeavy = rng() < 0.2;
+  }
   full(): boolean {
     return this.nodes.length >= MAX_NODES;
   }
   add(role: MapRole, parent = ""): MapNode {
     const i = this.nodes.length;
-    let kind = NODE_KINDS[int(this.rng, 0, NODE_KINDS.length - 1)];
-    if (kind === "zone" && this.zones >= 3) kind = "card";
+    let kind: NodeKind = this.zoneHeavy && this.rng() < 0.6 ? "zone" : NODE_KINDS[int(this.rng, 0, NODE_KINDS.length - 1)];
+    if (kind === "zone" && this.zones >= MAX_ZONES) kind = "card";
     if (kind === "zone") this.zones++;
     const filler = " lorem".repeat(int(this.rng, 0, 9));
     const node: MapNode = {
@@ -62,18 +76,36 @@ class Builder {
   }
 }
 
+/** Title of 1–200 chars (an empty title is structurally invalid). */
+function randomTitle(type: MapType, rng: Rng): string {
+  const len = int(rng, 1, 200);
+  return `${type} map${" lorem ipsum".repeat(20)}`.slice(0, len);
+}
+
+/** Sometimes label a few center->satellite relations, occasionally duplicating one. */
+function hubRelations(center: MapNode, satellites: MapNode[], rng: Rng): MapRelation[] {
+  if (rng() < 0.5) return [];
+  const out: MapRelation[] = satellites
+    .filter(() => rng() < 0.6)
+    .map((s, i) => ({ from: center.id, to: s.id, label: `is linked ${i}` }));
+  if (out.length && rng() < 0.3) out.push({ ...out[0], label: "duplicate" });
+  return out;
+}
+
 export function randomGraph(type: MapType, rng: Rng): MapGraph {
   const b = new Builder(rng);
   const relations: MapRelation[] = [];
   switch (type) {
     case "radial": {
-      b.add("center");
-      for (let i = 0, k = int(rng, 3, 8); i < k; i++) b.add("branch");
+      const c = b.add("center");
+      const sats = Array.from({ length: int(rng, 3, 8) }, () => b.add("branch"));
+      relations.push(...hubRelations(c, sats, rng));
       break;
     }
     case "bubble": {
-      b.add("center");
-      for (let i = 0, k = int(rng, 3, 8); i < k; i++) b.add("quality");
+      const c = b.add("center");
+      const sats = Array.from({ length: int(rng, 3, 8) }, () => b.add("quality"));
+      relations.push(...hubRelations(c, sats, rng));
       break;
     }
     case "spider": {
@@ -140,5 +172,5 @@ export function randomGraph(type: MapType, rng: Rng): MapGraph {
       break;
     }
   }
-  return { mapType: type, title: `${type} map`, nodes: b.nodes, relations };
+  return { mapType: type, title: randomTitle(type, rng), nodes: b.nodes, relations };
 }
