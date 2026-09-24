@@ -5,6 +5,7 @@
 // list only the fields an op actually uses.
 import { sanitizeCanvasOperations, isActionableMessage, canvasOperationsSchema } from "../canvas-operations";
 import { generateElementsSchema } from "../element-generation";
+import { auditSchemaForAnthropic } from "../schema-guards";
 import type { CanvasInventory } from "@/types/ai-operations";
 import type { z } from "zod";
 
@@ -158,42 +159,11 @@ check("'What should I focus on next?' remains not actionable", !isActionableMess
 // generateObject feature for Claude users, so assert the JSON Schema directly
 // rather than trusting that nobody re-adds .max()/.nullable() later.
 
-type JsonSchemaNode = { type?: string; anyOf?: unknown[]; oneOf?: unknown[]; properties?: Record<string, JsonSchemaNode>; required?: string[]; items?: JsonSchemaNode; maxItems?: number; minItems?: number };
-
-function walk(node: JsonSchemaNode | undefined, visit: (n: JsonSchemaNode) => void) {
-  if (!node || typeof node !== "object") return;
-  visit(node);
-  if (node.properties) for (const child of Object.values(node.properties)) walk(child, visit);
-  if (node.items) walk(node.items, visit);
-  for (const key of ["anyOf", "oneOf"] as const) {
-    for (const child of node[key] || []) walk(child as JsonSchemaNode, visit);
-  }
-}
-
-// zod v4 exposes toJSONSchema; fall back to skipping if unavailable.
-const toJson = (schema: unknown): JsonSchemaNode | null => {
-  const z4 = require("zod") as { toJSONSchema?: (s: unknown, o?: unknown) => JsonSchemaNode };
-  if (typeof z4.toJSONSchema !== "function") return null;
-  try { return z4.toJSONSchema(schema, { io: "input" }); } catch { return null; }
-};
-
 for (const [name, schema] of [["canvasOperations", canvasOperationsSchema], ["generateElements", generateElementsSchema]] as const) {
-  const json = toJson(schema);
-  if (!json) { console.log(`  SKIP ${name} JSON Schema guards (zod.toJSONSchema unavailable)`); continue; }
-  let arrayBounds = 0;
-  let unions = 0;
-  let optionals = 0;
-  walk(json, (n) => {
-    if (n.maxItems !== undefined || n.minItems !== undefined) arrayBounds++;
-    if (Array.isArray(n.anyOf) || Array.isArray(n.oneOf)) unions++;
-    if (n.properties) {
-      const required = new Set(n.required || []);
-      optionals += Object.keys(n.properties).filter((k) => !required.has(k)).length;
-    }
-  });
-  check(`${name}: no minItems/maxItems (Anthropic rejects them)`, arrayBounds === 0);
-  check(`${name}: union-typed params within Anthropic's limit of 16 (found ${unions})`, unions <= 16);
-  check(`${name}: optional params within Anthropic's limit of 24 (found ${optionals})`, optionals <= 24);
+  const a = auditSchemaForAnthropic(schema);
+  check(`${name}: no minItems/maxItems (Anthropic rejects them)`, a.arrayBounds === 0);
+  check(`${name}: union-typed params within Anthropic's limit of 16 (found ${a.unions})`, a.unions <= 16);
+  check(`${name}: optional params within Anthropic's limit of 24 (found ${a.optionals})`, a.optionals <= 24);
 }
 
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
