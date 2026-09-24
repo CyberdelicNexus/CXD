@@ -4,17 +4,18 @@
 // first and last child (Reingold–Tilford), clamped inside its interval.
 //
 // Connectors are drawn from auto anchors, so every parent -> child pair is
-// kept vertical-dominant (centre dy beats centre dx by DOMINANCE): the row gap
-// below each level grows until that holds for the widest-spread child. Each
+// kept vertical-dominant (centre dy beats centre dx by DOMINANCE): the gap
+// under each parent grows until that holds for its widest-spread child. Each
 // connector then runs from the parent's bottom to the child's top inside the
-// parent's own interval, through the empty band between the two rows; rows
-// are top-aligned, so no sibling or cousin can sit in that band. A deep,
+// parent's own interval, through the empty band between parent and children;
+// siblings are top-aligned and the interval holds nothing else, so no other
+// node can sit in that band. A deep,
 // narrow tree is laid out left-to-right instead (the same construction,
 // mirrored across the diagonal), and only children hang from their parent's
 // centre line like an outline, when that keeps the map squarer.
 import type { MapGraph, MapNode } from "../types";
 import {
-  DOMINANCE, footprint, squarest, transposed, GAP, LEVEL_GAP, relationLabel, snap, snapDown, snapUp, tintAt,
+  ASPECT_TARGET, DOMINANCE, footprint, squarest, transposed, GAP, LEVEL_GAP, relationLabel, snap, snapDown, snapUp, tintAt,
   type FootprintFn, type LayoutEdge, type LayoutEngine, type LayoutResult, type PlacedNode,
 } from "./shared";
 
@@ -40,22 +41,20 @@ function layoutTree(g: MapGraph, fp: FootprintFn, indent: boolean): LayoutResult
 
   // Horizontal placement: returns the node's centre x.
   const left = new Map<string, number>();
-  const depth = new Map<string, number>();
-  const placeX = (node: MapNode, start: number, d: number): number => {
+  const placeX = (node: MapNode, start: number): number => {
     const w = width.get(node.id)!;
     const f = fp(node);
-    depth.set(node.id, d);
     const ks = kids(node.id);
     let cx = start + w / 2;
     const hang = hangs(node, ks);
     if (hang) {
-      placeX(ks[0], start + hang, d + 1);
+      placeX(ks[0], start + hang);
       cx = start + f.w / 2;
     } else if (ks.length) {
       const span = ks.reduce((s, k) => s + width.get(k.id)!, 0) + GAP * (ks.length - 1);
       let cursor = start + snapDown((w - span) / 2);
       const centres = ks.map((k) => {
-        const c = placeX(k, cursor, d + 1);
+        const c = placeX(k, cursor);
         cursor += width.get(k.id)! + GAP;
         return c;
       });
@@ -65,35 +64,32 @@ function layoutTree(g: MapGraph, fp: FootprintFn, indent: boolean): LayoutResult
     left.set(node.id, x);
     return x + f.w / 2;
   };
-  placeX(root, 0, 0);
+  placeX(root, 0);
 
-  const rowH: number[] = [];
-  for (const node of g.nodes) {
-    const d = depth.get(node.id);
-    if (d !== undefined) rowH[d] = Math.max(rowH[d] ?? 0, fp(node).h);
-  }
-  // Gap below each row: at least LEVEL_GAP, and enough that every child is
-  // vertical-dominant from its parent. Rows are top-aligned, so a parent's
-  // centre sits f.h/2 below its row top and a child's likewise.
-  const gapBelow = rowH.map(() => LEVEL_GAP);
-  for (const node of g.nodes) {
-    const d = depth.get(node.id);
-    if (d === undefined || !node.parent) continue;
-    const parent = g.nodes.find((x) => x.id === node.parent)!;
-    const pf = fp(parent);
-    const cf = fp(node);
-    const dx = Math.abs(left.get(node.id)! + cf.w / 2 - (left.get(parent.id)! + pf.w / 2));
-    const need = dx + DOMINANCE - (rowH[d - 1] - pf.h / 2) - cf.h / 2;
-    gapBelow[d - 1] = Math.max(gapBelow[d - 1], snapUp(need));
-  }
-  const rowY: number[] = [0];
-  for (let d = 1; d < rowH.length; d++) rowY[d] = rowY[d - 1] + rowH[d - 1] + gapBelow[d - 1];
+  // Vertical placement per family: a parent's children are top-aligned at
+  // LEVEL_GAP below it, or lower if needed to keep every one of them
+  // vertical-dominant. A connector never leaves its parent's x-interval,
+  // which holds only that parent's own subtree, so families need not share
+  // rows and a wide family never stretches the gap under unrelated ones.
+  const top = new Map<string, number>([[root.id, 0]]);
+  const placeY = (node: MapNode): void => {
+    const pf = fp(node);
+    const ks = kids(node.id);
+    if (!ks.length) return;
+    const pcx = left.get(node.id)! + pf.w / 2;
+    const gap = Math.max(LEVEL_GAP, ...ks.map((k) => {
+      const cf = fp(k);
+      return snapUp(Math.abs(left.get(k.id)! + cf.w / 2 - pcx) + DOMINANCE - pf.h / 2 - cf.h / 2);
+    }));
+    for (const k of ks) { top.set(k.id, top.get(node.id)! + pf.h + gap); placeY(k); }
+  };
+  placeY(root);
 
   const placed: PlacedNode[] = [];
   const edges: LayoutEdge[] = [];
   const emit = (node: MapNode, branch: number): void => {
     const f = fp(node);
-    placed.push({ node, x: left.get(node.id)!, y: rowY[depth.get(node.id)!], w: f.w, h: f.h });
+    placed.push({ node, x: left.get(node.id)!, y: top.get(node.id)!, w: f.w, h: f.h });
     kids(node.id).forEach((k, i) => {
       const b = node.id === root.id ? i : branch;
       edges.push({ from: node.id, to: k.id, label: relationLabel(g, node.id, k.id), gradient: tintAt(b), bend: 0, arrow: "none" });
@@ -113,4 +109,4 @@ export const treeLayout: LayoutEngine = (g) => squarest([
   () => transposed((fp) => layoutTree(g, fp, false)),
   () => layoutTree(g, footprint, true),
   () => transposed((fp) => layoutTree(g, fp, true)),
-], 2.5);
+], ASPECT_TARGET);

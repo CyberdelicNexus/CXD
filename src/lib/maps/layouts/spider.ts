@@ -107,7 +107,9 @@ export const spiderLayout: LayoutEngine = (g) => {
   // ring is taken instead when it gives a squarer map.
   const k = groups.length;
   let best: { members: PlacedNode[][]; aspect: number } | null = null;
-  for (const rotation of [0, Math.PI / 2, Math.PI / k, Math.PI / 4, Math.PI / (2 * k)]) {
+  // Distinct turns only (for k = 2, π/k is π/2 and π/2k is π/4).
+  const rotations = Array.from(new Set([0, Math.PI / 2, Math.PI / k, Math.PI / 4, Math.PI / (2 * k)]));
+  for (const rotation of rotations) {
     const members = arrange(hub, groups, rotation);
     if (!members) continue;
     const aspect = renderedAspect([hub, ...members.flat()]);

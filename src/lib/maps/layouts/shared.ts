@@ -3,7 +3,10 @@
 // "correct by construction" arguments hold exactly.
 import { GRID_PX } from "@/lib/canvas-layout-rules";
 import type { CanvasElement, LineElement } from "@/types/canvas-elements";
-import { autoEdge, connectorHull, connectorPath, linePath } from "../connector-geometry";
+import {
+  autoEdge, connectorHull, connectorPath, labelRect, linePath, pathEntersBox, rectEntersBox, SAMPLES,
+  type PathGeometry, type Rect,
+} from "../connector-geometry";
 import { TINT_COLORS, INSPECTOR_SECTION_IDS } from "@/lib/ai/element-generation";
 import type { MapGraph, MapNode, NodeKind } from "../types";
 
@@ -28,7 +31,14 @@ export interface LayoutLine {
   /** Arrowhead at `end`; lines render caps, connectors render arrowStyle. */
   endCap?: "arrow";
 }
-export interface LayoutResult { placed: PlacedNode[]; edges: LayoutEdge[]; lines: LayoutLine[] }
+export interface LayoutResult {
+  placed: PlacedNode[]; edges: LayoutEdge[]; lines: LayoutLine[];
+  /**
+   * Connector/line crossings the engine could not remove (pathConflicts
+   * count). Absent means the engine guarantees none by construction.
+   */
+  residualConflicts?: number;
+}
 export type LayoutEngine = (graph: MapGraph) => LayoutResult;
 
 export function parseProps(raw: string): Record<string, unknown> {
@@ -199,37 +209,41 @@ export function hullOf(a: PlacedNode, b: PlacedNode): Box {
   return connectorHull(autoEdge(fa, fb), fa, fb);
 }
 
-/** The connector from `a` to `b`, drawn exactly as the canvas draws it, sampled at 200 points. */
-export function connectorSamples(a: PlacedNode, b: PlacedNode): Point[] {
+/** The connector from `a` to `b`, drawn exactly as the canvas draws it. */
+export function connectorGeometry(a: PlacedNode, b: PlacedNode): PathGeometry {
   const fa = anchorElement(a);
   const fb = anchorElement(b);
-  return connectorPath(autoEdge(fa, fb), fa, fb).sample(200);
+  return connectorPath(autoEdge(fa, fb), fa, fb);
 }
 
+const rectOf = (p: PlacedNode): Rect => ({ x: p.x, y: p.y, w: p.w, h: p.h });
+
 /**
- * Every (edge, unrelated placed box) pair where the connector, drawn exactly
- * as the canvas draws it (sampled), enters the box shrunk by 4px, or where a
- * layout line does. The same test the property harness applies to the
- * rendered map, run on the engine's own boxes.
+ * Every (edge or line, unrelated placed box) pair where the path, drawn
+ * exactly as the canvas draws it, or a labelled edge's opaque pill, enters the
+ * box shrunk by SHRINK — the property harness's test, run on the engine's own
+ * boxes. Line indices follow the edges (edges.length + i).
  */
 export function pathConflicts(r: LayoutResult): { edge: number; node: string }[] {
   const byId = new Map(r.placed.map((p) => [p.node.id, p]));
   const out: { edge: number; node: string }[] = [];
-  const test = (i: number, pts: Point[], skip: (p: PlacedNode) => boolean) => {
+  const test = (i: number, pts: Point[], pill: Rect | null, skip: (p: PlacedNode) => boolean) => {
     for (const p of r.placed) {
       if (skip(p)) continue;
-      if (pts.some((q) => q.x > p.x + 4 && q.x < p.x + p.w - 4 && q.y > p.y + 4 && q.y < p.y + p.h - 4)) out.push({ edge: i, node: p.node.id });
+      const box = rectOf(p);
+      if (pathEntersBox(pts, box) || (pill && rectEntersBox(pill, box))) out.push({ edge: i, node: p.node.id });
     }
   };
   r.edges.forEach((e, i) => {
     const a = byId.get(e.from);
     const b = byId.get(e.to);
     if (!a || !b) return;
-    test(i, connectorSamples(a, b), (p) => p === a || p === b);
+    const path = connectorGeometry(a, b);
+    test(i, path.sample(SAMPLES), e.label.trim() ? labelRect(path) : null, (p) => p === a || p === b);
   });
   r.lines.forEach((l, i) => {
     const line = { start: l.start, end: l.end, bend: l.bend ?? undefined } as LineElement;
-    test(r.edges.length + i, linePath(line).sample(200), () => false);
+    test(r.edges.length + i, linePath(line).sample(SAMPLES), null, () => false);
   });
   return out;
 }
@@ -260,6 +274,7 @@ export function transposed(run: (fp: FootprintFn) => LayoutResult): LayoutResult
     placed: out.placed.map((p) => ({ node: p.node, x: p.y, y: p.x, w: p.h, h: p.w })),
     edges: out.edges,
     lines: out.lines.map((l) => ({ ...l, start: flip(l.start), end: flip(l.end), bend: l.bend && flip(l.bend) })),
+    ...(out.residualConflicts !== undefined ? { residualConflicts: out.residualConflicts } : {}),
   };
 }
 
@@ -275,19 +290,30 @@ export function isClean(r: LayoutResult, margin = GAP): boolean {
   return pathConflicts(r).length === 0;
 }
 
+/** Hard cap the harness enforces on rendered aspect for compact map types. */
+export const ASPECT_MAX = 3;
+/** Aspect engines aim for when choosing between layout variants (slack under ASPECT_MAX). */
+export const ASPECT_TARGET = 2.5;
+
 /**
- * The first candidate whose rendered aspect is at most `limit`, else the
- * squarest. Candidates after the first must pass isClean to be considered;
- * the first is the engine's by-construction layout and always qualifies.
+ * Among candidates whose rendered aspect is at most `limit`, the one with the
+ * smallest bounding-box area (the densest; ties keep the earlier); if none is
+ * within the limit, the squarest. Candidates after the first must pass
+ * isClean to be considered; the first is the engine's by-construction layout
+ * and always qualifies.
  */
 export function squarest(candidates: (() => LayoutResult)[], limit: number): LayoutResult {
+  let within: { r: LayoutResult; area: number } | null = null;
   let best: { r: LayoutResult; a: number } | null = null;
   for (let i = 0; i < candidates.length; i++) {
     const r = candidates[i]();
     if (i > 0 && !isClean(r)) continue;
     const a = renderedAspect(r.placed);
-    if (a <= limit) return r;
-    if (!best || a < best.a - 0.01) best = { r, a };
+    if (a <= limit) {
+      const b = boundsOf(r.placed);
+      const area = (b.maxX - b.minX) * (b.maxY - b.minY);
+      if (!within || area < within.area) within = { r, area };
+    } else if (!best || a < best.a - 0.01) best = { r, a };
   }
-  return best!.r;
+  return (within ?? best)!.r;
 }

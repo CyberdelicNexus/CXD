@@ -19,7 +19,7 @@
 // whichever passes the hull check and is squarer.
 import type { MapGraph, MapNode, MapRole } from "../types";
 import {
-  DOMINANCE, footprint, GAP, relationLabel, snap, snapDown, snapUp, squarest, transposed, ZONE_GAP,
+  ASPECT_TARGET, DOMINANCE, footprint, GAP, relationLabel, snap, snapDown, snapUp, squarest, transposed, ZONE_GAP,
   type Footprint, type FootprintFn, type LayoutEdge, type LayoutEngine, type LayoutResult, type PlacedNode,
 } from "./shared";
 
@@ -148,5 +148,5 @@ export const doubleBubbleLayout: LayoutEngine = (g) => {
   return squarest([
     ...variants.map(([l, r]) => () => layoutDoubleBubble(g, footprint, l, r)),
     ...variants.map(([l, r]) => () => transposed((fp) => layoutDoubleBubble(g, fp, l, r))),
-  ], 2.5);
+  ], ASPECT_TARGET);
 };
