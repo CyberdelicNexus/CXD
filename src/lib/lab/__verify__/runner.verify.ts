@@ -117,6 +117,24 @@ async function main() {
     check(`budget halts new cells (${ran} ran, ${skipped.length} skipped)`, ran < 12 && skipped.length === 12 - ran && calls === ran);
     check("skipped cells say why", skipped.every((c) => c.error === "budget reached"));
     check("budget-halted run is stopped", r3.status === "stopped");
+
+    // 4. A run saved as "running" with no live executor (server restart) is reconciled.
+    const orphanId = "run-orphan-test";
+    const orphanCells = (await waitDone(r1.id)).cells.slice(0, 2).map((c, i) => ({
+      ...c, runId: orphanId, status: (i === 0 ? "running" : "done") as Run["cells"][number]["status"],
+    }));
+    const orphan: Run = { ...r1, id: orphanId, status: "running", cells: orphanCells };
+    await fs.writeFile(path.join(tmp, "lab-data", "runs", `${orphanId}.json`), JSON.stringify(orphan), "utf8");
+    const listed = (await runner.listRuns()).find((r) => r.id === orphanId);
+    check("orphaned run is listed as stopped", listed?.status === "stopped");
+    const fetched = await runner.getRun(orphanId);
+    const stuck = fetched?.cells[0];
+    check("orphaned running cell becomes a retryable error", stuck?.status === "error" && stuck.error === runner.ORPHANED_CELL_ERROR);
+    await sleep(50);
+    const persisted = JSON.parse(await fs.readFile(path.join(tmp, "lab-data", "runs", `${orphanId}.json`), "utf8")) as Run;
+    check("orphan reconciliation is persisted", persisted.status === "stopped" && persisted.cells[0].status === "error");
+    const healed = await runner.retryCell(orphanId, stuck!.id);
+    check("orphaned cell retries to done", healed?.cells[0].status === "done" && healed.status === "stopped");
   } finally {
     process.chdir(originalCwd);
     await sleep(100); // let any trailing writes land before removing the dir

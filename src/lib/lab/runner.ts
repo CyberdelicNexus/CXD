@@ -7,20 +7,55 @@ import { RUN_CONCURRENCY } from "./config";
 import { runArm } from "./arms";
 import { JUDGES } from "./judges";
 import { estimateRunCost } from "./lab-math";
-import { readCustomInputs, readRun, saveRun } from "./store";
+import { listRuns as listStoredRuns, readCustomInputs, readRun, saveRun } from "./store";
 import type { Cell, LabInput, Run, RunConfig } from "./types";
 
 /** Indirection so the offline verify script can fake the model call. */
 export const runnerDeps = { runArm };
 
-const live = new Map<string, Run>();
+// Runs executing in this process. Kept on globalThis so a dev hot reload of this
+// module does not forget runs whose executors are still going.
+const liveKey = "__cxdLabLiveRuns";
+const live: Map<string, Run> =
+  ((globalThis as Record<string, unknown>)[liveKey] as Map<string, Run> | undefined) ??
+  ((globalThis as Record<string, unknown>)[liveKey] = new Map<string, Run>()) as Map<string, Run>;
+
+export const ORPHANED_CELL_ERROR = "interrupted: the server restarted mid-run";
 
 export async function getInputs(): Promise<LabInput[]> {
   return [...CORPUS, ...(await readCustomInputs())];
 }
 
+/**
+ * A run saved as "running" whose executor is not live in this process was
+ * orphaned by a server restart. Mark it stopped (and its in-flight cells as
+ * errors, which retryCell accepts) and persist that, so it does not show as
+ * running forever.
+ */
+async function reconcileOrphan(run: Run): Promise<Run> {
+  if (run.status !== "running" || live.has(run.id)) return run;
+  run.status = "stopped";
+  for (const cell of run.cells) {
+    if (cell.status === "running") {
+      cell.status = "error";
+      cell.error = ORPHANED_CELL_ERROR;
+    }
+  }
+  await saveRun(run);
+  return run;
+}
+
 export async function getRun(id: string): Promise<Run | null> {
-  return live.get(id) ?? (await readRun(id));
+  const liveRun = live.get(id);
+  if (liveRun) return liveRun;
+  const stored = await readRun(id);
+  return stored ? reconcileOrphan(stored) : null;
+}
+
+/** Every stored run, newest first, live runs from memory and orphans reconciled. */
+export async function listRuns(): Promise<Run[]> {
+  const stored = await listStoredRuns();
+  return Promise.all(stored.map((r) => live.get(r.id) ?? reconcileOrphan(r)));
 }
 
 function blankCell(runId: string, inputId: string, arm: Cell["arm"], modelId: string): Cell {
