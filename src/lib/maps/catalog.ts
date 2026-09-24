@@ -39,16 +39,22 @@ export const CATALOG: Record<MapType, CatalogEntry> = {
     useWhen: "Brainstorming ideas around one central idea, with no hierarchy among them.",
     roles: ["center", "branch"],
     rules: ["exactly 1 center", "3–8 branches"],
-    check: (g) => [...exactlyOne(g, "center"), ...countBetween("branches", byRole(g, "branch").length, 3, 8)],
+    check: (g) => {
+      const v = [...exactlyOne(g, "center"), ...countBetween("branches", byRole(g, "branch").length, 3, 8)];
+      const center = byRole(g, "center")[0];
+      if (center && center.parent !== "") v.push("center must not have a parent");
+      return v;
+    },
   },
   spider: {
     type: "spider", name: "Spider", defaultKind: "card",
     useWhen: "One central idea whose branches each have their own sub-points.",
     roles: ["center", "branch", "leaf"],
-    rules: ["exactly 1 center", "2–8 branches whose parent is the center", "each leaf's parent is a branch", "at most 5 leaves per branch"],
+    rules: ["exactly 1 center", "2–8 branches whose parent is the center (or empty)", "each leaf's parent is a branch", "at most 5 leaves per branch"],
     check: (g) => {
       const v = [...exactlyOne(g, "center"), ...countBetween("branches", byRole(g, "branch").length, 2, 8)];
       const center = byRole(g, "center")[0];
+      if (center && center.parent !== "") v.push("center must not have a parent");
       const branchIds = new Set(byRole(g, "branch").map((b) => b.id));
       for (const b of byRole(g, "branch")) {
         if (b.parent !== "" && b.parent !== center?.id) v.push(`branch ${b.id} must hang off the center`);
@@ -57,7 +63,7 @@ export const CATALOG: Record<MapType, CatalogEntry> = {
         if (!branchIds.has(l.parent)) v.push(`leaf ${l.id} must hang off a branch`);
       }
       for (const id of Array.from(branchIds)) {
-        const c = childrenOf(g, id).length;
+        const c = g.nodes.filter((x) => x.parent === id && x.role === "leaf").length;
         if (c > 5) v.push(`branch ${id} has ${c} leaves; at most 5`);
       }
       return v;
@@ -100,7 +106,12 @@ export const CATALOG: Record<MapType, CatalogEntry> = {
     useWhen: "Describing one thing through its qualities, traits or adjectives.",
     roles: ["center", "quality"],
     rules: ["exactly 1 center", "3–8 qualities"],
-    check: (g) => [...exactlyOne(g, "center"), ...countBetween("qualities", byRole(g, "quality").length, 3, 8)],
+    check: (g) => {
+      const v = [...exactlyOne(g, "center"), ...countBetween("qualities", byRole(g, "quality").length, 3, 8)];
+      const center = byRole(g, "center")[0];
+      if (center && center.parent !== "") v.push("center must not have a parent");
+      return v;
+    },
   },
   doubleBubble: {
     type: "doubleBubble", name: "Double Bubble", defaultKind: "bubble",
@@ -140,10 +151,11 @@ export const CATALOG: Record<MapType, CatalogEntry> = {
     type: "brace", name: "Brace", defaultKind: "card",
     useWhen: "Breaking a whole down into its parts (and sub-parts).",
     roles: ["whole", "part", "subpart"],
-    rules: ["exactly 1 whole", "2–7 parts whose parent is the whole", "each subpart's parent is a part", "at most 5 subparts per part"],
+    rules: ["exactly 1 whole", "2–7 parts whose parent is the whole (or empty)", "each subpart's parent is a part", "at most 5 subparts per part"],
     check: (g) => {
       const v = [...exactlyOne(g, "whole"), ...countBetween("parts", byRole(g, "part").length, 2, 7)];
       const whole = byRole(g, "whole")[0];
+      if (whole && whole.parent !== "") v.push("whole must not have a parent");
       const partIds = new Set(byRole(g, "part").map((p) => p.id));
       for (const p of byRole(g, "part")) {
         if (p.parent !== "" && p.parent !== whole?.id) v.push(`part ${p.id} must hang off the whole`);
@@ -152,7 +164,7 @@ export const CATALOG: Record<MapType, CatalogEntry> = {
         if (!partIds.has(s.parent)) v.push(`subpart ${s.id} must hang off a part`);
       }
       for (const id of Array.from(partIds)) {
-        const c = childrenOf(g, id).length;
+        const c = g.nodes.filter((x) => x.parent === id && x.role === "subpart").length;
         if (c > 5) v.push(`part ${id} has ${c} subparts; at most 5`);
       }
       return v;
@@ -204,7 +216,17 @@ export interface FlowOrder {
 export function orderFlowSteps(g: MapGraph): FlowOrder | null {
   const steps = g.nodes.filter((x) => x.role === "step").map((x) => x.id);
   const stepSet = new Set(steps);
-  const rels = g.relations.filter((rel) => stepSet.has(rel.from) && stepSet.has(rel.to) && rel.from !== rel.to);
+  // Dedupe identical from→to relations (keep the first) so a repeated edge
+  // does not look like a branch during path-walking below.
+  const seenPairs = new Set<string>();
+  const rels: MapRelation[] = [];
+  for (const rel of g.relations) {
+    if (!stepSet.has(rel.from) || !stepSet.has(rel.to) || rel.from === rel.to) continue;
+    const pairKey = `${rel.from}→${rel.to}`;
+    if (seenPairs.has(pairKey)) continue;
+    seenPairs.add(pairKey);
+    rels.push(rel);
+  }
   const indeg = new Map(steps.map((s) => [s, 0]));
   for (const rel of rels) indeg.set(rel.to, (indeg.get(rel.to) || 0) + 1);
   const sources = steps.filter((s) => indeg.get(s) === 0);
@@ -244,10 +266,15 @@ export function orderFlowSteps(g: MapGraph): FlowOrder | null {
 
 /** All structural violations; empty means the graph may be laid out. */
 export function checkMapStructure(g: MapGraph): string[] {
+  // CATALOG[g.mapType] is truthy-but-wrong for keys like "toString" that
+  // exist only via Object.prototype — check ownership, not truthiness, so an
+  // unrecognized mapType is reported instead of crashing below.
+  if (!Object.prototype.hasOwnProperty.call(CATALOG, g.mapType)) {
+    return [`unknown mapType ${String(g.mapType)}`];
+  }
   const entry = CATALOG[g.mapType];
-  if (!entry) return [`unknown mapType ${String(g.mapType)}`];
   const v: string[] = [];
-  if (!g.title.trim()) v.push("map title is empty");
+  if (typeof g.title !== "string" || !g.title.trim()) v.push("map title is empty");
   if (g.nodes.length === 0) return [...v, "graph has no nodes"];
   if (g.nodes.length > MAX_NODES) v.push(`at most ${MAX_NODES} nodes allowed (has ${g.nodes.length})`);
   const zones = g.nodes.filter((x) => x.kind === "zone").length;
@@ -259,6 +286,7 @@ export function checkMapStructure(g: MapGraph): string[] {
     ids.add(x.id);
   }
   for (const x of g.nodes) {
+    if (!x.id.trim()) v.push(`node with label "${x.label}" has an empty id`);
     if (!x.label.trim()) v.push(`node ${x.id} has an empty label`);
     else if (x.label.length > MAX_LABEL) v.push(`node ${x.id} label is longer than ${MAX_LABEL} characters`);
     if (!entry.roles.includes(x.role)) v.push(`node ${x.id}: role "${x.role}" is not valid for ${g.mapType}`);
@@ -271,7 +299,7 @@ export function checkMapStructure(g: MapGraph): string[] {
   }
   const siblingLabels = new Map<string, Set<string>>();
   for (const x of g.nodes) {
-    const key = `${x.parent}|${x.role}`;
+    const key = siblingKey(g.mapType, x);
     const label = x.label.trim().toLowerCase();
     if (!siblingLabels.has(key)) siblingLabels.set(key, new Set());
     const set = siblingLabels.get(key)!;
@@ -279,4 +307,27 @@ export function checkMapStructure(g: MapGraph): string[] {
     set.add(label);
   }
   return [...v, ...entry.check(g)];
+}
+
+/**
+ * Groups nodes into the "sibling" set duplicate labels are compared against.
+ * What counts as a sibling differs by map type: hierarchical maps (tree,
+ * spider, brace) group by parent; doubleBubble groups by topic-vs-quality;
+ * multiFlow keeps cause and effect separate (they may legitimately share
+ * wording, e.g. a "Delay" that is both a cause and an effect elsewhere); the
+ * remaining flat maps require every label in the whole graph to be distinct.
+ */
+function siblingKey(mapType: MapType, x: MapNode): string {
+  switch (mapType) {
+    case "tree":
+    case "spider":
+    case "brace":
+      return x.parent;
+    case "doubleBubble":
+      return x.role === "leftTopic" || x.role === "rightTopic" ? "topics" : "qualities";
+    case "multiFlow":
+      return x.role;
+    default:
+      return "";
+  }
 }
