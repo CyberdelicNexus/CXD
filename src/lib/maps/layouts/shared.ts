@@ -9,6 +9,7 @@ import {
 } from "../connector-geometry";
 import { INSPECTOR_SECTION_IDS, SHAPE_TYPES, TINT_COLORS } from "@/lib/ai/element-generation";
 import type { MapGraph, MapNode, MapRelation, NodeKind, RelationDirection, RelationStyle } from "../types";
+import { clampTaskDetail, TASK_CARD_W, taskCardHeight, taskOwner } from "../task-card";
 
 export const GAP = 40;          // between siblings in a stack
 export const LEVEL_GAP = 120;   // between hierarchy levels / columns
@@ -114,7 +115,11 @@ export function footprint(node: MapNode): Footprint {
 function baseFootprint(node: MapNode): Footprint {
   switch (effectiveKind(node)) {
     case "card": return { w: 260, h: 300 };
-    case "task": return { w: 260, h: 160 };
+    // Painted size: 300px wide, as tall as its title, description and owner make it (task-card.ts).
+    case "task": return {
+      w: TASK_CARD_W,
+      h: snapUp(taskCardHeight(node.label, clampTaskDetail(node.detail), taskOwner(parseProps(node.props)))),
+    };
     case "bubble": return { w: 140, h: 140 };
     case "shape": return shapeTypeOf(node) === "rectangle" ? { w: 200, h: 120 } : { w: 160, h: 160 };
     case "waypoint": return { w: 80, h: 80 };

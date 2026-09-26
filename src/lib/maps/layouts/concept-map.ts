@@ -50,7 +50,9 @@ const LANE_ROUND_STEPS = [16, 8, 4, 0];
 const SIZE_BUDGET = 25000;
 const MAX_PUSHES = 40;
 /** Crossing checks (pathConflicts calls) all variants may spend repairing, together. */
-const CHECK_BUDGET = 32;
+const CHECK_BUDGET = 64;
+/** Pushes in a row without a new best before a variant's repair gives up. */
+const STALL_PUSHES = 6;
 
 interface Slot { id: string; node: MapNode | null; w: number; h: number; x: number }
 interface Lane { from: string; to: string; slots: Slot[]; rowOf: Map<Slot, number> }
@@ -265,6 +267,7 @@ function layoutConceptMap(g: MapGraph, fp: FootprintFn, laneRounds: number, work
   let conflicts = pathConflicts(layout);
   work.checks--;
   let best = { layout, n: conflicts.length };
+  let stalled = 0;
   for (let push = 0; push < MAX_PUSHES && conflicts.length > 0 && work.checks > 0; push++) {
     // Move the first offender just clear of the curve where it crosses the
     // offender's band, taking its row-mates on that side along.
@@ -296,7 +299,10 @@ function layoutConceptMap(g: MapGraph, fp: FootprintFn, laneRounds: number, work
     move(pick.rightward, 1);
     layout = pick.r;
     conflicts = pick.c;
-    if (conflicts.length < best.n) best = { layout, n: conflicts.length };
+    if (conflicts.length < best.n) { best = { layout, n: conflicts.length }; stalled = 0; }
+    // A push that leaves as many conflicts usually undoes the last one: stop
+    // oscillating and leave the shared budget to the next variant.
+    else if (++stalled >= STALL_PUSHES) break;
   }
   return best.n ? { ...best.layout, residualConflicts: best.n } : best.layout;
 }

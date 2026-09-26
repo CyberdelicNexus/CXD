@@ -438,10 +438,11 @@ export function generatedToCanvas(
       const noteTitle = str(p.noteTitle, MAX_LABEL_LEN) ?? str(g.label, MAX_LABEL_LEN) ?? 'Note';
       const noteBody = str(p.noteBody, MAX_TEXT_LEN) ?? str(g.content, MAX_TEXT_LEN) ?? '';
       const cardType = oneOf(p.cardType, ['note', 'task'] as const) ?? 'note';
-      // Note cards paint at a CSS floor of 200x300 whatever we store. Storing
+      // Note cards paint at a CSS floor of 200x300 and task cards at 300x300
+      // (taller with their properties panel) whatever we store. Storing
       // anything smaller makes every downstream layout calculation (overlap
       // checks, container bounds, the user's own eye) disagree with the screen.
-      const floor = cardType === 'note' ? RENDER_FLOORS.noteCard : { width: 0, height: 0 };
+      const floor = cardType === 'note' ? RENDER_FLOORS.noteCard : RENDER_FLOORS.taskCard;
       const freeform: FreeformElement = {
         ...base,
         width: Math.max(base.width, floor.width),

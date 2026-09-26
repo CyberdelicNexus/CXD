@@ -22,6 +22,11 @@ export const RENDER_FLOORS = {
   noteCard: { width: 200, height: 300 },
   document: { width: 100, height: 130 },
   boardHex: { width: 170, height: 230 },
+  /** Task cards: the element wrapper pins width to 300px and every
+   *  non-document freeform has min-height 300px (canvas-element.tsx). The
+   *  properties panel usually pushes the painted height past this floor, and
+   *  the ResizeObserver then writes the real height back to el.height. */
+  taskCard: { width: 300, height: 300 },
 } as const;
 
 export interface Box { x: number; y: number; w: number; h: number }
@@ -32,13 +37,18 @@ export function realBounds(el: CanvasElement): Box | null {
   let w = el.width;
   let h = el.height;
   if (el.type === 'freeform') {
-    const f = el as unknown as { isDocument?: boolean; cardType?: string };
+    const f = el as unknown as { isDocument?: boolean; cardType?: string; taskMetadata?: unknown };
+    // getFreeformCardType: an explicit cardType wins; taskMetadata alone means task.
+    const isTask = f.cardType === 'task' || (!f.cardType && !!f.taskMetadata);
     if (f.isDocument) {
       w = Math.max(w, RENDER_FLOORS.document.width);
       h = Math.max(h, RENDER_FLOORS.document.height);
     } else if (f.cardType === 'note') {
       w = Math.max(w, RENDER_FLOORS.noteCard.width);
       h = Math.max(h, RENDER_FLOORS.noteCard.height);
+    } else if (isTask) {
+      w = Math.max(w, RENDER_FLOORS.taskCard.width);
+      h = Math.max(h, RENDER_FLOORS.taskCard.height);
     }
   } else if (el.type === 'board') {
     w = Math.max(w, RENDER_FLOORS.boardHex.width);
