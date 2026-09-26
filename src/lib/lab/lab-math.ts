@@ -1,5 +1,6 @@
 // Pure maths for the lab: no I/O, no SDK imports (safe in client components).
 import { costOf, getLabModel, JUDGE_MODELS } from "./config";
+import { elementUsage } from "./describe";
 import type { MapType } from "@/lib/maps/types";
 import type { ArmId, Cell, JudgeId, RunConfig, Vote } from "./types";
 import { cellCosts, JUDGE_IDS, promptVersionOf, variantKey } from "./types";
@@ -187,6 +188,21 @@ export interface LeaderboardRow {
   judgeCostUsd: number;
   /** Generation cost per win: what the variant costs to produce, not to grade. */
   costPerWin: number | null;
+  /** Mean elementFit from the strong / cheap LLM judge over done cells; null when none scored it. */
+  elementFitStrong: number | null;
+  elementFitCheap: number | null;
+  /** Mean distinct element kinds per rendered map (done cells). */
+  kindsPerMap: number | null;
+  /** Mean share of plain note cards among rendered elements (done cells). */
+  plainCardShare: number | null;
+}
+
+const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+/** A judge's elementFit on a cell, or null (not judged, judge failed, or a cell from before elementFit existed). */
+function elementFitOf(c: Cell, judgeId: JudgeId): number | null {
+  const v = c.judges.find((j) => j.judgeId === judgeId)?.scores?.elementFit;
+  return typeof v === "number" ? v : null;
 }
 
 export interface Leaderboard {
@@ -222,16 +238,29 @@ export function buildLeaderboard(allCells: Cell[], allVotes: Vote[], opts: Leade
 
   const perVariant = new Map<string, {
     cells: number; failures: number; gen: number; judge: number; arm: string; modelId: string; forcedType: MapType | null;
+    fitStrong: number[]; fitCheap: number[]; kinds: number[]; cardShare: number[];
   }>();
   for (const c of cells) {
     if (c.status === "pending" || c.status === "running" || c.status === "skipped") continue;
     const key = variantKey(c);
-    const e = perVariant.get(key) || { cells: 0, failures: 0, gen: 0, judge: 0, arm: c.arm, modelId: c.modelId, forcedType: c.forcedType ?? null };
+    const e = perVariant.get(key) || {
+      cells: 0, failures: 0, gen: 0, judge: 0, arm: c.arm, modelId: c.modelId, forcedType: c.forcedType ?? null,
+      fitStrong: [], fitCheap: [], kinds: [], cardShare: [],
+    };
     e.cells++;
     if (c.status === "failed" || c.status === "error") e.failures++;
     const cost = cellCosts(c);
     e.gen += cost.gen;
     e.judge += cost.judge;
+    if (c.status === "done") {
+      const strong = elementFitOf(c, "llmStrong");
+      const cheap = elementFitOf(c, "llmCheap");
+      if (strong !== null) e.fitStrong.push(strong);
+      if (cheap !== null) e.fitCheap.push(cheap);
+      const usage = elementUsage(c.elements);
+      e.kinds.push(usage.distinctKinds);
+      e.cardShare.push(usage.plainCardShare);
+    }
     perVariant.set(key, e);
   }
 
@@ -243,6 +272,10 @@ export function buildLeaderboard(allCells: Cell[], allVotes: Vote[], opts: Leade
       cells: v.cells, failures: v.failures, failureRate: v.cells ? v.failures / v.cells : 0,
       costUsd: v.gen + v.judge, genCostUsd: v.gen, judgeCostUsd: v.judge,
       costPerWin: r.wins ? v.gen / r.wins : null,
+      elementFitStrong: mean(v.fitStrong),
+      elementFitCheap: mean(v.fitCheap),
+      kindsPerMap: mean(v.kinds),
+      plainCardShare: mean(v.cardShare),
     };
   }).sort((x, y) => y.rating - x.rating || y.wins - x.wins);
 

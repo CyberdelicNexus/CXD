@@ -151,5 +151,26 @@ const byId = new Map([a, b].map((c) => [c.id, c]));
   check("graphExemplars.input is well below the old ~8.8k-token estimate", ARM_TOKENS.graphExemplars.input < 8800 / 2);
 }
 
+{
+  // Spec §6: mean elementFit per variant, strong and cheap judges separately.
+  const fit = (id: string, judgeId: "llmStrong" | "llmCheap", v: number): Cell =>
+    ({ ...cell(id, "graphExemplars", "m9"), judges: [{ judgeId, overall: 3, pass: true, scores: { elementFit: v }, notes: "", costUsd: 0 }] });
+  const lb = buildLeaderboard([fit("f1", "llmStrong", 4), fit("f2", "llmStrong", 2), fit("f3", "llmCheap", 5), cell("f4", "graph", "m9")], []);
+  const row = lb.rows.find((r) => r.variant === "graphExemplars|m9")!;
+  check("mean elementFit from the strong judge", near(row.elementFitStrong!, 3));
+  check("mean elementFit from the cheap judge, separately", near(row.elementFitCheap!, 5));
+  check("a variant nobody scored for fit reads null", lb.rows.find((r) => r.variant === "graph|m9")!.elementFitStrong === null);
+}
+{
+  // Element usage: distinct kinds per map and share of plain cards, from the drawn elements.
+  const el = (id: string, type: string, extra: object = {}) =>
+    ({ id, type, x: 0, y: 0, width: 100, height: 100, zIndex: 1, locked: false, boardId: null, surface: "canvas", ...extra }) as unknown as Cell["elements"][number];
+  const rich: Cell = { ...cell("u1", "graph", "m8"), elements: [el("a", "freeform", { cardType: "note" }), el("b", "table"), el("c", "freeform", { cardType: "task" }), el("d", "link")] };
+  const plain: Cell = { ...cell("u2", "graph", "m8"), elements: [el("e", "freeform", { cardType: "note" }), el("f", "freeform", { cardType: "note" })] };
+  const row = buildLeaderboard([rich, plain], []).rows.find((r) => r.variant === "graph|m8")!;
+  check("kinds per map is the mean of distinct kinds (4 and 1)", near(row.kindsPerMap!, 2.5));
+  check("plain card share is the mean share (0.25 and 1)", near(row.plainCardShare!, 0.625));
+}
+
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log("\nALL PASS");

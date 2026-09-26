@@ -97,7 +97,7 @@ export function LeaderboardView({ meta }: { meta: LabMeta }) {
 
       <section className={cn(panelClass, "overflow-x-auto pt-3")} aria-labelledby="lb-variants">
         <h2 id="lb-variants" className="px-3 pb-3 text-sm font-semibold text-zinc-100">Variants</h2>
-        <table className="w-full min-w-[860px] text-sm">
+        <table className="w-full min-w-[1180px] text-sm">
           <thead>
             <tr className="text-left">
               <th className={cn(th, "w-10", num)}>#</th>
@@ -108,6 +108,10 @@ export function LeaderboardView({ meta }: { meta: LabMeta }) {
               <th className={cn(th, num)} title="What generating this variant's maps cost">Gen spend</th>
               <th className={cn(th, num)} title="What the LLM judges cost to grade them">Judge spend</th>
               <th className={cn(th, num)} title="Generation spend per win (judge cost excluded)">Cost per win</th>
+              <th className={cn(th, num)} title="Mean elementFit (1 to 5) from the Sonnet 5 judge: did each idea get the element that suits it">Fit (strong)</th>
+              <th className={cn(th, num)} title="Mean elementFit (1 to 5) from the Haiku 4.5 judge">Fit (cheap)</th>
+              <th className={cn(th, num)} title="Mean number of distinct element kinds per map">Kinds / map</th>
+              <th className={cn(th, num)} title="Share of plain note cards among drawn elements">Plain cards</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
@@ -127,6 +131,10 @@ export function LeaderboardView({ meta }: { meta: LabMeta }) {
                 <td className={cn("px-3 py-2.5", num)}>{usd(r.genCostUsd, 3)}</td>
                 <td className={cn("px-3 py-2.5", num)}>{usd(r.judgeCostUsd, 3)}</td>
                 <td className={cn("px-3 py-2.5", num)}>{r.costPerWin === null ? "-" : usd(r.costPerWin, 3)}</td>
+                <td className={cn("px-3 py-2.5", num)}>{r.elementFitStrong === null ? "-" : r.elementFitStrong.toFixed(2)}</td>
+                <td className={cn("px-3 py-2.5", num)}>{r.elementFitCheap === null ? "-" : r.elementFitCheap.toFixed(2)}</td>
+                <td className={cn("px-3 py-2.5", num)}>{r.kindsPerMap === null ? "-" : r.kindsPerMap.toFixed(1)}</td>
+                <td className={cn("px-3 py-2.5", num)}>{pct(r.plainCardShare)}</td>
               </tr>
             ))}
           </tbody>
