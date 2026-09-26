@@ -8,7 +8,7 @@ import {
   type PathGeometry, type Rect,
 } from "../connector-geometry";
 import { INSPECTOR_SECTION_IDS, SHAPE_TYPES, TINT_COLORS } from "@/lib/ai/element-generation";
-import type { MapGraph, MapNode, NodeKind } from "../types";
+import type { MapGraph, MapNode, NodeKind, RelationStyle } from "../types";
 
 export const GAP = 40;          // between siblings in a stack
 export const LEVEL_GAP = 120;   // between hierarchy levels / columns
@@ -24,7 +24,14 @@ export const snapDown = (v: number) => Math.floor(v / GRID_PX) * GRID_PX;
 
 export interface Footprint { w: number; h: number }
 export interface PlacedNode { node: MapNode; x: number; y: number; w: number; h: number }
-export interface LayoutEdge { from: string; to: string; label: string; gradient: Tint; bend: number; arrow: "none" | "end" }
+export type ArrowStyle = "none" | "end" | "start" | "both";
+export interface LayoutEdge {
+  from: string; to: string; label: string; gradient: Tint; bend: number; arrow: ArrowStyle;
+  /** Set from the matching relation by styleEdges (Task 4); solid when absent. */
+  lineStyle?: RelationStyle;
+  /** 4 for a strong relation; 2 when absent. */
+  thickness?: 2 | 4;
+}
 export interface Point { x: number; y: number }
 export interface LayoutLine {
   start: Point; end: Point; bend: Point | null; gradient: Tint;
@@ -88,8 +95,17 @@ export function shapeTypeOf(node: MapNode): ShapeKindType {
   return typeof t === "string" && (SHAPE_TYPES as readonly string[]).includes(t) ? (t as ShapeKindType) : "rectangle";
 }
 
-/** Rendered size per kind (≥ the canvas render floors in canvas-layout-rules). */
+/** Size scale for a node with emphasis "strong": size is the one emphasis every kind supports. */
+export const EMPHASIS_SCALE = 1.25;
+
+/** Rendered size per kind, with emphasis (≥ the canvas render floors in canvas-layout-rules). */
 export function footprint(node: MapNode): Footprint {
+  const f = baseFootprint(node);
+  return node.emphasis === "strong" ? { w: snapUp(f.w * EMPHASIS_SCALE), h: snapUp(f.h * EMPHASIS_SCALE) } : f;
+}
+
+/** Rendered size per kind at normal emphasis. */
+function baseFootprint(node: MapNode): Footprint {
   switch (effectiveKind(node)) {
     case "card": return { w: 260, h: 300 };
     case "task": return { w: 260, h: 160 };

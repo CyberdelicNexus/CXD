@@ -138,7 +138,8 @@ MAP_TYPES.forEach((type, typeIndex) => {
     }
     const zones = g.nodes.filter((x) => x.kind === "zone").length;
     const boxes = rendered.elements.filter((e) => e.type !== "line").length;
-    const expected = g.nodes.length + zones + 1; // every node, each zone's seed card, the title
+    // every node, each zone's seed card, the title, and a swatch plus a label per legend entry
+    const expected = g.nodes.length + zones + 1 + 2 * g.legend.length;
     if (boxes !== expected) {
       fail(`${type} graph #${i}: rendered ${boxes} elements, expected ${expected} (a node was dropped)`);
       typeFailed = true; break;

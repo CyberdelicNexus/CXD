@@ -141,7 +141,7 @@ const clamp = (v: number, min: number, max: number) =>
   Number.isFinite(v) ? Math.min(Math.max(v, min), max) : min;
 
 /** Hexagon portal fills per tint family (templates.design.md §5). */
-const BOARD_HEX_COLORS: Record<(typeof TINT_COLORS)[number], string> = {
+export const BOARD_HEX_COLORS: Record<(typeof TINT_COLORS)[number], string> = {
   violet: '#4B1B6B',
   ocean: '#0B3D63',
   emerald: '#0B5138',
@@ -157,7 +157,7 @@ export const INSPECTOR_SECTION_IDS = [
 ] as const satisfies readonly InspectorSectionId[];
 
 /** Card fill gradients per tint family (templates.design.md §3). */
-const TINT_GRADIENTS: Record<(typeof TINT_COLORS)[number], string> = {
+export const TINT_GRADIENTS: Record<(typeof TINT_COLORS)[number], string> = {
   violet: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)',
   ocean: 'linear-gradient(135deg, #06243D 0%, #0B3D63 50%, #0A2540 100%)',
   emerald: 'linear-gradient(135deg, #052E22 0%, #0B5138 50%, #052E2E 100%)',
