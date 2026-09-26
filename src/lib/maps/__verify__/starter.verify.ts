@@ -26,6 +26,13 @@ const EXPECTED: Expect[] = [
   { id: "retreat-purpose", mapType: "brace", inputType: "topic", kinds: ["card", "anchor", "caption"], pairings: ["twoAnchors"] },
   { id: "wellness-ecosystem", mapType: "conceptMap", inputType: "topic", kinds: ["card", "bubble"], pairings: ["conceptMapDashedTwoWay"] },
   { id: "community-evidence", mapType: "conceptMap", inputType: "canvasCards", kinds: ["card", "link", "caption"], pairings: ["linksSupportIdeas"] },
+  { id: "popup-vs-lease", mapType: "doubleBubble", inputType: "comparison", kinds: ["bubble"], pairings: ["doubleBubbleLegend"] },
+  { id: "ocean-room-qualities", mapType: "bubble", inputType: "topic", kinds: ["bubble", "shape"], pairings: ["starGoal"] },
+  { id: "remote-crew-ideas", mapType: "radial", inputType: "brainDump", kinds: ["card", "task", "link"], pairings: [] },
+  { id: "studio-launch", mapType: "radial", inputType: "canvasCards", kinds: ["card", "task", "shape", "frame", "link", "zone"], pairings: [] },
+  { id: "tea-ceremony-senses", mapType: "bubble", inputType: "canvasCards", kinds: ["card", "bubble"], pairings: [] },
+  { id: "venue-cancellation", mapType: "multiFlow", inputType: "comparison", kinds: ["card", "task", "caption"], pairings: [] },
+  { id: "festival-site", mapType: "spider", inputType: "topic", kinds: ["card", "task", "waypoint", "portal", "heading", "zone"], pairings: ["waypointBranches"] },
 ];
 
 for (const e of EXPECTED) {
