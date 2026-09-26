@@ -8,7 +8,7 @@ import {
   type PathGeometry, type Rect,
 } from "../connector-geometry";
 import { INSPECTOR_SECTION_IDS, SHAPE_TYPES, TINT_COLORS } from "@/lib/ai/element-generation";
-import type { MapGraph, MapNode, NodeKind, RelationStyle } from "../types";
+import type { MapGraph, MapNode, MapRelation, NodeKind, RelationDirection, RelationStyle } from "../types";
 
 export const GAP = 40;          // between siblings in a stack
 export const LEVEL_GAP = 120;   // between hierarchy levels / columns
@@ -37,6 +37,12 @@ export interface LayoutLine {
   start: Point; end: Point; bend: Point | null; gradient: Tint;
   /** Arrowhead at `end`; lines render caps, connectors render arrowStyle. */
   endCap?: "arrow";
+  /** Arrowhead at `start` (a two-way loop-back). */
+  startCap?: "arrow";
+  /** Dash pattern; solid when absent. */
+  kind?: RelationStyle;
+  /** Stroke width; 2 when absent. */
+  widthPx?: number;
 }
 export interface LayoutResult {
   placed: PlacedNode[]; edges: LayoutEdge[]; lines: LayoutLine[];
@@ -185,6 +191,44 @@ export function ringCenters(center: Footprint, items: Footprint[]): Point[] {
 export function relationLabel(g: MapGraph, a: string, b: string): string {
   const rel = g.relations.find((r) => (r.from === a && r.to === b) || (r.from === b && r.to === a));
   return rel?.label ?? "";
+}
+
+/** The relation joining a and b in either direction, and whether it runs b -> a. */
+function relationBetween(g: MapGraph, a: string, b: string): { rel: MapRelation; reversed: boolean } | null {
+  const forward = g.relations.find((r) => r.from === a && r.to === b);
+  if (forward) return { rel: forward, reversed: false };
+  const back = g.relations.find((r) => r.from === b && r.to === a);
+  return back ? { rel: back, reversed: true } : null;
+}
+
+/** Arrow style for a relation's direction: [drawn from -> to, drawn to -> from]. */
+const ARROWS: Record<RelationDirection, [ArrowStyle, ArrowStyle]> = {
+  forward: ["end", "start"],
+  both: ["both", "both"],
+  none: ["none", "none"],
+};
+
+/**
+ * Connector styling from the graph: colour from the source node's tint when it
+ * has one (otherwise the engine's rotation), and dash, thickness and arrows
+ * from the matching relation. An edge no relation matches keeps the engine's
+ * defaults (solid, 2px, the engine's arrow). Geometry is untouched, so the
+ * engines' crossing-free guarantees hold; bend stays 0 (the canvas never draws it).
+ */
+export function styleEdges(g: MapGraph, edges: LayoutEdge[]): LayoutEdge[] {
+  const byId = new Map(g.nodes.map((x) => [x.id, x]));
+  return edges.map((e) => {
+    const m = relationBetween(g, e.from, e.to);
+    const tint = byId.get(m ? m.rel.from : e.from)?.tint;
+    const out: LayoutEdge = { ...e, bend: 0, gradient: tint ? tint : e.gradient };
+    if (!m) return out;
+    return {
+      ...out,
+      lineStyle: m.rel.style,
+      thickness: m.rel.weight === "strong" ? 4 : 2,
+      arrow: ARROWS[m.rel.direction][m.reversed ? 1 : 0],
+    };
+  });
 }
 
 export function boundsOf(placed: PlacedNode[]): { minX: number; minY: number; maxX: number; maxY: number } {

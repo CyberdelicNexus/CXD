@@ -19,7 +19,7 @@ import { upgradeGraph, type LegacyMapGraph } from "./legacy";
 import type { LegendEntry, MapGraph } from "./types";
 import { LAYOUTS } from "./layouts";
 import {
-  boundsOf, effectiveKind, parseProps, shapeTypeOf, snap, snapUp,
+  boundsOf, effectiveKind, parseProps, shapeTypeOf, snap, snapUp, styleEdges,
   TABLE_MAX_COLS, TABLE_MAX_ROWS,
   type LayoutLine, type PlacedNode, type Point,
 } from "./layouts/shared";
@@ -137,7 +137,11 @@ function toLine(l: LayoutLine, dx: number, dy: number): LineElement {
     start,
     end,
     ...(l.bend ? { bend: { x: l.bend.x + dx, y: l.bend.y + dy } } : {}),
-    style: { kind: "solid", widthPx: 2, gradientName: l.gradient, ...(l.endCap ? { endCap: l.endCap } : {}) },
+    style: {
+      kind: l.kind ?? "solid", widthPx: l.widthPx ?? 2, gradientName: l.gradient,
+      ...(l.endCap ? { endCap: l.endCap } : {}),
+      ...(l.startCap ? { startCap: l.startCap } : {}),
+    },
   };
 }
 
@@ -248,7 +252,7 @@ export function renderMap(graph: LegacyMapGraph, origin: Point = { x: 0, y: 0 })
     ...layout.placed.flatMap(toGenerated),
   ].map((e) => ({ ...e, x: e.x + dx, y: e.y + dy }));
 
-  const genEdges: GeneratedEdge[] = layout.edges.map((e) => ({
+  const genEdges: GeneratedEdge[] = styleEdges(g, layout.edges).map((e) => ({
     from: e.from,
     to: e.to,
     label: e.label.trim() || null,

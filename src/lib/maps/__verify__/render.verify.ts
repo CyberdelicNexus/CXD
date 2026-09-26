@@ -2,14 +2,14 @@
 // Round trip (spec §8): each MapGraph field reaches the canvas element or edge it promises.
 import { BOARD_HEX_COLORS, TINT_COLORS, TINT_GRADIENTS } from "@/lib/ai/element-generation";
 import type {
-  BoardElement, CanvasElement, ContainerElement, FreeformElement, ShapeElement, TableElement, TextElement,
+  BoardElement, CanvasElement, ContainerElement, FreeformElement, LineElement, ShapeElement, TableElement, TextElement,
 } from "@/types/canvas-elements";
 import { checkMapStructure } from "../catalog";
 import { HEADING_FONT_PX, NEUTRAL_CARD_BG, readLegend, TINT_ACCENTS, tintOf } from "../element-style";
 import { footprint } from "../layouts/shared";
 import { renderMap } from "../render";
 import type { MapGraph } from "../types";
-import { n, VALID } from "./fixtures";
+import { n, r, VALID } from "./fixtures";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -84,6 +84,50 @@ const noLegend = renderMap(VALID.radial).elements.filter((e): e is FreeformEleme
 check("without a legend, untinted cards keep the engine's rotation",
   noLegend.length > 0 && noLegend.every((e) => TINT_COLORS.some((t) => TINT_GRADIENTS[t] === e.style?.bgColor)));
 check("without a legend, no swatches are drawn", readLegend(renderMap(VALID.radial).elements).length === 0);
+
+// ── Relations (spec §3.3) ────────────────────────────────────────────
+const concept: MapGraph = {
+  mapType: "conceptMap", title: "Relations", legend: [{ tint: "sunset", meaning: "Ours" }],
+  nodes: [{ ...n("a", "concept", "", "card", "{}", "Studio"), tint: "sunset" }, n("b", "concept", "", "card", "{}", "Members"),
+    n("c", "concept", "", "card", "{}", "Partners"), n("d", "concept", "", "card", "{}", "Council")],
+  relations: [
+    { ...r("a", "b", "serves"), weight: "strong" },
+    { ...r("b", "c", "maybe feeds"), style: "dashed" },
+    { ...r("c", "d", "loosely tied"), style: "dotted", direction: "none" },
+    { ...r("d", "a", "trade"), direction: "both" },
+  ],
+};
+check("relation graph is valid", checkMapStructure(concept).length === 0);
+const cm = renderMap(concept);
+const edge = (label: string) => cm.edges.find((e) => e.label?.text === label);
+check("strong relation -> thickness 4", edge("serves")?.style?.thickness === 4);
+check("forward relation -> arrowStyle end", edge("serves")?.style?.arrowStyle === "end");
+check("edge colour is the source node's tint", edge("serves")?.style?.gradientName === "sunset");
+check("dashed relation -> lineStyle dashed", edge("maybe feeds")?.style?.lineStyle === "dashed");
+check("dotted relation -> lineStyle dotted", edge("loosely tied")?.style?.lineStyle === "dotted");
+check("direction none -> arrowStyle none", edge("loosely tied")?.style?.arrowStyle === "none");
+check("direction both -> arrowStyle both", edge("trade")?.style?.arrowStyle === "both");
+check("normal relation -> thickness 2", edge("maybe feeds")?.style?.thickness === 2);
+check("no connector carries a bend", cm.edges.every((e) => e.bend === undefined));
+
+const reversed: MapGraph = {
+  mapType: "tree", title: "Reversed", legend: [],
+  nodes: [n("root", "root"), n("kid", "branch", "root"), n("kid2", "branch", "root")],
+  relations: [r("kid", "root", "part of")],
+};
+const rev = renderMap(reversed).edges.find((e) => e.label?.text === "part of");
+check("a relation drawn against its engine edge points back: arrowStyle start", rev?.style?.arrowStyle === "start");
+check("an edge with no relation keeps the engine default (tree: none)",
+  renderMap(reversed).edges.some((e) => !e.label && e.style?.arrowStyle === "none"));
+
+const looped: MapGraph = {
+  mapType: "flow", title: "Loop", legend: [],
+  nodes: [n("s1", "step"), n("s2", "step"), n("s3", "step")],
+  relations: [r("s1", "s2"), r("s2", "s3"), { ...r("s3", "s1", "again"), style: "dotted", weight: "strong" }],
+};
+const loopLine = renderMap(looped).elements.find((e): e is LineElement => e.type === "line" && e.style?.endCap === "arrow");
+check("the loop-back line takes the relation's style and weight",
+  loopLine?.style?.kind === "dotted" && loopLine?.style?.widthPx === 4 && !!loopLine?.bend);
 
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log("\nALL PASS");

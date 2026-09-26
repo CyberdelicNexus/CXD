@@ -43,14 +43,21 @@ export const flowLayout: LayoutEngine = (g) => {
   }));
   const lines: LayoutLine[] = [];
   if (order.backEdge) {
-    const from = placed.find((p) => p.node.id === order.backEdge!.from)!;
-    const to = placed.find((p) => p.node.id === order.backEdge!.to)!;
+    const back = order.backEdge;
+    const from = placed.find((p) => p.node.id === back.from)!;
+    const to = placed.find((p) => p.node.id === back.to)!;
     const start = { x: from.x + from.w / 2, y: 2 };
     const end = { x: to.x + to.w / 2, y: 2 };
+    const direction = back.direction ?? "forward";
     lines.push({
       start, end,
       bend: { x: (start.x + end.x) / 2, y: 2 + 2 * LOOP_DROP },
-      gradient: "sunset", endCap: "arrow",
+      // The back relation styles its line, as styleEdges styles connectors.
+      gradient: from.node.tint || "sunset",
+      ...(direction === "none" ? {} : { endCap: "arrow" as const }),
+      ...(direction === "both" ? { startCap: "arrow" as const } : {}),
+      kind: back.style ?? "solid",
+      widthPx: back.weight === "strong" ? 4 : 2,
     });
   }
   return { placed, edges, lines };
