@@ -164,6 +164,7 @@ for (const [name, schema] of [["canvasOperations", canvasOperationsSchema], ["ge
   check(`${name}: no minItems/maxItems (Anthropic rejects them)`, a.arrayBounds === 0);
   check(`${name}: union-typed params within Anthropic's limit of 16 (found ${a.unions})`, a.unions <= 16);
   check(`${name}: optional params within Anthropic's limit of 24 (found ${a.optionals})`, a.optionals <= 24);
+  check(`${name}: no enum has an empty string as a member (Gemini rejects that)`, a.emptyEnumMembers === 0);
 }
 
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }

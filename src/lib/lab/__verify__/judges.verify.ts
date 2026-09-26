@@ -65,6 +65,7 @@ for (const ex of EXEMPLARS) {
 {
   const a = auditSchemaForAnthropic(judgeSchema);
   check("judge schema: no array bounds, unions or optionals", a.arrayBounds === 0 && a.unions === 0 && a.optionals === 0);
+  check("judge schema: no enum has an empty string as a member (Gemini rejects that)", a.emptyEnumMembers === 0);
   check("judge schema adds elementFit to its fields", Object.keys(judgeSchema.shape).sort().join(",") ===
     "actionability,balance,clarity,elementFit,faithfulness,notes,relations,typeFit");
   check("the prompt defines elementFit and penalises variety for its own sake",
@@ -86,9 +87,9 @@ for (const ex of EXEMPLARS) {
     mapType: "conceptMap", title: "Signals", legend: [{ tint: "rose", meaning: "Risk" }],
     nodes: [
       { id: "a", label: "Cost overrun", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "rose", emphasis: "strong" },
-      { id: "b", label: "Late delivery", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "c", label: "New supplier", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "d", label: "Client trust", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "b", label: "Late delivery", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "c", label: "New supplier", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "d", label: "Client trust", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
     ],
     relations: [
       { from: "a", to: "b", label: "causes", style: "dashed", weight: "strong", direction: "forward" },
@@ -127,10 +128,10 @@ for (const ex of EXEMPLARS) {
   const noHeading: MapGraph = {
     mapType: "conceptMap", title: "No heading here", legend: [],
     nodes: [
-      { id: "a", label: "Root idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "b", label: "Child idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "c", label: "Another idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "d", label: "Fourth idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "a", label: "Root idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "b", label: "Child idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "c", label: "Another idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "d", label: "Fourth idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
     ],
     relations: [
       { from: "a", to: "b", label: "leads to", style: "solid", weight: "normal", direction: "forward" },
@@ -149,9 +150,9 @@ for (const ex of EXEMPLARS) {
   const withHeading: MapGraph = {
     mapType: "tree", title: "Has a real heading", legend: [],
     nodes: [
-      { id: "r", label: "Root", detail: "", role: "root", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "h", label: "Region A", detail: "", role: "branch", kind: "heading", parent: "r", props: "{}", tint: "", emphasis: "normal" },
-      { id: "c", label: "Inside A", detail: "", role: "leaf", kind: "card", parent: "h", props: "{}", tint: "", emphasis: "normal" },
+      { id: "r", label: "Root", detail: "", role: "root", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "h", label: "Region A", detail: "", role: "branch", kind: "heading", parent: "r", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "c", label: "Inside A", detail: "", role: "leaf", kind: "card", parent: "h", props: "{}", tint: "none", emphasis: "normal" },
     ],
     relations: [],
   };
@@ -173,8 +174,8 @@ for (const ex of EXEMPLARS) {
   const taskGraph: MapGraph = {
     mapType: "radial", title: "Task owner", legend: [],
     nodes: [
-      { id: "c", label: "Goal", detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "t", label: "Call the venue", detail: "Before Friday", role: "branch", kind: "task", parent: "", props: '{"owner":"Sam"}', tint: "", emphasis: "normal" },
+      { id: "c", label: "Goal", detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "t", label: "Call the venue", detail: "Before Friday", role: "branch", kind: "task", parent: "", props: '{"owner":"Sam"}', tint: "none", emphasis: "normal" },
     ],
     relations: [],
   };
@@ -192,10 +193,10 @@ void (async () => {
   const bad: MapGraph = {
     mapType: "radial", title: "Legend", legend: [{ tint: "emerald", meaning: "Unused" }],
     nodes: [
-      { id: "c", label: "Hub", detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "x", label: "A", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "y", label: "B", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
-      { id: "z", label: "C", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "c", label: "Hub", detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "x", label: "A", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "y", label: "B", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
+      { id: "z", label: "C", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal" },
     ],
     relations: [],
   };

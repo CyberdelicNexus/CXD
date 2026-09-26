@@ -109,7 +109,7 @@ const seen = {
   styles: new Set<string>(), weights: new Set<string>(), directions: new Set<string>(), legends: 0,
 };
 const tally = (g: MapGraph) => {
-  g.nodes.forEach((x) => { seen.kinds.add(x.kind); if (x.tint) seen.tints.add(x.tint); seen.emphasis.add(x.emphasis); });
+  g.nodes.forEach((x) => { seen.kinds.add(x.kind); if (x.tint !== "none") seen.tints.add(x.tint); seen.emphasis.add(x.emphasis); });
   g.relations.forEach((r) => { seen.styles.add(r.style); seen.weights.add(r.weight); seen.directions.add(r.direction); });
   if (g.legend.length) seen.legends++;
 };

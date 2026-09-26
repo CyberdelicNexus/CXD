@@ -12,21 +12,25 @@ interface Node {
   items?: Node;
   maxItems?: number;
   minItems?: number;
+  enum?: unknown[];
 }
 
 export interface SchemaAudit {
   arrayBounds: number;
   unions: number;
   optionals: number;
+  /** Enums with an empty string as a member: Gemini's structured output rejects those outright. */
+  emptyEnumMembers: number;
 }
 
 export function auditSchemaForAnthropic(schema: z.ZodTypeAny): SchemaAudit {
   const json = z.toJSONSchema(schema, { io: "input" }) as Node;
-  const audit: SchemaAudit = { arrayBounds: 0, unions: 0, optionals: 0 };
+  const audit: SchemaAudit = { arrayBounds: 0, unions: 0, optionals: 0, emptyEnumMembers: 0 };
   const walk = (n: Node | undefined): void => {
     if (!n || typeof n !== "object") return;
     if (n.maxItems !== undefined || n.minItems !== undefined) audit.arrayBounds++;
     if (Array.isArray(n.anyOf) || Array.isArray(n.oneOf)) audit.unions++;
+    if (Array.isArray(n.enum) && n.enum.some((v) => v === "")) audit.emptyEnumMembers++;
     if (n.properties) {
       const required = new Set(n.required || []);
       audit.optionals += Object.keys(n.properties).filter((k) => !required.has(k)).length;

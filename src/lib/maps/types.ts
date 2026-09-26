@@ -26,8 +26,14 @@ export type NodeKind = (typeof NODE_KINDS)[number];
 /** The canvas tint families, in TINT_COLORS order (schema.verify checks they match). */
 export const TINTS = ["violet", "ocean", "emerald", "sunset", "rose", "glacier"] as const;
 export type Tint = (typeof TINTS)[number];
-/** A node's tint: a colour whose meaning is in the legend, or "" to let the engine rotate decorative tints. */
-export const NODE_TINTS = ["", ...TINTS] as const;
+/**
+ * A node's tint: a colour whose meaning is in the legend, or "none" to let the
+ * engine rotate decorative tints. "none" (not "") because Gemini's structured
+ * output rejects a JSON Schema enum with an empty-string member outright
+ * ("enum[0]: cannot be empty") while Anthropic's accepts it — an empty string
+ * must never be a member of this or any other enum.
+ */
+export const NODE_TINTS = ["none", ...TINTS] as const;
 export type NodeTint = (typeof NODE_TINTS)[number];
 
 export const EMPHASES = ["normal", "strong"] as const;
@@ -51,7 +57,7 @@ export interface MapNode {
   parent: string;
   /** JSON object string of kind-specific extras; "{}" when none. */
   props: string;
-  /** Legend colour, or "" for none. */
+  /** Legend colour, or "none" for none. */
   tint: NodeTint;
   /** "strong" draws the node about 25% larger. */
   emphasis: Emphasis;

@@ -53,7 +53,7 @@ export const flowLayout: LayoutEngine = (g) => {
       start, end,
       bend: { x: (start.x + end.x) / 2, y: 2 + 2 * LOOP_DROP },
       // The back relation styles its line, as styleEdges styles connectors.
-      gradient: from.node.tint || decorativeTint(g, "sunset"),
+      gradient: from.node.tint !== "none" ? from.node.tint : decorativeTint(g, "sunset"),
       ...(direction === "none" ? {} : { endCap: "arrow" as const }),
       ...(direction === "both" ? { startCap: "arrow" as const } : {}),
       kind: back.style ?? "solid",

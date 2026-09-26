@@ -252,7 +252,7 @@ export function styleEdges(g: MapGraph, edges: LayoutEdge[]): LayoutEdge[] {
   return edges.map((e) => {
     const m = relationBetween(g, e.from, e.to);
     const tint = byId.get(m ? m.rel.from : e.from)?.tint;
-    const out: LayoutEdge = { ...e, bend: 0, gradient: tint ? tint : untinted(e.gradient) };
+    const out: LayoutEdge = { ...e, bend: 0, gradient: tint && tint !== "none" ? tint : untinted(e.gradient) };
     if (!m) return out;
     return {
       ...out,

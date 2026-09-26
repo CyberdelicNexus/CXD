@@ -62,7 +62,7 @@ export const PAIRINGS: Pairing[] = [
   {
     id: "doubleBubbleLegend",
     label: "A two-way comparison coloured by meaning, with a legend",
-    detect: (g) => g.mapType === "doubleBubble" && g.legend.length >= 1 && g.nodes.filter((x) => x.tint).length >= 2,
+    detect: (g) => g.mapType === "doubleBubble" && g.legend.length >= 1 && g.nodes.filter((x) => x.tint !== "none").length >= 2,
   },
   {
     id: "conceptMapDashedTwoWay",

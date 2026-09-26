@@ -3,6 +3,9 @@
 // schemas with many optional fields inside array elements. New fields are
 // enums (JSON Schema "enum", never anyOf), so the union budget stays at zero.
 // No array bounds, no nullable (both are Anthropic structured-output limits).
+// No enum may have an empty string as a member: Gemini's structured output
+// rejects that outright ("enum[0]: cannot be empty"), which is why tint's
+// "absent" sentinel is "none", not "" (see NODE_TINTS in types.ts).
 import { z } from "zod";
 import {
   EMPHASES, MAP_ROLES, MAP_TYPES, NODE_KINDS, NODE_TINTS,
@@ -17,7 +20,7 @@ export const mapNodeSchema = z.object({
   kind: z.enum(NODE_KINDS).describe("Which canvas element renders this node"),
   parent: z.string().describe('id of the parent node in hierarchical maps; "" for roots'),
   props: z.string().describe('JSON object string of extras for this kind; "{}" when none'),
-  tint: z.enum(NODE_TINTS).describe('A colour whose meaning is in the legend; "" when colour means nothing here'),
+  tint: z.enum(NODE_TINTS).describe('A colour whose meaning is in the legend; "none" when colour means nothing here'),
   emphasis: z.enum(EMPHASES).describe('"strong" for the one or two nodes that matter most (drawn larger); "normal" otherwise'),
 });
 

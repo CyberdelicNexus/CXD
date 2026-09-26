@@ -2,7 +2,7 @@ import type { MapGraph, MapNode, MapRelation, MapRole, MapType, NodeKind } from 
 
 export const n = (
   id: string, role: MapRole, parent = "", kind: NodeKind = "card", props = "{}", label = id,
-): MapNode => ({ id, label, detail: "", role, kind, parent, props, tint: "", emphasis: "normal" });
+): MapNode => ({ id, label, detail: "", role, kind, parent, props, tint: "none", emphasis: "normal" });
 
 export const r = (from: string, to: string, label = ""): MapRelation =>
   ({ from, to, label, style: "solid", weight: "normal", direction: "forward" });

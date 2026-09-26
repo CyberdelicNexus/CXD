@@ -246,12 +246,12 @@ export function checkLegend(g: MapGraph): string[] {
   }
   const used = new Set<string>();
   for (const x of g.nodes) {
-    if (!x.tint) continue;
+    if (x.tint === "none") continue;
     used.add(x.tint);
     if (!listed.has(x.tint)) v.push(`node ${x.id} uses tint "${x.tint}" but the legend has no entry for it`);
     // By the kind drawn: a link without a url or an anchor without a valid key renders as a card.
     const kind = effectiveKind(x);
-    if (!TINTABLE_KINDS.includes(kind)) v.push(`node ${x.id}: kind ${kind} cannot show a tint (use "")`);
+    if (!TINTABLE_KINDS.includes(kind)) v.push(`node ${x.id}: kind ${kind} cannot show a tint (use "none")`);
   }
   for (const e of g.legend) {
     if (!used.has(e.tint)) v.push(`legend entry "${e.tint}" (${e.meaning}) is not used by any node`);

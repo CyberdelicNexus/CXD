@@ -62,7 +62,7 @@ check("some exemplar's strong node is not a hub", EXEMPLARS.some((e) => e.graph.
 {
   const g = (label: string, extra: Partial<MapGraph["nodes"][number]> = {}): MapGraph => ({
     mapType: "radial", title: "T", legend: [], relations: [],
-    nodes: [{ id: "c", label, detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal", ...extra }],
+    nodes: [{ id: "c", label, detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "none", emphasis: "normal", ...extra }],
   });
   const inp = (text: string, cards: { title: string; body: string }[] = []) => ({ title: "In", text, cards });
   check("faithful: a number from the input passes, with currency and percent", faithfulnessProblems(inp("costs 4,200 and 15% off"), g("€4200 at 15%")).length === 0);

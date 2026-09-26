@@ -81,7 +81,7 @@ class Builder {
       kind,
       parent,
       props: KIND_PROPS[kind](this.rng),
-      tint: "",
+      tint: "none",
       emphasis: this.rng() < 0.2 ? "strong" : "normal",
     };
     this.nodes.push(node);

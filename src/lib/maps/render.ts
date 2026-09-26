@@ -91,7 +91,7 @@ export function normalizeGraph(input: LegacyMapGraph): MapGraph {
 function toGenerated(p: PlacedNode): GeneratedElement[] {
   const node = p.node;
   const base = {
-    ref: node.id, parentRef: null, tint: node.tint || null, hypercubeTags: null,
+    ref: node.id, parentRef: null, tint: node.tint !== "none" ? node.tint : null, hypercubeTags: null,
     x: p.x, y: p.y, width: p.w, height: p.h, props: node.props,
   };
   switch (effectiveKind(node)) {
@@ -194,7 +194,7 @@ function styleNodes(g: MapGraph, at: (ref: string) => CanvasElement | undefined)
     if (!el) continue;
     const kind = effectiveKind(node);
     // By the kind drawn: a link without a url or an anchor without a key renders as a card and shows its tint.
-    const tint = node.tint && TINTABLE_KINDS.includes(kind) ? node.tint : null;
+    const tint = node.tint !== "none" && TINTABLE_KINDS.includes(kind) ? node.tint : null;
     if (kind === "task" && el.type === "freeform") {
       // Description and owner exactly as footprint() sized them (task-card.ts).
       const owner = taskOwner(parseProps(node.props));
