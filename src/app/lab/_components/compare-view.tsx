@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ChevronDown, Scale } from "lucide-react";
+import { ArrowRight, BookmarkPlus, ChevronDown, Scale } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { ArmId } from "@/lib/lab/types";
 import type { MapType } from "@/lib/maps/types";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import type { LabMeta } from "./lab-app";
 import { EmptyState, fetchJson, fieldClass, focusRing, InlineError, Kbd, LabButton, panelClass, postJson, Skeleton, usd } from "./lab-ui";
 import { MapPreview } from "./map-preview";
+import { PromotePanel } from "./promote-panel";
 
 interface Side { cellId: string; elements: CanvasElement[]; edges: CanvasEdge[] }
 interface Pair { inputId: string; inputTitle: string; inputText: string; repeat: boolean; left: Side; right: Side }
@@ -26,6 +27,8 @@ const compareParam = () => (typeof window === "undefined" ? null : new URLSearch
 
 /** How long the revealed arm/model/cost stay on screen before the next pair. */
 const REVEAL_MS = 1400;
+/** A clear winner stays a little longer, so it can be promoted (P) before the next pair. */
+const REVEAL_WINNER_MS = 2600;
 const PREVIEW_H = 540;
 const LONG_INPUT = 280;
 
@@ -43,6 +46,9 @@ export function CompareView({ meta }: { meta: LabMeta }) {
   const [totalVotes, setTotalVotes] = useState(0);
   const [inputOpen, setInputOpen] = useState(false);
   const [versionMode, setVersionMode] = useState<VersionMode | null>(null);
+  /** The revealed winner's cell being promoted; the auto-advance is paused while set. */
+  const [promoting, setPromoting] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
   const skipped = useRef(new Set<string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -51,6 +57,8 @@ export function CompareView({ meta }: { meta: LabMeta }) {
     setLoadError(null);
     setVoteError(null);
     setReveal(null);
+    setPromoting(null);
+    setPaused(false);
     try {
       // Pairs are drawn at random: redraw a few times to avoid ones skipped this session.
       const compare = compareParam();
@@ -90,7 +98,7 @@ export function CompareView({ meta }: { meta: LabMeta }) {
       if (data.reveal) {
         setReveal({ winner, ...data.reveal });
         setPhase("reveal");
-        timer.current = setTimeout(() => void next(), REVEAL_MS);
+        timer.current = setTimeout(() => void next(), winner === "tie" ? REVEAL_MS : REVEAL_WINNER_MS);
       } else {
         void next();
       }
@@ -106,9 +114,21 @@ export function CompareView({ meta }: { meta: LabMeta }) {
     void next();
   }, [pair, phase, next]);
 
+  /** Promote the revealed winner: pauses the advance and opens the panel. */
+  const promoteWinner = useCallback(() => {
+    if (phase !== "reveal" || !reveal || reveal.winner === "tie" || !pair) return;
+    if (timer.current) clearTimeout(timer.current);
+    setPaused(true);
+    setPromoting(pair[reveal.winner].cellId);
+  }, [phase, reveal, pair]);
+
+  const advance = useCallback(() => {
+    if (phase === "reveal" && paused) void next();
+  }, [phase, paused, next]);
+
   // Keyboard-first voting. Ignored while typing and when a modifier is held.
-  const handlers = useRef({ vote, skip });
-  handlers.current = { vote, skip };
+  const handlers = useRef({ vote, skip, promoteWinner, advance });
+  handlers.current = { vote, skip, promoteWinner, advance };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
@@ -119,6 +139,8 @@ export function CompareView({ meta }: { meta: LabMeta }) {
       else if (key === "l") void handlers.current.vote("right");
       else if (key === "t") void handlers.current.vote("tie");
       else if (key === "s") handlers.current.skip();
+      else if (key === "p") handlers.current.promoteWinner();
+      else if (key === "n") handlers.current.advance();
       else return;
       e.preventDefault();
     };
@@ -220,6 +242,12 @@ export function CompareView({ meta }: { meta: LabMeta }) {
                     </motion.span>
                   )}
                 </AnimatePresence>
+                {won && !paused && (
+                  <LabButton tone="ghost" data-testid="promote-winner" className="h-6 shrink-0 px-2 text-xs" aria-keyshortcuts="P" onClick={promoteWinner}>
+                    <BookmarkPlus aria-hidden />
+                    Promote <Kbd>P</Kbd>
+                  </LabButton>
+                )}
               </div>
               <div className={cn("rounded-xl transition-shadow", won && "ring-2 ring-violet-400/70 ring-offset-2 ring-offset-zinc-950")}>
                 <MapPreview elements={pair[side].elements} edges={pair[side].edges} height={PREVIEW_H} label={`Map ${letter}`} />
@@ -228,6 +256,15 @@ export function CompareView({ meta }: { meta: LabMeta }) {
           );
         })}
       </motion.div>
+
+      {paused && (
+        <div className="space-y-3">
+          {promoting && <PromotePanel key={promoting} cellId={promoting} onClose={() => setPromoting(null)} />}
+          <LabButton tone="secondary" data-testid="next-pair" className="h-9" aria-keyshortcuts="N" onClick={() => void next()}>
+            Next pair <ArrowRight aria-hidden /> <Kbd>N</Kbd>
+          </LabButton>
+        </div>
+      )}
 
       <div className={cn(panelClass, "flex flex-col gap-3 p-3 lg:flex-row lg:items-center")}>
         <Input

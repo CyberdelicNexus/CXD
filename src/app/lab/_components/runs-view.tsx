@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ChevronDown, Plus, RotateCcw } from "lucide-react";
+import { AlertTriangle, BookmarkPlus, ChevronDown, Plus, RotateCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
@@ -16,6 +16,7 @@ import {
   shortTime, Skeleton, StatusLabel, usd,
 } from "./lab-ui";
 import { MapPreview } from "./map-preview";
+import { PromotePanel } from "./promote-panel";
 
 const TYPE_LABELS: Record<InputType, string> = {
   brainDump: "Brain dumps",
@@ -458,6 +459,7 @@ function RunDetail({ runId, meta, inputsById, onChanged }: {
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<Set<string>>(new Set());
   const [retryErrors, setRetryErrors] = useState<Record<string, string>>({});
+  const [promoting, setPromoting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -544,6 +546,8 @@ function RunDetail({ runId, meta, inputsById, onChanged }: {
       {error && <InlineError message={`Refresh failed: ${error}`} onRetry={() => void load()} />}
       {run.persistError && <InlineError message={`Not saved to disk: ${run.persistError}. The lab keeps this run in memory until a save succeeds.`} />}
 
+      {promoting && <PromotePanel key={promoting} cellId={promoting} onClose={() => setPromoting(null)} />}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {run.cells.map((c) => (
           <CellTile
@@ -555,6 +559,7 @@ function RunDetail({ runId, meta, inputsById, onChanged }: {
             retrying={retrying.has(c.id)}
             retryError={retryErrors[c.id]}
             onRetry={() => void retry(c.id)}
+            onPromote={() => { setPromoting(c.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
           />
         ))}
       </div>
@@ -564,8 +569,8 @@ function RunDetail({ runId, meta, inputsById, onChanged }: {
 
 const PREVIEW_H = 200;
 
-function CellTile({ cell: c, title, armLabel, modelLabel, retrying, retryError, onRetry }: {
-  cell: Cell; title: string; armLabel: string; modelLabel: string; retrying: boolean; retryError?: string; onRetry: () => void;
+function CellTile({ cell: c, title, armLabel, modelLabel, retrying, retryError, onRetry, onPromote }: {
+  cell: Cell; title: string; armLabel: string; modelLabel: string; retrying: boolean; retryError?: string; onRetry: () => void; onPromote: () => void;
 }) {
   const failed = c.status === "failed" || c.status === "error";
   const problems = [c.error, ...c.structureViolations].filter(Boolean) as string[];
@@ -614,6 +619,12 @@ function CellTile({ cell: c, title, armLabel, modelLabel, retrying, retryError, 
         <LabButton tone="secondary" className="h-8 self-start" busy={retrying} onClick={onRetry}>
           {!retrying && <RotateCcw aria-hidden />}
           Retry
+        </LabButton>
+      )}
+      {c.status === "done" && c.graph && (
+        <LabButton tone="ghost" data-testid="promote-cell" className="h-8 self-start" onClick={onPromote}>
+          <BookmarkPlus aria-hidden />
+          Promote
         </LabButton>
       )}
     </article>
