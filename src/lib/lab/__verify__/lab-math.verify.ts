@@ -1,12 +1,14 @@
 // Run: npx tsx src/lib/lab/__verify__/lab-math.verify.ts
 import {
-  ARM_TOKENS, buildLeaderboard, compareVersions, computeElo, estimateRunCost, expectedScore, judgeAgreement, pickPair, selfConsistency,
+  ARM_TOKENS, buildLeaderboard, compareVersions, computeElo, estimateRunCost, expectedScore,
+  graphExemplarsInputTokens, judgeAgreement, pickPair, selfConsistency,
 } from "../lab-math";
 import { JUDGE_MODELS } from "../config";
 import { CORPUS } from "../corpus";
-import { exemplarBlock } from "../prompts";
+import { formatInput } from "../format-input";
+import { exemplarBlock, TASK } from "../prompts";
 import { buildMapGuide } from "@/lib/maps/prompt";
-import { parseVariantKey, type Cell, type Vote } from "../types";
+import { parseVariantKey, type Cell, type LabInput, type Vote } from "../types";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -140,15 +142,45 @@ const byId = new Map([a, b].map((c) => [c.id, c]));
 
 {
   // The graphExemplars token estimate (item C) must honestly cover the real
-  // block size across the corpus, chars/4, with margin, not a stale guess.
+  // system+task size for each input, chars/4, with margin — not a flat guess
+  // that only happens to fit the small inputs in the bundled corpus.
   const guideChars = buildMapGuide(null).length;
-  const chars = CORPUS.map((c) => guideChars + exemplarBlock(c, null).length + `Organise this into the clearest thinking map for the canvas.\n\n${c.text}`.length);
-  const maxTokens = Math.max(...chars) / 4;
-  const avgTokens = chars.reduce((a, b) => a + b, 0) / chars.length / 4;
-  console.log(`       graphExemplars real system+task tokens (chars/4): avg ${Math.round(avgTokens)}, max ${Math.round(maxTokens)}; estimate ${ARM_TOKENS.graphExemplars.input}`);
-  check(`graphExemplars.input (${ARM_TOKENS.graphExemplars.input}) covers the measured max (${Math.round(maxTokens)}) with margin`,
-    ARM_TOKENS.graphExemplars.input >= maxTokens && ARM_TOKENS.graphExemplars.input <= maxTokens * 1.5);
-  check("graphExemplars.input is well below the old ~8.8k-token estimate", ARM_TOKENS.graphExemplars.input < 8800 / 2);
+  const measuredTokensOf = (input: LabInput) =>
+    (guideChars + exemplarBlock(input, null).length + TASK.length + 2 + formatInput(input).length) / 4;
+
+  const measured = CORPUS.map(measuredTokensOf);
+  const estimated = CORPUS.map((c) => graphExemplarsInputTokens(c));
+  const maxMeasured = Math.max(...measured);
+  const avgMeasured = measured.reduce((a, b) => a + b, 0) / measured.length;
+  console.log(`       graphExemplars real system+task tokens (chars/4): avg ${Math.round(avgMeasured)}, max ${Math.round(maxMeasured)}`);
+
+  check("graphExemplars scales per input: every corpus estimate covers its own measured tokens, with margin",
+    CORPUS.every((c, i) => estimated[i] >= measured[i] && estimated[i] <= measured[i] * 1.5));
+  check(`graphExemplars scaled estimate's own max (${Math.round(Math.max(...estimated))}) still covers the corpus-measured max (${Math.round(maxMeasured)}) with margin`,
+    Math.max(...estimated) >= maxMeasured && Math.max(...estimated) <= maxMeasured * 1.5);
+  check("graphExemplars.input (the no-input-data fallback) is well below the old ~8.8k-token estimate", ARM_TOKENS.graphExemplars.input < 8800 / 2);
+
+  // A large real canvasCards board (many cards) must not be undercounted the
+  // way the old flat 4000-token guess undercounted it by ~44%: the scaled
+  // estimate must stay within ~15-20% of the real measured size, not far under it.
+  const bigBoard: LabInput = {
+    id: "verify-synthetic-40-cards", type: "canvasCards", expectedTypes: [],
+    title: "Canvas board export",
+    text: "A messy canvas board with lots of scattered sticky notes to organise.",
+    cards: Array.from({ length: 40 }, (_, i) => ({
+      title: `Card ${i + 1}: some idea about the project roadmap and next steps for the team to consider`,
+      body: `This is a longer body describing card ${i + 1} in more detail, including context, the owner ` +
+        "responsible, a rough date for when this should be done, and any open risks or dependencies worth " +
+        "flagging early. Also worth noting: dependencies on the design team and a pending legal review.",
+    })),
+  };
+  const bigMeasured = measuredTokensOf(bigBoard);
+  const bigEstimated = graphExemplarsInputTokens(bigBoard);
+  const oldFlatUndercount = 1 - ARM_TOKENS.graphExemplars.input / bigMeasured;
+  console.log(`       40-card synthetic board: measured ${Math.round(bigMeasured)}, scaled estimate ${Math.round(bigEstimated)}, old flat ${ARM_TOKENS.graphExemplars.input} (${Math.round(oldFlatUndercount * 100)}% under)`);
+  check("the old flat estimate would have undercounted the 40-card board by a lot (confirms the bug this fixes)", oldFlatUndercount > 0.15);
+  check("the scaled estimate for the 40-card board is not more than ~15-20% under the real measured size",
+    bigEstimated >= bigMeasured * 0.8);
 }
 
 {

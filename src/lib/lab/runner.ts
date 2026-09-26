@@ -133,7 +133,7 @@ export async function startRun(config: RunConfig): Promise<Run> {
   }
   const run: Run = {
     id, createdAt: new Date().toISOString(), config,
-    estimateUsd: estimateRunCost(config), spentUsd: 0, status: "running", cells,
+    estimateUsd: estimateRunCost(config, Array.from(inputs.values())), spentUsd: 0, status: "running", cells,
   };
   // Never spend on a run that could not be written down.
   try {
@@ -152,8 +152,11 @@ export async function startRun(config: RunConfig): Promise<Run> {
 }
 
 /** Estimated cost of one cell (arm + model + the run's judges), used to reserve budget while it is in flight. */
-function cellEstimate(config: RunConfig, cell: Cell): number {
-  return estimateRunCost({ ...config, inputIds: [cell.inputId], arms: [cell.arm], modelIds: [cell.modelId] });
+function cellEstimate(config: RunConfig, cell: Cell, input?: LabInput): number {
+  return estimateRunCost(
+    { ...config, inputIds: [cell.inputId], arms: [cell.arm], modelIds: [cell.modelId] },
+    input ? [input] : undefined,
+  );
 }
 
 async function executeRun(run: Run, inputs: Map<string, LabInput>): Promise<void> {
@@ -171,7 +174,7 @@ async function executeRun(run: Run, inputs: Map<string, LabInput>): Promise<void
         cell.status = "skipped";
         cell.error = "budget reached";
       } else {
-        const hold = cellEstimate(run.config, cell);
+        const hold = cellEstimate(run.config, cell, inputs.get(cell.inputId));
         st.reserved += hold;
         try {
           await runCell(run, cell, inputs.get(cell.inputId)!);
@@ -297,7 +300,9 @@ export async function retryCell(runId: string, cellId: string): Promise<Run | nu
     if (cell.status === "done") {
       throw new LabConflictError("This cell already succeeded. Retrying it would replace a map your votes may refer to.");
     }
-    const estimate = cellEstimate(run.config, cell);
+    const input = inputs.find((i) => i.id === cell.inputId);
+    if (!input) return run;
+    const estimate = cellEstimate(run.config, cell, input);
     if (run.spentUsd + st.reserved + estimate > run.config.budgetUsd) {
       const inFlight = st.reserved > 0 ? ` + $${st.reserved.toFixed(3)} in flight` : "";
       throw new LabConflictError(
@@ -305,8 +310,6 @@ export async function retryCell(runId: string, cellId: string): Promise<Run | nu
         `would exceed the $${run.config.budgetUsd.toFixed(2)} budget.`,
       );
     }
-    const input = inputs.find((i) => i.id === cell.inputId);
-    if (!input) return run;
     Object.assign(cell, blankCell(run.id, cell.inputId, cell.arm, cell.modelId, run.config.forcedType), { id: cell.id });
     st.reserved += estimate;
     try {

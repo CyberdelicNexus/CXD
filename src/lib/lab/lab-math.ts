@@ -1,8 +1,9 @@
 // Pure maths for the lab: no I/O, no SDK imports (safe in client components).
 import { costOf, getLabModel, JUDGE_MODELS } from "./config";
 import { elementUsage } from "./describe";
+import { formatInput } from "./format-input";
 import type { MapType } from "@/lib/maps/types";
-import type { ArmId, Cell, JudgeId, RunConfig, Vote } from "./types";
+import type { ArmId, Cell, JudgeId, LabInput, RunConfig, Vote } from "./types";
 import { cellCosts, JUDGE_IDS, promptVersionOf, variantKey } from "./types";
 
 export const ELO_START = 1000;
@@ -95,23 +96,53 @@ export const ARM_TOKENS: Record<ArmId, { input: number; output: number }> = {
   baseline: { input: 6000, output: 4000 },
   graph: { input: 4000, output: 3000 },
   graphCritique: { input: 10000, output: 6000 },
-  // The guide (~1.4k tokens) plus up to 3 selected exemplars, each with its
-  // input and graph JSON (the block itself measures ~1.6k-2k tokens across
-  // the corpus, chars/4, since select-v3-relevance; down from ~8.8k when the
-  // library always showed the same 3 examples verbatim). ~4000 tokens covers
-  // the measured max (~3.3k guide+block, plus the task input) with margin;
-  // lab-math.verify's corpus measurement must stay under this.
+  // graphExemplars' input does NOT stay flat: see graphExemplarsInputTokens
+  // below, which is what estimateRunCost actually uses once it knows the real
+  // LabInput. The number here is only the no-input-data fallback (a caller
+  // that cannot supply the actual input, or code that reads ARM_TOKENS
+  // directly) and the base this arm's output assumption still comes from.
   graphExemplars: { input: 4000, output: 3500 },
 };
 /** Per LLM-judge call; the description now carries tints, legend, emphasis and connector styles. */
 export const JUDGE_TOKENS = { input: 4000, output: 700 };
 
-export function estimateRunCost(config: RunConfig): number {
-  const perArmModel = config.inputIds.length;
+/**
+ * graphExemplars' system prompt is the map guide plus up to 3 selected
+ * exemplars (prompts.ts's exemplarBlock) — roughly fixed however big the
+ * user's own input is — while its user prompt is TASK + formatInput(input),
+ * which scales directly with it: a large real canvasCards board (dozens of
+ * cards) can run well past anything the bundled corpus exercises. So this
+ * arm's input estimate is base (guide + a typical exemplar block, corpus-
+ * measured by lab-math.verify, chars/4 with margin) plus the actual input's
+ * own formatInput size (chars/4, with a margin for tokenizer overhead) —
+ * honest for real inputs, not just the corpus lab-math.verify measures it against.
+ */
+export const GRAPH_EXEMPLARS_BASE_INPUT_TOKENS = 3500;
+const GRAPH_EXEMPLARS_INPUT_MARGIN = 1.2;
+
+/** graphExemplars' honest input-token estimate for a real input; the flat ARM_TOKENS fallback without one. */
+export function graphExemplarsInputTokens(input?: LabInput): number {
+  if (!input) return ARM_TOKENS.graphExemplars.input;
+  return GRAPH_EXEMPLARS_BASE_INPUT_TOKENS + Math.ceil((formatInput(input).length / 4) * GRAPH_EXEMPLARS_INPUT_MARGIN);
+}
+
+function armTokens(arm: ArmId, input?: LabInput): { input: number; output: number } {
+  if (arm === "graphExemplars") return { input: graphExemplarsInputTokens(input), output: ARM_TOKENS.graphExemplars.output };
+  return ARM_TOKENS[arm];
+}
+
+/** With `inputs` given, graphExemplars scales its input estimate to each input's real size; without it, every arm falls back to its flat ARM_TOKENS guess. */
+export function estimateRunCost(config: RunConfig, inputs?: LabInput[]): number {
+  const inputsById = inputs ? new Map(inputs.map((i) => [i.id, i])) : undefined;
   let total = 0;
   for (const modelId of config.modelIds) {
     const model = getLabModel(modelId);
-    for (const arm of config.arms) total += perArmModel * costOf(model, ARM_TOKENS[arm].input, ARM_TOKENS[arm].output);
+    for (const arm of config.arms) {
+      for (const inputId of config.inputIds) {
+        const tokens = armTokens(arm, inputsById?.get(inputId));
+        total += costOf(model, tokens.input, tokens.output);
+      }
+    }
   }
   const cells = config.inputIds.length * config.arms.length * config.modelIds.length;
   if (config.judges.includes("llmStrong")) total += cells * costOf(getLabModel(JUDGE_MODELS.strong), JUDGE_TOKENS.input, JUDGE_TOKENS.output);

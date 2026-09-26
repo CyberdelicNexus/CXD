@@ -303,7 +303,9 @@ function NewRunForm({ meta, inputs, inputsError, onReloadInputs, onStarted }: {
     [inputIds, arms, modelIds, forcedType, judges, budgetUsd],
   );
   const cellCount = inputIds.length * arms.length * modelIds.length;
-  const estimate = cellCount > 0 ? estimateRunCost(config) : 0;
+  // Real input content, so graphExemplars' estimate scales with the actual
+  // input size (a large canvasCards board) rather than a flat guess.
+  const estimate = cellCount > 0 ? estimateRunCost(config, inputs ?? undefined) : 0;
   const overBudget = budgetValid && estimate > budgetUsd;
   const needsConfirm = estimate > meta.confirmThresholdUsd;
 

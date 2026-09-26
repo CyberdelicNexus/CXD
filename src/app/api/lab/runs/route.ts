@@ -3,7 +3,7 @@ import { z } from "zod";
 import { CONFIRM_THRESHOLD_USD, LAB_MODELS } from "@/lib/lab/config";
 import { labGate } from "@/lib/lab/http";
 import { estimateRunCost } from "@/lib/lab/lab-math";
-import { listRuns, startRun } from "@/lib/lab/runner";
+import { getInputs, listRuns, startRun } from "@/lib/lab/runner";
 import { summarise } from "@/lib/lab/store";
 import { ARM_IDS, JUDGE_IDS } from "@/lib/lab/types";
 import { MAP_TYPES } from "@/lib/maps/types";
@@ -40,7 +40,9 @@ export async function POST(request: Request) {
   const unknownModel = config.modelIds.find((id) => !LAB_MODELS.some((m) => m.id === id));
   if (unknownModel) return NextResponse.json({ error: `unknown model ${unknownModel}` }, { status: 400 });
 
-  const estimateUsd = estimateRunCost(config);
+  // Real input content, so graphExemplars' estimate scales with the actual
+  // input size (a large canvasCards board) rather than a flat guess.
+  const estimateUsd = estimateRunCost(config, await getInputs());
   if (estimateUsd > CONFIRM_THRESHOLD_USD && !confirmed) {
     return NextResponse.json({ needsConfirmation: true, estimateUsd }, { status: 409 });
   }
