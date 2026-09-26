@@ -23,7 +23,10 @@ import type { ExemplarInput } from "./types";
 
 export const URL_RE = /https?:\/\/[^\s"'<>()[\]{}]+/g;
 const NUMBER_RE = /\d+(?:[.,]\d+)*/g;
-const WORD_CHAR = /[\p{L}\p{N}]/u;
+// ASCII letters/digits, matching the rest of the library's word handling
+// (similarity.ts's normaliseWords): good enough to spot "a number inside a word".
+const WORD_CHAR = /[a-zA-Z0-9]/;
+const WORD_RE = /[a-zA-Z0-9]+/g;
 /** Props that decorate rather than state content. */
 const DECORATION_KEYS = new Set(["emoji", "icon", "shapeType", "componentKey"]);
 const MAX_HEADER_ORDINAL = 10;
@@ -96,19 +99,22 @@ export function faithfulnessProblems(input: InputText, graph: MapGraph): string[
   const inputNumbers = new Set(numberTokens(source).map(normNumber));
   // Numbers inside URLs in the input still count as stated.
   (source.match(URL_RE) ?? []).forEach((u) => (u.match(NUMBER_RE) ?? []).forEach((x) => inputNumbers.add(normNumber(x))));
-  const inputWords = new Set((source.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []));
+  const inputWords = new Set((source.toLowerCase().match(WORD_RE) ?? []));
   const problems: string[] = [];
   for (const s of graphSnippets(graph)) {
     for (const url of s.text.match(URL_RE) ?? []) {
       if (!source.includes(url)) problems.push(`${s.where}: URL ${url} is not in the input`);
     }
     const text = stripUrls(s.text);
-    for (const m of text.matchAll(NUMBER_RE)) {
+    const re = new RegExp(NUMBER_RE.source, "g");
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(text))) {
       const token = m[0];
       if (inputNumbers.has(normNumber(token))) continue;
-      const start = m.index ?? 0;
+      const start = m.index;
       const word = wordAround(text, start, start + token.length);
-      if (/\p{L}/u.test(word) && inputWords.has(word.toLowerCase())) continue;
+      if (/[a-zA-Z]/.test(word) && inputWords.has(word.toLowerCase())) continue;
       if (s.headerRow && /^\d+$/.test(token) && Number(token) >= 1 && Number(token) <= MAX_HEADER_ORDINAL) continue;
       problems.push(`${s.where}: number ${token} is not in the input ("${s.text}")`);
     }
