@@ -94,8 +94,13 @@ export const ARM_TOKENS: Record<ArmId, { input: number; output: number }> = {
   baseline: { input: 6000, output: 4000 },
   graph: { input: 4000, output: 3000 },
   graphCritique: { input: 10000, output: 6000 },
-  // Three selected exemplars, each with its input, plus the longer guide; graphs carry the new fields.
-  graphExemplars: { input: 8000, output: 3500 },
+  // The guide (~1.4k tokens) plus up to 3 selected exemplars, each with its
+  // input and graph JSON (the block itself measures ~1.6k-2k tokens across
+  // the corpus, chars/4, since select-v3-relevance; down from ~8.8k when the
+  // library always showed the same 3 examples verbatim). ~4000 tokens covers
+  // the measured max (~3.3k guide+block, plus the task input) with margin;
+  // lab-math.verify's corpus measurement must stay under this.
+  graphExemplars: { input: 4000, output: 3500 },
 };
 /** Per LLM-judge call; the description now carries tints, legend, emphasis and connector styles. */
 export const JUDGE_TOKENS = { input: 4000, output: 700 };

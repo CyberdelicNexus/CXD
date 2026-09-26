@@ -1,8 +1,11 @@
 // Run: npx tsx src/lib/lab/__verify__/lab-math.verify.ts
 import {
-  buildLeaderboard, computeElo, estimateRunCost, expectedScore, judgeAgreement, pickPair, selfConsistency,
+  ARM_TOKENS, buildLeaderboard, computeElo, estimateRunCost, expectedScore, judgeAgreement, pickPair, selfConsistency,
 } from "../lab-math";
 import { JUDGE_MODELS } from "../config";
+import { CORPUS } from "../corpus";
+import { exemplarBlock } from "../prompts";
+import { buildMapGuide } from "@/lib/maps/prompt";
 import { parseVariantKey, type Cell, type Vote } from "../types";
 
 let failures = 0;
@@ -133,6 +136,19 @@ const byId = new Map([a, b].map((c) => [c.id, c]));
   check("excl. own model skips votes involving the judge's model", row.comparedExSelf === 1 && near(row.agreementExSelf!, 1));
   const rubricRow = lb.judges.find((j) => j.judgeId === "rubric")!;
   check("non-LLM judges have identical excl. figures", rubricRow.comparedExSelf === rubricRow.compared);
+}
+
+{
+  // The graphExemplars token estimate (item C) must honestly cover the real
+  // block size across the corpus, chars/4, with margin, not a stale guess.
+  const guideChars = buildMapGuide(null).length;
+  const chars = CORPUS.map((c) => guideChars + exemplarBlock(c, null).length + `Organise this into the clearest thinking map for the canvas.\n\n${c.text}`.length);
+  const maxTokens = Math.max(...chars) / 4;
+  const avgTokens = chars.reduce((a, b) => a + b, 0) / chars.length / 4;
+  console.log(`       graphExemplars real system+task tokens (chars/4): avg ${Math.round(avgTokens)}, max ${Math.round(maxTokens)}; estimate ${ARM_TOKENS.graphExemplars.input}`);
+  check(`graphExemplars.input (${ARM_TOKENS.graphExemplars.input}) covers the measured max (${Math.round(maxTokens)}) with margin`,
+    ARM_TOKENS.graphExemplars.input >= maxTokens && ARM_TOKENS.graphExemplars.input <= maxTokens * 1.5);
+  check("graphExemplars.input is well below the old ~8.8k-token estimate", ARM_TOKENS.graphExemplars.input < 8800 / 2);
 }
 
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
