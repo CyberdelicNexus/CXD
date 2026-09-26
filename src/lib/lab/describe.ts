@@ -24,8 +24,16 @@ export function elementText(el: CanvasElement): string {
   const e = el as unknown as Record<string, unknown>;
   const join = (...parts: unknown[]) => clip(parts.map(clean).filter(Boolean).join(" — "));
   switch (el.type) {
-    case "freeform":
-      return join(e.noteTitle, e.content, e.noteBody);
+    case "freeform": {
+      // render.ts overwrites content with the task's own label for tasks,
+      // duplicating noteTitle (which already carries that label): only show
+      // it when it actually differs. taskMetadata.assignee (render.ts's
+      // styleNodes) is the only place a task's owner reaches the element, so
+      // it must be surfaced here for elementFit's "owned actions in tasks".
+      const meta = e.taskMetadata as { assignee?: unknown } | undefined;
+      const content = e.content === e.noteTitle ? undefined : e.content;
+      return join(e.noteTitle, content, e.noteBody, meta?.assignee);
+    }
     case "text":
     case "shape":
       return join(e.content);

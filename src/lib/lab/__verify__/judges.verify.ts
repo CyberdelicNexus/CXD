@@ -164,6 +164,29 @@ for (const ex of EXEMPLARS) {
     usageYes.distinctKinds === 2);
 }
 
+// Review fix: a task's owner (render.ts's styleNodes puts it only in
+// taskMetadata.assignee) must reach the judge, since elementFit explicitly
+// credits "owned actions in tasks". Also proves the noteTitle/content dedupe
+// (render.ts overwrites content with the task's own label, duplicating
+// noteTitle) does not swallow the owner or repeat the label.
+{
+  const taskGraph: MapGraph = {
+    mapType: "radial", title: "Task owner", legend: [],
+    nodes: [
+      { id: "c", label: "Goal", detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "t", label: "Call the venue", detail: "Before Friday", role: "branch", kind: "task", parent: "", props: '{"owner":"Sam"}', tint: "", emphasis: "normal" },
+    ],
+    relations: [],
+  };
+  const rTask = renderMap(taskGraph);
+  const taskEl = rTask.elements.find((e) => e.type === "freeform" && e.cardType === "task")!;
+  check("elementText surfaces a task's owner (taskMetadata.assignee)", elementText(taskEl).includes("Sam"));
+  check("elementText dedupes the task's repeated label (content mirrors noteTitle)",
+    (elementText(taskEl).match(/Call the venue/g) || []).length === 1);
+  const textTask = describeRendered(rTask.elements, rTask.edges);
+  check("describeRendered's judge-facing text includes the task's owner", textTask.includes("Sam"));
+}
+
 // The structure judge fails a legend mismatch (a hard violation).
 void (async () => {
   const bad: MapGraph = {
