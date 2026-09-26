@@ -21,6 +21,11 @@ const EXPECTED: Expect[] = [
   { id: "membership-churn", mapType: "multiFlow", inputType: "brainDump", kinds: ["card"], pairings: [] },
   { id: "rooftop-go-no-go", mapType: "tree", inputType: "brainDump", kinds: ["card", "task", "waypoint", "caption"], pairings: ["waypointBranches"] },
   { id: "ocean-room-scenes", mapType: "flow", inputType: "topic", kinds: ["task", "frame"], pairings: ["framesToTask"] },
+  { id: "onboarding-path", mapType: "flow", inputType: "canvasCards", kinds: ["card", "waypoint", "shape"], pairings: ["strongMainPath", "starGoal"] },
+  { id: "sprint-day-owners", mapType: "brace", inputType: "brainDump", kinds: ["card", "task", "heading"], pairings: ["headingsRegions"] },
+  { id: "retreat-purpose", mapType: "brace", inputType: "topic", kinds: ["card", "anchor", "caption"], pairings: ["twoAnchors"] },
+  { id: "wellness-ecosystem", mapType: "conceptMap", inputType: "topic", kinds: ["card", "bubble"], pairings: ["conceptMapDashedTwoWay"] },
+  { id: "community-evidence", mapType: "conceptMap", inputType: "canvasCards", kinds: ["card", "link", "caption"], pairings: ["linksSupportIdeas"] },
 ];
 
 for (const e of EXPECTED) {
