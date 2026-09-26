@@ -30,8 +30,8 @@ const inputText = (i: ExemplarInput) => formatInput({ id: "", type: i.type, titl
  * it came from. An example whose input is too close to this one (same title,
  * or word 3-gram Jaccard >= 0.3) is never shown: it would hand over the answer.
  */
-export function exemplarBlock(input: Pick<ExemplarInput, "type" | "title" | "text">, forcedType: MapType | null, library: Exemplar[] = EXEMPLARS): string {
-  const picked = selectExemplars(library.filter((e) => !tooClose(e.input, input)), input.type, forcedType);
+export function exemplarBlock(input: Pick<ExemplarInput, "type" | "title" | "text"> & { cards?: ExemplarInput["cards"] }, forcedType: MapType | null, library: Exemplar[] = EXEMPLARS): string {
+  const picked = selectExemplars(library.filter((e) => !tooClose(e.input, input)), input, forcedType);
   return "\n\nEXAMPLES of well-formed graphs, chosen for this kind of input. Learn how each idea got the element that suits it; do not copy their content.\n" +
     picked.map((e) => `Example "${e.title}": ${e.note}\nINPUT:\n${inputText(e.input)}\nGRAPH:\n${JSON.stringify(e.graph)}`).join("\n\n");
 }
