@@ -90,6 +90,18 @@ export function tintOf(el: CanvasElement): Tint | null {
   }
 }
 
+/**
+ * True for the map's own title element (renderMap's synthetic `__title`, never
+ * a real graph node): the only text element a rendered map ever draws at
+ * TITLE_FONT_PX. A real heading node is drawn at the strictly smaller
+ * HEADING_FONT_PX (styleNodes), and no other text element's size is driven by
+ * anything but that or the generator's fixed 14px default, so this fontSize
+ * alone identifies it without threading an id through RenderedMap.
+ */
+export function isTitleElement(el: CanvasElement): boolean {
+  return el.type === "text" && el.style?.fontSize === TITLE_FONT_PX;
+}
+
 export interface DrawnLegendEntry { tint: Tint; meaning: string; swatchId: string; labelId: string }
 
 /**

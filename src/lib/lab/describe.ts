@@ -5,7 +5,7 @@
 // legend, each element's tint and its meaning, elements drawn larger than
 // their peers, and each connection's arrow, dash and weight. Pure: no I/O.
 import type { CanvasEdge, CanvasElement, LineElement } from "@/types/canvas-elements";
-import { readLegend, tintOf } from "@/lib/maps/element-style";
+import { HEADING_FONT_PX, isTitleElement, readLegend, tintOf } from "@/lib/maps/element-style";
 
 const MAX_TEXT = 160;
 /** A line end this close to an element's box counts as attached to it. */
@@ -51,15 +51,15 @@ export function elementText(el: CanvasElement): string {
 export function elementKind(el: CanvasElement): string {
   if (el.type === "shape") return `shape:${el.shapeType}`;
   if (el.type === "freeform") return el.cardType === "task" ? "task" : "card";
-  if (el.type === "text") return (el.style?.fontSize ?? 14) >= 20 ? "heading" : "text";
+  if (el.type === "text") return (el.style?.fontSize ?? 14) >= HEADING_FONT_PX ? "heading" : "text";
   return el.type;
 }
 
-/** Distinct element kinds on the canvas and the share of plain note cards (legend swatches and labels excluded). */
+/** Distinct element kinds on the canvas and the share of plain note cards (legend swatches, labels and the map's own title excluded). */
 export function elementUsage(elements: CanvasElement[]): { distinctKinds: number; plainCardShare: number } {
   const legendIds = new Set<string>();
   readLegend(elements).forEach((l) => { legendIds.add(l.swatchId); legendIds.add(l.labelId); });
-  const content = elements.filter((e) => e.type !== "line" && e.type !== "connector" && !legendIds.has(e.id));
+  const content = elements.filter((e) => e.type !== "line" && e.type !== "connector" && !legendIds.has(e.id) && !isTitleElement(e));
   if (content.length === 0) return { distinctKinds: 0, plainCardShare: 0 };
   const kinds = new Set<string>(content.map(elementKind));
   const cards = content.filter((e) => elementKind(e) === "card").length;
@@ -99,7 +99,10 @@ function emphasisedIds(boxes: CanvasElement[]): Set<string> {
  * text, tint meaning, emphasis and position; which container each sits in
  * (declared containerId, else the smallest container enclosing it); and every
  * connection as "#a -> #b [label] (dashed, strong)". Line elements attached at
- * both ends are listed as undirected connections ("#a -- #b").
+ * both ends are listed as undirected connections ("#a -- #b"). renderMap's own
+ * synthetic title element is excluded, the same as legend swatches and labels:
+ * it is not a node the graph asked for, so it must not read as a phantom
+ * heading.
  */
 export function describeRendered(elements: CanvasElement[], edges: CanvasEdge[]): string {
   const legend = readLegend(elements);
@@ -109,7 +112,7 @@ export function describeRendered(elements: CanvasElement[], edges: CanvasEdge[])
 
   const lines = elements.filter((e): e is LineElement => e.type === "line");
   const boxes = elements
-    .filter((e) => e.type !== "line" && !legendIds.has(e.id))
+    .filter((e) => e.type !== "line" && !legendIds.has(e.id) && !isTitleElement(e))
     .sort((a, b) => a.y - b.y || a.x - b.x);
   const ref = new Map(boxes.map((e, i) => [e.id, `#${i + 1}`]));
   const containers = boxes.filter((e) => e.type === "container");

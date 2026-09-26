@@ -111,10 +111,59 @@ for (const ex of EXEMPLARS) {
   check("element kinds name tasks and headings",
     elementKind({ type: "freeform", cardType: "task" } as unknown as CanvasElement) === "task" &&
     elementKind({ type: "text", style: { fontSize: 24 } } as unknown as CanvasElement) === "heading");
+  // All four nodes are plain cards (zero real headings): with the title
+  // excluded, distinctKinds is 1 (card only) and every counted element is a
+  // card, not 2 / 4-of-5 as it was while the synthetic title read as a
+  // phantom heading.
   const usage = elementUsage(r.elements);
-  check(`element usage counts kinds and plain cards (${usage.distinctKinds}, ${usage.plainCardShare.toFixed(2)})`,
-    usage.distinctKinds === 2 && Math.abs(usage.plainCardShare - 4 / 5) < 1e-9);
+  check(`element usage counts kinds and plain cards, the title excluded (${usage.distinctKinds}, ${usage.plainCardShare.toFixed(2)})`,
+    usage.distinctKinds === 1 && Math.abs(usage.plainCardShare - 1) < 1e-9);
 }
+
+// Review fix: renderMap's synthetic title (28px, TITLE_FONT_PX) must not be
+// mistaken for a real heading node (24px, HEADING_FONT_PX) in either the
+// judge-facing text or the element-usage stats.
+{
+  const noHeading: MapGraph = {
+    mapType: "conceptMap", title: "No heading here", legend: [],
+    nodes: [
+      { id: "a", label: "Root idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "b", label: "Child idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "c", label: "Another idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "d", label: "Fourth idea", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+    ],
+    relations: [
+      { from: "a", to: "b", label: "leads to", style: "solid", weight: "normal", direction: "forward" },
+      { from: "b", to: "c", label: "enables", style: "solid", weight: "normal", direction: "forward" },
+      { from: "c", to: "d", label: "needs", style: "solid", weight: "normal", direction: "forward" },
+    ],
+  };
+  const rNo = renderMap(noHeading);
+  const textNo = describeRendered(rNo.elements, rNo.edges);
+  check("no real heading node: the judge-facing text has no phantom heading line",
+    !/\bheading\b/.test(textNo));
+  const usageNo = elementUsage(rNo.elements);
+  check(`no real heading node: distinctKinds counts only card, not the title (${usageNo.distinctKinds})`,
+    usageNo.distinctKinds === 1);
+
+  const withHeading: MapGraph = {
+    mapType: "tree", title: "Has a real heading", legend: [],
+    nodes: [
+      { id: "r", label: "Root", detail: "", role: "root", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "h", label: "Region A", detail: "", role: "branch", kind: "heading", parent: "r", props: "{}", tint: "", emphasis: "normal" },
+      { id: "c", label: "Inside A", detail: "", role: "leaf", kind: "card", parent: "h", props: "{}", tint: "", emphasis: "normal" },
+    ],
+    relations: [],
+  };
+  const rYes = renderMap(withHeading);
+  const textYes = describeRendered(rYes.elements, rYes.edges);
+  check("a real heading node is described as heading, exactly once (the 28px title never adds a second)",
+    (textYes.match(/\bheading\b/g) || []).length === 1);
+  const usageYes = elementUsage(rYes.elements);
+  check(`a real heading node adds to distinctKinds but the 28px title does not (${usageYes.distinctKinds})`,
+    usageYes.distinctKinds === 2);
+}
+
 // The structure judge fails a legend mismatch (a hard violation).
 void (async () => {
   const bad: MapGraph = {
