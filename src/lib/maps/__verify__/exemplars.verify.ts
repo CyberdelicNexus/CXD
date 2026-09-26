@@ -76,6 +76,12 @@ check("some exemplar's strong node is not a hub", EXEMPLARS.some((e) => e.graph.
     g("T", { kind: "table", props: JSON.stringify({ cells: [["Option 1", "Option 2"], ["a", "b"]], headerRow: true }) })).length === 0);
   check("faithful: the same ordinal in a body row is not", faithfulnessProblems(inp("compare them"),
     g("T", { kind: "table", props: JSON.stringify({ cells: [["A", "B"], ["Option 1", "b"]], headerRow: true }) })).length === 1);
+  check("faithful: a bare header ordinal is allowed", faithfulnessProblems(inp("compare them"),
+    g("T", { kind: "table", props: JSON.stringify({ cells: [["1", "2"], ["a", "b"]], headerRow: true }) })).length === 0);
+  check("faithful: a header cell that merely contains a number is not exempt (\"Fits 8\")", faithfulnessProblems(inp("compare them"),
+    g("T", { kind: "table", props: JSON.stringify({ cells: [["Fits 8", "Other"], ["a", "b"]], headerRow: true }) })).length === 1);
+  check("faithful: a header cell that merely contains a number is not exempt (\"8 visits\")", faithfulnessProblems(inp("compare them"),
+    g("T", { kind: "table", props: JSON.stringify({ cells: [["8 visits", "Other"], ["a", "b"]], headerRow: true }) })).length === 1);
   check("faithful: a number inside a word from the input is allowed", faithfulnessProblems(inp("the Q3 launch"), g("Q3 launch")).length === 0);
   check("faithful: a number inside a new word is not", faithfulnessProblems(inp("the launch"), g("Q3 launch")).length === 1);
   check("faithful: emoji and other decoration props are not read", faithfulnessProblems(inp("x"), g("A", { props: JSON.stringify({ emoji: "1️⃣" }) })).length === 0);

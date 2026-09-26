@@ -13,9 +13,11 @@
 //      props (table cells included) except decoration keys (emoji, icon,
 //      shapeType, componentKey), relation labels and legend meanings. URLs
 //      are cut out first; rule 1 covers them.
-//    - Exceptions: a whole number from 1 to 10 in a table's header row (a
-//      column ordinal such as "Option 2"), and a number inside a word that
-//      also appears in the input ("Q3" when the input says "Q3").
+//    - Exceptions: a table header cell whose ENTIRE trimmed text is just a
+//      column ordinal 1 to 10 ("2", "Option 2", "Tier 3") — not a number
+//      merely appearing inside a longer descriptive header ("Fits 8" and
+//      "8 visits" are not exempt) — and a number inside a word that also
+//      appears in the input ("Q3" when the input says "Q3").
 // Numbers written as words ("twelve") are not checked: review them by hand.
 import { parseProps } from "../layouts/shared";
 import type { MapGraph } from "../types";
@@ -30,6 +32,28 @@ const WORD_RE = /[a-zA-Z0-9]+/g;
 /** Props that decorate rather than state content. */
 const DECORATION_KEYS = new Set(["emoji", "icon", "shapeType", "componentKey"]);
 const MAX_HEADER_ORDINAL = 10;
+// A header cell exempted from the "number must be in the input" rule must be
+// the column's bare ordinal and nothing else: "2", or a known ordinal-label
+// word with the number ("Option 2", "Tier 3"). A descriptive header that
+// merely contains a number ("Fits 8", "8 visits") is not a bare ordinal and
+// still must appear in the input.
+const HEADER_ORDINAL_LABEL_RE = /^(?:option|tier|column|choice|variant)$/i;
+const HEADER_BARE_ORDINAL_RE = /^(\d{1,2})$/;
+const HEADER_LABELED_ORDINAL_RE = /^([a-zA-Z]+)\s+(\d{1,2})$/;
+
+/** True when the whole trimmed header cell is just a column ordinal (1-10). */
+function isHeaderOrdinalCell(cellText: string): boolean {
+  const trimmed = cellText.trim();
+  const bare = HEADER_BARE_ORDINAL_RE.exec(trimmed);
+  let numStr: string | undefined = bare?.[1];
+  if (numStr === undefined) {
+    const labeled = HEADER_LABELED_ORDINAL_RE.exec(trimmed);
+    if (labeled && HEADER_ORDINAL_LABEL_RE.test(labeled[1])) numStr = labeled[2];
+  }
+  if (numStr === undefined) return false;
+  const n = Number(numStr);
+  return n >= 1 && n <= MAX_HEADER_ORDINAL;
+}
 
 type InputText = Pick<ExemplarInput, "title" | "text" | "cards">;
 
@@ -115,7 +139,7 @@ export function faithfulnessProblems(input: InputText, graph: MapGraph): string[
       const start = m.index;
       const word = wordAround(text, start, start + token.length);
       if (/[a-zA-Z]/.test(word) && inputWords.has(word.toLowerCase())) continue;
-      if (s.headerRow && /^\d+$/.test(token) && Number(token) >= 1 && Number(token) <= MAX_HEADER_ORDINAL) continue;
+      if (s.headerRow && isHeaderOrdinalCell(s.text)) continue;
       problems.push(`${s.where}: number ${token} is not in the input ("${s.text}")`);
     }
   }
