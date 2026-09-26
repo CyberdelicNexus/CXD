@@ -16,10 +16,14 @@
 // A map too wide for its height (few, flat qualities) hangs its one-sided
 // qualities above and below the topics instead of beside them, or is laid
 // out top to bottom (the same construction mirrored across the diagonal),
-// whichever passes the hull check and is squarer.
+// whichever passes the hull check and is squarer. A sparse map of wide, flat
+// members (e.g. two topics and one shared quality in a line) can exceed the
+// aspect cap in every variant with major-column gaps; only then are the
+// variants retried with level gaps, and kept if clean and squarer.
 import type { MapGraph, MapNode, MapRole } from "../types";
 import {
-  ASPECT_TARGET, DOMINANCE, footprint, GAP, relationLabel, snap, snapDown, snapUp, squarest, transposed, ZONE_GAP,
+  ASPECT_MAX, ASPECT_TARGET, DOMINANCE, footprint, GAP, isClean, LEVEL_GAP, relationLabel, renderedAspect,
+  snap, snapDown, snapUp, squarest, transposed, ZONE_GAP,
   type Footprint, type FootprintFn, type LayoutEdge, type LayoutEngine, type LayoutResult, type PlacedNode,
 } from "./shared";
 
@@ -43,7 +47,9 @@ function widthOrdered(nodes: MapNode[], fp: FootprintFn): MapNode[] {
  * the right topic (vertical-dominant, facing edges aligned) — a squarer shape for maps
  * with few, flat qualities.
  */
-function layoutDoubleBubble(g: MapGraph, fp: FootprintFn, flankL: boolean, flankR: boolean): LayoutResult {
+function layoutDoubleBubble(
+  g: MapGraph, fp: FootprintFn, flankL: boolean, flankR: boolean, columnGap: number = ZONE_GAP,
+): LayoutResult {
   const pick = (role: MapRole) => g.nodes.filter((x) => x.role === role);
   const left = pick("leftTopic")[0];
   const right = pick("rightTopic")[0];
@@ -74,7 +80,7 @@ function layoutDoubleBubble(g: MapGraph, fp: FootprintFn, flankL: boolean, flank
 
   /** Gap from a topic's side to a column so every member is horizontal-dominant. */
   const gapFor = (topic: Footprint, topicCy: number, fps: Footprint[], tops: number[], reach: (f: Footprint) => number) =>
-    Math.max(ZONE_GAP, snapUp(Math.max(...fps.map((f, i) =>
+    Math.max(columnGap, snapUp(Math.max(...fps.map((f, i) =>
       Math.abs(tops[i] + f.h / 2 - topicCy) + DOMINANCE - topic.w / 2 - reach(f)))));
 
   const placed: PlacedNode[] = [];
@@ -88,7 +94,7 @@ function layoutDoubleBubble(g: MapGraph, fp: FootprintFn, flankL: boolean, flank
     let cx = snapDown(tcx - total / 2);
     const xs = fps.map((f) => { const l = cx; cx += f.w + GAP; return l; });
     const need = Math.max(...fps.map((f, i) => Math.abs(xs[i] + f.w / 2 - tcx) + DOMINANCE - topic.h / 2 - f.h / 2));
-    let gap = Math.max(ZONE_GAP, snapUp(need));
+    let gap = Math.max(columnGap, snapUp(need));
     // Clear every box already placed under/over the row's span (e.g. a tall shared column).
     const x0 = xs[0];
     const x1 = xs[xs.length - 1] + fps[fps.length - 1].w;
@@ -145,8 +151,14 @@ function layoutDoubleBubble(g: MapGraph, fp: FootprintFn, flankL: boolean, flank
 /** Classic columns unless too wide or tall; then flanks and/or top-to-bottom, whichever is clean and squarer. */
 export const doubleBubbleLayout: LayoutEngine = (g) => {
   const variants: [boolean, boolean][] = [[false, false], [true, true], [true, false], [false, true]];
-  return squarest([
-    ...variants.map(([l, r]) => () => layoutDoubleBubble(g, footprint, l, r)),
-    ...variants.map(([l, r]) => () => transposed((fp) => layoutDoubleBubble(g, fp, l, r))),
+  const run = (gap: number) => squarest([
+    ...variants.map(([l, r]) => () => layoutDoubleBubble(g, footprint, l, r, gap)),
+    ...variants.map(([l, r]) => () => transposed((fp) => layoutDoubleBubble(g, fp, l, r, gap))),
   ], ASPECT_TARGET);
+  const roomy = run(ZONE_GAP);
+  const roomyAspect = renderedAspect(roomy.placed);
+  if (roomyAspect <= ASPECT_MAX) return roomy;
+  // Too sparse to square with major-column gaps: tighten to level gaps.
+  const tight = run(LEVEL_GAP);
+  return isClean(tight) && renderedAspect(tight.placed) < roomyAspect ? tight : roomy;
 };
