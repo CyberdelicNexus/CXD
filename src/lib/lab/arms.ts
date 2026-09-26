@@ -96,7 +96,7 @@ export async function runArm(arm: ArmId, input: LabInput, modelId: string, force
       return finish(res.object, [res]);
     }
     case "graphExemplars": {
-      const res = await draftGraph(modelId, guide + exemplarBlock(), `${TASK}\n\n${inputText}`, meter);
+      const res = await draftGraph(modelId, guide + exemplarBlock(input, forcedType), `${TASK}\n\n${inputText}`, meter);
       return finish(res.object, [res]);
     }
     case "graphCritique": {

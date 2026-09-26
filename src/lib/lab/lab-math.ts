@@ -94,9 +94,11 @@ export const ARM_TOKENS: Record<ArmId, { input: number; output: number }> = {
   baseline: { input: 6000, output: 4000 },
   graph: { input: 4000, output: 3000 },
   graphCritique: { input: 10000, output: 6000 },
-  graphExemplars: { input: 6500, output: 3000 },
+  // Three selected exemplars, each with its input, plus the longer guide; graphs carry the new fields.
+  graphExemplars: { input: 8000, output: 3500 },
 };
-const JUDGE_TOKENS = { input: 3500, output: 600 };
+/** Per LLM-judge call; the description now carries tints, legend, emphasis and connector styles. */
+export const JUDGE_TOKENS = { input: 4000, output: 700 };
 
 export function estimateRunCost(config: RunConfig): number {
   const perArmModel = config.inputIds.length;
