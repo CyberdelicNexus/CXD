@@ -14,7 +14,7 @@ export const ARM_LABELS: Record<ArmId, string> = {
 export const JUDGE_IDS = ["rubric", "structure", "llmStrong", "llmCheap", "jev"] as const;
 export type JudgeId = (typeof JUDGE_IDS)[number];
 
-export const JUDGE_DIMENSIONS = ["clarity", "typeFit", "balance", "relations", "actionability", "faithfulness"] as const;
+export const JUDGE_DIMENSIONS = ["clarity", "typeFit", "balance", "relations", "actionability", "faithfulness", "elementFit"] as const;
 export type Dimension = (typeof JUDGE_DIMENSIONS)[number];
 
 export type InputType = "brainDump" | "canvasCards" | "topic" | "comparison";

@@ -79,17 +79,20 @@ export const judgeSchema = z.object({
   relations: z.number(),
   actionability: z.number(),
   faithfulness: z.number(),
+  elementFit: z.number(),
   notes: z.string(),
 });
 
-const JUDGE_SYSTEM = `You grade thinking maps made from a person's input. Score each dimension from 1 (poor) to 5 (excellent):
+export const JUDGE_SYSTEM = `You grade thinking maps made from a person's input. Score each dimension from 1 (poor) to 5 (excellent):
 - clarity: can someone grasp the structure at a glance?
 - typeFit: is this the right kind of map for what the input needs? (compare two things → double bubble; sequence → flow; causes/effects → multi-flow; categories → tree; whole into parts → brace; how ideas relate → concept map; one idea explored → radial, spider or bubble)
 - balance: are branches evenly developed, siblings distinct, and together complete?
 - relations: are connections meaningful, and labelled where the relationship is not obvious?
 - actionability: would this help the person decide or act next?
 - faithfulness: does it stay true to the input without inventing or dropping key points?
-Be strict and calibrated: 3 is acceptable, 5 is exceptional. notes: one sentence naming the single biggest improvement.`;
+- elementFit: did each idea get the element that best suits it? Numbers and comparisons across attributes belong in a table, sources in links, owned actions in tasks, forks in a decision shape, scenes in frames, sub-topics too big for the map in a portal, and colour only where a legend gives it meaning. Variety for its own sake scores low: a comparison of qualities drawn entirely as bubbles scores 5 when bubbles suit it, while numbers crammed into cards score 2 because they belonged in a table.
+The description lists a legend when colours carry meaning, each element's tint as [tint = meaning], "emphasised" for elements drawn larger than their peers, and each connection's arrow (-> one way, <-> both ways, -- none) and line style.
+Be strict and calibrated: 3 is acceptable, 5 is exceptional. notes: two short sentences: the single biggest improvement, then the reason for your elementFit score.`;
 
 /**
  * Every arm is shown to the LLM judges the same way: described from its

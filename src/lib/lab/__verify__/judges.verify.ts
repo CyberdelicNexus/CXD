@@ -5,13 +5,13 @@
 import { execFileSync } from "node:child_process";
 import { auditSchemaForAnthropic } from "@/lib/ai/schema-guards";
 import { EXEMPLARS } from "@/lib/maps/exemplars";
-import { MAP_TYPES } from "@/lib/maps/types";
+import { MAP_TYPES, type MapGraph } from "@/lib/maps/types";
 import { renderMap } from "@/lib/maps/render";
 import type { CanvasElement } from "@/types/canvas-elements";
 import { CORPUS } from "../corpus";
-import { describeRendered, elementText } from "../describe";
+import { describeRendered, elementKind, elementText, elementUsage } from "../describe";
 import { cardsAsElements } from "../format-input";
-import { judgePrompt, judgeSchema } from "../judges";
+import { JUDGES, judgePrompt, judgeSchema, JUDGE_SYSTEM } from "../judges";
 import { PROMPT_VERSION } from "../prompts";
 
 let failures = 0;
@@ -35,7 +35,7 @@ for (const ex of EXEMPLARS) {
     prompt === judgePrompt(input, { ...cell, graph: null }));
   const labelled = ex.graph.nodes.filter((n) => n.kind !== "zone" && n.kind !== "table").slice(0, 3);
   check(`${ex.graph.mapType}: node labels appear in the description`, labelled.every((n) => result.includes(n.label.slice(0, 20))));
-  if (r.edges.length > 0) check(`${ex.graph.mapType}: connections listed as "#a -> #b"`, /#\d+ -> #\d+/.test(result));
+  if (r.edges.length > 0) check(`${ex.graph.mapType}: connections listed as "#a -> #b" (or <-, <->, --)`, /#\d+ (->|<-|<->|--) #\d+/.test(result));
 }
 
 // Containment and labelled connections, built by hand so both are certain to be present.
@@ -65,8 +65,10 @@ for (const ex of EXEMPLARS) {
 {
   const a = auditSchemaForAnthropic(judgeSchema);
   check("judge schema: no array bounds, unions or optionals", a.arrayBounds === 0 && a.unions === 0 && a.optionals === 0);
-  check("judge schema keeps its fields", Object.keys(judgeSchema.shape).sort().join(",") ===
-    "actionability,balance,clarity,faithfulness,notes,relations,typeFit");
+  check("judge schema adds elementFit to its fields", Object.keys(judgeSchema.shape).sort().join(",") ===
+    "actionability,balance,clarity,elementFit,faithfulness,notes,relations,typeFit");
+  check("the prompt defines elementFit and penalises variety for its own sake",
+    JUDGE_SYSTEM.includes("elementFit: did each idea get the element that best suits it") && /variety for its own sake scores low/i.test(JUDGE_SYSTEM));
 }
 
 // I6: the prompt version is a short hex hash, the same in every process.
@@ -78,5 +80,55 @@ for (const ex of EXEMPLARS) {
   check(`prompt version is deterministic across processes (${again})`, again === PROMPT_VERSION);
 }
 
-if (failures) { console.error(`${failures} FAILED`); process.exit(1); }
-console.log("ALL PASS");
+// The judge view carries the new fields, still without map type or arm (spec §6).
+{
+  const g: MapGraph = {
+    mapType: "conceptMap", title: "Signals", legend: [{ tint: "rose", meaning: "Risk" }],
+    nodes: [
+      { id: "a", label: "Cost overrun", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "rose", emphasis: "strong" },
+      { id: "b", label: "Late delivery", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "c", label: "New supplier", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "d", label: "Client trust", detail: "", role: "concept", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+    ],
+    relations: [
+      { from: "a", to: "b", label: "causes", style: "dashed", weight: "strong", direction: "forward" },
+      { from: "b", to: "c", label: "pushes", style: "solid", weight: "normal", direction: "both" },
+      { from: "c", to: "d", label: "near", style: "dotted", weight: "normal", direction: "none" },
+    ],
+  };
+  const r = renderMap(g);
+  const text = judgePrompt(input, { graph: g, elements: r.elements, edges: r.edges });
+  const result = text.slice(text.indexOf("RESULT"));
+  check("legend line lists tint = meaning", result.includes("Legend: rose = Risk"));
+  check("a tinted element shows its legend meaning", /card "Cost overrun[^"]*" \[rose = Risk\]/.test(result));
+  check("an untinted element beside a legend shows no tint", !/card "Late delivery[^"]*" \[/.test(result));
+  check("strong emphasis shows as emphasised", /card "Cost overrun[^"]*" \[rose = Risk\] emphasised/.test(result));
+  check("dashed strong one-way connection", /#\d+ -> #\d+ \[causes\] \(dashed, strong\)/.test(result));
+  check("two-way connection", /#\d+ <-> #\d+ \[pushes\]/.test(result));
+  check("dotted connection without an arrow", /#\d+ -- #\d+ \[near\] \(dotted\)/.test(result));
+  check("legend swatches are not listed as elements", !/shape:circle "Risk"/.test(result) && !/text "Risk"/.test(result));
+  check("the new fields reveal no map type", !mentionsMapType(result));
+  check("element kinds name tasks and headings",
+    elementKind({ type: "freeform", cardType: "task" } as unknown as CanvasElement) === "task" &&
+    elementKind({ type: "text", style: { fontSize: 24 } } as unknown as CanvasElement) === "heading");
+  const usage = elementUsage(r.elements);
+  check(`element usage counts kinds and plain cards (${usage.distinctKinds}, ${usage.plainCardShare.toFixed(2)})`,
+    usage.distinctKinds === 2 && Math.abs(usage.plainCardShare - 4 / 5) < 1e-9);
+}
+// The structure judge fails a legend mismatch (a hard violation).
+void (async () => {
+  const bad: MapGraph = {
+    mapType: "radial", title: "Legend", legend: [{ tint: "emerald", meaning: "Unused" }],
+    nodes: [
+      { id: "c", label: "Hub", detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "x", label: "A", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "y", label: "B", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+      { id: "z", label: "C", detail: "", role: "branch", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal" },
+    ],
+    relations: [],
+  };
+  const score = await JUDGES.structure.judge({ input, cell: { graph: bad, elements: [], edges: [] } });
+  check("structure judge fails an unused legend entry", score.pass === false && /legend/.test(score.notes));
+  if (failures) { console.error(`${failures} FAILED`); process.exit(1); }
+  console.log("ALL PASS");
+})();
