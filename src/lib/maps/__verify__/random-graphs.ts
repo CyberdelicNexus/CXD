@@ -1,7 +1,7 @@
 // Seeded generator of VALID graphs per map type, exercising every node kind
 // and wide label/size ranges. The layout property test asserts every one of
 // these renders with zero rubric errors.
-import { MAX_NODES, MAX_ZONES } from "../catalog";
+import { headingProblem, MAX_NODES, MAX_ZONES } from "../catalog";
 import { NODE_KINDS, type MapGraph, type MapNode, type MapRelation, type MapRole, type MapType, type NodeKind } from "../types";
 
 export type Rng = () => number;
@@ -191,5 +191,8 @@ export function randomGraph(type: MapType, rng: Rng, opts: GraphOptions = {}): M
       break;
     }
   }
-  return { mapType: type, title: randomTitle(type, rng), legend: [], nodes: b.nodes, relations };
+  const graph: MapGraph = { mapType: type, title: randomTitle(type, rng), legend: [], nodes: b.nodes, relations };
+  // A heading must label a group; anywhere else the generator's heading becomes a caption.
+  for (const x of graph.nodes) if (headingProblem(graph, x)) x.kind = "caption";
+  return graph;
 }

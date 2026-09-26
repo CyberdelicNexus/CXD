@@ -2,10 +2,18 @@
 // the structural rules a graph must satisfy before it is laid out. The rules
 // double as judge input and as the critique checklist.
 import type { MapGraph, MapNode, MapRelation, MapRole, MapType, NodeKind } from "./types";
+import { upgradeGraph, type LegacyMapGraph } from "./legacy";
 
 export const MAX_NODES = 40;
 export const MAX_ZONES = 8;
 export const MAX_LABEL = 60;
+export const MAX_LEGEND_MEANING = 30;
+
+/** Map types whose hierarchy has groups a heading can label. */
+export const HEADING_MAP_TYPES: readonly MapType[] = ["spider", "tree", "brace"];
+
+/** Kinds whose canvas element can show a tint (card gradient, board hex, container tint, shape or table accent). */
+export const TINTABLE_KINDS: readonly NodeKind[] = ["card", "task", "bubble", "waypoint", "shape", "portal", "table", "zone"];
 
 export interface CatalogEntry {
   type: MapType;
@@ -203,6 +211,50 @@ function isConnected(g: MapGraph): boolean {
   return seen.size === g.nodes.length;
 }
 
+/**
+ * The nodes a node labels as a group: its hierarchy children. A spider centre
+ * or brace whole also owns the branches or parts written with parent "".
+ */
+export function groupOf(g: MapGraph, x: MapNode): MapNode[] {
+  const hub = (g.mapType === "spider" && x.role === "center") || (g.mapType === "brace" && x.role === "whole");
+  return g.nodes.filter((m) => m.id !== x.id &&
+    (m.parent === x.id || (hub && m.parent === "" && (m.role === "branch" || m.role === "part"))));
+}
+
+/** Why a heading node is misplaced, or null when it labels a group. */
+export function headingProblem(g: MapGraph, x: MapNode): string | null {
+  if (x.kind !== "heading") return null;
+  if (!HEADING_MAP_TYPES.includes(g.mapType)) {
+    return `node ${x.id}: a heading labels a group, and only spider, tree and brace maps have groups (use a caption)`;
+  }
+  if (groupOf(g, x).length === 0) return `heading ${x.id} labels no group: give it children or use a caption`;
+  return null;
+}
+
+/** Legend rule (spec §3.4): every tint on a node has an entry, every entry is used, meanings are short. */
+export function checkLegend(g: MapGraph): string[] {
+  const v: string[] = [];
+  const listed = new Set<string>();
+  for (const e of g.legend) {
+    if (listed.has(e.tint)) v.push(`legend lists tint "${e.tint}" twice`);
+    listed.add(e.tint);
+    const meaning = (e.meaning ?? "").trim();
+    if (!meaning) v.push(`legend entry "${e.tint}" has no meaning`);
+    else if (meaning.length > MAX_LEGEND_MEANING) v.push(`legend meaning for "${e.tint}" is longer than ${MAX_LEGEND_MEANING} characters`);
+  }
+  const used = new Set<string>();
+  for (const x of g.nodes) {
+    if (!x.tint) continue;
+    used.add(x.tint);
+    if (!listed.has(x.tint)) v.push(`node ${x.id} uses tint "${x.tint}" but the legend has no entry for it`);
+    if (!TINTABLE_KINDS.includes(x.kind)) v.push(`node ${x.id}: a ${x.kind} cannot show a tint (use "")`);
+  }
+  for (const e of g.legend) {
+    if (!used.has(e.tint)) v.push(`legend entry "${e.tint}" (${e.meaning}) is not used by any node`);
+  }
+  return v;
+}
+
 export interface FlowOrder {
   order: string[];
   backEdge: MapRelation | null;
@@ -265,7 +317,9 @@ export function orderFlowSteps(g: MapGraph): FlowOrder | null {
 }
 
 /** All structural violations; empty means the graph may be laid out. */
-export function checkMapStructure(g: MapGraph): string[] {
+export function checkMapStructure(input: LegacyMapGraph): string[] {
+  // Stored graphs from before the element vocabulary are read with defaults.
+  const g = upgradeGraph(input);
   // CATALOG[g.mapType] is truthy-but-wrong for keys like "toString" that
   // exist only via Object.prototype — check ownership, not truthiness, so an
   // unrecognized mapType is reported instead of crashing below.
@@ -292,7 +346,10 @@ export function checkMapStructure(g: MapGraph): string[] {
     if (!entry.roles.includes(x.role)) v.push(`node ${x.id}: role "${x.role}" is not valid for ${g.mapType}`);
     if (x.parent !== "" && !ids.has(x.parent)) v.push(`node ${x.id} has unknown parent ${x.parent}`);
     if (x.parent === x.id) v.push(`node ${x.id} is its own parent`);
+    const heading = headingProblem(g, x);
+    if (heading) v.push(heading);
   }
+  v.push(...checkLegend(g));
   for (const rel of g.relations) {
     if (!ids.has(rel.from) || !ids.has(rel.to)) v.push(`relation ${rel.from}→${rel.to} references an unknown node`);
     else if (rel.from === rel.to) v.push(`relation on ${rel.from} points at itself`);

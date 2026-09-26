@@ -155,5 +155,51 @@ check("brace rule text is truthful about the empty-parent allowance",
   check("spider: branch label may equal the center's label (implicit empty parent)", checkMapStructure(g).length === 0);
 }
 
+// ── Element vocabulary (spec §3) ─────────────────────────────────────
+
+{ // Legend rule: every tint on a node has an entry, and every entry is used.
+  const g = clone(VALID.radial);
+  g.nodes[1].tint = "rose";
+  check("a tinted node without a legend entry is rejected", violates(g, "no entry"));
+  g.legend = [{ tint: "rose", meaning: "Risk" }];
+  check("a tinted node with its legend entry is valid", checkMapStructure(g).length === 0);
+  g.legend.push({ tint: "emerald", meaning: "Opportunity" });
+  check("an unused legend entry is rejected", violates(g, "not used"));
+  g.legend = [{ tint: "rose", meaning: "Risk" }, { tint: "rose", meaning: "Again" }];
+  check("a tint listed twice is rejected", violates(g, "twice"));
+  g.legend = [{ tint: "rose", meaning: "x".repeat(31) }];
+  check("a legend meaning over 30 characters is rejected", violates(g, "longer than 30"));
+  g.legend = [{ tint: "rose", meaning: " " }];
+  check("an empty legend meaning is rejected", violates(g, "no meaning"));
+}
+{ // Tints only on kinds that can show one.
+  const g = clone(VALID.radial);
+  g.nodes[1] = { ...g.nodes[1], kind: "link", props: '{"url":"https://example.com"}', tint: "rose" };
+  g.legend = [{ tint: "rose", meaning: "Risk" }];
+  check("a tint on a link is rejected", violates(g, "cannot show a tint"));
+}
+{ // Heading rule: a heading labels a group, only in spider, tree and brace.
+  const radial = clone(VALID.radial);
+  radial.nodes[1].kind = "heading";
+  check("a heading in a radial map is rejected", violates(radial, "only spider, tree and brace"));
+  const leaf = clone(VALID.tree);
+  leaf.nodes.find((x) => x.id === "l1")!.kind = "heading";
+  check("a heading with no children is rejected", violates(leaf, "labels no group"));
+  const branch = clone(VALID.tree);
+  branch.nodes.find((x) => x.id === "b1")!.kind = "heading";
+  check("a heading over its children is valid", checkMapStructure(branch).length === 0);
+  const hub: MapGraph = { mapType: "spider", title: "T", legend: [], relations: [],
+    nodes: [n("c", "center", "", "heading", "{}", "Hub"), n("b1", "branch"), n("b2", "branch")] };
+  check("a spider centre heading owns branches with parent \"\"", checkMapStructure(hub).length === 0);
+}
+{ // Graphs stored before this change (no tint, emphasis, styles or legend) still check.
+  const old = { mapType: "flow", title: "Old",
+    nodes: [{ id: "s1", label: "A", detail: "", role: "step", kind: "card", parent: "", props: "{}" },
+      { id: "s2", label: "B", detail: "", role: "step", kind: "card", parent: "", props: "{}" },
+      { id: "s3", label: "C", detail: "", role: "step", kind: "card", parent: "", props: "{}" }],
+    relations: [{ from: "s1", to: "s2", label: "" }, { from: "s2", to: "s3", label: "" }] } as unknown as MapGraph;
+  check("a legacy graph checks without crashing and passes", checkMapStructure(old).length === 0);
+}
+
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log("\nALL PASS");
