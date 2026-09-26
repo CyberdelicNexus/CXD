@@ -18,7 +18,10 @@ import { connectorCrossings } from "../connector-geometry";
 import { LAYOUTS } from "../layouts";
 import { normalizeGraph, renderMap } from "../render";
 import { ASPECT_MAX, type LayoutResult } from "../layouts/shared";
-import { MAP_TYPES, type MapGraph, type MapType } from "../types";
+import {
+  EMPHASES, MAP_TYPES, NODE_KINDS, RELATION_DIRECTIONS, RELATION_STYLES, RELATION_WEIGHTS, TINTS,
+  type MapGraph, type MapType,
+} from "../types";
 import { VALID } from "./fixtures";
 import { mulberry32, randomGraph } from "./random-graphs";
 
@@ -100,6 +103,17 @@ function rawProblems(type: MapType, g: MapGraph, layout: LayoutResult): string[]
 let failures = 0;
 const fail = (msg: string) => { failures++; console.error(`  FAIL ${msg}`); };
 
+/** What the generator actually produced, so a harness that stops covering a value fails loudly. */
+const seen = {
+  kinds: new Set<string>(), tints: new Set<string>(), emphasis: new Set<string>(),
+  styles: new Set<string>(), weights: new Set<string>(), directions: new Set<string>(), legends: 0,
+};
+const tally = (g: MapGraph) => {
+  g.nodes.forEach((x) => { seen.kinds.add(x.kind); if (x.tint) seen.tints.add(x.tint); seen.emphasis.add(x.emphasis); });
+  g.relations.forEach((r) => { seen.styles.add(r.style); seen.weights.add(r.weight); seen.directions.add(r.direction); });
+  if (g.legend.length) seen.legends++;
+};
+
 MAP_TYPES.forEach((type, typeIndex) => {
   if (!LAYOUTS[type]) {
     if (REQUIRED.includes(type)) fail(`${type}: no layout engine registered`);
@@ -112,6 +126,7 @@ MAP_TYPES.forEach((type, typeIndex) => {
   const graphs = [VALID[type], ...Array.from({ length: SEEDS }, (_, s) => randomGraph(type, mulberry32(s * 9973 + typeIndex)))];
   for (let i = 0; i < graphs.length && !typeFailed; i++) {
     const g = graphs[i];
+    tally(g);
     const structure = checkMapStructure(g);
     if (structure.length) { fail(`${type} graph #${i} is not valid (generator bug): ${structure.join("; ")}`); typeFailed = true; break; }
     let rendered;
@@ -207,6 +222,21 @@ else {
     console.log(`  PASS conceptMap stress: ${crossing}/${STRESS_SEEDS} graphs cross (ceiling ${STRESS_CROSSING_CEILING}; by concepts ${bands}), 0 at <= ${STRESS_HARD_MAX_NODES} concepts`);
     console.log(`       size: largest side ${maxExtent}px (bound ${STRESS_MAX_EXTENT}); render time median ${sorted[sorted.length >> 1].toFixed(0)}ms, max ${sorted[sorted.length - 1].toFixed(0)}ms`);
   }
+}
+
+// The generator must exercise the whole vocabulary (spec §3.5).
+{
+  const missing = [
+    ...NODE_KINDS.filter((k) => !seen.kinds.has(k)).map((k) => `kind ${k}`),
+    ...TINTS.filter((t) => !seen.tints.has(t)).map((t) => `tint ${t}`),
+    ...EMPHASES.filter((e) => !seen.emphasis.has(e)).map((e) => `emphasis ${e}`),
+    ...RELATION_STYLES.filter((s) => !seen.styles.has(s)).map((s) => `style ${s}`),
+    ...RELATION_WEIGHTS.filter((w) => !seen.weights.has(w)).map((w) => `weight ${w}`),
+    ...RELATION_DIRECTIONS.filter((d) => !seen.directions.has(d)).map((d) => `direction ${d}`),
+    ...(seen.legends === 0 ? ["a graph with a legend"] : []),
+  ];
+  if (missing.length) fail(`generator coverage: never produced ${missing.join(", ")}`);
+  else console.log(`  PASS generator covers every kind, tint (${seen.legends} graphs with a legend), emphasis, relation style, weight and direction`);
 }
 
 // The crossing rule itself, on hand-built canvases.
