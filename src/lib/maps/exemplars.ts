@@ -1,7 +1,7 @@
 // Hand-written exemplar graphs, derived from the CXD templates, shown to the
 // graph+exemplars arm. Each must pass checkMapStructure and render cleanly
-// (exemplars.verify.ts).
-import type { MapGraph, MapNode } from "./types";
+// (exemplars.verify.ts). Replaced by src/lib/maps/exemplars/ in Task 8.
+import type { MapGraph, MapNode, MapRelation } from "./types";
 
 export interface Exemplar {
   note: string;
@@ -9,7 +9,9 @@ export interface Exemplar {
 }
 
 const node = (id: string, role: MapNode["role"], label: string, extra: Partial<MapNode> = {}): MapNode =>
-  ({ id, label, detail: "", role, kind: "card", parent: "", props: "{}", ...extra });
+  ({ id, label, detail: "", role, kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal", ...extra });
+const rel = (from: string, to: string): MapRelation =>
+  ({ from, to, label: "", style: "solid", weight: "normal", direction: "forward" });
 
 export const EXEMPLARS: Exemplar[] = [
   {
@@ -17,6 +19,7 @@ export const EXEMPLARS: Exemplar[] = [
     graph: {
       mapType: "flow",
       title: "First visit, as a storyboard",
+      legend: [],
       nodes: [
         node("s1", "step", "Arrival", { kind: "frame", detail: "Guest steps in from the street; light and sound soften.", props: JSON.stringify({ storyboard: true, description: "Threshold moment" }) }),
         node("s2", "step", "Orientation", { kind: "frame", detail: "A host frames what the next hour holds.", props: JSON.stringify({ storyboard: true, description: "Welcome" }) }),
@@ -24,12 +27,7 @@ export const EXEMPLARS: Exemplar[] = [
         node("s4", "step", "Peak moment", { kind: "frame", detail: "Room-scale projection responds to breath.", props: JSON.stringify({ storyboard: true, description: "The reveal" }) }),
         node("s5", "step", "Reflection", { detail: "Quiet room with a single prompt card to take home.", props: JSON.stringify({ emoji: "🕯️" }) }),
       ],
-      relations: [
-        { from: "s1", to: "s2", label: "" },
-        { from: "s2", to: "s3", label: "" },
-        { from: "s3", to: "s4", label: "" },
-        { from: "s4", to: "s5", label: "" },
-      ],
+      relations: [rel("s1", "s2"), rel("s2", "s3"), rel("s3", "s4"), rel("s4", "s5")],
     },
   },
   {
@@ -37,6 +35,7 @@ export const EXEMPLARS: Exemplar[] = [
     graph: {
       mapType: "tree",
       title: "Who this is for",
+      legend: [],
       nodes: [
         node("root", "root", "Human context", { kind: "anchor", props: JSON.stringify({ componentKey: "humanContext" }) }),
         node("needs", "branch", "Needs", { parent: "root", props: JSON.stringify({ emoji: "🧭" }) }),
@@ -57,6 +56,7 @@ export const EXEMPLARS: Exemplar[] = [
     graph: {
       mapType: "doubleBubble",
       title: "App vs. in-person onboarding",
+      legend: [],
       nodes: [
         node("lt", "leftTopic", "App onboarding", { kind: "bubble" }),
         node("rt", "rightTopic", "In-person onboarding", { kind: "bubble" }),

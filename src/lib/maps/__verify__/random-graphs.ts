@@ -43,7 +43,14 @@ const KIND_PROPS: Record<NodeKind, (rng: Rng) => string> = {
   link: (rng) => JSON.stringify({ url: rng() < 0.25 ? "" : "https://example.com" }),
   caption: () => "{}",
   zone: () => "{}",
+  task: (rng) => JSON.stringify(rng() < 0.5 ? { owner: "Sam", emoji: "✅" } : {}),
+  // "blob" is not a canvas shape: it exercises the fallback to "rectangle".
+  shape: (rng) => JSON.stringify({ shapeType: ["rectangle", "triangle", "hexagon", "star", "circle", "diamond", "blob"][int(rng, 0, 6)] }),
+  heading: () => "{}",
 };
+
+const rel = (from: string, to: string, label: string): MapRelation =>
+  ({ from, to, label, style: "solid", weight: "normal", direction: "forward" });
 
 class Builder {
   nodes: MapNode[] = [];
@@ -70,6 +77,8 @@ class Builder {
       kind,
       parent,
       props: KIND_PROPS[kind](this.rng),
+      tint: "",
+      emphasis: "normal",
     };
     this.nodes.push(node);
     return node;
@@ -87,7 +96,7 @@ function hubRelations(center: MapNode, satellites: MapNode[], rng: Rng): MapRela
   if (rng() < 0.5) return [];
   const out: MapRelation[] = satellites
     .filter(() => rng() < 0.6)
-    .map((s, i) => ({ from: center.id, to: s.id, label: `is linked ${i}` }));
+    .map((s, i) => rel(center.id, s.id, `is linked ${i}`));
   if (out.length && rng() < 0.3) out.push({ ...out[0], label: "duplicate" });
   return out;
 }
@@ -150,8 +159,8 @@ export function randomGraph(type: MapType, rng: Rng, opts: GraphOptions = {}): M
     case "flow": {
       const k = int(rng, 3, 8);
       const steps = Array.from({ length: k }, () => b.add("step"));
-      for (let i = 1; i < k; i++) relations.push({ from: steps[i - 1].id, to: steps[i].id, label: "" });
-      if (rng() < 0.5) relations.push({ from: steps[k - 1].id, to: steps[int(rng, 0, k - 2)].id, label: "again" });
+      for (let i = 1; i < k; i++) relations.push(rel(steps[i - 1].id, steps[i].id, ""));
+      if (rng() < 0.5) relations.push(rel(steps[k - 1].id, steps[int(rng, 0, k - 2)].id, "again"));
       break;
     }
     case "multiFlow": {
@@ -173,14 +182,14 @@ export function randomGraph(type: MapType, rng: Rng, opts: GraphOptions = {}): M
     case "conceptMap": {
       const k = stress ? int(rng, 4, MAX_NODES) : int(rng, 4, 10);
       const cs = Array.from({ length: k }, () => b.add("concept"));
-      for (let i = 1; i < k; i++) relations.push({ from: cs[int(rng, 0, i - 1)].id, to: cs[i].id, label: "relates to" });
+      for (let i = 1; i < k; i++) relations.push(rel(cs[int(rng, 0, i - 1)].id, cs[i].id, "relates to"));
       for (let e = 0, extra = int(rng, 0, stress ? k : 3); e < extra; e++) {
         const a = int(rng, 0, k - 1);
         const c = int(rng, 0, k - 1);
-        if (a !== c) relations.push({ from: cs[a].id, to: cs[c].id, label: "influences" });
+        if (a !== c) relations.push(rel(cs[a].id, cs[c].id, "influences"));
       }
       break;
     }
   }
-  return { mapType: type, title: randomTitle(type, rng), nodes: b.nodes, relations };
+  return { mapType: type, title: randomTitle(type, rng), legend: [], nodes: b.nodes, relations };
 }

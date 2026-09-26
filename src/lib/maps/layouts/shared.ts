@@ -7,7 +7,7 @@ import {
   autoEdge, connectorHull, connectorPath, labelRect, linePath, pathEntersBox, rectEntersBox, SAMPLES,
   type PathGeometry, type Rect,
 } from "../connector-geometry";
-import { TINT_COLORS, INSPECTOR_SECTION_IDS } from "@/lib/ai/element-generation";
+import { INSPECTOR_SECTION_IDS, SHAPE_TYPES, TINT_COLORS } from "@/lib/ai/element-generation";
 import type { MapGraph, MapNode, NodeKind } from "../types";
 
 export const GAP = 40;          // between siblings in a stack
@@ -80,11 +80,21 @@ export function effectiveKind(node: MapNode): NodeKind {
   return node.kind;
 }
 
+export type ShapeKindType = (typeof SHAPE_TYPES)[number];
+
+/** props.shapeType when it is a canvas shape, else "rectangle" (the plain step). */
+export function shapeTypeOf(node: MapNode): ShapeKindType {
+  const t = parseProps(node.props).shapeType;
+  return typeof t === "string" && (SHAPE_TYPES as readonly string[]).includes(t) ? (t as ShapeKindType) : "rectangle";
+}
+
 /** Rendered size per kind (≥ the canvas render floors in canvas-layout-rules). */
 export function footprint(node: MapNode): Footprint {
   switch (effectiveKind(node)) {
     case "card": return { w: 260, h: 300 };
+    case "task": return { w: 260, h: 160 };
     case "bubble": return { w: 140, h: 140 };
+    case "shape": return shapeTypeOf(node) === "rectangle" ? { w: 200, h: 120 } : { w: 160, h: 160 };
     case "waypoint": return { w: 80, h: 80 };
     case "portal": return { w: 180, h: 240 };
     case "anchor": return { w: 280, h: 160 };
@@ -94,6 +104,7 @@ export function footprint(node: MapNode): Footprint {
     }
     case "frame": return { w: 320, h: 260 };
     case "link": return { w: 320, h: 120 };
+    case "heading": return { w: 360, h: 100 };
     case "caption": return { w: 280, h: 60 };
     case "zone": return { w: 340, h: 420 };
   }

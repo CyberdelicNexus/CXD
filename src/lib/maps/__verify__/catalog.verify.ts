@@ -65,7 +65,7 @@ for (const t of MAP_TYPES) {
 // C1: an empty node id must be rejected — "" is the no-parent sentinel, so an
 // empty id would make the tree layout engine recurse forever.
 {
-  const g: MapGraph = { mapType: "tree", title: "T", relations: [],
+  const g: MapGraph = { mapType: "tree", title: "T", legend: [], relations: [],
     nodes: [n("r", "root"), n("", "branch", "r", "card", "{}", "B"), n("b2", "branch", "r")] };
   check("tree: empty node id rejected", violates(g, "empty id"));
 }
@@ -73,7 +73,7 @@ for (const t of MAP_TYPES) {
 // I1: roots must be roots — center/whole must not themselves have a parent —
 // and per-branch/per-part child counts must only count the expected role.
 {
-  const g: MapGraph = { mapType: "spider", title: "Spider2", relations: [],
+  const g: MapGraph = { mapType: "spider", title: "Spider2", legend: [], relations: [],
     nodes: [n("c", "center", "b1"), n("b1", "branch", "c"), n("b2", "branch", "c")] };
   check("spider: center parented to a branch rejected", violates(g, "center must not have a parent"));
 }
@@ -113,7 +113,7 @@ check("brace rule text is truthful about the empty-parent allowance",
   check("duplicate relation flow is structurally valid", checkMapStructure(g).length === 0); }
 
 // M2: an unrecognized mapType must produce a violation, never throw.
-{ const g: MapGraph = { mapType: "toString" as unknown as MapType, title: "T", relations: [], nodes: [n("a", "concept")] };
+{ const g: MapGraph = { mapType: "toString" as unknown as MapType, title: "T", legend: [], relations: [], nodes: [n("a", "concept")] };
   check("unrecognized mapType is rejected without throwing", violates(g, "unknown mapType")); }
 
 // ── Re-review of e996856: implicit ("") and explicit (center/whole id)
@@ -121,7 +121,7 @@ check("brace rule text is truthful about the empty-parent allowance",
 
 { // spider: a branch parented to "" and one explicitly parented to the center
   // are drawn identically, so they must be compared as siblings.
-  const g: MapGraph = { mapType: "spider", title: "T", relations: [],
+  const g: MapGraph = { mapType: "spider", title: "T", legend: [], relations: [],
     nodes: [
       n("c", "center", "", "card", "{}", "Trip"),
       n("b1", "branch", "", "card", "{}", "Needs"),
@@ -131,7 +131,7 @@ check("brace rule text is truthful about the empty-parent allowance",
 }
 
 { // brace: same ambiguity for parts hanging off the whole.
-  const g: MapGraph = { mapType: "brace", title: "T", relations: [],
+  const g: MapGraph = { mapType: "brace", title: "T", legend: [], relations: [],
     nodes: [
       n("w", "whole"),
       n("p1", "part", "", "card", "{}", "Engine"),

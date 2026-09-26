@@ -1,5 +1,6 @@
 // The typed graph a model emits for a thinking map. Deliberately contains no
-// coordinates: the model owns structure and wording, layout engines own geometry.
+// coordinates: the model owns structure, wording and element choice; layout
+// engines own geometry.
 
 export const MAP_TYPES = [
   "radial", "spider", "tree", "bubble", "doubleBubble",
@@ -15,12 +16,29 @@ export const MAP_ROLES = [
 ] as const;
 export type MapRole = (typeof MAP_ROLES)[number];
 
-/** Which canvas element renders a node. */
+/** Which canvas element renders a node. The guide gives each a content trigger; none is a default. */
 export const NODE_KINDS = [
-  "card", "bubble", "waypoint", "portal", "anchor",
-  "table", "frame", "link", "caption", "zone",
+  "card", "task", "bubble", "waypoint", "shape", "portal", "anchor",
+  "table", "frame", "link", "heading", "caption", "zone",
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
+
+/** The canvas tint families, in TINT_COLORS order (schema.verify checks they match). */
+export const TINTS = ["violet", "ocean", "emerald", "sunset", "rose", "glacier"] as const;
+export type Tint = (typeof TINTS)[number];
+/** A node's tint: a colour whose meaning is in the legend, or "" to let the engine rotate decorative tints. */
+export const NODE_TINTS = ["", ...TINTS] as const;
+export type NodeTint = (typeof NODE_TINTS)[number];
+
+export const EMPHASES = ["normal", "strong"] as const;
+export type Emphasis = (typeof EMPHASES)[number];
+
+export const RELATION_STYLES = ["solid", "dashed", "dotted"] as const;
+export type RelationStyle = (typeof RELATION_STYLES)[number];
+export const RELATION_WEIGHTS = ["normal", "strong"] as const;
+export type RelationWeight = (typeof RELATION_WEIGHTS)[number];
+export const RELATION_DIRECTIONS = ["forward", "both", "none"] as const;
+export type RelationDirection = (typeof RELATION_DIRECTIONS)[number];
 
 export interface MapNode {
   id: string;
@@ -33,6 +51,10 @@ export interface MapNode {
   parent: string;
   /** JSON object string of kind-specific extras; "{}" when none. */
   props: string;
+  /** Legend colour, or "" for none. */
+  tint: NodeTint;
+  /** "strong" draws the node about 25% larger. */
+  emphasis: Emphasis;
 }
 
 export interface MapRelation {
@@ -40,11 +62,22 @@ export interface MapRelation {
   to: string;
   /** "" when none; required for conceptMap. */
   label: string;
+  style: RelationStyle;
+  weight: RelationWeight;
+  direction: RelationDirection;
+}
+
+export interface LegendEntry {
+  tint: Tint;
+  /** What the colour means; at most 30 characters. */
+  meaning: string;
 }
 
 export interface MapGraph {
   mapType: MapType;
   title: string;
+  /** One entry per tint used on a node; [] when colour carries no meaning. */
+  legend: LegendEntry[];
   nodes: MapNode[];
   relations: MapRelation[];
 }

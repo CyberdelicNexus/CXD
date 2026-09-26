@@ -7,7 +7,7 @@ import { generatedToCanvas, type GeneratedEdge, type GeneratedElement } from "@/
 import type { MapGraph } from "./types";
 import { LAYOUTS } from "./layouts";
 import {
-  boundsOf, effectiveKind, parseProps, snap, snapUp,
+  boundsOf, effectiveKind, parseProps, shapeTypeOf, snap, snapUp,
   TABLE_MAX_COLS, TABLE_MAX_ROWS,
   type LayoutLine, type PlacedNode, type Point,
 } from "./layouts/shared";
@@ -68,6 +68,15 @@ function toGenerated(p: PlacedNode): GeneratedElement[] {
   switch (effectiveKind(node)) {
     case "card":
       return [{ ...base, kind: "freeform", label: node.label, content: node.detail || null, shapeType: null }];
+    case "task":
+      return [{
+        ...base, kind: "freeform", label: node.label, content: node.detail || null, shapeType: null,
+        props: JSON.stringify({ ...parseProps(node.props), cardType: "task" }),
+      }];
+    case "shape":
+      return [{ ...base, kind: "shape", label: null, content: node.label, shapeType: shapeTypeOf(node) }];
+    case "heading":
+      return [{ ...base, kind: "text", label: null, content: node.label, shapeType: null }];
     case "bubble":
       return [{ ...base, kind: "shape", label: null, content: node.label, shapeType: "circle" }];
     case "waypoint":
