@@ -7,7 +7,7 @@ import type {
 import { checkMapStructure } from "../catalog";
 import { RENDER_FLOORS, realBounds } from "@/lib/canvas-layout-rules";
 import {
-  HEADING_FONT_PX, LEGEND, NEUTRAL_CARD_BG, NEUTRAL_SHAPE_STYLE, readLegend, TINT_ACCENTS, tintOf,
+  HEADING_FONT_PX, LEGEND, NEUTRAL_CARD_BG, NEUTRAL_SHAPE_STYLE, readLegend, TINT_ACCENTS, TITLE_FONT_PX, tintOf,
 } from "../element-style";
 import { footprint, NEUTRAL_CONNECTOR } from "../layouts/shared";
 import { TASK_CARD_W, TASK_DETAIL_MAX, taskCardHeight } from "../task-card";
@@ -101,6 +101,40 @@ const mapTop = Math.min(...els.filter((e) => e.type !== "line" && e.id !== title
 const legendEls = els.filter((e) => legendIds.has(e.id));
 check("legend sits under the title and above the map",
   legendEls.length === 4 && legendEls.every((e) => e.y >= title.y + title.height && e.y + e.height <= mapTop));
+// Title hierarchy: the title is the largest, boldest text on the map -
+// bigger than a heading's 24px, which is itself bigger than the 14px default.
+check("the title renders larger and bolder than a heading, in bold",
+  title.style?.fontSize === TITLE_FONT_PX && title.style?.fontWeight === "bold" && TITLE_FONT_PX > HEADING_FONT_PX);
+{
+  // A long title on a narrow map must still not overlap the legend, the
+  // divider or the map below: the title band grows with wrapped lines.
+  const longTitle = "A very long map title that will not fit on a single line at twenty eight pixels wide";
+  const narrow: MapGraph = {
+    mapType: "bubble", title: longTitle, legend: [{ tint: "rose", meaning: "Risk" }], relations: [],
+    nodes: [
+      n("c", "center", "", "card", "{}", "X"),
+      { ...n("q1", "quality", "", "bubble", "{}", "Y"), tint: "rose" },
+      n("q2", "quality", "", "bubble", "{}", "Z"),
+      n("q3", "quality", "", "bubble", "{}", "W"),
+    ],
+  };
+  const out = renderMap(narrow);
+  const els2 = out.elements;
+  const findT = <T extends CanvasElement>(pred: (e: CanvasElement) => boolean) => els2.find((e): e is T => pred(e));
+  const t2 = findT<TextElement>((e) => e.type === "text" && !!e.content && longTitle.startsWith(e.content.replace(/…$/, "")))!;
+  check("a long title wraps to more than one line (grows the band)", t2.height > 40);
+  const legend2 = readLegend(els2);
+  const legendIds2 = new Set(legend2.flatMap((l) => [l.swatchId, l.labelId]));
+  const legendEls2 = els2.filter((e) => legendIds2.has(e.id));
+  const mapTop2 = Math.min(...els2.filter((e) => e.type !== "line" && e.id !== t2.id && !legendIds2.has(e.id)).map((e) => e.y));
+  const divider2 = els2.find((e): e is LineElement => e.type === "line")!;
+  check("with a long title, the legend still starts under the (taller) title",
+    legendEls2.every((e) => e.y >= t2.y + t2.height));
+  check("with a long title, the legend still ends above the divider and the map",
+    legendEls2.every((e) => e.y + e.height <= divider2.start.y) && legendEls2.every((e) => e.y + e.height <= mapTop2));
+  check("with a long title, the title itself never reaches the divider",
+    t2.y + t2.height <= divider2.start.y);
+}
 const swatch = els.find((e): e is ShapeElement => e.id === legend[0]?.swatchId);
 // ShapeCard strokes in a 100-unit viewBox stretched to the element: borderWidth 2
 // on a 20px swatch is a 0.4px hairline. The disc is opaque in the tint's card

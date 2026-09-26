@@ -27,6 +27,9 @@ export const HEADING_FONT_PX = 24;
  * the browser. "bold" is what the canvas's own heading tool stores.
  */
 export const HEADING_FONT_WEIGHT = "bold" as const;
+/** Map title size: clearly the largest text on the map, bigger than a heading's 24px. */
+export const TITLE_FONT_PX = 28;
+export const TITLE_FONT_WEIGHT = "bold" as const;
 
 /**
  * Untinted shapes, bubbles and waypoints beside a legend: white-on-glass, so

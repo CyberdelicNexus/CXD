@@ -14,9 +14,9 @@ import {
 import { TINTABLE_KINDS } from "./catalog";
 import {
   HEADING_FONT_PX, HEADING_FONT_WEIGHT, LEGEND, legendLabelWidth, NEUTRAL_CARD_BG, NEUTRAL_HEX, NEUTRAL_SHAPE_STYLE,
-  shapeTintStyle, swatchStyle, TINT_ACCENTS,
+  shapeTintStyle, swatchStyle, TINT_ACCENTS, TITLE_FONT_PX, TITLE_FONT_WEIGHT,
 } from "./element-style";
-import { clampTaskDetail, taskOwner } from "./task-card";
+import { clampTaskDetail, taskOwner, wrappedLines } from "./task-card";
 import { upgradeGraph, type LegacyMapGraph } from "./legacy";
 import type { LegendEntry, MapGraph } from "./types";
 import { LAYOUTS } from "./layouts";
@@ -26,7 +26,20 @@ import {
   type LayoutLine, type PlacedNode, type Point,
 } from "./layouts/shared";
 
-const TITLE_H = 60;
+/**
+ * Title band: padding matches TextCard's p-2 container (8px top and bottom);
+ * line height matches the ~1.4x-font-size assumption task-card.ts uses for
+ * the same TextCard markup. wrappedLines gives the real line count for a
+ * (possibly long, clamped) title at TITLE_FONT_PX in the title box, so a
+ * long title on a narrow map gets a taller band instead of overlapping the
+ * legend or divider below it.
+ */
+const TITLE_PAD = 16;
+const TITLE_LINE_H = Math.ceil(TITLE_FONT_PX * 1.4);
+function titleHeight(title: string, titleW: number): number {
+  const lines = wrappedLines(title, TITLE_FONT_PX, Math.max(1, titleW - TITLE_PAD));
+  return TITLE_PAD + lines * TITLE_LINE_H;
+}
 const TITLE_GAP = 60;
 /** Seed card inside a zone: inside the container, below its 56px header band. */
 const ZONE_SEED = { dx: 40, dy: 80, w: 260, h: 300 };
@@ -227,12 +240,13 @@ export function renderMap(graph: LegacyMapGraph, origin: Point = { x: 0, y: 0 })
 
   const b = boundsOf(layout.placed);
   const titleW = Math.min(1200, Math.max(280, snapUp(b.maxX - b.minX)));
+  const titleH = titleHeight(g.title, titleW);
   // The legend sits under the title and above the divider, inside the title band.
   const legendMaxW = Math.max(titleW, LEGEND.minRowW);
   const legendH = layoutLegend(g.legend, 0, 0, legendMaxW).height;
   const legendBand = legendH ? LEGEND.gapAboveRow + legendH : 0;
-  const titleY = b.minY - TITLE_GAP - legendBand - TITLE_H;
-  const legend = layoutLegend(g.legend, b.minX, titleY + TITLE_H + LEGEND.gapAboveRow, legendMaxW);
+  const titleY = b.minY - TITLE_GAP - legendBand - titleH;
+  const legend = layoutLegend(g.legend, b.minX, titleY + titleH + LEGEND.gapAboveRow, legendMaxW);
   const dx = snap(origin.x) - b.minX;
   const dy = snap(origin.y) - titleY;
 
@@ -240,7 +254,7 @@ export function renderMap(graph: LegacyMapGraph, origin: Point = { x: 0, y: 0 })
     {
       kind: "text", ref: "__title", parentRef: null, label: null, content: g.title,
       tint: null, shapeType: null, hypercubeTags: null,
-      x: b.minX, y: titleY, width: titleW, height: TITLE_H, props: null,
+      x: b.minX, y: titleY, width: titleW, height: titleH, props: null,
     } as GeneratedElement,
     ...legend.slots.flatMap((s, i): GeneratedElement[] => [
       {
@@ -274,6 +288,9 @@ export function renderMap(graph: LegacyMapGraph, origin: Point = { x: 0, y: 0 })
     return id ? byId.get(id) : undefined;
   };
   styleNodes(g, at);
+  const title = at("__title");
+  // The largest text on the map: clearly bigger than a heading's 24px.
+  if (title && title.type === "text") title.style = { ...title.style, fontSize: TITLE_FONT_PX, fontWeight: TITLE_FONT_WEIGHT };
   legend.slots.forEach((s, i) => {
     const swatch = at(`__legend${i}`);
     if (swatch && swatch.type === "shape") swatch.style = swatchStyle(s.entry.tint);
