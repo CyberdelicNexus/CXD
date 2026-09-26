@@ -407,7 +407,7 @@ ELEMENT KINDS for op=create (props is a JSON OBJECT STRING):
 
 FLOW DIAGRAMS AND MIND MAPS:
 - Nodes are 'freeform' cards (or small 'shape' waypoints: rectangle, circle, diamond, triangle, hexagon, star). Connect them with op=connect, never with 'line'.
-- Style each connector through props: {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end","bend":40}. Rotate gradientName per branch so parallel paths read apart, and give edges a gentle bend rather than leaving every line straight.
+- Style each connector through props: {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end"}. Rotate gradientName per branch so parallel paths read apart.
 - Mind map: one central hub node with branches radiating out. Flow: left-to-right lanes with a diamond shape at each decision point.
 
 HOUSE STYLE (this canvas has a design system):

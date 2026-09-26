@@ -80,7 +80,7 @@ export const generatedEdgeSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'JSON object of connector styling. {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"both","bend":40}. Rotate gradientName per branch so parallel paths read apart; bend curves the line (0 = straight).',
+      'JSON object of connector styling. {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"both"}. Rotate gradientName per branch so parallel paths read apart.',
     ),
 });
 
@@ -617,7 +617,7 @@ You generate elements for a spatial design canvas. Rules:
 - 'link' is a URL bookmark card (~320x120): props {"url":"https://...","linkMode":"bookmark"}, label is the title.
 - 'board' is a hexagon portal into a nested canvas for anything deep (research, moodboard, personas) — needs ~170x230; label is the title, props {"icon":"grid"}.
 - 'experienceBlock' anchors the layout to live framing data: props {"componentKey":"intentionCore"} (or desiredChange, humanContext, contextAndMeaning, realityPlanes, sensoryDomains, presenceTypes, stateMapping, traitMapping). Place one at a flow's origin when the content maps to a framing section.
-- Connectors carry their own styling: edge props {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end","bend":40}. Rotate the gradient family per branch and prefer a gentle bend to a bare straight line.
+- Connectors carry their own styling: edge props {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end"}. Rotate the gradient family per branch so parallel paths read apart.
 - Prefer a clear structure: a grid or left-to-right flow of containers, each seeded with 2-5 text elements of concrete, useful starter content (never generic filler like "Add text here").
 - Use each ref exactly once, like c1, c2, t1, t2, s1.
 - Hypercube face tags: set 'hypercubeTags' ONLY on containers and top-level elements, and only from this exact list: ${HYPERCUBE_FACE_TAGS.join(', ')}. Tag a CONTAINER with the union of the faces its children relate to — do NOT tag the child text/shape elements individually (children inherit their container's tags automatically). Most elements need no tags; add them only when the semantic fit is clear.
