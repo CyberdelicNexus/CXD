@@ -4,6 +4,7 @@
 // from the graphs they describe.
 import { upgradeGraph } from "../legacy";
 import { MIGRATED } from "./authored/migrated";
+import { STARTER_1 } from "./authored/starter-1";
 import { byId, deriveTags } from "./derive";
 import { PROMOTED } from "./promoted/manifest";
 import type { AuthoredExemplar, Exemplar, PromotedExemplarFile } from "./types";
@@ -23,6 +24,6 @@ export function fromPromoted(p: PromotedExemplarFile): Exemplar {
   };
 }
 
-export const AUTHORED_EXEMPLARS: Exemplar[] = [...MIGRATED].map(fromAuthored).sort(byId);
+export const AUTHORED_EXEMPLARS: Exemplar[] = [...MIGRATED, ...STARTER_1].map(fromAuthored).sort(byId);
 export const PROMOTED_EXEMPLARS: Exemplar[] = PROMOTED.map(fromPromoted).sort(byId);
 export const EXEMPLARS: Exemplar[] = [...AUTHORED_EXEMPLARS, ...PROMOTED_EXEMPLARS];
