@@ -5,8 +5,12 @@ import type {
   BoardElement, CanvasElement, ContainerElement, FreeformElement, LineElement, ShapeElement, TableElement, TextElement,
 } from "@/types/canvas-elements";
 import { checkMapStructure } from "../catalog";
-import { HEADING_FONT_PX, NEUTRAL_CARD_BG, readLegend, TINT_ACCENTS, tintOf } from "../element-style";
-import { footprint } from "../layouts/shared";
+import { RENDER_FLOORS, realBounds } from "@/lib/canvas-layout-rules";
+import {
+  HEADING_FONT_PX, LEGEND, NEUTRAL_CARD_BG, NEUTRAL_SHAPE_STYLE, readLegend, TINT_ACCENTS, tintOf,
+} from "../element-style";
+import { footprint, NEUTRAL_CONNECTOR } from "../layouts/shared";
+import { TASK_CARD_W, TASK_DETAIL_MAX, taskCardHeight } from "../task-card";
 import { renderMap } from "../render";
 import type { MapGraph } from "../types";
 import { n, r, VALID } from "./fixtures";
@@ -48,6 +52,29 @@ const task = find<FreeformElement>((e) => e.type === "freeform" && e.cardType ==
 check("task node becomes a task card titled by its label", task?.content === "Call the venue");
 check("task owner and detail reach the task metadata",
   task?.taskMetadata?.assignee === "Sam" && task?.taskMetadata?.description === "Before Friday" && task?.taskMetadata?.isActionable === true);
+// A task card paints 300px wide and at least 300px tall (324px with a one-line
+// description): it must be stored, and measured by realBounds, at least that big.
+check(`task is stored at least at the task-card floor (${task?.width}x${task?.height})`,
+  !!task && task.width >= RENDER_FLOORS.taskCard.width && task.height >= RENDER_FLOORS.taskCard.height);
+check("task is stored at least as tall as its painted estimate (title, description, owner)",
+  !!task && task.height >= taskCardHeight("Call the venue", "Before Friday", "Sam") && task.height >= 324);
+check("realBounds floors a task card at 300x300",
+  (() => { const b = realBounds({ ...task!, width: 260, height: 160 }); return b?.w === 300 && b?.h === 300; })());
+{
+  const long = { ...n("t2", "leaf", "", "task", '{"owner":"Exhibits team, Venue lead, Ana"}',
+    "Test the mist levels with families and the venue team"), detail: "word ".repeat(60).trim() };
+  const f = footprint(long);
+  const strong = footprint({ ...long, emphasis: "strong" });
+  check(`a long task grows its footprint to its painted height (${f.w}x${f.h})`,
+    f.w === TASK_CARD_W && f.h >= taskCardHeight(long.label, long.detail.slice(0, TASK_DETAIL_MAX), "Exhibits team, Venue lead, Ana") && f.h > 400);
+  check("strong emphasis never shrinks a task below its painted size", strong.w >= TASK_CARD_W && strong.h >= f.h);
+  const hub = renderMap({ mapType: "radial", title: "Long task", legend: [], relations: [],
+    nodes: [n("a", "center"), { ...long, role: "branch" }, n("b", "branch")] });
+  const lt = hub.elements.find((e): e is FreeformElement => e.type === "freeform" && e.cardType === "task");
+  check(`a long description is cut to ${TASK_DETAIL_MAX} characters, as footprint() sized it`,
+    Array.from(lt?.taskMetadata?.description ?? "").length === TASK_DETAIL_MAX && !!lt?.taskMetadata?.description?.endsWith("…")
+    && lt!.height >= f.h);
+}
 
 const risky = find<FreeformElement>((e) => e.type === "freeform" && e.noteTitle === "Risky card");
 check("tint reaches the card gradient", risky?.style?.bgColor === TINT_GRADIENTS.rose && tintOf(risky!) === "rose");
@@ -61,6 +88,9 @@ const table = find<TableElement>((e) => e.type === "table");
 check("tint reaches the table border", table?.lineColor === TINT_ACCENTS.rose && tintOf(table!) === "rose");
 const plain = find<FreeformElement>((e) => e.type === "freeform" && e.noteTitle === "Plain card");
 check("with a legend, an untinted card is neutral", plain?.style?.bgColor === NEUTRAL_CARD_BG && tintOf(plain!) === null);
+const goal = find<ShapeElement>((e) => e.type === "shape" && e.content === "Goal");
+check("with a legend, an untinted shape is neutral, not the generator's violet",
+  goal?.style?.bgColor === NEUTRAL_SHAPE_STYLE.bgColor && goal?.style?.borderColor === NEUTRAL_SHAPE_STYLE.borderColor && tintOf(goal!) === null);
 
 const legend = readLegend(els);
 check(`legend renders one swatch and label per entry (${legend.map((l) => `${l.tint}:${l.meaning}`).join(",")})`,
@@ -71,6 +101,18 @@ const mapTop = Math.min(...els.filter((e) => e.type !== "line" && e.id !== title
 const legendEls = els.filter((e) => legendIds.has(e.id));
 check("legend sits under the title and above the map",
   legendEls.length === 4 && legendEls.every((e) => e.y >= title.y + title.height && e.y + e.height <= mapTop));
+const swatch = els.find((e): e is ShapeElement => e.id === legend[0]?.swatchId);
+// ShapeCard strokes in a 100-unit viewBox stretched to the element: borderWidth 2
+// on a 20px swatch is a 0.4px hairline. The disc is opaque in the tint's card
+// colour (card gradient midpoint = portal hex) and ringed in its accent.
+check("legend swatch is an opaque disc in the card colour with a visible accent ring",
+  swatch?.style?.bgColor === BOARD_HEX_COLORS.rose && TINT_GRADIENTS.rose.includes(BOARD_HEX_COLORS.rose)
+  && swatch?.style?.borderColor === TINT_ACCENTS.rose && (swatch?.style?.borderWidth ?? 0) * LEGEND.swatch / 100 >= 2);
+{ // A canvas snapshot: TextCard auto-grows the label; readLegend still pairs it by position.
+  const grown = els.map((e) => (e.type === "text" && legendIds.has(e.id) ? { ...e, height: 36 } : e));
+  check("readLegend matches labels by position when TextCard has grown them",
+    readLegend(grown).map((l) => `${l.tint}:${l.meaning}`).join(",") === "rose:Risk,emerald:Opportunity");
+}
 
 const tree: MapGraph = {
   mapType: "tree", title: "Heading check", legend: [], relations: [],
@@ -78,7 +120,8 @@ const tree: MapGraph = {
 };
 check("heading graph is valid", checkMapStructure(tree).length === 0);
 const heading = renderMap(tree).elements.find((e) => e.type === "text" && e.content === "Region A") as TextElement | undefined;
-check("heading renders at heading size", heading?.style?.fontSize === HEADING_FONT_PX && heading?.style?.fontWeight === "semibold");
+// TextCard passes fontWeight straight to inline CSS: it must be a CSS value ("semibold" is dropped).
+check("heading renders at heading size, in bold", heading?.style?.fontSize === HEADING_FONT_PX && heading?.style?.fontWeight === "bold");
 
 const noLegend = renderMap(VALID.radial).elements.filter((e): e is FreeformElement => e.type === "freeform");
 check("without a legend, untinted cards keep the engine's rotation",
@@ -103,6 +146,22 @@ const edge = (label: string) => cm.edges.find((e) => e.label?.text === label);
 check("strong relation -> thickness 4", edge("serves")?.style?.thickness === 4);
 check("forward relation -> arrowStyle end", edge("serves")?.style?.arrowStyle === "end");
 check("edge colour is the source node's tint", edge("serves")?.style?.gradientName === "sunset");
+check("beside a legend, edges from untinted sources avoid legend colours",
+  cm.edges.filter((e) => e.label?.text !== "serves").every((e) => e.style?.gradientName && e.style.gradientName !== "sunset"));
+{
+  const all = TINT_COLORS.map((t) => ({ tint: t, meaning: t }));
+  const full: MapGraph = {
+    ...concept, legend: all,
+    nodes: concept.nodes.map((x, i) => (i === 0 ? x : i === 1 ? { ...x, tint: "violet" } : i === 2 ? { ...x, tint: "ocean" } : x)),
+  };
+  full.nodes.push(...(["emerald", "rose", "glacier"] as const).map((t, i) => ({ ...n(`x${i}`, "concept", "", "card", "{}", `Extra ${t}`), tint: t })));
+  full.relations = [...concept.relations, r("a", "x0", "one"), r("a", "x1", "two"), r("a", "x2", "three")];
+  check(`all-six legend graph is valid (${checkMapStructure(full).join("; ")})`, checkMapStructure(full).length === 0);
+  // "trade" runs from d, which stays untinted.
+  const fe = renderMap(full).edges.find((e) => e.label?.text === "trade");
+  check("with every tint in the legend, an untinted source's edge takes the neutral connector",
+    fe?.style?.gradientName === NEUTRAL_CONNECTOR);
+}
 check("dashed relation -> lineStyle dashed", edge("maybe feeds")?.style?.lineStyle === "dashed");
 check("dotted relation -> lineStyle dotted", edge("loosely tied")?.style?.lineStyle === "dotted");
 check("direction none -> arrowStyle none", edge("loosely tied")?.style?.arrowStyle === "none");

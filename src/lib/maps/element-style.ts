@@ -21,6 +21,21 @@ export const NEUTRAL_CARD_BG = "linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%
 export const NEUTRAL_HEX = "#2d2d2d";
 /** Heading text size (captions stay at the generator's 14px). */
 export const HEADING_FONT_PX = 24;
+/**
+ * Heading weight. TextCard passes style.fontWeight straight to inline CSS, so
+ * it must be a CSS keyword or number: "semibold" and "medium" are dropped by
+ * the browser. "bold" is what the canvas's own heading tool stores.
+ */
+export const HEADING_FONT_WEIGHT = "bold" as const;
+
+/**
+ * Untinted shapes, bubbles and waypoints beside a legend: white-on-glass, so
+ * no uncoloured node borrows the generator's violet fill and colour-meaning
+ * stays with the legend.
+ */
+export const NEUTRAL_SHAPE_STYLE: ElementStyle = {
+  bgColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.35)", borderWidth: 2, textColor: "#ffffff",
+};
 
 /** Legend row geometry, all on the 20px grid: swatch, gap, label; rows wrap at max(title width, minRowW). */
 export const LEGEND = {
@@ -31,14 +46,28 @@ export const LEGEND = {
 const rgba = (hex: string, a: number) =>
   `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
 
-/** Shape styling for a tinted node or a legend swatch. */
+/** Shape styling for a tinted node. */
 export function shapeTintStyle(tint: Tint): ElementStyle {
   return { bgColor: rgba(TINT_ACCENTS[tint], 0.22), borderColor: TINT_ACCENTS[tint], borderWidth: 2, textColor: "#ffffff" };
 }
 
+/**
+ * Legend swatch: an opaque disc in the tint's card colour (the midpoint of its
+ * card gradient, which is also the portal hex fill) ringed in its accent (the
+ * outline of tinted shapes and tables), so it reads as the same colour as
+ * every element that uses the tint. ShapeCard strokes in a 100-unit viewBox
+ * stretched to the element, so on a 20px swatch borderWidth 12 is a 2.4px ring.
+ */
+export function swatchStyle(tint: Tint): ElementStyle {
+  return { bgColor: BOARD_HEX_COLORS[tint], borderColor: TINT_ACCENTS[tint], borderWidth: 12, textColor: "#ffffff" };
+}
+
+/** Characters in a legend meaning, counted as the legend rule counts them (code points, not UTF-16 units). */
+export const meaningLength = (meaning: string): number => Array.from(meaning.trim()).length;
+
 /** Width of a legend label: about 8px per character plus padding, on the grid, within [60, 260]. */
 export function legendLabelWidth(meaning: string): number {
-  const w = Math.ceil((meaning.trim().length * LEGEND.charW + 20) / 20) * 20;
+  const w = Math.ceil((meaningLength(meaning) * LEGEND.charW + 20) / 20) * 20;
   return Math.min(LEGEND.labelMaxW, Math.max(LEGEND.labelMinW, w));
 }
 
@@ -60,7 +89,12 @@ export function tintOf(el: CanvasElement): Tint | null {
 
 export interface DrawnLegendEntry { tint: Tint; meaning: string; swatchId: string; labelId: string }
 
-/** Legend entries as renderMap draws them: a 20px tinted circle and, 40px to its right on the same row, its label. */
+/**
+ * Legend entries as renderMap draws them: a 20px tinted circle and, 40px to
+ * its right on the same row, its label. The label is matched by position
+ * only: TextCard auto-grows text heights, so a canvas snapshot's label is
+ * rarely still 20px tall.
+ */
 export function readLegend(elements: CanvasElement[]): DrawnLegendEntry[] {
   const out: DrawnLegendEntry[] = [];
   for (const el of elements) {
@@ -68,7 +102,7 @@ export function readLegend(elements: CanvasElement[]): DrawnLegendEntry[] {
     const tint = tintOf(el);
     if (!tint) continue;
     const label = elements.find((t): t is TextElement =>
-      t.type === "text" && t.y === el.y && t.x === el.x + LEGEND.swatch + LEGEND.labelGap && t.height === LEGEND.rowH);
+      t.type === "text" && t.y === el.y && t.x === el.x + LEGEND.swatch + LEGEND.labelGap);
     if (label) out.push({ tint, meaning: label.content, swatchId: el.id, labelId: label.id });
   }
   return out;

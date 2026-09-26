@@ -2,7 +2,7 @@
 // smaller brace per part opening onto its subparts. CXD has no brace element,
 // so each brace is two bent line segments meeting at a point (spec §4).
 import {
-  columnSize, footprint, GAP, placeAt, snap, snapDown, stackColumn, tintAt, ZONE_GAP,
+  columnSize, decorativeTint, footprint, GAP, placeAt, snap, snapDown, stackColumn, tintAt, ZONE_GAP,
   type LayoutEngine, type LayoutLine, type PlacedNode, type Tint,
 } from "./shared";
 
@@ -38,10 +38,10 @@ export const braceLayout: LayoutEngine = (g) => {
     if (gr.subs.length > 0) {
       const subTop = y + snapDown((gr.h - gr.sc.h) / 2);
       placed.push(...stackColumn(gr.subs, subsX, subTop));
-      lines.push(...braceLines(partsX + gr.pf.w + 40, subsX - 40, subTop, subTop + gr.sc.h, tintAt(i + 1)));
+      lines.push(...braceLines(partsX + gr.pf.w + 40, subsX - 40, subTop, subTop + gr.sc.h, decorativeTint(g, tintAt(i + 1))));
     }
     y += gr.h + GAP;
   });
-  lines.push(...braceLines(wholeFp.w + 40, partsX - 40, top, top + totalH, "violet"));
+  lines.push(...braceLines(wholeFp.w + 40, partsX - 40, top, top + totalH, decorativeTint(g, "violet")));
   return { placed, edges: [], lines };
 };

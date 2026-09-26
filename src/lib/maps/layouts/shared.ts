@@ -214,18 +214,45 @@ const ARROWS: Record<RelationDirection, [ArrowStyle, ArrowStyle]> = {
 };
 
 /**
+ * Connector colour when all six tints carry legend meanings. The connector
+ * palette (connector-gradients.ts) has only the six tint gradients and no
+ * neutral; glacier's is slate to near-white, the least hue-bearing of them.
+ */
+export const NEUTRAL_CONNECTOR: Tint = "glacier";
+
+/**
+ * The colour for a connector or line that carries no meaning (its source is
+ * untinted, or it is structure: brace arms, the title divider). Without a
+ * legend, the engine's own rotation colour. Beside a legend, a colour the
+ * legend does not use, each engine colour mapping to one spare colour so
+ * parallel branches still read apart; NEUTRAL_CONNECTOR when all six are used.
+ */
+export function decorativeTint(g: MapGraph, engine: Tint): Tint {
+  if (g.legend.length === 0) return engine;
+  const used = new Set<string>(g.legend.map((e) => e.tint));
+  const spare = TINT_COLORS.filter((t) => !used.has(t));
+  if (spare.length === 0) return NEUTRAL_CONNECTOR;
+  return spare[TINT_COLORS.indexOf(engine) % spare.length];
+}
+
+/**
  * Connector styling from the graph: colour from the source node's tint when it
  * has one (otherwise the engine's rotation), and dash, thickness and arrows
- * from the matching relation. An edge no relation matches keeps the engine's
- * defaults (solid, 2px, the engine's arrow). Geometry is untouched, so the
- * engines' crossing-free guarantees hold; bend stays 0 (the canvas never draws it).
+ * from the matching relation. Beside a legend, an edge from an untinted source
+ * rotates only through tints the legend does not use (as zones do), mapping
+ * each engine colour to one spare colour so branches still read apart; when
+ * every tint is in the legend it takes NEUTRAL_CONNECTOR. An edge no relation
+ * matches keeps the engine's defaults (solid, 2px, the engine's arrow).
+ * Geometry is untouched, so the engines' crossing-free guarantees hold; bend
+ * stays 0 (the canvas never draws it).
  */
 export function styleEdges(g: MapGraph, edges: LayoutEdge[]): LayoutEdge[] {
   const byId = new Map(g.nodes.map((x) => [x.id, x]));
+  const untinted = (engine: Tint) => decorativeTint(g, engine);
   return edges.map((e) => {
     const m = relationBetween(g, e.from, e.to);
     const tint = byId.get(m ? m.rel.from : e.from)?.tint;
-    const out: LayoutEdge = { ...e, bend: 0, gradient: tint ? tint : e.gradient };
+    const out: LayoutEdge = { ...e, bend: 0, gradient: tint ? tint : untinted(e.gradient) };
     if (!m) return out;
     return {
       ...out,

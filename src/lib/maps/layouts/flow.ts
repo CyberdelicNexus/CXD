@@ -12,7 +12,7 @@
 // (centre dx beats centre dy by DOMINANCE) and runs in the gap between them.
 import { orderFlowSteps } from "../catalog";
 import {
-  DOMINANCE, footprint, LEVEL_GAP, relationLabel, snapDown, snapUp, tintAt,
+  decorativeTint, DOMINANCE, footprint, LEVEL_GAP, relationLabel, snapDown, snapUp, tintAt,
   type LayoutEdge, type LayoutEngine, type LayoutLine, type PlacedNode,
 } from "./shared";
 
@@ -53,7 +53,7 @@ export const flowLayout: LayoutEngine = (g) => {
       start, end,
       bend: { x: (start.x + end.x) / 2, y: 2 + 2 * LOOP_DROP },
       // The back relation styles its line, as styleEdges styles connectors.
-      gradient: from.node.tint || "sunset",
+      gradient: from.node.tint || decorativeTint(g, "sunset"),
       ...(direction === "none" ? {} : { endCap: "arrow" as const }),
       ...(direction === "both" ? { startCap: "arrow" as const } : {}),
       kind: back.style ?? "solid",

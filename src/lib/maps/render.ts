@@ -13,13 +13,15 @@ import {
 } from "@/lib/ai/element-generation";
 import { TINTABLE_KINDS } from "./catalog";
 import {
-  HEADING_FONT_PX, LEGEND, legendLabelWidth, NEUTRAL_CARD_BG, NEUTRAL_HEX, shapeTintStyle, TINT_ACCENTS,
+  HEADING_FONT_PX, HEADING_FONT_WEIGHT, LEGEND, legendLabelWidth, NEUTRAL_CARD_BG, NEUTRAL_HEX, NEUTRAL_SHAPE_STYLE,
+  shapeTintStyle, swatchStyle, TINT_ACCENTS,
 } from "./element-style";
+import { clampTaskDetail, taskOwner } from "./task-card";
 import { upgradeGraph, type LegacyMapGraph } from "./legacy";
 import type { LegendEntry, MapGraph } from "./types";
 import { LAYOUTS } from "./layouts";
 import {
-  boundsOf, effectiveKind, parseProps, shapeTypeOf, snap, snapUp, styleEdges,
+  boundsOf, decorativeTint, effectiveKind, parseProps, shapeTypeOf, snap, snapUp, styleEdges,
   TABLE_MAX_COLS, TABLE_MAX_ROWS,
   type LayoutLine, type PlacedNode, type Point,
 } from "./layouts/shared";
@@ -178,21 +180,23 @@ function styleNodes(g: MapGraph, at: (ref: string) => CanvasElement | undefined)
     const el = at(node.id);
     if (!el) continue;
     const kind = effectiveKind(node);
-    const tint = node.tint && TINTABLE_KINDS.includes(node.kind) ? node.tint : null;
+    // By the kind drawn: a link without a url or an anchor without a key renders as a card and shows its tint.
+    const tint = node.tint && TINTABLE_KINDS.includes(kind) ? node.tint : null;
     if (kind === "task" && el.type === "freeform") {
-      const p = parseProps(node.props);
-      const owner = typeof p.owner === "string" && p.owner.trim() ? p.owner.trim().slice(0, 60) : undefined;
+      // Description and owner exactly as footprint() sized them (task-card.ts).
+      const owner = taskOwner(parseProps(node.props));
+      const description = clampTaskDetail(node.detail);
       el.content = node.label;
       el.taskMetadata = {
         isActionable: true,
         subtasks: [],
-        ...(node.detail ? { description: node.detail } : {}),
+        ...(description ? { description } : {}),
         ...(owner ? { assignee: owner } : {}),
       };
       if (!el.emoji) el.emoji = "✅";
     }
     if (kind === "heading" && el.type === "text") {
-      el.style = { ...el.style, fontSize: HEADING_FONT_PX, fontWeight: "semibold" };
+      el.style = { ...el.style, fontSize: HEADING_FONT_PX, fontWeight: HEADING_FONT_WEIGHT };
     }
     if (tint) {
       if (el.type === "shape") el.style = shapeTintStyle(tint);
@@ -200,6 +204,7 @@ function styleNodes(g: MapGraph, at: (ref: string) => CanvasElement | undefined)
       else if (el.type === "board") el.hexColor = BOARD_HEX_COLORS[tint];
     } else if (hasLegend) {
       if (el.type === "freeform") el.style = { ...el.style, bgColor: NEUTRAL_CARD_BG };
+      else if (el.type === "shape") el.style = { ...NEUTRAL_SHAPE_STYLE };
       else if (el.type === "board") el.hexColor = NEUTRAL_HEX;
       else if (el.type === "container" && spare.length) el.tintColor = spare[spareIdx++ % spare.length];
     }
@@ -271,14 +276,14 @@ export function renderMap(graph: LegacyMapGraph, origin: Point = { x: 0, y: 0 })
   styleNodes(g, at);
   legend.slots.forEach((s, i) => {
     const swatch = at(`__legend${i}`);
-    if (swatch && swatch.type === "shape") swatch.style = shapeTintStyle(s.entry.tint);
+    if (swatch && swatch.type === "shape") swatch.style = swatchStyle(s.entry.tint);
   });
 
   const divider: LayoutLine = {
     start: { x: b.minX, y: b.minY - TITLE_GAP / 2 },
     end: { x: b.minX + titleW, y: b.minY - TITLE_GAP / 2 },
     bend: null,
-    gradient: "violet",
+    gradient: decorativeTint(g, "violet"),
   };
   const lines = [...layout.lines, divider].map((l) => toLine(l, dx, dy));
   return { elements: [...converted.elements, ...lines], edges: converted.edges };
