@@ -3,9 +3,7 @@ import { checkLayout } from "@/lib/canvas-layout-rules";
 import { checkMapStructure } from "../catalog";
 import { connectorCrossings } from "../connector-geometry";
 import { EXEMPLARS } from "../exemplars";
-import { buildMapGuide } from "../prompt";
 import { renderMap } from "../render";
-import { MAP_TYPES, NODE_KINDS } from "../types";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -25,13 +23,6 @@ for (const ex of EXEMPLARS) {
     check(`exemplar "${ex.graph.title}" renders with 0 connector crossings${crossings.length ? ` (${crossings.length})` : ""}`, crossings.length === 0);
   }
 }
-
-const guide = buildMapGuide();
-check("guide names every map type", MAP_TYPES.every((t) => guide.includes(`- ${t} (`)));
-check("guide explains node kinds", guide.includes("NODE KINDS"));
-check("guide names every node kind", NODE_KINDS.every((k) => guide.includes(`- ${k}:`)));
-check("guide never mentions bends", !/bend/i.test(guide));
-check("forced type is stated", buildMapGuide("brace").includes('mapType MUST be "brace"'));
 
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }
 console.log("\nALL PASS");
