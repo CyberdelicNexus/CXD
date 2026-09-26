@@ -11,6 +11,7 @@ import { faithfulnessProblems, numberTokens } from "../exemplars/faithful";
 import { closestCorpusClash, jaccard, MAX_INPUT_SIMILARITY, tooClose, trigrams } from "../exemplars/similarity";
 import type { Exemplar } from "../exemplars/types";
 import { exemplarProblems } from "../exemplars/validate";
+import { renderMap } from "../render";
 import type { MapGraph } from "../types";
 
 let failures = 0;
@@ -34,7 +35,28 @@ for (const ex of EXEMPLARS) {
   check(`${ex.id}: provenance is recorded`, ex.provenance.source === "authored" || ex.provenance.source === "promoted");
   const clash = closestCorpusClash(ex.input, CORPUS, ex.provenance.inputId);
   check(`${ex.id}: not too close to any corpus input${clash ? `: ${clash}` : ""}`, clash === null);
+  const unfaithful = faithfulnessProblems(ex.input, ex.graph);
+  check(`${ex.id}: every URL and number is in the input${unfaithful.length ? `: ${unfaithful.slice(0, 3).join("; ")}` : ""}`, unfaithful.length === 0);
+  if (ex.input.type === "canvasCards") {
+    const details = new Set(ex.graph.nodes.map((x) => x.detail));
+    const urls = new Set(ex.graph.nodes.map((x) => String(JSON.parse(x.props || "{}").url ?? "")));
+    // A card the map draws as a connector keeps its body as the relation label.
+    const relLabels = new Set(ex.graph.relations.map((r) => r.label.trim().toLowerCase()));
+    const dropped = ex.input.cards
+      .filter((c) => c.body && !details.has(c.body) && !urls.has(c.body) && !relLabels.has(c.body.trim().toLowerCase()))
+      .map((c) => c.title);
+    check(`${ex.id}: every card body is kept as a detail (or a link's url, or a connector's label)${dropped.length ? `; dropped: ${dropped.join(", ")}` : ""}`, dropped.length === 0);
+  }
+  // A relation that labels a hierarchy edge must not become a second connector.
+  const pairs = renderMap(ex.graph).edges.map((e) => [e.fromNodeId, e.toNodeId].sort().join("|"));
+  check(`${ex.id}: no connector is drawn twice`, new Set(pairs).size === pairs.length);
 }
+
+// Emphasis is not always "the hub": some exemplar marks two strong nodes, and
+// some exemplar's strong node is not a hub (a recommended option, a peak moment).
+const HUB_ROLES: readonly string[] = ["center", "root", "whole", "event", "leftTopic", "rightTopic"];
+check("some exemplar has two strong nodes", EXEMPLARS.some((e) => e.graph.nodes.filter((x) => x.emphasis === "strong").length >= 2));
+check("some exemplar's strong node is not a hub", EXEMPLARS.some((e) => e.graph.nodes.some((x) => x.emphasis === "strong" && !HUB_ROLES.includes(x.role))));
 
 // Faithfulness rule self-tests (faithful.ts).
 {
