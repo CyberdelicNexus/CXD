@@ -1,6 +1,7 @@
 // Run: npx tsx src/lib/maps/__verify__/catalog.verify.ts
 import { checkMapStructure, orderFlowSteps, CATALOG } from "../catalog";
 import { MAP_TYPES } from "../types";
+import { legendLabelWidth } from "../element-style";
 import type { MapGraph, MapType } from "../types";
 import { VALID, clone, n, r } from "./fixtures";
 
@@ -176,7 +177,24 @@ check("brace rule text is truthful about the empty-parent allowance",
   const g = clone(VALID.radial);
   g.nodes[1] = { ...g.nodes[1], kind: "link", props: '{"url":"https://example.com"}', tint: "rose" };
   g.legend = [{ tint: "rose", meaning: "Risk" }];
-  check("a tint on a link is rejected", violates(g, "cannot show a tint"));
+  check("a tint on a link is rejected", violates(g, "kind link cannot show a tint"));
+  // By the kind drawn: a link without a url and an anchor without a valid key render as cards.
+  g.nodes[1] = { ...g.nodes[1], kind: "link", props: "{}" };
+  check("a tint on a link without a url (drawn as a card) is accepted", checkMapStructure(g).length === 0);
+  g.nodes[1] = { ...g.nodes[1], kind: "anchor", props: '{"componentKey":"nope"}' };
+  check("a tint on an anchor without a valid key (drawn as a card) is accepted", checkMapStructure(g).length === 0);
+  g.nodes[1] = { ...g.nodes[1], kind: "anchor", props: '{"componentKey":"intentionCore"}' };
+  check("a tint on a real anchor is rejected, in plain grammar", violates(g, "kind anchor cannot show a tint"));
+}
+{ // Legend meanings are counted in characters (code points), not UTF-16 units.
+  const g = clone(VALID.radial);
+  g.nodes[1].tint = "rose";
+  g.legend = [{ tint: "rose", meaning: "🔥".repeat(30) }];
+  check("a 30-emoji legend meaning is within 30 characters", checkMapStructure(g).length === 0);
+  g.legend = [{ tint: "rose", meaning: "🔥".repeat(31) }];
+  check("a 31-emoji legend meaning is rejected", violates(g, "longer than 30"));
+  check("legend label width counts the same characters",
+    legendLabelWidth("🔥".repeat(10)) === legendLabelWidth("x".repeat(10)));
 }
 { // Heading rule: a heading labels a group, only in spider, tree and brace.
   const radial = clone(VALID.radial);

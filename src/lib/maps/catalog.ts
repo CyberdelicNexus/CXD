@@ -3,6 +3,7 @@
 // double as judge input and as the critique checklist.
 import type { MapGraph, MapNode, MapRelation, MapRole, MapType, NodeKind } from "./types";
 import { upgradeGraph, type LegacyMapGraph } from "./legacy";
+import { effectiveKind } from "./layouts/shared";
 
 export const MAX_NODES = 40;
 export const MAX_ZONES = 8;
@@ -240,14 +241,17 @@ export function checkLegend(g: MapGraph): string[] {
     listed.add(e.tint);
     const meaning = (e.meaning ?? "").trim();
     if (!meaning) v.push(`legend entry "${e.tint}" has no meaning`);
-    else if (meaning.length > MAX_LEGEND_MEANING) v.push(`legend meaning for "${e.tint}" is longer than ${MAX_LEGEND_MEANING} characters`);
+    // Code points, not UTF-16 units: an emoji is one character here and in the legend label width.
+    else if (Array.from(meaning).length > MAX_LEGEND_MEANING) v.push(`legend meaning for "${e.tint}" is longer than ${MAX_LEGEND_MEANING} characters`);
   }
   const used = new Set<string>();
   for (const x of g.nodes) {
     if (!x.tint) continue;
     used.add(x.tint);
     if (!listed.has(x.tint)) v.push(`node ${x.id} uses tint "${x.tint}" but the legend has no entry for it`);
-    if (!TINTABLE_KINDS.includes(x.kind)) v.push(`node ${x.id}: a ${x.kind} cannot show a tint (use "")`);
+    // By the kind drawn: a link without a url or an anchor without a valid key renders as a card.
+    const kind = effectiveKind(x);
+    if (!TINTABLE_KINDS.includes(kind)) v.push(`node ${x.id}: kind ${kind} cannot show a tint (use "")`);
   }
   for (const e of g.legend) {
     if (!used.has(e.tint)) v.push(`legend entry "${e.tint}" (${e.meaning}) is not used by any node`);
