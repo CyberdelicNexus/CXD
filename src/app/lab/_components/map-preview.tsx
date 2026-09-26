@@ -116,7 +116,13 @@ function Freeform({ el }: { el: FreeformElement }) {
               </div>
             </>
           ) : (
-            <div className="break-words text-xl font-bold" style={{ whiteSpace: "pre-wrap" }}>{el.content || "Untitled"}</div>
+            <>
+              <div className="break-words text-xl font-bold" style={{ whiteSpace: "pre-wrap" }}>{el.content || "Untitled"}</div>
+              {el.taskMetadata?.description && (
+                <div className="break-words text-sm opacity-70" style={{ whiteSpace: "pre-wrap" }}>{el.taskMetadata.description}</div>
+              )}
+              {el.taskMetadata?.assignee && <div className="truncate text-xs text-white/60">{el.taskMetadata.assignee}</div>}
+            </>
           )}
         </div>
       </div>
@@ -128,10 +134,14 @@ function Shape({ el }: { el: ShapeElement }) {
   const b = boxOf(el);
   const fill = el.style?.bgColor || "hsl(var(--primary) / 0.3)";
   const stroke = el.style?.borderColor || "hsl(var(--primary))";
-  const sw = el.style?.borderWidth || 2;
-  // ShapeCard draws in a 0..100 viewBox stretched to the box (preserveAspectRatio none).
+  // ShapeCard draws in a 0..100 viewBox stretched to the box (preserveAspectRatio
+  // none), so a borderWidth set in that space scales with the box rather than
+  // painting at its raw pixel value -- otherwise a legend swatch's borderWidth
+  // 12 (a 2.4px ring on a 20px swatch, element-style.ts swatchStyle) would
+  // paint as a 12px ring nearly filling the swatch.
   const sx = (v: number) => b.x + (v / 100) * b.w;
   const sy = (v: number) => b.y + (v / 100) * b.h;
+  const sw = (el.style?.borderWidth || 2) * ((b.w / 100 + b.h / 100) / 2);
   const poly = (pts: [number, number][]) => pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
   let body: React.ReactNode;
   switch (el.shapeType) {
@@ -145,7 +155,10 @@ function Shape({ el }: { el: ShapeElement }) {
       body = <polygon points={poly([[50, 5], [95, 95], [5, 95]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
       break;
     case "hexagon":
-      body = <polygon points={poly([[25, 5], [75, 5], [95, 50], [75, 95], [25, 95], [5, 50]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
+      body = <polygon points={poly([[50, 5], [93.3, 25], [93.3, 75], [50, 95], [6.7, 75], [6.7, 25]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
+      break;
+    case "star":
+      body = <polygon points={poly([[50, 10], [61, 40], [92, 40], [68, 60], [78, 90], [50, 70], [22, 90], [32, 60], [8, 40], [39, 40]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
       break;
     default:
       body = <rect x={sx(2)} y={sy(2)} width={(96 / 100) * b.w} height={(96 / 100) * b.h} rx={8} fill={fill} stroke={stroke} strokeWidth={sw} />;
