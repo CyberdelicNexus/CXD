@@ -95,4 +95,44 @@ export const CORPUS: LabInput[] = [
   { id: "cmp-churn", type: "comparison", title: "Churn causes and effects", cards: [], expectedTypes: ["multiFlow"], text: "What causes members to cancel their membership, and what happens to the community when they do?" },
   { id: "cmp-retreat-parts", type: "comparison", title: "Anatomy of a retreat", cards: [], expectedTypes: ["brace"], text: "Break down what a great weekend retreat is made of." },
   { id: "cmp-tools", type: "comparison", title: "Planning tools", cards: [], expectedTypes: ["tree", "doubleBubble"], text: "Compare Notion, Miro and CXD for planning an immersive experience, across collaboration, structure, visuals and cost." },
+
+  // ── Element-rich inputs (element library spec §6): content that calls for a
+  // table, links, a portal, tasks, a decision, frames, colour with meaning, and
+  // relation styles. ──
+  {
+    id: "cmp-pricing-numbers", type: "comparison", title: "Membership options, by the numbers", cards: [], expectedTypes: ["tree", "brace"],
+    text: "Compare our three membership options on the numbers. Starter: 29 a month, 2 classes, book 3 days ahead. Plus: 59 a month, 6 classes, book 7 days ahead, one guest pass. Unlimited: 95 a month, any class, book 14 days ahead, two guest passes, 10% off retreats. Last quarter we had 140 Starter, 210 Plus and 60 Unlimited members. Which should the homepage push?",
+  },
+  {
+    id: "bd-research-sources", type: "brainDump", title: "Research brief with sources", cards: [], expectedTypes: ["conceptMap", "tree"],
+    text: "pulling together the brief on why people join breathwork classes. the ONS wellbeing survey says loneliness is up for 16 to 29 year olds (ons.gov.uk, wellbeing section). our own 30 interviews: stress relief first, then meeting people. the Stanford study on cyclic sighing (Cell Reports Medicine, 2023) is what everyone quotes for mood. the Headspace annual report says most people drop a new habit within two weeks. I need to show which claim rests on which source.",
+  },
+  {
+    id: "tp-journey-subjourney", type: "topic", title: "Gallery visit with a booking sub-journey", cards: [], expectedTypes: ["flow"],
+    text: "Map a guest's journey through our immersive gallery, from first hearing about it to telling friends afterwards. Booking is its own long sub-journey (choosing a slot, group tickets, access needs, payment, reminders) that deserves a separate space of its own.",
+  },
+  {
+    id: "bd-workshop-owners", type: "brainDump", title: "Community workshop, who does what", cards: [], expectedTypes: ["flow", "brace"],
+    text: "community workshop saturday 10 to 4. Priya does the welcome and the why (20 min). then Tom runs the listening exercise in threes. lunch from the cafe, Jo orders it by thursday. afternoon: Priya facilitates the ideas wall, Tom collects the votes, closing reflections by me. still need someone to set up chairs at 9 and someone to send the follow-up email on monday.",
+  },
+  {
+    id: "cmp-go-no-go", type: "comparison", title: "Winter market stall: go or no-go", cards: [], expectedTypes: ["tree", "flow"],
+    text: "Decide whether to take a stall at the winter market. It costs 900 for four weekends. Go if we can staff both days and pre-sell at least 40 class passes by 1 November; otherwise no-go and put the money into online ads. If go: order the heater, print vouchers, build the rota. If no-go: brief the ads freelancer.",
+  },
+  {
+    id: "bd-event-scenes", type: "brainDump", title: "Launch night as scenes", cards: [], expectedTypes: ["flow"],
+    text: "picture the launch night: guests come up the candlelit stairs, coats taken, a glass of something warm. then the room goes dark and the first gong sounds. twenty minutes of sound, people lying down. lights come up slowly, amber, the founder says a few words. people drift to the tea bar, chatting. last scene: everyone leaves with a small bag of tea and a card with a code for their first class. afterwards the team needs a debrief.",
+  },
+  {
+    id: "cc-risks-opps", type: "canvasCards", title: "Risks and opportunities review", text: "Review these cards for the new studio: which are risks and which are opportunities?", expectedTypes: ["doubleBubble", "tree"],
+    cards: cards(
+      ["Landlord wants a 5-year lease", "Locks us in"], ["Yoga studio next door closing", "Their members need a new home"],
+      ["Two teachers may leave", "Both teach evening classes"], ["Council wellbeing grant", "Up to 10k, deadline March"],
+      ["Rising energy bills", "Heating the hall in winter"], ["Corporate wellness enquiries", "Three companies asked this month"],
+    ),
+  },
+  {
+    id: "tp-ecosystem-ties", type: "topic", title: "Creative ecosystem, with uncertain ties", cards: [], expectedTypes: ["conceptMap"],
+    text: "How do our venue, the local artists, the council, a streaming partner and our audience relate? The artists and the venue promote each other. The council's funding might depend on audience numbers, but we are not sure. The streaming partner could bring new audiences, which is unproven. The audience supports the artists directly through tips.",
+  },
 ];
