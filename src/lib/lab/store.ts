@@ -17,7 +17,8 @@ async function ensureDirs(): Promise<void> {
 
 let tmpSeq = 0;
 
-async function writeAtomic(file: string, data: string): Promise<void> {
+/** Write via tmp + rename, so a reader never sees a half-written file. Shared by the library store. */
+export async function writeAtomic(file: string, data: string): Promise<void> {
   const tmp = `${file}.${process.pid}.${Date.now()}.${tmpSeq++}.tmp`;
   await fs.writeFile(tmp, data, "utf8");
   // Windows can briefly refuse the rename while a reader holds the file open.
