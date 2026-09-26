@@ -73,6 +73,12 @@ export interface Cell {
   promptVersion?: string;
   /** The run's forced map type, if any. Missing on legacy cells (read as null). */
   forcedType?: MapType | null;
+  /**
+   * Set on a re-scored copy of an older cell (same map, new judges): the
+   * original's id. The copy supersedes the original in every count, so the
+   * original run and its votes never have to be rewritten.
+   */
+  rescoredFrom?: string;
   error: string | null;
 }
 

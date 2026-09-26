@@ -19,6 +19,10 @@ type Winner = "left" | "right" | "tie";
 interface Reveal { winner: Winner; left: RevealSide; right: RevealSide }
 
 type Phase = "loading" | "ready" | "voting" | "reveal" | "error";
+interface VersionMode { old: string; current: string }
+
+/** `/lab?compare=<version>` switches Compare to old-vs-new pairs. */
+const compareParam = () => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("compare"));
 
 /** How long the revealed arm/model/cost stay on screen before the next pair. */
 const REVEAL_MS = 1400;
@@ -38,6 +42,7 @@ export function CompareView({ meta }: { meta: LabMeta }) {
   const [sessionVotes, setSessionVotes] = useState(0);
   const [totalVotes, setTotalVotes] = useState(0);
   const [inputOpen, setInputOpen] = useState(false);
+  const [versionMode, setVersionMode] = useState<VersionMode | null>(null);
   const skipped = useRef(new Set<string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -48,11 +53,14 @@ export function CompareView({ meta }: { meta: LabMeta }) {
     setReveal(null);
     try {
       // Pairs are drawn at random: redraw a few times to avoid ones skipped this session.
-      let data: { pair: Pair | null; totalVotes: number } = { pair: null, totalVotes: 0 };
+      const compare = compareParam();
+      const url = compare ? `/api/lab/pair?compare=${encodeURIComponent(compare)}` : "/api/lab/pair";
+      let data: { pair: Pair | null; totalVotes: number; mode?: VersionMode | null } = { pair: null, totalVotes: 0 };
       for (let i = 0; i < 5; i++) {
-        data = (await fetchJson<{ pair: Pair | null; totalVotes: number }>("/api/lab/pair")).data;
+        data = (await fetchJson<{ pair: Pair | null; totalVotes: number; mode?: VersionMode | null }>(url)).data;
         if (!data.pair || !skipped.current.has(pairKey(data.pair))) break;
       }
+      setVersionMode(data.mode ?? null);
       setPair(data.pair);
       setTotalVotes(data.totalVotes ?? 0);
       setReason("");
@@ -125,6 +133,17 @@ export function CompareView({ meta }: { meta: LabMeta }) {
     return <InlineError message={`Could not load a pair: ${loadError}`} onRetry={() => void next()} />;
   }
   if (phase === "loading" && !pair) return <CompareSkeleton />;
+  if (!pair && versionMode) {
+    return (
+      <EmptyState
+        testId="no-pairs"
+        icon={Scale}
+        title="No old-vs-new pairs left to judge."
+        detail={`Comparing prompt version ${versionMode.old} with the current ${versionMode.current}. Pairs need a clean map from each version for the same input, arm and model.`}
+        action={<LabButton tone="ghost" onClick={() => void next()}>Check again</LabButton>}
+      />
+    );
+  }
   if (!pair) {
     return (
       <EmptyState
@@ -146,6 +165,12 @@ export function CompareView({ meta }: { meta: LabMeta }) {
 
   return (
     <div className="space-y-4">
+      {versionMode && (
+        <p data-testid="version-mode" className={cn(panelClass, "px-4 py-2 text-xs text-zinc-300")}>
+          Old vs new prompts: version <span className="tabular-nums">{versionMode.old}</span> against the current{" "}
+          <span className="tabular-nums">{versionMode.current}</span>. Both maps come from the same input, arm and model.
+        </p>
+      )}
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
         <h2 className="min-w-0 text-base font-semibold text-zinc-100">{pair.inputTitle}</h2>
         <p className="text-sm tabular-nums text-zinc-400">{sessionVotes} this session · {totalVotes} total</p>

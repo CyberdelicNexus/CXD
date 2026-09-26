@@ -1,6 +1,6 @@
 // Run: npx tsx src/lib/lab/__verify__/lab-math.verify.ts
 import {
-  ARM_TOKENS, buildLeaderboard, computeElo, estimateRunCost, expectedScore, judgeAgreement, pickPair, selfConsistency,
+  ARM_TOKENS, buildLeaderboard, compareVersions, computeElo, estimateRunCost, expectedScore, judgeAgreement, pickPair, selfConsistency,
 } from "../lab-math";
 import { JUDGE_MODELS } from "../config";
 import { CORPUS } from "../corpus";
@@ -170,6 +170,52 @@ const byId = new Map([a, b].map((c) => [c.id, c]));
   const row = buildLeaderboard([rich, plain], []).rows.find((r) => r.variant === "graph|m8")!;
   check("kinds per map is the mean of distinct kinds (4 and 1)", near(row.kindsPerMap!, 2.5));
   check("plain card share is the mean share (0.25 and 1)", near(row.plainCardShare!, 0.625));
+}
+
+{
+  // Old vs new prompt versions: same input, arm, model; different versions (spec §6).
+  const v = (id: string, version: string, extra: Partial<Cell> = {}): Cell =>
+    ({ ...cell(id, "graphExemplars", "m1"), promptVersion: version, ...extra });
+  const o1 = v("o1", "old");
+  const n1 = v("n1", "new");
+  const n2 = { ...v("n2", "new"), arm: "graph" as const };
+  check("versions mode pairs the same variant across versions", (() => {
+    const p = pickPair([o1, n1, n2], [], () => 0.3, { versions: ["old", "new"] });
+    return !!p && new Set([p.left.id, p.right.id]).size === 2 && [p.left.id, p.right.id].sort().join(",") === "n1,o1";
+  })());
+  check("versions mode never pairs two cells of one version", pickPair([n1, { ...n2, arm: "graphExemplars" as const, id: "n3" }], [], () => 0.3, { versions: ["old", "new"] }) === null);
+
+  const fit = (c: Cell, strong: number, cheap: number): Cell => ({ ...c, judges: [
+    { judgeId: "llmStrong", overall: 3, pass: true, scores: { elementFit: strong }, notes: "", costUsd: 0 },
+    { judgeId: "llmCheap", overall: 3, pass: true, scores: { elementFit: cheap }, notes: "", costUsd: 0 },
+  ] });
+  const oldA = fit(v("oa", "old"), 2, 3);
+  const newA = fit(v("na", "new"), 4, 4);
+  const oldB = fit(v("ob", "old", { inputId: "i2" }), 3, 3);
+  const newB = { ...v("nb", "new", { inputId: "i2" }), status: "failed" as const };
+  const lonely = fit(v("nl", "new", { inputId: "i9" }), 5, 5); // no old counterpart: excluded
+  const votes = [vote("na", "oa", "left"), vote("ob", "nb", "left")];
+  const cmp = compareVersions([oldA, newA, oldB, newB, lonely], votes, "old", "new");
+  check("only slots present in both versions count", cmp.old.cells === 2 && cmp.next.cells === 2);
+  check("mean elementFit per version and judge", near(cmp.old.elementFitStrong!, 2.5) && near(cmp.next.elementFitStrong!, 4) && near(cmp.next.elementFitCheap!, 4));
+  check("failure rate per version", cmp.old.failureRate === 0 && near(cmp.next.failureRate, 0.5));
+  check("cross-version votes counted by version", cmp.votes.newWins === 1 && cmp.votes.oldWins === 1 && cmp.votes.ties === 0);
+  check("verdict: fit rises, votes tie, failures rose, so not a success",
+    cmp.verdict.elementFitRises === true && cmp.verdict.votesFavourNew === false && cmp.verdict.failureRateHolds === false && cmp.verdict.success === false);
+
+  // A re-scored copy supersedes its original everywhere (Task 22 never rewrites the original run).
+  const orig = fit(v("orig", "old"), 1, 1);
+  const copy: Cell = { ...fit(v("copy", "old"), 3, 3), rescoredFrom: "orig" };
+  const fresh = fit(v("fresh", "new"), 4, 4);
+  const withCopy = compareVersions([orig, copy, fresh], [vote("orig", "fresh", "left"), vote("copy", "fresh", "right")], "old", "new");
+  check("the copy stands in for its original in the comparison", withCopy.old.cells === 1 && near(withCopy.old.elementFitStrong!, 3));
+  check("votes on a superseded original are ignored", withCopy.votes.newWins === 1 && withCopy.votes.oldWins === 0);
+  check("versions mode never offers a superseded original", (() => {
+    const p = pickPair([orig, copy, fresh], [], () => 0.3, { versions: ["old", "new"] });
+    return !!p && [p.left.id, p.right.id].sort().join(",") === "copy,fresh";
+  })());
+  check("the leaderboard counts the copy, not both",
+    buildLeaderboard([orig, copy], [], { promptVersion: "old" }).rows.find((r) => r.variant === "graphExemplars|m1")?.cells === 1);
 }
 
 if (failures > 0) { console.error(`\n${failures} FAILURES`); process.exit(1); }

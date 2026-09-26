@@ -140,10 +140,25 @@ export function votable(c: Cell): boolean {
  * With `promptVersion`, only cells generated with that prompt version are
  * offered, so new votes count on the default leaderboard.
  */
+export interface PickOptions {
+  /** Only cells generated with this prompt version. */
+  promptVersion?: string;
+  /**
+   * Old-vs-new mode: only cells of these two versions, paired with the same
+   * input, arm, model and forced type in the other version.
+   */
+  versions?: [string, string];
+}
+
 export function pickPair(
-  cells: Cell[], votes: Vote[], rng: () => number = Math.random, opts: { promptVersion?: string } = {},
+  cells: Cell[], votes: Vote[], rng: () => number = Math.random, opts: PickOptions = {},
 ): PairPick | null {
-  const eligible = cells.filter((c) => votable(c) && (opts.promptVersion === undefined || promptVersionOf(c) === opts.promptVersion));
+  const inVersions = (c: Cell) => !opts.versions || opts.versions.includes(promptVersionOf(c));
+  const eligible = withoutSuperseded(cells).filter((c) => votable(c) && inVersions(c) &&
+    (opts.promptVersion === undefined || promptVersionOf(c) === opts.promptVersion));
+  const pairable = (x: Cell, y: Cell) => (opts.versions
+    ? variantKey(x) === variantKey(y) && promptVersionOf(x) !== promptVersionOf(y)
+    : variantKey(x) !== variantKey(y));
   const byInput = new Map<string, Cell[]>();
   for (const c of eligible) byInput.set(c.inputId, [...(byInput.get(c.inputId) || []), c]);
 
@@ -152,7 +167,7 @@ export function pickPair(
   Array.from(byInput.values()).forEach((group) => {
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
-        if (variantKey(group[i]) !== variantKey(group[j])) candidates.push([group[i], group[j]]);
+        if (pairable(group[i], group[j])) candidates.push([group[i], group[j]]);
       }
     }
   });
@@ -199,6 +214,13 @@ export interface LeaderboardRow {
 
 const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
+/** Cells without the originals that a re-scored copy (Cell.rescoredFrom) stands in for. */
+export function withoutSuperseded(cells: Cell[]): Cell[] {
+  const superseded = new Set<string>();
+  cells.forEach((c) => { if (c.rescoredFrom) superseded.add(c.rescoredFrom); });
+  return superseded.size ? cells.filter((c) => !superseded.has(c.id)) : cells;
+}
+
 /** A judge's elementFit on a cell, or null (not judged, judge failed, or a cell from before elementFit existed). */
 function elementFitOf(c: Cell, judgeId: JudgeId): number | null {
   const v = c.judges.find((j) => j.judgeId === judgeId)?.scores?.elementFit;
@@ -230,7 +252,8 @@ export interface LeaderboardOptions {
 
 export function buildLeaderboard(allCells: Cell[], allVotes: Vote[], opts: LeaderboardOptions = {}): Leaderboard {
   const pv = opts.promptVersion;
-  const cells = pv === undefined ? allCells : allCells.filter((c) => promptVersionOf(c) === pv);
+  const live = withoutSuperseded(allCells);
+  const cells = pv === undefined ? live : live.filter((c) => promptVersionOf(c) === pv);
   const cellsById = new Map(cells.map((c) => [c.id, c]));
   // A vote counts only when both of its cells do.
   const votes = allVotes.filter((v) => cellsById.has(v.leftCellId) && cellsById.has(v.rightCellId));
@@ -307,5 +330,89 @@ export function buildLeaderboard(allCells: Cell[], allVotes: Vote[], opts: Leade
     promptVersion: pv ?? null,
     excludedCells: allCells.length - cells.length,
     excludedVotes: allVotes.length - votes.length,
+  };
+}
+
+export interface VersionStats {
+  version: string;
+  cells: number;
+  failures: number;
+  failureRate: number;
+  elementFitStrong: number | null;
+  elementFitCheap: number | null;
+  kindsPerMap: number | null;
+  plainCardShare: number | null;
+}
+
+export interface VersionComparison {
+  old: VersionStats;
+  next: VersionStats;
+  votes: { newWins: number; oldWins: number; ties: number };
+  verdict: {
+    /** Every judge that scored both versions gives the new one a higher mean; null when none did. */
+    elementFitRises: boolean | null;
+    /** More blind wins for the new version than the old; null before any cross-version vote. */
+    votesFavourNew: boolean | null;
+    failureRateHolds: boolean;
+    success: boolean;
+  };
+}
+
+/**
+ * Spec §6 success criterion on the same inputs and models: only (input, arm,
+ * model, forced type) slots that have settled cells in both versions count.
+ */
+export function compareVersions(cells: Cell[], votes: Vote[], oldVersion: string, newVersion: string): VersionComparison {
+  const slot = (c: Cell) => `${c.inputId}|${variantKey(c)}`;
+  const live = withoutSuperseded(cells);
+  const settled = live.filter((c) => c.status === "done" || c.status === "failed" || c.status === "error");
+  const oldAll = settled.filter((c) => promptVersionOf(c) === oldVersion);
+  const newAll = settled.filter((c) => promptVersionOf(c) === newVersion);
+  const newSlots = new Set(newAll.map(slot));
+  const shared = new Set(oldAll.map(slot).filter((s) => newSlots.has(s)));
+  const oldCells = oldAll.filter((c) => shared.has(slot(c)));
+  const newCells = newAll.filter((c) => shared.has(slot(c)));
+
+  const stats = (version: string, list: Cell[]): VersionStats => {
+    const done = list.filter((c) => c.status === "done");
+    const failures = list.length - done.length;
+    const fits = (judgeId: JudgeId) => done.map((c) => elementFitOf(c, judgeId)).filter((x): x is number => x !== null);
+    const usage = done.map((c) => elementUsage(c.elements));
+    return {
+      version, cells: list.length, failures, failureRate: list.length ? failures / list.length : 0,
+      elementFitStrong: mean(fits("llmStrong")), elementFitCheap: mean(fits("llmCheap")),
+      kindsPerMap: mean(usage.map((u) => u.distinctKinds)), plainCardShare: mean(usage.map((u) => u.plainCardShare)),
+    };
+  };
+  const old = stats(oldVersion, oldCells);
+  const next = stats(newVersion, newCells);
+
+  const byId = new Map(live.map((c) => [c.id, c]));
+  const tally = { newWins: 0, oldWins: 0, ties: 0 };
+  for (const v of votes) {
+    const l = byId.get(v.leftCellId);
+    const r = byId.get(v.rightCellId);
+    if (!l || !r) continue;
+    const lv = promptVersionOf(l);
+    const rv = promptVersionOf(r);
+    if (!((lv === oldVersion && rv === newVersion) || (lv === newVersion && rv === oldVersion))) continue;
+    if (v.winner === "tie") { tally.ties++; continue; }
+    const winnerVersion = v.winner === "left" ? lv : rv;
+    if (winnerVersion === newVersion) tally.newWins++;
+    else tally.oldWins++;
+  }
+
+  const fitPairs: [number | null, number | null][] = [
+    [old.elementFitStrong, next.elementFitStrong],
+    [old.elementFitCheap, next.elementFitCheap],
+  ];
+  const judged = fitPairs.filter((p): p is [number, number] => p[0] !== null && p[1] !== null);
+  const elementFitRises = judged.length ? judged.every(([a, b]) => b > a) : null;
+  const decisive = tally.newWins + tally.oldWins;
+  const votesFavourNew = decisive ? tally.newWins > tally.oldWins : null;
+  const failureRateHolds = next.failureRate <= old.failureRate;
+  return {
+    old, next, votes: tally,
+    verdict: { elementFitRises, votesFavourNew, failureRateHolds, success: elementFitRises === true && votesFavourNew === true && failureRateHolds },
   };
 }
