@@ -207,10 +207,108 @@ async function main() {
     check("the second publish starts from the first one's version", pub2Body.promptVersion.before === pubBody.promptVersion.after);
     check("and returns to the authored-only version", pub2Body.promptVersion.after === pubBody.promptVersion.before);
     check("retiring an unknown example is 404", (await retire.POST(post("/api/lab/library/retire", { id: "no-such" }))).status === 404);
+
+    // ── Concurrent writers: the lost-update race ──
+    // library-pending.json is a single shared file with no natural
+    // partitioning, so promote/retire/publish must serialize every
+    // read-modify-write through one queue. Below: N concurrent promotes for
+    // different eligible cells (the exact race a reviewer found — two calls
+    // both return 201 with distinct payloads, but an unguarded
+    // read-then-write let the second write clobber the first with no error
+    // anywhere), then a promote racing a retire, then a promote racing a
+    // publish. Each step must leave every write accounted for: nothing
+    // silently dropped.
+    const raceExemplar = (i: number) => EXEMPLARS[i % EXEMPLARS.length];
+    const raceCell = (tag: string, index: number): { cell: Cell; input: typeof goodInput } => {
+      const e = raceExemplar(index);
+      const input = { id: `race-input-${tag}`, type: e.input.type, title: e.input.title, text: e.input.text, cards: e.input.cards, expectedTypes: [], custom: true as const };
+      const r = renderMap(e.graph);
+      const cell = base(`race-cell-${tag}`, {
+        runId: "run-race", inputId: input.id, graph: e.graph, mapType: e.graph.mapType, elements: r.elements, edges: r.edges,
+      });
+      return { cell, input };
+    };
+    // seedRaceCells does its own read-modify-write of the shared "run-race"
+    // document, so (unlike promoteCell/retireExample/publishLibrary, which is
+    // what this test is verifying) it is NOT safe to call concurrently with
+    // itself — every batch of fixture cells is seeded in one go, sequentially
+    // with respect to other batches, before the concurrent calls under test fire.
+    const seedRaceCells = async (specs: Array<{ tag: string; index: number }>): Promise<{ cell: Cell; input: typeof goodInput }[]> => {
+      const built = specs.map(({ tag, index }) => raceCell(tag, index));
+      for (const { input } of built) await store.saveCustomInput(input);
+      const existing = await store.readRun("run-race");
+      const raceRun2: Run = existing ?? { id: "run-race", createdAt: "2026-09-26T00:00:00.000Z", estimateUsd: 0, spentUsd: 0, status: "done", config: run.config, cells: [] };
+      const newIds = new Set(built.map((b) => b.cell.id));
+      raceRun2.cells = [...raceRun2.cells.filter((c) => !newIds.has(c.id)), ...built.map((b) => b.cell)];
+      await store.saveRun(raceRun2);
+      return built;
+    };
+    const seedRaceCell = async (tag: string, index: number) => (await seedRaceCells([{ tag, index }]))[0];
+    const promoteReq = (cellId: string, note: string) => promote.POST(post("/api/lab/library/promote", { cellId, note }));
+
+    // N concurrent promotes of different eligible cells: all must persist.
+    const raceSeeds = await seedRaceCells([1, 2, 3, 4].map((i) => ({ tag: `n${i}`, index: i })));
+    const raceResults = await Promise.all(raceSeeds.map((s, i) => promoteReq(s.cell.id, `Concurrent promote ${i}`)));
+    check("all N concurrent promotes return 201", raceResults.every((r) => r.status === 201));
+    const raceBodies = (await Promise.all(raceResults.map((r) => r.json()))) as { item: { id: string } }[];
+    const raceIds = raceBodies.map((b) => b.item.id);
+    check("N distinct promoted ids came back", new Set(raceIds).size === raceIds.length);
+    const afterRace = await lib.readPending();
+    check(`all ${raceIds.length} concurrent promotions persisted (no lost update)`,
+      afterRace.pending.length === raceIds.length && raceIds.every((id) => afterRace.pending.some((p) => p.id === id)));
+
+    // A promote concurrent with a retire of one of those pending items.
+    const seed5 = await seedRaceCell("r1", 5);
+    const [retireDuringPromote, promoteDuringRetire] = await Promise.all([
+      retire.POST(post("/api/lab/library/retire", { id: raceIds[0] })),
+      promoteReq(seed5.cell.id, "Promote racing a retire"),
+    ]);
+    check("the racing retire is 200", retireDuringPromote.status === 200);
+    check("the racing promote is 201", promoteDuringRetire.status === 201);
+    const seed5Body = (await promoteDuringRetire.json()) as { item: { id: string } };
+    const afterRetireRace = await lib.readPending();
+    const expectedAfterRetire = [...raceIds.slice(1), seed5Body.item.id];
+    check("promote-vs-retire: the retired id is gone, the new promotion is present, nothing else lost",
+      afterRetireRace.pending.length === expectedAfterRetire.length &&
+      expectedAfterRetire.every((id) => afterRetireRace.pending.some((p) => p.id === id)) &&
+      !afterRetireRace.pending.some((p) => p.id === raceIds[0]));
+
+    // A promote concurrent with a publish of the currently-pending items.
+    const seed6 = await seedRaceCell("r2", 6);
+    const [publishDuringPromote, promoteDuringPublish] = await Promise.all([
+      publish.POST(post("/api/lab/library/publish", {})),
+      promoteReq(seed6.cell.id, "Promote racing a publish"),
+    ]);
+    check("the racing publish is 200", publishDuringPromote.status === 200);
+    check("the racing promote is 201", promoteDuringPublish.status === 201);
+    const seed6Body = (await promoteDuringPublish.json()) as { item: { id: string } };
+    const expectedSet = [...expectedAfterRetire, seed6Body.item.id];
+    const publishedAfterRace = await lib.publishedIds();
+    const pendingAfterRace = (await lib.readPending()).pending.map((p) => p.id);
+    const observedSet = [...publishedAfterRace.filter((id) => expectedSet.includes(id)), ...pendingAfterRace];
+    check("promote-vs-publish: every expected id landed in exactly one of published/pending, none lost or duplicated",
+      new Set(observedSet).size === observedSet.length &&
+      expectedSet.every((id) => observedSet.includes(id)) &&
+      !pendingAfterRace.some((id) => publishedAfterRace.includes(id)));
+
+    // Clean up the race fixtures so they don't leak into a differently-ordered rerun's assumptions.
+    for (const id of pendingAfterRace) await retire.POST(post("/api/lab/library/retire", { id }));
+    for (const id of publishedAfterRace.filter((pid) => expectedSet.includes(pid))) await retire.POST(post("/api/lab/library/retire", { id }));
+    await publish.POST(post("/api/lab/library/publish", {})).catch(() => undefined);
   } finally {
     process.chdir(originalCwd);
-    await new Promise((r) => setTimeout(r, 100));
-    await fs.rm(tmp, { recursive: true, force: true });
+    // Windows can briefly hold a file handle open after a write settles
+    // (more so with this file's added concurrent-writer tests); retry rather
+    // than let tmp-dir cleanup flake the whole run.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise((r) => setTimeout(r, 100 * (attempt + 1)));
+      try {
+        await fs.rm(tmp, { recursive: true, force: true });
+        break;
+      } catch (e) {
+        if (attempt === 4) console.error(`warning: could not remove tmp dir ${tmp}:`, e);
+      }
+    }
   }
 
   if (failures) { console.error(`${failures} FAILED`); process.exit(1); }

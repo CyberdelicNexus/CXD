@@ -64,6 +64,23 @@ async function savePending(state: PendingState): Promise<void> {
   await libraryDeps.writeFile(pendingFile(), JSON.stringify(state, null, 2));
 }
 
+/**
+ * Serializes every mutation of library-pending.json (promote, retire, and
+ * publish's final pending clear) through one shared queue, so concurrent
+ * calls never read-modify-write from a stale snapshot taken before they got
+ * in line — the lost-update race the reviewer flagged (two promotes, or a
+ * promote racing a retire or a publish, silently dropping one write). Each
+ * step's `run` reads pending state itself, inside the queue, so it always
+ * builds on the previous queued mutation's result. Rejects when the step
+ * fails, but never blocks later queued steps from running.
+ */
+let pendingQueue: Promise<unknown> = Promise.resolve();
+function withPendingQueue<T>(run: () => Promise<T>): Promise<T> {
+  const result = pendingQueue.catch(() => undefined).then(run);
+  pendingQueue = result.catch(() => undefined);
+  return result;
+}
+
 const IMPORT_LINE = /^import e\d+ from "\.\/([a-z0-9-]+)\.json";$/gm;
 
 /** Ids the manifest loads: the published promoted examples. */
@@ -207,14 +224,16 @@ export async function promoteCell(
   if (!note || note.includes("\n") || note.length > 200) {
     throw new LibraryConflictError("Write a one-line note (up to 200 characters) saying why this map is good.");
   }
-  const state = await readPending();
-  const published = await publishedFiles();
-  const reason = promotionProblem(cell, input, published, state);
-  if (reason) throw new LibraryConflictError(reason);
-  const item = toPromotedFile(cell, input!, fields, promotedAt);
-  const gain = coverageGain(libraries(published, state).after, fromPromoted(item));
-  await savePending({ ...state, pending: [...state.pending, item] });
-  return { item, gain };
+  return withPendingQueue(async () => {
+    const state = await readPending();
+    const published = await publishedFiles();
+    const reason = promotionProblem(cell, input, published, state);
+    if (reason) throw new LibraryConflictError(reason);
+    const item = toPromotedFile(cell, input!, fields, promotedAt);
+    const gain = coverageGain(libraries(published, state).after, fromPromoted(item));
+    await savePending({ ...state, pending: [...state.pending, item] });
+    return { item, gain };
+  });
 }
 
 /**
@@ -226,18 +245,20 @@ export async function retireExample(id: string, undo = false): Promise<PendingSt
   if (AUTHORED_EXEMPLARS.some((e) => e.id === id)) {
     throw new LibraryConflictError("Authored examples live in code: edit src/lib/maps/exemplars/authored/ to change or remove them.");
   }
-  const state = await readPending();
-  if (state.pending.some((p) => p.id === id)) {
-    if (undo) return state;
-    const next = { ...state, pending: state.pending.filter((p) => p.id !== id) };
+  return withPendingQueue(async () => {
+    const state = await readPending();
+    if (state.pending.some((p) => p.id === id)) {
+      if (undo) return state;
+      const next = { ...state, pending: state.pending.filter((p) => p.id !== id) };
+      await savePending(next);
+      return next;
+    }
+    if (!(await publishedIds()).includes(id)) throw new LibraryNotFoundError(`No example ${id} in the library.`);
+    const retired = undo ? state.retired.filter((r) => r !== id) : state.retired.includes(id) ? state.retired : [...state.retired, id];
+    const next = { ...state, retired };
     await savePending(next);
     return next;
-  }
-  if (!(await publishedIds()).includes(id)) throw new LibraryNotFoundError(`No example ${id} in the library.`);
-  const retired = undo ? state.retired.filter((r) => r !== id) : state.retired.includes(id) ? state.retired : [...state.retired, id];
-  const next = { ...state, retired };
-  await savePending(next);
-  return next;
+  });
 }
 
 export interface PublishResult {
@@ -247,55 +268,57 @@ export interface PublishResult {
 }
 
 export async function publishLibrary(): Promise<PublishResult> {
-  const state = await readPending();
-  if (state.pending.length === 0 && state.retired.length === 0) {
-    throw new LibraryConflictError("Nothing to publish: promote or retire an example first.");
-  }
-  const idsBefore = await publishedIds();
-  const published = await Promise.all(idsBefore.map(readPromotedFile));
-  for (const p of state.pending) {
-    if (idsBefore.includes(p.id)) throw new LibraryConflictError(`${p.id} is already published; retire it first.`);
-    const problem = libraryProblems(p.input, upgradeGraph(p.graph));
-    if (problem) throw new LibraryConflictError(`${p.id} no longer passes the library checks: ${problem}`);
-  }
-  const { current, after } = libraries(published, state);
-  const before = computePromptVersion(current);
-  const afterVersion = computePromptVersion(after);
-  const ids = Array.from(new Set([...idsBefore.filter((id) => !state.retired.includes(id)), ...state.pending.map((p) => p.id)])).sort();
-
-  let oldManifest: string | null = null;
-  try {
-    oldManifest = await fs.readFile(manifestFile(), "utf8");
-  } catch {
-    oldManifest = null;
-  }
-  const written: string[] = [];
-  let manifestWritten = false;
-  try {
-    await fs.mkdir(promotedDir(), { recursive: true });
+  return withPendingQueue(async () => {
+    const state = await readPending();
+    if (state.pending.length === 0 && state.retired.length === 0) {
+      throw new LibraryConflictError("Nothing to publish: promote or retire an example first.");
+    }
+    const idsBefore = await publishedIds();
+    const published = await Promise.all(idsBefore.map(readPromotedFile));
     for (const p of state.pending) {
-      const file = path.join(promotedDir(), `${p.id}.json`);
-      await libraryDeps.writeFile(file, `${JSON.stringify(p, null, 2)}\n`);
-      written.push(file);
+      if (idsBefore.includes(p.id)) throw new LibraryConflictError(`${p.id} is already published; retire it first.`);
+      const problem = libraryProblems(p.input, upgradeGraph(p.graph));
+      if (problem) throw new LibraryConflictError(`${p.id} no longer passes the library checks: ${problem}`);
     }
-    await libraryDeps.writeFile(manifestFile(), manifestSource(ids));
-    manifestWritten = true;
-    await savePending({ pending: [], retired: [] });
-  } catch (e) {
-    for (const f of written) await libraryDeps.removeFile(f).catch(() => undefined);
-    if (manifestWritten) {
-      if (oldManifest !== null) await libraryDeps.writeFile(manifestFile(), oldManifest).catch(() => undefined);
-      else await libraryDeps.removeFile(manifestFile()).catch(() => undefined);
+    const { current, after } = libraries(published, state);
+    const before = computePromptVersion(current);
+    const afterVersion = computePromptVersion(after);
+    const ids = Array.from(new Set([...idsBefore.filter((id) => !state.retired.includes(id)), ...state.pending.map((p) => p.id)])).sort();
+
+    let oldManifest: string | null = null;
+    try {
+      oldManifest = await fs.readFile(manifestFile(), "utf8");
+    } catch {
+      oldManifest = null;
     }
-    throw e;
-  }
-  // Committed. The manifest no longer loads retired files; removing them is housekeeping.
-  const removed: string[] = [];
-  for (const id of state.retired) {
-    if (!idsBefore.includes(id)) continue;
-    await libraryDeps.removeFile(path.join(promotedDir(), `${id}.json`)).then(() => { removed.push(id); }, () => undefined);
-  }
-  return { written: state.pending.map((p) => p.id), removed, promptVersion: { before, after: afterVersion } };
+    const written: string[] = [];
+    let manifestWritten = false;
+    try {
+      await fs.mkdir(promotedDir(), { recursive: true });
+      for (const p of state.pending) {
+        const file = path.join(promotedDir(), `${p.id}.json`);
+        await libraryDeps.writeFile(file, `${JSON.stringify(p, null, 2)}\n`);
+        written.push(file);
+      }
+      await libraryDeps.writeFile(manifestFile(), manifestSource(ids));
+      manifestWritten = true;
+      await savePending({ pending: [], retired: [] });
+    } catch (e) {
+      for (const f of written) await libraryDeps.removeFile(f).catch(() => undefined);
+      if (manifestWritten) {
+        if (oldManifest !== null) await libraryDeps.writeFile(manifestFile(), oldManifest).catch(() => undefined);
+        else await libraryDeps.removeFile(manifestFile()).catch(() => undefined);
+      }
+      throw e;
+    }
+    // Committed. The manifest no longer loads retired files; removing them is housekeeping.
+    const removed: string[] = [];
+    for (const id of state.retired) {
+      if (!idsBefore.includes(id)) continue;
+      await libraryDeps.removeFile(path.join(promotedDir(), `${id}.json`)).then(() => { removed.push(id); }, () => undefined);
+    }
+    return { written: state.pending.map((p) => p.id), removed, promptVersion: { before, after: afterVersion } };
+  });
 }
 
 export type LibraryStatus = "authored" | "published" | "pending" | "retiring";
