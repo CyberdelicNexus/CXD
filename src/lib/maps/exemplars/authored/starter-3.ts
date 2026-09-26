@@ -1,6 +1,7 @@
 // Starter exemplars, part 3: colour with a legend in comparisons and quality
 // maps, a star as the goal, radial idea boards with an owned task and a
-// sourced link, an uncertain cause, and a site plan with a portal and a fork. Every fact in a graph is in its input
+// sourced link, an uncertain cause, a site plan with a portal and a fork, and
+// a comparison led by a table. Every fact in a graph is in its input
 // (faithful.ts).
 import type { AuthoredExemplar } from "../types";
 import { node, props, rel } from "./helpers";
@@ -164,7 +165,7 @@ export const STARTER_3: AuthoredExemplar[] = [
     note: "Because the ask is what could cause one event and what follows, it is causes and consequences; the rumour is a card on a dashed link, and what someone must handle is a task.",
     labels: ["risk", "event"],
     input: {
-      type: "comparison",
+      type: "topic",
       title: "Venue cancellation: causes and knock-ons",
       text: "What could make our venue cancel the autumn gathering, and what would follow? It's our only venue option, we paid the deposit late, and there's a rumour the owner may sell the building. If it happens guests will want refunds, every ticket holder needs a call, and we'd need a backup venue. Lena handles guests, Omar handles venues.",
       cards: [],
@@ -223,6 +224,46 @@ export const STARTER_3: AuthoredExemplar[] = [
         node("d2", "leaf", "No: close at 11", { parent: "b4" }),
       ],
       relations: [rel("b4", "d1", "if permit"), rel("b4", "d2", "if not")],
+    },
+  },
+  {
+    id: "venue-shortlist",
+    title: "Choosing the winter venue",
+    note: "Because three venues are compared on the same four numbers and facts, a table leads; what rules each out and the strong pick are cards under it, the unknown a caption.",
+    labels: ["venue", "decision"],
+    input: {
+      type: "comparison",
+      title: "Three venues for the winter gathering",
+      text: "Help me pick a venue for the winter gathering. We expect about 100 people and several guests use wheelchairs. The Old Chapel holds 90, costs 2,400 for the day, is step-free and has a 22:00 curfew. Riverside Barn holds 140, costs 3,100, is not step-free and has no curfew. The Glasshouse holds 110, costs 2,900, is step-free and has a 23:00 curfew. We haven't asked whether the Glasshouse would move its curfew.",
+      cards: [],
+    },
+    graph: {
+      mapType: "tree",
+      title: "Choosing the winter venue",
+      legend: [],
+      nodes: [
+        node("root", "root", "Winter gathering venue", { detail: "About 100 people; several use wheelchairs", props: props({ emoji: "🏛️" }) }),
+        node("t", "branch", "Three venues compared", {
+          kind: "table", parent: "root",
+          props: props({
+            cells: [
+              ["Venue", "Holds", "Cost", "Step-free", "Curfew"],
+              ["Old Chapel", "90", "2,400", "Yes", "22:00"],
+              ["Riverside Barn", "140", "3,100", "No", "None"],
+              ["Glasshouse", "110", "2,900", "Yes", "23:00"],
+            ],
+            headerRow: true,
+          }),
+        }),
+        node("h", "branch", "Ruled out", { kind: "heading", parent: "root" }),
+        node("x1", "leaf", "Old Chapel is too small", { parent: "h", detail: "Holds 90; we expect about 100" }),
+        node("x2", "leaf", "Riverside Barn is not step-free", { parent: "h", detail: "Several guests use wheelchairs" }),
+        node("pick", "branch", "Glasshouse meets both needs", {
+          parent: "root", emphasis: "strong", detail: "Holds 110 and is step-free, for 2,900", props: props({ emoji: "✅" }),
+        }),
+        node("q", "branch", "Open question: would the Glasshouse move its curfew?", { kind: "caption", parent: "root" }),
+      ],
+      relations: [],
     },
   },
 ];

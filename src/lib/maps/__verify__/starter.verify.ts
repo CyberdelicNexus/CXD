@@ -31,8 +31,9 @@ const EXPECTED: Expect[] = [
   { id: "remote-crew-ideas", mapType: "radial", inputType: "brainDump", kinds: ["card", "task", "link"], pairings: [] },
   { id: "studio-launch", mapType: "radial", inputType: "canvasCards", kinds: ["card", "task", "frame", "zone"], pairings: [] },
   { id: "tea-ceremony-senses", mapType: "bubble", inputType: "canvasCards", kinds: ["card", "bubble"], pairings: [] },
-  { id: "venue-cancellation", mapType: "multiFlow", inputType: "comparison", kinds: ["card", "task"], pairings: [] },
+  { id: "venue-cancellation", mapType: "multiFlow", inputType: "topic", kinds: ["card", "task"], pairings: [] },
   { id: "festival-site", mapType: "spider", inputType: "topic", kinds: ["card", "waypoint", "portal", "heading", "zone"], pairings: ["waypointBranches", "headingsRegions"] },
+  { id: "venue-shortlist", mapType: "tree", inputType: "comparison", kinds: ["card", "table", "heading", "caption"], pairings: [] },
 ];
 
 for (const e of EXPECTED) {
