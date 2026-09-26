@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { CompareView } from "./compare-view";
 import { fetchJson, focusRing, InlineError, Skeleton } from "./lab-ui";
 import { LeaderboardView } from "./leaderboard-view";
+import { LibraryView } from "./library-view";
 import { RunsView } from "./runs-view";
 
 export interface LabMeta {
@@ -22,11 +23,12 @@ export interface LabMeta {
   defaultBudgetUsd: number;
 }
 
-type Tab = "runs" | "compare" | "leaderboard";
+type Tab = "runs" | "compare" | "leaderboard" | "library";
 const TABS: { id: Tab; label: string }[] = [
   { id: "runs", label: "Runs" },
   { id: "compare", label: "Compare" },
   { id: "leaderboard", label: "Leaderboard" },
+  { id: "library", label: "Library" },
 ];
 
 export function LabApp() {
@@ -89,6 +91,9 @@ export function LabApp() {
               </TabsContent>
               <TabsContent value="leaderboard" className="mt-0 focus-visible:ring-0">
                 <LeaderboardView meta={meta} />
+              </TabsContent>
+              <TabsContent value="library" className="mt-0 focus-visible:ring-0">
+                <LibraryView />
               </TabsContent>
             </>
           )}
