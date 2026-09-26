@@ -1,6 +1,7 @@
 // Starter exemplars, part 1: headings over regions, a zone holding a table,
 // a portal drill-down, colour with meaning on causes, a decision fork, and
-// scenes that end in a task.
+// scenes that end in a task. Every fact in a graph is in its input
+// (faithful.ts): a detail only repeats what the input says.
 import type { AuthoredExemplar } from "../types";
 import { node, props, rel } from "./helpers";
 
@@ -8,12 +9,12 @@ export const STARTER_1: AuthoredExemplar[] = [
   {
     id: "retreat-weekend",
     title: "Sound retreat weekend",
-    note: "A messy retreat dump sorted by day under headings, with the money as a real table and the open decision as a task with an owner.",
+    note: "Because the dump runs day by day, each day is a heading over its moments; the costs are numbers, so a table; the room question has an owner, so a task.",
     labels: ["retreat", "planning"],
     input: {
       type: "brainDump",
       title: "Sound retreat, unsorted",
-      text: "right so the sound retreat in march. friday people arrive from 6, I want it soft: tea, low light, phones in a basket. saturday: gong bath at 9, then a slow walk to the lake, long lunch, afternoon voice workshop with Ana. sunday: closing circle then people leave by 2. money: venue is 4,200 for the weekend, food about 1,500, teachers 1,800. still need to decide shared or private rooms, Leo said he'd price both.",
+      text: "right so the sound retreat in march. friday people arrive from 6, I want it soft: tea, low light, phones in a basket. saturday: gong bath at 9, then a slow walk to the lake, long lunch, afternoon voice workshop with Ines. sunday: closing circle then people leave by 2. money: venue is 4,200 for the weekend, food about 1,500, teachers 1,800, so 7,500 all in. still need to decide shared or private rooms, Tomás said he'd price both.",
       cards: [],
     },
     graph: {
@@ -21,24 +22,22 @@ export const STARTER_1: AuthoredExemplar[] = [
       title: "Sound retreat weekend",
       legend: [],
       nodes: [
-        node("c", "center", "Sound retreat", { detail: "March weekend, 18 guests", props: props({ emoji: "🔔" }) }),
+        node("c", "center", "Sound retreat", { detail: "A weekend in March", props: props({ emoji: "🔔" }) }),
         node("h1", "branch", "Friday arrival", { kind: "heading", parent: "c" }),
         node("h2", "branch", "Saturday", { kind: "heading", parent: "c" }),
         node("h3", "branch", "Sunday close", { kind: "heading", parent: "c" }),
         node("h4", "branch", "Money", { kind: "heading", parent: "c" }),
-        node("f1", "leaf", "Soft landing", { parent: "h1", detail: "Tea, low light, phones in a basket", props: props({ emoji: "🍵" }) }),
-        node("f2", "leaf", "Guests arrive from 6pm", { kind: "caption", parent: "h1" }),
-        node("s1", "leaf", "Gong bath", { parent: "h2", detail: "9am in the main hall", props: props({ emoji: "🎶" }) }),
-        node("s2", "leaf", "Walk to the lake", { parent: "h2", detail: "Slow and mostly silent" }),
-        node("s3", "leaf", "Long lunch", { parent: "h2", detail: "No rush, one long table" }),
-        node("s4", "leaf", "Voice workshop", { parent: "h2", detail: "Afternoon, led by Ana" }),
-        node("u1", "leaf", "Closing circle", { parent: "h3", detail: "One word each, then goodbyes" }),
-        node("u2", "leaf", "Guests leave by 2pm", { kind: "caption", parent: "h3" }),
+        node("f1", "leaf", "Soft landing", { parent: "h1", detail: "Arrivals from 6: tea, low light, phones in a basket", props: props({ emoji: "🍵" }) }),
+        node("s1", "leaf", "Gong bath", { parent: "h2", detail: "At 9", props: props({ emoji: "🎶" }) }),
+        node("s2", "leaf", "Slow walk to the lake", { parent: "h2" }),
+        node("s3", "leaf", "Long lunch", { parent: "h2" }),
+        node("s4", "leaf", "Voice workshop", { parent: "h2", detail: "Afternoon, with Ines" }),
+        node("u1", "leaf", "Closing circle", { parent: "h3", detail: "Then people leave by 2" }),
         node("m1", "leaf", "Budget", {
           kind: "table", parent: "h4",
-          props: props({ cells: [["Item", "Cost (EUR)"], ["Venue", "4,200"], ["Food", "1,500"], ["Teachers", "1,800"], ["Total", "7,500"]], headerRow: true }),
+          props: props({ cells: [["Item", "Cost"], ["Venue", "4,200"], ["Food", "1,500"], ["Teachers", "1,800"], ["Total", "7,500"]], headerRow: true }),
         }),
-        node("m2", "leaf", "Price shared vs private rooms", { kind: "task", parent: "h4", props: props({ owner: "Leo", emoji: "✅" }) }),
+        node("m2", "leaf", "Price shared vs private rooms", { kind: "task", parent: "h4", props: props({ owner: "Tomás", emoji: "✅" }) }),
       ],
       relations: [],
     },
@@ -46,12 +45,12 @@ export const STARTER_1: AuthoredExemplar[] = [
   {
     id: "pass-pricing-tiers",
     title: "Experience pass tiers",
-    note: "Numbers go in a table inside a zone for the designer's comparison, competitor research becomes a portal, and the next step is a task.",
+    note: "Because the tiers differ on numbers, they sit in a table in a zone beside the strong recommendation; rival studios are a portal and the owned page a task.",
     labels: ["pricing"],
     input: {
       type: "comparison",
       title: "Three pass tiers",
-      text: "We're choosing between three experience pass tiers: Drop-in at 18 a visit, Regular at 49 a month for four visits, and Unlimited at 89 a month. Compare them on price per visit and booking window, and tell me what to launch with. We also looked at what three other studios charge, and Mia will write the tier page.",
+      text: "We're choosing between three experience pass tiers: Drop-in at 18 a visit, Regular at 49 a month for four visits (12.25 a visit), and Unlimited at 89 a month, which only beats Regular per visit from 8 visits a month. Compare them on price and price per visit, and tell me what to launch with. We also looked at what three other studios charge. Priya will write the tier page.",
       cards: [],
     },
     graph: {
@@ -59,17 +58,18 @@ export const STARTER_1: AuthoredExemplar[] = [
       title: "Experience pass tiers",
       legend: [],
       nodes: [
-        node("root", "root", "Pass pricing", { detail: "Launch with three tiers", props: props({ emoji: "🎟️" }) }),
+        node("root", "root", "Pass pricing", { detail: "What to launch with", props: props({ emoji: "🎟️" }) }),
         node("z1", "branch", "Tier comparison", { kind: "zone", parent: "root", detail: "Compare the tiers side by side before choosing the anchor price." }),
         node("t1", "leaf", "Tiers at a glance", {
           kind: "table", parent: "z1",
-          props: props({ cells: [["Tier", "Price", "Per visit", "Booking window"], ["Drop-in", "18", "18.00", "3 days"], ["Regular", "49 a month", "12.25", "7 days"], ["Unlimited", "89 a month", "under 9 at 10+", "14 days"]], headerRow: true }),
+          props: props({ cells: [["Tier", "Price", "Per visit"], ["Drop-in", "18 a visit", "18"], ["Regular", "49 a month", "12.25"], ["Unlimited", "89 a month", "Beats Regular from 8 visits"]], headerRow: true }),
         }),
-        node("c1", "leaf", "Anchor on Regular", { parent: "z1", detail: "Most members land in the middle tier; make it the default choice.", props: props({ emoji: "⚓" }) }),
-        node("c2", "leaf", "Founding member price", { parent: "z1", detail: "Unlimited at 69 for the first 100 members.", props: props({ emoji: "🌱" }) }),
-        node("p1", "branch", "Competitor pricing", { kind: "portal", parent: "root", detail: "Three studios' passes, screenshots and notes", props: props({ icon: "grid" }) }),
-        node("b3", "branch", "Launch offer", { parent: "root", detail: "First visit free with a Regular sign-up", props: props({ emoji: "🎁" }) }),
-        node("k1", "leaf", "Draft tier page copy", { kind: "task", parent: "b3", props: props({ owner: "Mia" }) }),
+        node("c1", "leaf", "Anchor on Regular", {
+          parent: "z1", emphasis: "strong", detail: "12.25 a visit against 18 for Drop-in; Unlimited only wins from 8 visits a month",
+          props: props({ emoji: "⚓" }),
+        }),
+        node("p1", "branch", "Competitor pricing", { kind: "portal", parent: "root", detail: "What three other studios charge", props: props({ icon: "grid" }) }),
+        node("k1", "branch", "Write the tier page", { kind: "task", parent: "root", props: props({ owner: "Priya" }) }),
       ],
       relations: [],
     },
@@ -77,12 +77,12 @@ export const STARTER_1: AuthoredExemplar[] = [
   {
     id: "membership-churn",
     title: "Why members cancel",
-    note: "Causes coloured by whether they are in our control, with a legend; the two causes we own most are strong, the outside ones dotted as indirect.",
+    note: "Because the dump says which causes are ours, colour splits ours from outside with a legend; the two causes most surveys name are strong, the outside ones dotted as indirect.",
     labels: ["churn", "membership"],
     input: {
       type: "brainDump",
       title: "Why members cancel",
-      text: "sound bath studio, members cancelling after month 3. from the exit survey: class times clash with commutes, the app booking is clunky, a few say the price went up. outside stuff too: two new studios opened nearby and summer holidays. when people cancel the evening classes get half empty, teachers lose hours, and we lose word of mouth. the price thing and the booking thing are on us, the rest isn't.",
+      text: "sound bath studio, members cancelling after month 3. from the exit survey: class times clash with commutes, the app booking is clunky, a few say the price went up. most exit surveys mention the times and the booking. outside stuff too: two new studios opened nearby and summer holidays. when people cancel the evening classes get half empty, teachers lose hours, and we lose word of mouth. times, price and booking are on us, the new studios and the holidays aren't.",
       cards: [],
     },
     graph: {
@@ -90,12 +90,12 @@ export const STARTER_1: AuthoredExemplar[] = [
       title: "Why members cancel",
       legend: [{ tint: "sunset", meaning: "In our control" }, { tint: "glacier", meaning: "Outside our control" }],
       nodes: [
-        node("k1", "cause", "Clashing class times", { tint: "sunset", detail: "Evening slots start before commuters get back", props: props({ emoji: "🕕" }) }),
-        node("k2", "cause", "Clunky app booking", { tint: "sunset", detail: "Four taps to book, and it often fails", props: props({ emoji: "📱" }) }),
-        node("k3", "cause", "Price rise", { tint: "sunset", detail: "Up 15% in spring" }),
-        node("k4", "cause", "New studios nearby", { tint: "glacier", detail: "Two opened within 1 km" }),
+        node("k1", "cause", "Class times clash with commutes", { tint: "sunset", emphasis: "strong", detail: "In most exit surveys", props: props({ emoji: "🕕" }) }),
+        node("k2", "cause", "Clunky app booking", { tint: "sunset", emphasis: "strong", detail: "In most exit surveys", props: props({ emoji: "📱" }) }),
+        node("k3", "cause", "Price went up", { tint: "sunset", detail: "A few mention it" }),
+        node("k4", "cause", "New studios nearby", { tint: "glacier", detail: "Two opened" }),
         node("k5", "cause", "Summer holidays", { tint: "glacier" }),
-        node("ev", "event", "Member cancels after month 3", { emphasis: "strong", detail: "Cancellations peak in month 3", props: props({ emoji: "🚪" }) }),
+        node("ev", "event", "Member cancels after month 3", { props: props({ emoji: "🚪" }) }),
         node("e1", "effect", "Half-empty evening classes"),
         node("e2", "effect", "Teachers lose hours"),
         node("e3", "effect", "Less word of mouth"),
@@ -115,12 +115,12 @@ export const STARTER_1: AuthoredExemplar[] = [
   {
     id: "rooftop-go-no-go",
     title: "Rooftop night: go or no-go",
-    note: "A decision is a waypoint with two labelled branches, each ending in the tasks it triggers; the deadline is a caption, not a card.",
+    note: "Because the content is one decision with two outcomes, it is a waypoint with labelled branches; each outcome's actions are tasks, with owners only where the dump names one.",
     labels: ["event", "decision"],
     input: {
       type: "brainDump",
       title: "Rooftop night: go or no-go",
-      text: "rooftop listening night on the 14th. if the forecast is clear by tuesday we go: book the heaters, confirm the DJ, send the reminder. if rain risk is over 40% we move indoors to the loft, which only fits 60, so we'd need to cap tickets and email people. can't decide later than tuesday because of the heater deposit. Sam does heaters, Ivy does comms.",
+      text: "rooftop listening night on the 14th. if the forecast is clear by tuesday we go: book the heaters, confirm the DJ, send the reminder. if rain risk is over 40% we move indoors to the loft, which only fits 60, so we'd need to cap tickets and email people. can't decide later than tuesday because of the heater deposit. Kofi does heaters, Hana does comms.",
       cards: [],
     },
     graph: {
@@ -128,15 +128,15 @@ export const STARTER_1: AuthoredExemplar[] = [
       title: "Rooftop night: go or no-go",
       legend: [],
       nodes: [
-        node("d", "root", "Go or no-go?", { kind: "waypoint", emphasis: "strong", props: props({ shapeType: "diamond" }) }),
-        node("g", "branch", "Go: rooftop", { parent: "d", detail: "Forecast clear", props: props({ emoji: "🌙" }) }),
-        node("n", "branch", "No-go: move to the loft", { parent: "d", detail: "The loft fits 60", props: props({ emoji: "🏠" }) }),
-        node("c", "branch", "Decide by Tuesday (heater deposit)", { kind: "caption", parent: "d" }),
-        node("g1", "leaf", "Book the heaters", { kind: "task", parent: "g", props: props({ owner: "Sam" }) }),
-        node("g2", "leaf", "Confirm the DJ", { kind: "task", parent: "g", props: props({ owner: "Ivy" }) }),
-        node("g3", "leaf", "Send the reminder", { kind: "task", parent: "g", props: props({ owner: "Ivy" }) }),
-        node("n1", "leaf", "Cap tickets at 60", { kind: "task", parent: "n", props: props({ owner: "Ivy" }) }),
-        node("n2", "leaf", "Email ticket holders", { kind: "task", parent: "n", props: props({ owner: "Ivy" }) }),
+        node("d", "root", "Go or no-go?", { kind: "waypoint", emphasis: "strong", detail: "Listening night on the 14th", props: props({ shapeType: "diamond" }) }),
+        node("g", "branch", "Go: rooftop", { parent: "d", detail: "Forecast clear by Tuesday", props: props({ emoji: "🌙" }) }),
+        node("n", "branch", "No-go: move to the loft", { parent: "d", detail: "The loft only fits 60", props: props({ emoji: "🏠" }) }),
+        node("c", "branch", "Decide by Tuesday: the heater deposit is due", { kind: "caption", parent: "d" }),
+        node("g1", "leaf", "Book the heaters", { kind: "task", parent: "g", props: props({ owner: "Kofi" }) }),
+        node("g2", "leaf", "Confirm the DJ", { kind: "task", parent: "g" }),
+        node("g3", "leaf", "Send the reminder", { kind: "task", parent: "g", props: props({ owner: "Hana" }) }),
+        node("n1", "leaf", "Cap tickets at 60", { kind: "task", parent: "n", props: props({ owner: "Hana" }) }),
+        node("n2", "leaf", "Email ticket holders", { kind: "task", parent: "n", props: props({ owner: "Hana" }) }),
       ],
       relations: [rel("d", "g", "if clear"), rel("d", "n", "if rain > 40%")],
     },
@@ -144,7 +144,7 @@ export const STARTER_1: AuthoredExemplar[] = [
   {
     id: "ocean-room-scenes",
     title: "Ocean room visit, scene by scene",
-    note: "A visit told as scenes is a sequence of frames, and it ends in the one action the team must take next, as a task.",
+    note: "Because the visit is asked for as scenes, each is a frame and the deepest one is strong; the ask ends in what the team should do, so the last step is a task.",
     labels: ["museum", "storyboard"],
     input: {
       type: "topic",
@@ -159,11 +159,11 @@ export const STARTER_1: AuthoredExemplar[] = [
       nodes: [
         node("v1", "step", "Queue at the portal", { kind: "frame", detail: "Blue light spills into the corridor", props: props({ storyboard: true, description: "Anticipation" }) }),
         node("v2", "step", "Sinking in", { kind: "frame", detail: "The floor rumbles, whale song slows", props: props({ storyboard: true, description: "Descent" }) }),
-        node("v3", "step", "The deep", { kind: "frame", detail: "Kids lie on the haptic floor", props: props({ storyboard: true, description: "Stillness" }) }),
+        node("v3", "step", "Peak moment: the deep", { kind: "frame", emphasis: "strong", detail: "The family lies still on the floor", props: props({ storyboard: true, description: "Stillness" }) }),
         node("v4", "step", "Surfacing", { kind: "frame", detail: "Mist at the exit, lights warm up", props: props({ storyboard: true, description: "Return" }) }),
-        node("v5", "step", "Test mist levels with families", { kind: "task", detail: "Two sessions before opening", props: props({ owner: "Exhibits team", emoji: "✅" }) }),
+        node("v5", "step", "Test the mist with families", { kind: "task", props: props({ owner: "Exhibits team", emoji: "✅" }) }),
       ],
-      relations: [rel("v1", "v2"), rel("v2", "v3"), rel("v3", "v4"), rel("v4", "v5")],
+      relations: [rel("v1", "v2"), rel("v2", "v3"), rel("v3", "v4"), rel("v4", "v5", "so we should")],
     },
   },
 ];

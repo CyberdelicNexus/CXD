@@ -1,6 +1,7 @@
 // Starter exemplars, part 2: a strong main path to a star goal with a dotted
 // loop, owners' actions as tasks under headings, two framing anchors, and
-// concept maps with uncertain, mutual and sourced relations.
+// concept maps with uncertain, mutual and sourced relations. Every fact in a
+// graph is in its input (faithful.ts).
 import type { AuthoredExemplar } from "../types";
 import { node, props, rel } from "./helpers";
 
@@ -8,7 +9,7 @@ export const STARTER_2: AuthoredExemplar[] = [
   {
     id: "onboarding-path",
     title: "The path to a first calm session",
-    note: "Shuffled onboarding cards put in order: plain steps as rectangles, the choice as a waypoint, the goal as a strong star, the main path strong and the retry loop dotted.",
+    note: "Because the cards are steps in one order, they are a flow of plain rectangles; the choice is a waypoint, the goal a strong star, and the retry card the dotted loop back.",
     labels: ["onboarding", "app"],
     input: {
       type: "canvasCards",
@@ -20,6 +21,7 @@ export const STARTER_2: AuthoredExemplar[] = [
         { title: "Set a reminder", body: "Pick a time of day" },
         { title: "First calm session", body: "Five minutes, guided" },
         { title: "Create account", body: "Email or Apple" },
+        { title: "If the session doesn't land", body: "Try another intention" },
       ],
     },
     graph: {
@@ -27,11 +29,11 @@ export const STARTER_2: AuthoredExemplar[] = [
       title: "The path to a first calm session",
       legend: [],
       nodes: [
-        node("w1", "step", "Welcome screen", { kind: "shape", props: props({ shapeType: "rectangle" }) }),
-        node("w2", "step", "Create account", { kind: "shape", props: props({ shapeType: "rectangle" }) }),
-        node("w3", "step", "Choose an intention", { kind: "waypoint", props: props({ shapeType: "diamond" }) }),
-        node("w4", "step", "Set a reminder", { detail: "Pick a time of day", props: props({ emoji: "⏰" }) }),
-        node("w5", "step", "First calm session", { kind: "shape", emphasis: "strong", props: props({ shapeType: "star" }) }),
+        node("w1", "step", "Welcome screen", { kind: "shape", detail: "The brand promise", props: props({ shapeType: "rectangle" }) }),
+        node("w2", "step", "Create account", { kind: "shape", detail: "Email or Apple", props: props({ shapeType: "rectangle" }) }),
+        node("w3", "step", "Choose an intention", { kind: "waypoint", detail: "Sleep, focus or calm", props: props({ shapeType: "diamond" }) }),
+        node("w4", "step", "Set a reminder", { kind: "shape", detail: "Pick a time of day", props: props({ shapeType: "rectangle" }) }),
+        node("w5", "step", "First calm session", { kind: "shape", emphasis: "strong", detail: "Five minutes, guided", props: props({ shapeType: "star" }) }),
       ],
       relations: [
         rel("w1", "w2", "", { weight: "strong" }),
@@ -45,12 +47,12 @@ export const STARTER_2: AuthoredExemplar[] = [
   {
     id: "sprint-day-owners",
     title: "Design sprint day",
-    note: "A day broken into parts under headings; everything someone owns is a task with that owner, and group activities stay cards.",
+    note: "Because the day splits into morning, afternoon and prep, each is a heading over its parts; what a named person owns is a task, and what everyone does stays a card.",
     labels: ["workshop", "agenda"],
     input: {
       type: "brainDump",
       title: "Design sprint day, who does what",
-      text: "sprint day next thursday. morning: Ana opens with the challenge (15 min), then expert interviews, Leo runs those, then how-might-we notes, everyone. afternoon: Mia runs the dot vote, then sketching in silence, then Sam picks two concepts with the client. I need to book the room and print the templates.",
+      text: "sprint day next thursday. morning: Aiko opens with the challenge (15 min), then expert interviews, Dev runs those, then how-might-we notes, everyone. afternoon: Marta runs the dot vote, then sketching in silence, then Kwame picks two concepts with the client. Noor books the room and prints the templates.",
       cards: [],
     },
     graph: {
@@ -58,18 +60,18 @@ export const STARTER_2: AuthoredExemplar[] = [
       title: "Design sprint day",
       legend: [],
       nodes: [
-        node("w", "whole", "Sprint day", { detail: "Thursday, 9:30 to 17:00", props: props({ emoji: "🏃" }) }),
+        node("w", "whole", "Sprint day", { detail: "Next Thursday", props: props({ emoji: "🏃" }) }),
         node("a", "part", "Morning", { kind: "heading", parent: "w" }),
         node("b", "part", "Afternoon", { kind: "heading", parent: "w" }),
         node("p", "part", "Prep", { kind: "heading", parent: "w" }),
-        node("a1", "subpart", "Open with the challenge", { kind: "task", parent: "a", detail: "15 minutes", props: props({ owner: "Ana" }) }),
-        node("a2", "subpart", "Run expert interviews", { kind: "task", parent: "a", props: props({ owner: "Leo" }) }),
-        node("a3", "subpart", "How-might-we notes", { parent: "a", detail: "Everyone writes, one idea per note" }),
-        node("b1", "subpart", "Run the dot vote", { kind: "task", parent: "b", props: props({ owner: "Mia" }) }),
-        node("b2", "subpart", "Silent sketching", { parent: "b", detail: "Crazy 8s, then solution sketches" }),
-        node("b3", "subpart", "Pick two concepts with the client", { kind: "task", parent: "b", props: props({ owner: "Sam" }) }),
-        node("p1", "subpart", "Book the room", { kind: "task", parent: "p", props: props({ owner: "Me" }) }),
-        node("p2", "subpart", "Print the templates", { kind: "task", parent: "p", props: props({ owner: "Me" }) }),
+        node("a1", "subpart", "Open with the challenge", { kind: "task", parent: "a", detail: "15 min", props: props({ owner: "Aiko" }) }),
+        node("a2", "subpart", "Run expert interviews", { kind: "task", parent: "a", props: props({ owner: "Dev" }) }),
+        node("a3", "subpart", "How-might-we notes", { parent: "a", detail: "Everyone" }),
+        node("b1", "subpart", "Run the dot vote", { kind: "task", parent: "b", props: props({ owner: "Marta" }) }),
+        node("b2", "subpart", "Sketching in silence", { parent: "b" }),
+        node("b3", "subpart", "Pick two concepts with the client", { kind: "task", parent: "b", props: props({ owner: "Kwame" }) }),
+        node("p1", "subpart", "Book the room", { kind: "task", parent: "p", props: props({ owner: "Noor" }) }),
+        node("p2", "subpart", "Print the templates", { kind: "task", parent: "p", props: props({ owner: "Noor" }) }),
       ],
       relations: [],
     },
@@ -77,12 +79,12 @@ export const STARTER_2: AuthoredExemplar[] = [
   {
     id: "retreat-purpose",
     title: "What the retreat is for",
-    note: "Purpose content anchors onto two different framing sections (intention and desired change), so the map feeds the framing instead of duplicating it.",
+    note: "Because the content is the retreat's intention and the change it hopes for, each part anchors to that framing section, so the map feeds the framing instead of repeating it.",
     labels: ["retreat", "framing"],
     input: {
       type: "topic",
       title: "What the retreat is for",
-      text: "Break down what our breathwork retreat is for: the intention behind it and the change we hope guests leave with.",
+      text: "Break down what our breathwork retreat is for. The intention: slow down on purpose, use the breath as an anchor, and let guests choose their own pace. The change we hope guests leave with: better sleep and a short daily practice they keep.",
       cards: [],
     },
     graph: {
@@ -90,14 +92,14 @@ export const STARTER_2: AuthoredExemplar[] = [
       title: "What the retreat is for",
       legend: [],
       nodes: [
-        node("w", "whole", "Breathwork retreat", { detail: "Three days, 12 guests", props: props({ emoji: "🌬️" }) }),
+        node("w", "whole", "Breathwork retreat", { props: props({ emoji: "🌬️" }) }),
         node("i", "part", "Intention", { kind: "anchor", parent: "w", props: props({ componentKey: "intentionCore" }) }),
         node("d", "part", "Desired change", { kind: "anchor", parent: "w", props: props({ componentKey: "desiredChange" }) }),
         node("i1", "subpart", "Slow down on purpose", { parent: "i" }),
         node("i2", "subpart", "Breath as an anchor", { parent: "i" }),
-        node("i3", "subpart", "Guests choose their own pace", { kind: "caption", parent: "i" }),
-        node("d1", "subpart", "Sleep better within a week", { parent: "d" }),
-        node("d2", "subpart", "A daily 5-minute practice", { parent: "d" }),
+        node("i3", "subpart", "Guests choose their own pace", { parent: "i" }),
+        node("d1", "subpart", "Better sleep", { parent: "d" }),
+        node("d2", "subpart", "A short daily practice they keep", { parent: "d" }),
       ],
       relations: [],
     },
@@ -105,12 +107,12 @@ export const STARTER_2: AuthoredExemplar[] = [
   {
     id: "wellness-ecosystem",
     title: "Neighbourhood wellness ecosystem",
-    note: "Unproven links are dashed, mutual ones two-way, a loose association has no arrow, and the studio's main relationship is strong.",
+    note: "Because the content is how players relate, relations carry the meaning: unproven ones dashed, the mutual one two-way, a loose overlap with no arrow, the studio's main tie strong.",
     labels: ["ecosystem", "partners"],
     input: {
       type: "topic",
       title: "Neighbourhood wellness ecosystem",
-      text: "How do our studio, local therapists, the council's green spaces, a wellbeing app partner and our members relate to each other? Some of these relationships are still unproven.",
+      text: "How do our studio, local therapists, the council's green spaces, a wellbeing app partner and our members relate to each other, and where does trust come in? The green spaces and the app partner are still unproven.",
       cards: [],
     },
     graph: {
@@ -130,15 +132,15 @@ export const STARTER_2: AuthoredExemplar[] = [
         rel("th", "st", "refer clients", { direction: "both" }),
         rel("gs", "st", "hosts sessions", { style: "dashed" }),
         rel("ap", "me", "nudges", { style: "dashed" }),
-        rel("me", "tr", "builds"),
-        rel("tr", "th", "linked to", { style: "dotted", direction: "none" }),
+        rel("me", "tr", "grow"),
+        rel("ap", "th", "overlaps with", { style: "dotted", direction: "none" }),
       ],
     },
   },
   {
     id: "community-evidence",
     title: "What backs our community bet",
-    note: "Sources become links attached to the finding each one supports, and the open question stays a caption so it is not mistaken for a finding.",
+    note: "Because two cards are sources, they become links on the finding each supports, using only the URLs given; the open question stays a caption so it is not read as a finding.",
     labels: ["research", "community"],
     input: {
       type: "canvasCards",
@@ -148,8 +150,8 @@ export const STARTER_2: AuthoredExemplar[] = [
         { title: "Loneliness drives sign-ups", body: "Top reason in 40 interviews" },
         { title: "Rituals build belonging", body: "Weekly tea circle regulars" },
         { title: "Small groups retain members", body: "Under 12 feels intimate" },
-        { title: "Source: ONS wellbeing data", body: "ons.gov.uk" },
-        { title: "Source: APA on social support", body: "apa.org" },
+        { title: "Source: ONS wellbeing data", body: "https://www.ons.gov.uk" },
+        { title: "Source: APA on social support", body: "https://www.apa.org" },
         { title: "Does this hold online?", body: "Nobody has checked" },
       ],
     },
@@ -161,9 +163,9 @@ export const STARTER_2: AuthoredExemplar[] = [
         node("f1", "concept", "Loneliness drives sign-ups", { detail: "Top reason in 40 interviews" }),
         node("f2", "concept", "Rituals build belonging", { detail: "Weekly tea circle regulars" }),
         node("f3", "concept", "Small groups retain members", { detail: "Under 12 feels intimate" }),
-        node("l1", "concept", "ONS wellbeing data", { kind: "link", props: props({ url: "https://www.ons.gov.uk/peoplepopulationandcommunity/wellbeing" }) }),
-        node("l2", "concept", "APA on social support", { kind: "link", props: props({ url: "https://www.apa.org/topics/social-support" }) }),
-        node("q", "concept", "Open question: does this hold online?", { kind: "caption" }),
+        node("l1", "concept", "ONS wellbeing data", { kind: "link", props: props({ url: "https://www.ons.gov.uk" }) }),
+        node("l2", "concept", "APA on social support", { kind: "link", props: props({ url: "https://www.apa.org" }) }),
+        node("q", "concept", "Open question: does this hold online?", { kind: "caption", detail: "Nobody has checked" }),
       ],
       relations: [
         rel("f1", "f2", "leads people to"),

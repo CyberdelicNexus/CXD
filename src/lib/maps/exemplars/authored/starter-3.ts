@@ -1,6 +1,7 @@
 // Starter exemplars, part 3: colour with a legend in comparisons and quality
-// maps, a star as the goal, radial idea boards mixing tasks, links, frames and
-// a zone, an uncertain cause, and a site plan with a portal and a fork.
+// maps, a star as the goal, radial idea boards with an owned task and a
+// sourced link, an uncertain cause, and a site plan with a portal and a fork. Every fact in a graph is in its input
+// (faithful.ts).
 import type { AuthoredExemplar } from "../types";
 import { node, props, rel } from "./helpers";
 
@@ -8,12 +9,12 @@ export const STARTER_3: AuthoredExemplar[] = [
   {
     id: "popup-vs-lease",
     title: "Pop-up vs. permanent studio",
-    note: "A two-way comparison coloured by meaning, risks against opportunities, with a legend; the topics stay uncoloured because they are neither.",
+    note: "Because the ask is what each offers and what could go wrong, colour splits opportunity from risk with a legend; the two topics stay uncoloured because they are neither.",
     labels: ["space", "decision"],
     input: {
       type: "comparison",
       title: "Pop-up or permanent studio",
-      text: "Should we run a six-month pop-up in the market hall or sign a five-year lease on a permanent studio? List what each offers and what could go wrong.",
+      text: "Should we run a six-month pop-up in the market hall or sign a five-year lease on a permanent studio? The pop-up tests demand cheaply with the market's foot traffic but we'd have to move out; the lease gives us room for a sound lab but locks us into rent. List what each offers and what could go wrong.",
       cards: [],
     },
     graph: {
@@ -25,9 +26,9 @@ export const STARTER_3: AuthoredExemplar[] = [
         node("rt", "rightTopic", "Five-year lease", { kind: "bubble" }),
         node("s1", "shared", "Builds a local audience", { kind: "bubble", tint: "emerald" }),
         node("s2", "shared", "Needs a fit-out budget", { kind: "bubble", tint: "rose" }),
-        node("l1", "leftOnly", "Test demand cheaply", { kind: "bubble", tint: "emerald" }),
+        node("l1", "leftOnly", "Tests demand cheaply", { kind: "bubble", tint: "emerald" }),
         node("l2", "leftOnly", "Market foot traffic", { kind: "bubble", tint: "emerald" }),
-        node("l3", "leftOnly", "Must move out in autumn", { kind: "bubble", tint: "rose" }),
+        node("l3", "leftOnly", "Must move out", { kind: "bubble", tint: "rose" }),
         node("r1", "rightOnly", "Room for a sound lab", { kind: "bubble", tint: "emerald" }),
         node("r2", "rightOnly", "Locked into rent", { kind: "bubble", tint: "rose" }),
       ],
@@ -37,7 +38,7 @@ export const STARTER_3: AuthoredExemplar[] = [
   {
     id: "ocean-room-qualities",
     title: "What makes the ocean room unforgettable",
-    note: "Qualities are bubbles, the goal they serve is a strong star, and colour separates what visitors sense from what they feel.",
+    note: "Because the content is qualities of one room, each is a bubble around the goal they serve, a strong star; colour separates sensed from felt, as the ask requests.",
     labels: ["museum", "qualities"],
     input: {
       type: "topic",
@@ -64,12 +65,12 @@ export const STARTER_3: AuthoredExemplar[] = [
   {
     id: "remote-crew-ideas",
     title: "Keeping the remote crew engaged",
-    note: "Brainstormed ideas around one question, coloured quick win or bigger bet as asked, with the one owned action as a task and the article as a link.",
+    note: "Because the ideas circle one question, they are spokes, coloured quick win or bigger bet as asked; the one offered job is a task, and the shared page a link that informs the question.",
     labels: ["community", "ideas"],
     input: {
       type: "brainDump",
       title: "Keeping the remote crew engaged",
-      text: "between our in-person weekends people drift. ideas: monthly online listening party, a shared playlist, pairing new people with old hands (Nadia offered to run that), a small print zine twice a year (bigger job), a members' map of where everyone is, and the handbook page about async rituals that Nadia sent. quick wins first please, but mark the bigger bets.",
+      text: "between our in-person weekends people drift. ideas: monthly online listening party, a shared playlist, pairing new people with old hands (Nadia offered to run that), a small print zine twice a year (bigger job), a members' map of where everyone is. Nadia also sent a page on async rituals (https://handbook.gitlab.com/handbook/company/culture/all-remote/). quick wins first please, but mark the bigger bets.",
       cards: [],
     },
     graph: {
@@ -77,21 +78,21 @@ export const STARTER_3: AuthoredExemplar[] = [
       title: "Keeping the remote crew engaged",
       legend: [{ tint: "sunset", meaning: "Quick win" }, { tint: "ocean", meaning: "Bigger bet" }],
       nodes: [
-        node("c", "center", "Between weekends", { detail: "Keep people connected", props: props({ emoji: "🌍" }) }),
+        node("c", "center", "Between weekends", { detail: "People drift", props: props({ emoji: "🌍" }) }),
         node("b1", "branch", "Monthly listening party", { tint: "sunset", props: props({ emoji: "🎧" }) }),
         node("b2", "branch", "Shared playlist", { tint: "sunset" }),
         node("b3", "branch", "Pair newcomers with old hands", { kind: "task", tint: "sunset", props: props({ owner: "Nadia" }) }),
         node("b4", "branch", "Print zine, twice a year", { tint: "ocean" }),
-        node("b5", "branch", "Members' map", { tint: "ocean", detail: "Where everyone lives and works" }),
-        node("b6", "branch", "Async rituals handbook", { kind: "link", props: props({ url: "https://handbook.gitlab.com/handbook/company/culture/all-remote/" }) }),
+        node("b5", "branch", "Members' map", { tint: "ocean", detail: "Where everyone is" }),
+        node("b6", "branch", "Async rituals page", { kind: "link", props: props({ url: "https://handbook.gitlab.com/handbook/company/culture/all-remote/" }) }),
       ],
-      relations: [],
+      relations: [rel("b6", "c", "informs")],
     },
   },
   {
     id: "studio-launch",
     title: "Studio launch",
-    note: "Launch cards around a hexagon building block: the press kit is a zone to fill, the opening night a frame, the booking page a link and the flyer drop a task.",
+    note: "Because the press kit is pieces to gather it is a zone, the opening night is a scene so a frame, and the flyer drop and booking page are jobs, so tasks; each card body is kept.",
     labels: ["launch"],
     input: {
       type: "canvasCards",
@@ -101,7 +102,7 @@ export const STARTER_3: AuthoredExemplar[] = [
         { title: "Press kit", body: "Photos, founder story, price list" },
         { title: "Opening night", body: "Candlelit sound bath for 40" },
         { title: "Launch post", body: "Instagram carousel" },
-        { title: "Neighbour flyers", body: "Leo drops 500 in the street" },
+        { title: "Neighbour flyers", body: "Femi drops 500 in the street" },
         { title: "Booking page", body: "Live a week before" },
       ],
     },
@@ -110,12 +111,12 @@ export const STARTER_3: AuthoredExemplar[] = [
       title: "Studio launch",
       legend: [],
       nodes: [
-        node("c", "center", "Opening week", { kind: "shape", props: props({ shapeType: "hexagon" }) }),
+        node("c", "center", "Opening week", { props: props({ emoji: "🗝️" }) }),
         node("b1", "branch", "Press kit", { kind: "zone", detail: "Photos, founder story, price list" }),
-        node("b2", "branch", "Opening night", { kind: "frame", props: props({ storyboard: true, description: "Candlelit sound bath for 40" }) }),
+        node("b2", "branch", "Opening night", { kind: "frame", detail: "Candlelit sound bath for 40", props: props({ storyboard: true, description: "Candlelit sound bath for 40" }) }),
         node("b3", "branch", "Launch post", { detail: "Instagram carousel", props: props({ emoji: "📣" }) }),
-        node("b4", "branch", "Drop 500 neighbour flyers", { kind: "task", props: props({ owner: "Leo" }) }),
-        node("b5", "branch", "Booking page", { kind: "link", detail: "Live a week before", props: props({ url: "https://example.com/book" }) }),
+        node("b4", "branch", "Drop 500 neighbour flyers", { kind: "task", detail: "Femi drops 500 in the street", props: props({ owner: "Femi" }) }),
+        node("b5", "branch", "Put booking page live", { kind: "task", detail: "Live a week before" }),
       ],
       relations: [],
     },
@@ -123,12 +124,12 @@ export const STARTER_3: AuthoredExemplar[] = [
   {
     id: "tea-ceremony-senses",
     title: "Morning tea ceremony, by sense",
-    note: "Sensory cards become qualities around the ritual, coloured by the sense they reach, with a legend so the palette reads at a glance.",
+    note: "Because every card is a quality of one ritual, each is a bubble around it, coloured by the sense it reaches with a legend; card titles stay as labels and bodies as detail.",
     labels: ["ritual", "senses"],
     input: {
       type: "canvasCards",
       title: "Tea ceremony cards",
-      text: "Sort these cards for the morning tea ceremony by the sense each one reaches.",
+      text: "Describe the morning tea ceremony through these cards: each one is a quality of the ritual. Mark which sense each reaches: sound, touch, taste or sight.",
       cards: [
         { title: "Steam rising", body: "From the kettle" },
         { title: "Bamboo whisk", body: "Soft rhythmic sound" },
@@ -141,15 +142,18 @@ export const STARTER_3: AuthoredExemplar[] = [
     graph: {
       mapType: "bubble",
       title: "Morning tea ceremony, by sense",
-      legend: [{ tint: "glacier", meaning: "Sound" }, { tint: "sunset", meaning: "Touch and taste" }, { tint: "rose", meaning: "Sight" }],
+      legend: [
+        { tint: "glacier", meaning: "Sound" }, { tint: "sunset", meaning: "Touch" },
+        { tint: "rose", meaning: "Taste" }, { tint: "emerald", meaning: "Sight" },
+      ],
       nodes: [
         node("c", "center", "Morning tea ceremony", { props: props({ emoji: "🍵" }) }),
-        node("q1", "quality", "Bamboo whisk rhythm", { kind: "bubble", tint: "glacier" }),
-        node("q2", "quality", "Birdsong fade-out", { kind: "bubble", tint: "glacier" }),
-        node("q3", "quality", "Bitter first sip", { kind: "bubble", tint: "sunset" }),
-        node("q4", "quality", "Cool stone underfoot", { kind: "bubble", tint: "sunset" }),
-        node("q5", "quality", "Steam rising", { kind: "bubble", tint: "rose" }),
-        node("q6", "quality", "Lantern glow", { kind: "bubble", tint: "rose" }),
+        node("q1", "quality", "Bamboo whisk", { kind: "bubble", tint: "glacier", detail: "Soft rhythmic sound" }),
+        node("q2", "quality", "Birdsong recording", { kind: "bubble", tint: "glacier", detail: "Fades in at the end" }),
+        node("q3", "quality", "Cool stone floor", { kind: "bubble", tint: "sunset", detail: "Bare feet" }),
+        node("q4", "quality", "Matcha bitterness", { kind: "bubble", tint: "rose", detail: "The first sip" }),
+        node("q5", "quality", "Steam rising", { kind: "bubble", tint: "emerald", detail: "From the kettle" }),
+        node("q6", "quality", "Paper lantern light", { kind: "bubble", tint: "emerald", detail: "Soft and low" }),
       ],
       relations: [],
     },
@@ -157,12 +161,12 @@ export const STARTER_3: AuthoredExemplar[] = [
   {
     id: "venue-cancellation",
     title: "If the venue cancels",
-    note: "A rumour is a caption with a dashed link because it is uncertain; the effects we must act on are tasks with owners.",
+    note: "Because the ask is what could cause one event and what follows, it is causes and consequences; the rumour is a card on a dashed link, and what someone must handle is a task.",
     labels: ["risk", "event"],
     input: {
       type: "comparison",
       title: "Venue cancellation: causes and knock-ons",
-      text: "What could cause our venue to cancel the autumn gathering, and what would that lead to? Include what we'd need to do if it happens. Ivy handles guests, Sam handles venues.",
+      text: "What could make our venue cancel the autumn gathering, and what would follow? It's our only venue option, we paid the deposit late, and there's a rumour the owner may sell the building. If it happens guests will want refunds, every ticket holder needs a call, and we'd need a backup venue. Lena handles guests, Omar handles venues.",
       cards: [],
     },
     graph: {
@@ -170,13 +174,13 @@ export const STARTER_3: AuthoredExemplar[] = [
       title: "If the venue cancels",
       legend: [],
       nodes: [
-        node("k1", "cause", "Single venue option", { detail: "Nothing else in town fits 120" }),
-        node("k2", "cause", "Late deposit", { detail: "Paid two weeks after the deadline" }),
-        node("k3", "cause", "Owner may sell the building (rumour)", { kind: "caption" }),
+        node("k1", "cause", "Our only venue option"),
+        node("k2", "cause", "Deposit paid late"),
+        node("k3", "cause", "Owner may sell the building", { detail: "Only a rumour" }),
         node("ev", "event", "Venue cancels", { emphasis: "strong", props: props({ emoji: "⚠️" }) }),
-        node("e1", "effect", "Refund requests"),
-        node("e2", "effect", "Call every ticket holder", { kind: "task", props: props({ owner: "Ivy" }) }),
-        node("e3", "effect", "Shortlist two backup venues", { kind: "task", props: props({ owner: "Sam" }) }),
+        node("e1", "effect", "Guests want refunds"),
+        node("e2", "effect", "Every ticket holder needs a call", { kind: "task", props: props({ owner: "Lena" }) }),
+        node("e3", "effect", "We need a backup venue", { kind: "task", props: props({ owner: "Omar" }) }),
       ],
       relations: [
         rel("k1", "ev"),
@@ -191,12 +195,12 @@ export const STARTER_3: AuthoredExemplar[] = [
   {
     id: "festival-site",
     title: "Listening festival site",
-    note: "A site plan where the stages are a portal (too big for this map), food is a zone to sketch in, safety sits under a heading and the late-night question is a fork.",
+    note: "Because each stage needs its own plan, stages are a portal; food and safety are regions, so headings over their parts; the vendor layout is a zone to sketch, the late-night question a fork.",
     labels: ["festival", "site plan"],
     input: {
       type: "topic",
       title: "Festival site plan",
-      text: "Plan the site for a two-day listening festival: stages, food, safety and the late-night decision about the silent disco.",
+      text: "Plan the site for our two-day listening festival. Three stages (main, forest and dome) each need their own layout. Food: vegan and gluten-free vendors plus water refills, and I want to sketch where the vendors go. Safety covers a medical tent, gate security and a fire marshal walkthrough. Open decision: does the silent disco run after 11? Only if the permit allows it.",
       cards: [],
     },
     graph: {
@@ -204,17 +208,18 @@ export const STARTER_3: AuthoredExemplar[] = [
       title: "Listening festival site",
       legend: [],
       nodes: [
-        node("c", "center", "Festival site", { props: props({ emoji: "🎪" }) }),
-        node("b1", "branch", "Stages", { kind: "portal", parent: "c", detail: "Main, forest and dome stages", props: props({ icon: "grid" }) }),
-        node("b2", "branch", "Food court", { kind: "zone", parent: "c", detail: "Sketch the vendor layout here" }),
+        node("c", "center", "Festival site", { detail: "Two days", props: props({ emoji: "🎪" }) }),
+        node("b1", "branch", "Stages", { kind: "portal", parent: "c", detail: "Main, forest and dome, each with its own layout", props: props({ icon: "grid" }) }),
+        node("b2", "branch", "Food", { kind: "heading", parent: "c" }),
         node("b3", "branch", "Safety", { kind: "heading", parent: "c" }),
         node("b4", "branch", "Silent disco after 11?", { kind: "waypoint", parent: "c", emphasis: "strong", props: props({ shapeType: "diamond" }) }),
-        node("f1", "leaf", "Twelve vendors", { parent: "b2", detail: "Vegan and gluten-free options" }),
-        node("f2", "leaf", "Water refill points", { parent: "b2" }),
+        node("f1", "leaf", "Vegan and gluten-free vendors", { parent: "b2" }),
+        node("f2", "leaf", "Water refills", { parent: "b2" }),
+        node("f3", "leaf", "Vendor layout", { kind: "zone", parent: "b2", detail: "Sketch where the vendors go" }),
         node("s1", "leaf", "Medical tent", { parent: "b3" }),
         node("s2", "leaf", "Gate security", { parent: "b3" }),
-        node("s3", "leaf", "Fire marshal walkthrough", { kind: "task", parent: "b3", props: props({ owner: "Site lead" }) }),
-        node("d1", "leaf", "Yes: headphones at the dome", { parent: "b4" }),
+        node("s3", "leaf", "Fire marshal walkthrough", { parent: "b3" }),
+        node("d1", "leaf", "Yes: the disco runs late", { parent: "b4" }),
         node("d2", "leaf", "No: close at 11", { parent: "b4" }),
       ],
       relations: [rel("b4", "d1", "if permit"), rel("b4", "d2", "if not")],

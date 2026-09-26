@@ -16,23 +16,23 @@ const check = (name: string, cond: boolean) => {
 interface Expect { id: string; mapType: MapType; inputType: ExemplarInputType; kinds: NodeKind[]; pairings: PairingId[] }
 
 const EXPECTED: Expect[] = [
-  { id: "retreat-weekend", mapType: "spider", inputType: "brainDump", kinds: ["card", "task", "table", "heading", "caption"], pairings: ["headingsRegions"] },
+  { id: "retreat-weekend", mapType: "spider", inputType: "brainDump", kinds: ["card", "task", "table", "heading"], pairings: ["headingsRegions"] },
   { id: "pass-pricing-tiers", mapType: "tree", inputType: "comparison", kinds: ["card", "task", "portal", "table", "zone"], pairings: ["zoneTableCards", "treePortal"] },
   { id: "membership-churn", mapType: "multiFlow", inputType: "brainDump", kinds: ["card"], pairings: [] },
   { id: "rooftop-go-no-go", mapType: "tree", inputType: "brainDump", kinds: ["card", "task", "waypoint", "caption"], pairings: ["waypointBranches"] },
   { id: "ocean-room-scenes", mapType: "flow", inputType: "topic", kinds: ["task", "frame"], pairings: ["framesToTask"] },
-  { id: "onboarding-path", mapType: "flow", inputType: "canvasCards", kinds: ["card", "waypoint", "shape"], pairings: ["strongMainPath", "starGoal"] },
+  { id: "onboarding-path", mapType: "flow", inputType: "canvasCards", kinds: ["waypoint", "shape"], pairings: ["strongMainPath", "starGoal"] },
   { id: "sprint-day-owners", mapType: "brace", inputType: "brainDump", kinds: ["card", "task", "heading"], pairings: ["headingsRegions"] },
-  { id: "retreat-purpose", mapType: "brace", inputType: "topic", kinds: ["card", "anchor", "caption"], pairings: ["twoAnchors"] },
+  { id: "retreat-purpose", mapType: "brace", inputType: "topic", kinds: ["card", "anchor"], pairings: ["twoAnchors"] },
   { id: "wellness-ecosystem", mapType: "conceptMap", inputType: "topic", kinds: ["card", "bubble"], pairings: ["conceptMapDashedTwoWay"] },
   { id: "community-evidence", mapType: "conceptMap", inputType: "canvasCards", kinds: ["card", "link", "caption"], pairings: ["linksSupportIdeas"] },
   { id: "popup-vs-lease", mapType: "doubleBubble", inputType: "comparison", kinds: ["bubble"], pairings: ["doubleBubbleLegend"] },
   { id: "ocean-room-qualities", mapType: "bubble", inputType: "topic", kinds: ["bubble", "shape"], pairings: ["starGoal"] },
   { id: "remote-crew-ideas", mapType: "radial", inputType: "brainDump", kinds: ["card", "task", "link"], pairings: [] },
-  { id: "studio-launch", mapType: "radial", inputType: "canvasCards", kinds: ["card", "task", "shape", "frame", "link", "zone"], pairings: [] },
+  { id: "studio-launch", mapType: "radial", inputType: "canvasCards", kinds: ["card", "task", "frame", "zone"], pairings: [] },
   { id: "tea-ceremony-senses", mapType: "bubble", inputType: "canvasCards", kinds: ["card", "bubble"], pairings: [] },
-  { id: "venue-cancellation", mapType: "multiFlow", inputType: "comparison", kinds: ["card", "task", "caption"], pairings: [] },
-  { id: "festival-site", mapType: "spider", inputType: "topic", kinds: ["card", "task", "waypoint", "portal", "heading", "zone"], pairings: ["waypointBranches"] },
+  { id: "venue-cancellation", mapType: "multiFlow", inputType: "comparison", kinds: ["card", "task"], pairings: [] },
+  { id: "festival-site", mapType: "spider", inputType: "topic", kinds: ["card", "waypoint", "portal", "heading", "zone"], pairings: ["waypointBranches", "headingsRegions"] },
 ];
 
 for (const e of EXPECTED) {
