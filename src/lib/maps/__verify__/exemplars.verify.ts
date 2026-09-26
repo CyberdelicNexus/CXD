@@ -7,9 +7,11 @@ import { CORPUS } from "@/lib/lab/corpus";
 import { EXEMPLARS } from "../exemplars";
 import { COVERAGE_MINIMUMS, coverageGaps, coverageOf } from "../exemplars/coverage";
 import { deriveTags } from "../exemplars/derive";
+import { faithfulnessProblems, numberTokens } from "../exemplars/faithful";
 import { closestCorpusClash, jaccard, MAX_INPUT_SIMILARITY, tooClose, trigrams } from "../exemplars/similarity";
 import type { Exemplar } from "../exemplars/types";
 import { exemplarProblems } from "../exemplars/validate";
+import type { MapGraph } from "../types";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -32,6 +34,36 @@ for (const ex of EXEMPLARS) {
   check(`${ex.id}: provenance is recorded`, ex.provenance.source === "authored" || ex.provenance.source === "promoted");
   const clash = closestCorpusClash(ex.input, CORPUS, ex.provenance.inputId);
   check(`${ex.id}: not too close to any corpus input${clash ? `: ${clash}` : ""}`, clash === null);
+}
+
+// Faithfulness rule self-tests (faithful.ts).
+{
+  const g = (label: string, extra: Partial<MapGraph["nodes"][number]> = {}): MapGraph => ({
+    mapType: "radial", title: "T", legend: [], relations: [],
+    nodes: [{ id: "c", label, detail: "", role: "center", kind: "card", parent: "", props: "{}", tint: "", emphasis: "normal", ...extra }],
+  });
+  const inp = (text: string, cards: { title: string; body: string }[] = []) => ({ title: "In", text, cards });
+  check("faithful: a number from the input passes, with currency and percent", faithfulnessProblems(inp("costs 4,200 and 15% off"), g("€4200 at 15%")).length === 0);
+  check("faithful: an invented number fails", faithfulnessProblems(inp("about twenty guests"), g("18 guests")).length === 1);
+  check("faithful: decimals must match exactly", faithfulnessProblems(inp("18 a visit"), g("18.00 a visit")).length === 1);
+  check("faithful: numbers in detail, legend and relation labels are checked", faithfulnessProblems(inp("x"),
+    { ...g("A", { detail: "9:30" }), legend: [{ tint: "rose", meaning: "Top 3" }], relations: [{ from: "c", to: "c", label: "in 2 days", style: "solid", weight: "normal", direction: "forward" }] }).length === 4);
+  check("faithful: table cells are checked", faithfulnessProblems(inp("7 days"),
+    g("T", { kind: "table", props: JSON.stringify({ cells: [["Tier", "Window"], ["A", "7 days"], ["B", "14 days"]], headerRow: true }) })).length === 1);
+  check("faithful: header-row ordinals 1 to 10 are allowed", faithfulnessProblems(inp("compare them"),
+    g("T", { kind: "table", props: JSON.stringify({ cells: [["Option 1", "Option 2"], ["a", "b"]], headerRow: true }) })).length === 0);
+  check("faithful: the same ordinal in a body row is not", faithfulnessProblems(inp("compare them"),
+    g("T", { kind: "table", props: JSON.stringify({ cells: [["A", "B"], ["Option 1", "b"]], headerRow: true }) })).length === 1);
+  check("faithful: a number inside a word from the input is allowed", faithfulnessProblems(inp("the Q3 launch"), g("Q3 launch")).length === 0);
+  check("faithful: a number inside a new word is not", faithfulnessProblems(inp("the launch"), g("Q3 launch")).length === 1);
+  check("faithful: emoji and other decoration props are not read", faithfulnessProblems(inp("x"), g("A", { props: JSON.stringify({ emoji: "1️⃣" }) })).length === 0);
+  check("faithful: a URL must be in the input verbatim", faithfulnessProblems(inp("see ons.gov.uk"),
+    g("A", { kind: "link", props: JSON.stringify({ url: "https://www.ons.gov.uk/wellbeing" }) })).length === 1);
+  check("faithful: a URL given in a card passes, and its digits do not count as numbers", faithfulnessProblems(inp("x", [{ title: "Src", body: "https://example.org/2024/report" }]),
+    g("A", { kind: "link", props: JSON.stringify({ url: "https://example.org/2024/report" }) })).length === 0);
+  check("faithful: a deeper path than the one given fails", faithfulnessProblems(inp("https://www.apa.org"),
+    g("A", { kind: "link", props: JSON.stringify({ url: "https://www.apa.org/topics/social-support" }) })).length === 1);
+  check("faithful: number tokens keep separators and skip URLs", numberTokens("4,200 and 12.25 at https://a.b/9").join("|") === "4,200|12.25");
 }
 
 // The similarity rule itself.
