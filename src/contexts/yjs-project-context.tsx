@@ -90,6 +90,12 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
 
   const currentProjectId = useCXDStore((s) => s.currentProjectId);
   const getCurrentProject = useCXDStore((s) => s.getCurrentProject);
+  // On a page reload currentProjectId rehydrates from localStorage before the
+  // project itself is fetched, so the init effect below would bail on "no
+  // project" and never re-run. Depending on this flag re-runs it on arrival.
+  const currentProjectLoaded = useCXDStore((s) =>
+    s.projects.some((p) => p.id === s.currentProjectId && !(p as any)._listingOnly),
+  );
   const setYDoc = useCXDStore((s) => s.setYDoc);
 
   const createAutoSnapshot = useCallback(async (label: string, minIntervalMs = 300000) => {
@@ -120,7 +126,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     cleanup();
 
     const project = getCurrentProject();
-    if (!project) return;
+    if (!project || (project as any)._listingOnly) return;
 
 
     // Create new Y.Doc
@@ -295,7 +301,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProjectId]);
+  }, [currentProjectId, currentProjectLoaded]);
 
   function cleanup() {
     // Clear auto-snapshot timer

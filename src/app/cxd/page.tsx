@@ -6,7 +6,7 @@ import { useCXDStore, type ViewMode } from "@/store/cxd-store";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
 import { useProjectSync, getLocalBackup, clearLocalBackup } from "@/hooks/use-project-sync";
 import { useCanvasPermissions } from "@/hooks/use-canvas-permissions";
-import { fetchUserProjects, saveProject } from "@/lib/supabase-projects";
+import { fetchUserProjects, fetchProjectById, saveProject } from "@/lib/supabase-projects";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 import { CollaborationProvider } from "@/contexts/collaboration-context";
@@ -90,6 +90,7 @@ export default function CXDPage() {
     projects,
     setProjects,
     canvasViewMode,
+    canvasFocusMode,
     addCanvasElement,
     updateCanvasElement,
     removeCanvasElement,
@@ -146,6 +147,9 @@ export default function CXDPage() {
   }, [accessLoading, canvasAccess, currentProjectId, router]);
 
   const [isRestoring, setIsRestoring] = useState(true);
+  // True once the restore fetch has actually finished (the 5s failsafe below can
+  // clear isRestoring earlier, while the fetch is still in flight).
+  const [restoreSettled, setRestoreSettled] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   // Track minimum loading time so LoadingScreen doesn't flash
@@ -400,6 +404,7 @@ export default function CXDPage() {
 
         // Show canvas immediately
         setIsRestoring(false);
+        setRestoreSettled(true);
 
         // Verify auth in background; expired sessions redirect on next interaction
         supabase.auth.getUser().then(({ data: { user }, error }) => {
@@ -421,9 +426,35 @@ export default function CXDPage() {
           return;
         }
 
-        // If we have a currentProjectId but no projects loaded, restore from database
+        // If we have a currentProjectId but no projects loaded, restore from database.
+        // Fetch only the open project (one row) on the critical path so the canvas
+        // can render; the full project list is loaded in the background below.
         if (currentProjectId && projects.length === 0) {
-          const userProjects = await fetchUserProjects(user.id);
+          let openProject = await fetchProjectById(currentProjectId);
+          if (!openProject) {
+            // Fallback: API route (admin client) also resolves collaborator projects
+            try {
+              const res = await fetch('/api/projects');
+              if (res.ok) {
+                const data = await res.json();
+                openProject = data.projects?.find((p: any) => p.id === currentProjectId && !p._listingOnly) || null;
+              }
+            } catch {}
+          }
+          const userProjects = openProject ? [openProject] : [];
+
+          fetchUserProjects(user.id)
+            .then((all) => {
+              const { projects: loaded, setProjects: set } = useCXDStore.getState();
+              // Keep the already-loaded (possibly edited) project objects as-is
+              const byId = new Map(loaded.map((p) => [p.id, p]));
+              const merged = all.map((p) => byId.get(p.id) ?? p);
+              loaded.forEach((p) => {
+                if (!merged.some((m) => m.id === p.id)) merged.push(p);
+              });
+              set(merged);
+            })
+            .catch((err) => console.warn('[CXD] Background project list fetch failed:', err));
 
           // Check for localStorage backup before setting projects
           const backup = getLocalBackup();
@@ -478,6 +509,7 @@ export default function CXDPage() {
         console.error('[CXD] Error restoring project state:', err);
       } finally {
         setIsRestoring(false);
+        setRestoreSettled(true);
       }
     };
 
@@ -499,6 +531,18 @@ export default function CXDPage() {
       router.replace("/dashboard");
     }
   }, [isRestoring, hasHydrated, currentProjectId, router]);
+
+  // The restore finished but the open project wasn't found (deleted, access
+  // revoked, fetch failed): leave rather than sit on the loader forever.
+  const currentProjectLoaded = useCXDStore((s) =>
+    s.projects.some((p) => p.id === s.currentProjectId && !(p as any)._listingOnly),
+  );
+  useEffect(() => {
+    if (restoreSettled && hasHydrated && currentProjectId && !currentProjectLoaded) {
+      console.warn('[CXD] Open project could not be loaded, redirecting to dashboard');
+      router.replace("/dashboard");
+    }
+  }, [restoreSettled, hasHydrated, currentProjectId, currentProjectLoaded, router]);
 
   // Failsafe: if loading takes too long, force show content
   useEffect(() => {
@@ -594,15 +638,20 @@ export default function CXDPage() {
 
   // Create a unique key for the current view to trigger transitions (only for wizard and plan)
   const viewKey = `${viewMode}-${canvasViewMode}`;
+  // Keep the loading screen up until the project itself is in the store, not just
+  // until the restore flag clears — otherwise a slow fetch shows an empty shell.
+  const needsProject = viewMode !== "home";
+  const showLoader = isRestoring || !minLoadTimePassed || (needsProject && !currentProjectLoaded);
+  const hideNavbar = canvasFocusMode && viewMode === "canvas" && canvasViewMode === "canvas";
   const shouldAnimate = viewMode === "wizard" || (viewMode === "canvas" && canvasViewMode === "plan");
 
   return (
     <YjsProjectProvider>
     <CollaborationProvider onRemoteUpdate={handleRemoteUpdate}>
       <div className="min-h-screen bg-gradient-radial">
-        {!isRestoring && minLoadTimePassed && <CXDNavbar />}
-        <main className={!isRestoring && minLoadTimePassed ? "pt-20" : ""}>
-          {isRestoring || !minLoadTimePassed ? (
+        {!showLoader && !hideNavbar && <CXDNavbar />}
+        <main className={!showLoader && !hideNavbar ? "pt-20" : ""}>
+          {showLoader ? (
             <ViewSkeleton />
           ) : (
             <div

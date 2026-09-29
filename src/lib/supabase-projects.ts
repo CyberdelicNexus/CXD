@@ -16,6 +16,10 @@ export interface DbCXDProject {
   updated_at: string;
 }
 
+// Explicit columns: never pull `yjs_state` (a large base64 blob per project) into
+// project listings. SupabasePersistence.load() fetches it for the open project only.
+const PROJECT_COLUMNS = 'id, owner_id, name, description, project_data, share_token, created_at, updated_at';
+
 export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
   const supabase = createClient();
 
@@ -26,7 +30,7 @@ export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
   ] = await Promise.all([
     supabase
       .from('cxd_projects')
-      .select('*')
+      .select(PROJECT_COLUMNS)
       .eq('owner_id', userId)
       .order('updated_at', { ascending: false }),
     supabase
@@ -46,7 +50,7 @@ export async function fetchUserProjects(userId: string): Promise<CXDProject[]> {
   if (collabCanvasIds.length > 0) {
     const { data: collabProjects, error: collabProjectsError } = await supabase
       .from('cxd_projects')
-      .select('*')
+      .select(PROJECT_COLUMNS)
       .in('id', collabCanvasIds)
       .neq('owner_id', userId) // Exclude owned projects to avoid duplicates
       .order('updated_at', { ascending: false });
@@ -393,7 +397,7 @@ export async function fetchProjectById(projectId: string): Promise<CXDProject | 
   const supabase = createClient();
   const { data, error } = await supabase
     .from('cxd_projects')
-    .select('*')
+    .select(PROJECT_COLUMNS)
     .eq('id', projectId)
     .single();
 
