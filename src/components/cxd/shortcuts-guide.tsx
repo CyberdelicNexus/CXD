@@ -24,6 +24,7 @@ const SHORTCUTS: ShortcutItem[] = [
       { keys: ["Middle Mouse", "+", "Drag"], description: "Pan canvas" },
       { keys: ["Right Click"], description: "Context menu" },
       { keys: ["Esc"], description: "Cancel current action" },
+      { keys: ["Ctrl/Cmd", "+", "."], description: "Toggle focus mode (hide all UI)" },
     ],
   },
   {

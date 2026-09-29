@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip, Focus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface NavigationToolkitProps {
@@ -17,6 +17,7 @@ export interface NavigationToolkitProps {
   gridVisible?: boolean;
   gridMajorDots?: boolean;
   onCycleGrid?: () => void;
+  onEnterFocusMode?: () => void;
 }
 
 export function NavigationToolkit({
@@ -34,6 +35,7 @@ export function NavigationToolkit({
   gridVisible,
   gridMajorDots,
   onCycleGrid,
+  onEnterFocusMode,
 }: NavigationToolkitProps) {
   return (
     // Vertically centered on the page regardless of viewport height (top-1/2 +
@@ -110,6 +112,17 @@ export function NavigationToolkit({
       >
         <Grid3X3 className="w-4 h-4" />
       </Button>
+      {onEnterFocusMode && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onEnterFocusMode}
+          className="bg-card/80 backdrop-blur border border-border"
+          title="Focus Mode: hide all UI (Ctrl/Cmd + .)"
+        >
+          <Focus className="w-4 h-4" />
+        </Button>
+      )}
 
       {onUndo && (
         <Button

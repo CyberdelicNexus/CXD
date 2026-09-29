@@ -10,13 +10,14 @@ import { CanvasToolkit } from "./canvas/canvas-toolkit";
 import { CanvasElementRenderer } from "./canvas/canvas-element";
 import { canResizeFreeformCard, sanitizeFreeformResizeUpdate } from "./canvas/card-type-utils";
 import { ExperienceInspector } from "./canvas/experience-inspector";
+import { PinnedInboxNote } from "./canvas/pinned-inbox-note";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
 import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
 import { CanvasAssistant } from "./canvas/canvas-assistant";
 import { MultiSelectionBox } from "./canvas/multi-selection-box";
 import { Button } from "@/components/ui/button";
-import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid, SmilePlus } from "lucide-react";
+import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid, SmilePlus, Minimize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   CanvasElement,
@@ -433,6 +434,7 @@ export function CXDCanvas() {
     setCanvasViewMode,
     addCanvasElement,
     addCanvasElements,
+    addCanvasEdges,
     updateCanvasElement,
     removeCanvasElement,
     getCanvasElements,
@@ -471,6 +473,8 @@ export function CXDCanvas() {
     showResolvedComments,
     setActiveComment,
     getThreads,
+    canvasFocusMode,
+    setCanvasFocusMode,
   } = useCXDStore();
 
   const project = getCurrentProject();
@@ -532,6 +536,84 @@ export function CXDCanvas() {
     addCanvasEdge(edge);
     broadcastUpdate({ type: 'edge_add', edge });
   }, [addCanvasEdge, broadcastUpdate, canEdit]);
+
+  // Duplicate a set of elements in ONE batched insert (addCanvasElements), so the
+  // copies land in Zustand in the same tick as the new selection. Looping
+  // syncAddElement left the selection pointing at ids the store didn't have yet
+  // for a frame. A multi-selection shifts as a whole (arrangement kept), group
+  // and container links are remapped inside the copy, and connections whose
+  // both endpoints were duplicated are duplicated too. Returns the new ids.
+  const duplicateElements = useCallback((ids: Iterable<string>): string[] => {
+    if (!canEdit) return [];
+    const all = getCanvasElements();
+    const idSet = new Set(ids);
+    const sources = all.filter((el) => idSet.has(el.id));
+    if (sources.length === 0) return [];
+
+    let dx: number;
+    let dy: number;
+    if (sources.length === 1) {
+      ({ dx, dy } = getDuplicateOffset(sources[0]));
+    } else {
+      const minX = Math.min(...sources.map((el) => el.x));
+      const maxX = Math.max(...sources.map((el) => el.x + (el.width || 0)));
+      dx = maxX - minX + 24;
+      dy = 0;
+    }
+
+    const idRemap = new Map<string, string>();
+    sources.forEach((el) => idRemap.set(el.id, uuidv4()));
+    const groupIdRemap = new Map<string, string>();
+    let maxZ = Math.max(0, ...all.map((el) => el.zIndex || 0));
+    const shift = (p?: { x: number; y: number }) => (p ? { x: p.x + dx, y: p.y + dy } : p);
+
+    const clones: CanvasElement[] = sources.map((el) => {
+      const cloned = (typeof structuredClone === "function"
+        ? structuredClone(el)
+        : JSON.parse(JSON.stringify(el))) as CanvasElement;
+      const anyClone = cloned as any;
+      anyClone.id = idRemap.get(el.id)!;
+      anyClone.x = el.x + dx;
+      anyClone.y = el.y + dy;
+      anyClone.zIndex = ++maxZ;
+      if (anyClone.groupId && sources.length > 1) {
+        if (!groupIdRemap.has(anyClone.groupId)) groupIdRemap.set(anyClone.groupId, uuidv4());
+        anyClone.groupId = groupIdRemap.get(anyClone.groupId);
+      } else {
+        anyClone.groupId = undefined;
+      }
+      if (anyClone.containerId && idRemap.has(anyClone.containerId)) {
+        anyClone.containerId = idRemap.get(anyClone.containerId);
+      }
+      if (cloned.type === "line") {
+        anyClone.start = shift(anyClone.start);
+        anyClone.end = shift(anyClone.end);
+        anyClone.bend = shift(anyClone.bend);
+      }
+      if (cloned.type === "connector") {
+        if (idRemap.has(anyClone.fromNodeId)) anyClone.fromNodeId = idRemap.get(anyClone.fromNodeId);
+        if (idRemap.has(anyClone.toNodeId)) anyClone.toNodeId = idRemap.get(anyClone.toNodeId);
+      }
+      return cloned;
+    });
+
+    const edgeClones: CanvasEdge[] = getCanvasEdges()
+      .filter((edge) => idRemap.has(edge.fromNodeId) && idRemap.has(edge.toNodeId))
+      .map((edge) => ({
+        ...(typeof structuredClone === "function" ? structuredClone(edge) : JSON.parse(JSON.stringify(edge))),
+        id: uuidv4(),
+        fromNodeId: idRemap.get(edge.fromNodeId)!,
+        toNodeId: idRemap.get(edge.toNodeId)!,
+        bend: shift(edge.bend),
+      }));
+
+    // addCanvasElements pushes history itself; addCanvasEdges joins that entry.
+    addCanvasElements(clones);
+    addCanvasEdges(edgeClones);
+    clones.forEach((el) => broadcastUpdate({ type: "element_add", element: el }));
+    edgeClones.forEach((edge) => broadcastUpdate({ type: "edge_add", edge }));
+    return clones.map((el) => el.id);
+  }, [canEdit, getCanvasElements, getCanvasEdges, addCanvasElements, addCanvasEdges, broadcastUpdate]);
 
   // Gradient for a NEW connector: if either endpoint already has connectors,
   // continue THEIR gradient family so a chain reads as one flow (the user can
@@ -2437,68 +2519,121 @@ export function CXDCanvas() {
   const moveElementsIntoBoard = useCallback(
     (ids: string[], childBoardId: string, mode: "keep" | "distribute") => {
       const els = getCanvasElements();
-      const movable = ids
-        .map((id) => els.find((e) => e.id === id))
+      const byId = new Map(els.map((el) => [el.id, el]));
+      const picked = ids
+        .map((id) => byId.get(id))
         .filter((el): el is CanvasElement => !!el && el.type !== "board");
-      if (movable.length === 0) return;
+      if (picked.length === 0) return;
+
+      // A container travels with everything nested in it.
+      const movedIds = new Set(picked.map((el) => el.id));
+      picked.forEach((el) => {
+        if (el.type === "container") getContainerDescendantIds(el.id, els).forEach((id) => movedIds.add(id));
+      });
+      const moved = els.filter((el) => movedIds.has(el.id) && el.type !== "board");
+      // Roots are placed; nested elements follow their root container's offset.
+      const roots = moved.filter((el) => !el.containerId || !movedIds.has(el.containerId));
+      const rootOf = (el: CanvasElement): CanvasElement => {
+        let cur = el;
+        while (cur.containerId && movedIds.has(cur.containerId)) cur = byId.get(cur.containerId)!;
+        return cur;
+      };
 
       type Rect = { x: number; y: number; width: number; height: number };
       const MARGIN = 32;
       const START_X = 80;
       const START_Y = 80;
+      const deltas = new Map<string, { dx: number; dy: number }>();
 
       if (mode === "keep") {
         // Preserve relative positions: translate the whole group so its top-left
         // lands at (START_X, START_Y) in the board's coordinate space.
-        const minX = Math.min(...movable.map((el) => el.x));
-        const minY = Math.min(...movable.map((el) => el.y));
-        movable.forEach((el) => {
-          updateCanvasElement(el.id, {
-            boardId: childBoardId,
-            x: START_X + (el.x - minX),
-            y: START_Y + (el.y - minY),
-          });
+        const minX = Math.min(...roots.map((el) => el.x));
+        const minY = Math.min(...roots.map((el) => el.y));
+        roots.forEach((el) => deltas.set(el.id, { dx: START_X - minX, dy: START_Y - minY }));
+      } else {
+        // distribute → grid of empty slots that avoids existing board content.
+        const occupied: Rect[] = els
+          .filter((el) => el.boardId === childBoardId && el.type !== "line" && el.type !== "connector")
+          .map((el) => ({ x: el.x, y: el.y, width: el.width || 200, height: el.height || 200 }));
+
+        const GRID_STEP_X = 260;
+        const GRID_STEP_Y = 220;
+        const MAX_COLS = 8;
+        const MAX_ROWS = 30;
+        const findEmptySlot = (width: number, height: number): { x: number; y: number } => {
+          const overlapsAny = (cx: number, cy: number) =>
+            occupied.some(
+              (p) =>
+                cx < p.x + p.width + MARGIN &&
+                cx + width + MARGIN > p.x &&
+                cy < p.y + p.height + MARGIN &&
+                cy + height + MARGIN > p.y,
+            );
+          for (let row = 0; row < MAX_ROWS; row++) {
+            for (let col = 0; col < MAX_COLS; col++) {
+              const cx = START_X + col * GRID_STEP_X;
+              const cy = START_Y + row * GRID_STEP_Y;
+              if (!overlapsAny(cx, cy)) return { x: cx, y: cy };
+            }
+          }
+          return { x: START_X + Math.random() * 400, y: START_Y + Math.random() * 400 };
+        };
+
+        roots.forEach((el) => {
+          const w = el.width || 200;
+          const h = el.height || 200;
+          const { x, y } = findEmptySlot(w, h);
+          occupied.push({ x, y, width: w, height: h });
+          deltas.set(el.id, { dx: x - el.x, dy: y - el.y });
         });
-        return;
       }
 
-      // distribute → grid of empty slots that avoids existing board content.
-      const occupied: Rect[] = els
-        .filter((el) => el.boardId === childBoardId && el.type !== "line" && el.type !== "connector")
-        .map((el) => ({ x: el.x, y: el.y, width: el.width || 200, height: el.height || 200 }));
+      const shift = (pt: { x: number; y: number } | undefined, d: { dx: number; dy: number }) =>
+        pt ? { x: pt.x + d.dx, y: pt.y + d.dy } : undefined;
+      const newCenters = new Map<string, { x: number; y: number }>();
 
-      const GRID_STEP_X = 260;
-      const GRID_STEP_Y = 220;
-      const MAX_COLS = 8;
-      const MAX_ROWS = 30;
-      const findEmptySlot = (width: number, height: number): { x: number; y: number } => {
-        const overlapsAny = (cx: number, cy: number) =>
-          occupied.some(
-            (p) =>
-              cx < p.x + p.width + MARGIN &&
-              cx + width + MARGIN > p.x &&
-              cy < p.y + p.height + MARGIN &&
-              cy + height + MARGIN > p.y,
-          );
-        for (let row = 0; row < MAX_ROWS; row++) {
-          for (let col = 0; col < MAX_COLS; col++) {
-            const cx = START_X + col * GRID_STEP_X;
-            const cy = START_Y + row * GRID_STEP_Y;
-            if (!overlapsAny(cx, cy)) return { x: cx, y: cy };
+      moved.forEach((el) => {
+        const d = deltas.get(rootOf(el).id)!;
+        const updates: Partial<CanvasElement> = { boardId: childBoardId, x: el.x + d.dx, y: el.y + d.dy };
+        if (el.type === "line") {
+          const line = el as any;
+          Object.assign(updates, {
+            start: shift(line.start, d),
+            end: shift(line.end, d),
+            ...(line.bend ? { bend: shift(line.bend, d) } : {}),
+          });
+        }
+        newCenters.set(el.id, { x: el.x + d.dx + (el.width || 0) / 2, y: el.y + d.dy + (el.height || 0) / 2 });
+        updateCanvasElement(el.id, updates);
+        // A root nested in a container that stays behind is no longer inside it.
+        if (el.containerId && !movedIds.has(el.containerId)) removeNodeFromContainer(el.id);
+      });
+
+      // Carry connections along: an edge whose endpoints BOTH moved is re-scoped to
+      // the child board. Edges are filtered by their own boardId, so without this
+      // they stay on the source board with endpoints that no longer live there,
+      // and render on neither board.
+      getCanvasEdges().forEach((edge) => {
+        if (!movedIds.has(edge.fromNodeId) || !movedIds.has(edge.toNodeId)) return;
+        const changes: Partial<CanvasEdge> = { boardId: childBoardId };
+        if (edge.bend) {
+          const dFrom = deltas.get(rootOf(byId.get(edge.fromNodeId)!).id)!;
+          const dTo = deltas.get(rootOf(byId.get(edge.toNodeId)!).id)!;
+          if (dFrom.dx === dTo.dx && dFrom.dy === dTo.dy) {
+            changes.bend = shift(edge.bend, dFrom);
+          } else {
+            // Endpoints moved independently: re-seat the curve's control point
+            // midway between them so it doesn't loop back to the old spot.
+            const a = newCenters.get(edge.fromNodeId)!;
+            const b = newCenters.get(edge.toNodeId)!;
+            changes.bend = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
           }
         }
-        return { x: START_X + Math.random() * 400, y: START_Y + Math.random() * 400 };
-      };
-
-      movable.forEach((el) => {
-        const w = el.width || 200;
-        const h = el.height || 200;
-        const { x, y } = findEmptySlot(w, h);
-        occupied.push({ x, y, width: w, height: h });
-        updateCanvasElement(el.id, { boardId: childBoardId, x, y });
+        syncUpdateEdge(edge.id, changes);
       });
     },
-    [getCanvasElements, updateCanvasElement],
+    [getCanvasElements, getCanvasEdges, updateCanvasElement, removeNodeFromContainer, syncUpdateEdge],
   );
 
   // Resolve a pending multi-element board drop with the user's chosen layout.
@@ -2557,6 +2692,7 @@ export function CXDCanvas() {
         }
 
         // Single element → drop straight into the next empty slot.
+        pushCanvasHistory();
         moveElementsIntoBoard(elementsToMove, targetChildBoardId, "distribute");
 
         // Clear selection after move
@@ -2788,6 +2924,7 @@ export function CXDCanvas() {
     commitDragPositionsToYjs,
     moveElementsIntoBoard,
     lastMousePos,
+    pushCanvasHistory,
   ]);
 
   // Handle experience block drag start
@@ -3396,8 +3533,21 @@ export function CXDCanvas() {
           setSelectedElementId(null);
           setHoveredAnchor(null);
           setSelectedEdgeId(null);
+          // Esc with nothing selected leaves focus mode; with a selection it
+          // only deselects, so clearing a selection never drops you out.
+          if (canvasFocusMode && selectedElementIds.size === 0 && !selectedEdgeId) {
+            setCanvasFocusMode(false);
+          }
         }
         // If editing text, let the text element's own handler deal with it
+        return;
+      }
+
+      // FOCUS MODE: Ctrl/Cmd + . toggles hiding all canvas UI. Handled before the
+      // text-editing bail-out so it also works while writing inside a note.
+      if ((e.ctrlKey || e.metaKey) && e.key === ".") {
+        e.preventDefault();
+        setCanvasFocusMode(!canvasFocusMode);
         return;
       }
 
@@ -3727,36 +3877,15 @@ export function CXDCanvas() {
       if (isMod && e.key === "d" && selectedElementIds.size > 0) {
         if (!canEdit) return;
         e.preventDefault();
-        pushCanvasHistory(); // Save state before duplicate
-
-        const newIds = new Set<string>();
-        const elements = getCanvasElements();
-        // Copies must render above everything else on the canvas — an
-        // unbumped (equal) zIndex leaves them buried under other elements.
-        let ctrlDMaxZ = Math.max(0, ...elements.map((el) => el.zIndex || 0));
-        selectedElementIds.forEach((id) => {
-          const element = elements.find((el) => el.id === id);
-          if (element) {
-            ctrlDMaxZ += 1;
-            const { dx, dy } = getDuplicateOffset(element);
-            const newElement: CanvasElement = {
-              ...element,
-              id: uuidv4(),
-              x: element.x + dx,
-              y: element.y + dy,
-              zIndex: ctrlDMaxZ,
-            };
-            syncAddElement(newElement);
-            newIds.add(newElement.id);
-          }
-        });
-
+        const newIds = duplicateElements(selectedElementIds);
         // Select duplicated elements — replace BOTH selection pieces of
         // state. `selectedElementId` (the single/"primary" selection) is
         // otherwise left pointing at an original, which keeps it at the
         // forced top z-index and ties with (or beats) the new copies.
-        setSelectedElementIds(newIds);
-        setSelectedElementId(newIds.size > 0 ? Array.from(newIds)[0] : null);
+        if (newIds.length > 0) {
+          setSelectedElementIds(new Set(newIds));
+          setSelectedElementId(newIds[0]);
+        }
         return;
       }
 
@@ -3822,6 +3951,9 @@ export function CXDCanvas() {
     connectSelectedElements,
     autoOrganizeSelected,
     canEdit,
+    duplicateElements,
+    canvasFocusMode,
+    setCanvasFocusMode,
   ]);
 
   // Keep zoomSensitivity in a ref so the wheel handler never needs to be recreated.
@@ -4332,34 +4464,15 @@ export function CXDCanvas() {
   }, [pushCanvasHistory, selectedElementIds, syncRemoveElement, syncRemoveEdge, getCanvasEdges]);
 
   const handleMultiSelectDuplicateElements = useCallback(() => {
-    pushCanvasHistory();
-    const newIds = new Set<string>();
-    // Copies must render above everything else on the canvas — an
-    // unbumped (equal) zIndex leaves them buried under other elements.
-    let multiDupMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
-    selectedElementIds.forEach((id) => {
-      const element = canvasElements.find((el) => el.id === id);
-      if (element) {
-        multiDupMaxZ += 1;
-        const { dx, dy } = getDuplicateOffset(element);
-        const newElement: CanvasElement = {
-          ...element,
-          id: uuidv4(),
-          x: element.x + dx,
-          y: element.y + dy,
-          zIndex: multiDupMaxZ,
-          groupId: undefined, // Don't copy group assignment
-        };
-        syncAddElement(newElement);
-        newIds.add(newElement.id);
-      }
-    });
+    const newIds = duplicateElements(selectedElementIds);
     // Replace both selection pieces of state — leaving `selectedElementId`
     // pointing at an original keeps it at the forced top z-index, tying
     // with (or beating) the new copies.
-    setSelectedElementIds(newIds);
-    setSelectedElementId(newIds.size > 0 ? Array.from(newIds)[0] : null);
-  }, [pushCanvasHistory, selectedElementIds, canvasElements, syncAddElement]);
+    if (newIds.length > 0) {
+      setSelectedElementIds(new Set(newIds));
+      setSelectedElementId(newIds[0]);
+    }
+  }, [duplicateElements, selectedElementIds]);
 
   const handleMultiSelectCreateGroup = useCallback(() => {
     pushCanvasHistory();
@@ -4777,12 +4890,12 @@ export function CXDCanvas() {
 
   // Calculate right margin based on inspector panel state
   // When panel is open, add a small margin (60px for icon rail). When closed, just the icon rail width.
-  const canvasRightMargin = inspectorPanelOpen ? 60 : 60;
+  const canvasRightMargin = canvasFocusMode ? 0 : 60;
 
   return (
     <div
       ref={containerRef}
-      className={`fixed inset-0 top-16 overflow-hidden select-none transition-[right] duration-300 w-full h-full ${isPanning
+      className={`fixed inset-0 ${canvasFocusMode ? "top-0" : "top-16"} overflow-hidden select-none transition-[right] duration-300 w-full h-full ${isPanning
         ? "cursor-grabbing"
         : isSpacePressed
           ? "cursor-grab"
@@ -5927,7 +6040,7 @@ export function CXDCanvas() {
 
 
       {/* Canvas Toolkit */}
-      {canEdit && (
+      {canEdit && !canvasFocusMode && (
         <CanvasToolkit
           onPlaceElement={handlePlaceElement}
           canvasRef={containerRef}
@@ -5937,7 +6050,20 @@ export function CXDCanvas() {
           onActiveToolChange={setActiveTool}
         />
       )}
+      {/* Focus mode: all chrome hidden; this pill is the only way back besides the shortcut */}
+      {canvasFocusMode && (
+        <button
+          className="absolute top-4 right-4 z-[60] flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur border border-white/10 text-xs text-white/50 opacity-40 hover:opacity-100 hover:text-white hover:border-violet-500/50 transition-all"
+          onClick={() => setCanvasFocusMode(false)}
+          onMouseDown={(e) => e.stopPropagation()}
+          title="Exit focus mode (Ctrl/Cmd + . or Esc)"
+        >
+          <Minimize2 className="w-3.5 h-3.5" />
+          Exit focus
+        </button>
+      )}
       {/* Zoom Controls */}
+      {!canvasFocusMode && (
       <NavigationToolkit
         canvasZoom={canvasZoom}
         onZoomIn={handleZoomIn}
@@ -5968,8 +6094,11 @@ export function CXDCanvas() {
           else if (!settings.gridMajorDots) updateSettings({ gridMajorDots: true });
           else updateSettings({ gridVisible: false, gridMajorDots: false });
         }}
+        onEnterFocusMode={() => setCanvasFocusMode(true)}
       />
+      )}
       {/* Task Inbox - for tasks created in Plan Tab */}
+      {!canvasFocusMode && (
       <TaskInbox
         inboxItems={inboxItems}
         onPlaceOnCanvas={handlePlaceInboxItem}
@@ -5978,8 +6107,11 @@ export function CXDCanvas() {
         onGoToPlanTab={() => setCanvasViewMode('plan')}
         canvasZoom={canvasZoom}
       />
+      )}
+      {/* Inbox note pinned open for writing — stays up in focus mode too */}
+      {canEdit && <PinnedInboxNote />}
       {/* Canvas AI Assistant — canvas view only, edit mode only */}
-      {canEdit && (
+      {canEdit && !canvasFocusMode && (
         <CanvasAssistant selectedElementIds={Array.from(selectedElementIds)} />
       )}
       {/* Drag preview for inbox items */}
@@ -6039,8 +6171,9 @@ export function CXDCanvas() {
         </>
       )}
       {/* Experience Flow Timeline */}
-      <ExperienceFlowDrawer />
+      {!canvasFocusMode && <ExperienceFlowDrawer />}
       {/* Experience Inspector - Icon rail with editable section panels */}
+      {!canvasFocusMode && (
       <ExperienceInspector
         project={project}
         onPanelOpenChange={setInspectorPanelOpen}
@@ -6052,6 +6185,7 @@ export function CXDCanvas() {
         }}
         className=" right-[15px] static"
       />
+      )}
       {/* Experience Block Drag Preview */}
       {draggingExperienceBlock && experienceBlockDragPos && (
         <div
@@ -6330,25 +6464,9 @@ export function CXDCanvas() {
                 setSelectedElementIds(new Set([newElement.id]));
               }
             } else if (selectedElementIds.size > 0) {
-              const newIds: string[] = [];
-              selectedElementIds.forEach(id => {
-                const element = canvasElements.find(el => el.id === id);
-                if (element) {
-                  ctxDupMaxZ += 1;
-                  const { dx, dy } = getDuplicateOffset(element);
-                  const newElement = {
-                    ...element,
-                    id: uuidv4(),
-                    x: element.x + dx,
-                    y: element.y + dy,
-                    zIndex: ctxDupMaxZ,
-                  };
-                  syncAddElement(newElement);
-                  newIds.push(newElement.id);
-                }
-              });
-              setSelectedElementIds(new Set(newIds));
+              const newIds = duplicateElements(selectedElementIds);
               if (newIds.length > 0) {
+                setSelectedElementIds(new Set(newIds));
                 setSelectedElementId(newIds[0]);
               }
             }

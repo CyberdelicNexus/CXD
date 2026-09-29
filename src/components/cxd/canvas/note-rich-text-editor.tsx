@@ -30,6 +30,10 @@ interface NoteRichTextEditorProps {
   textColor: string;
   isSelected: boolean;
   isFocusMode?: boolean;
+  /** Put the formatting toolbar on the editor's right instead of its left. */
+  toolbarSide?: "left" | "right";
+  /** Scroll the text area itself past this height (keeps the toolbar unclipped). */
+  contentMaxHeight?: string;
   onChange: (nextHtml: string) => void;
   onBlurCard: () => void;
   onFocusBody: () => void;
@@ -65,6 +69,8 @@ export function NoteRichTextEditor({
   textColor,
   isSelected,
   isFocusMode = false,
+  toolbarSide = "left",
+  contentMaxHeight,
   onChange,
   onBlurCard,
   onFocusBody,
@@ -298,10 +304,12 @@ export function NoteRichTextEditor({
         {isSelected && (
           <div className={cn(
             "absolute z-20 flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
-            isFocusMode
-              ? "right-full mr-3 top-0"
-              : "right-full mr-6"
-          )} style={isFocusMode ? undefined : { top: -105 }}>
+            toolbarSide === "right"
+              ? "left-full ml-3 top-0"
+              : isFocusMode
+                ? "right-full mr-3 top-0"
+                : "right-full mr-6"
+          )} style={isFocusMode || toolbarSide === "right" ? undefined : { top: -105 }}>
             {editorButtons.map((button) => (
               <button
                 key={button.title}
@@ -437,7 +445,10 @@ export function NoteRichTextEditor({
           </div>
         )}
 
-        <div className="min-w-0 flex-1">
+        <div
+          className={cn("min-w-0 flex-1", contentMaxHeight && "overflow-y-auto pr-1")}
+          style={contentMaxHeight ? { maxHeight: contentMaxHeight } : undefined}
+        >
           <EditorContent
             editor={editor}
             className="w-full rounded bg-transparent p-0 text-sm leading-relaxed [box-sizing:border-box] overflow-visible"

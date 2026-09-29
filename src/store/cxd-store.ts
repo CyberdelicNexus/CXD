@@ -87,6 +87,14 @@ interface CXDState {
   focusedSection: CXDSectionId | null;
   canvasViewMode: 'canvas' | 'hexagon' | 'hypercube' | 'plan';
   defaultView: 'canvas' | 'hexagon' | 'plan'; // User's preferred default view
+  // Canvas focus mode: hides all canvas chrome (navbar, toolkits, panels) so only
+  // the elements are visible. Session-only, deliberately not persisted.
+  canvasFocusMode: boolean;
+  setCanvasFocusMode: (on: boolean) => void;
+  // Inbox note kept open in a floating editor while the user moves around the
+  // canvas. Session-only, deliberately not persisted.
+  pinnedInboxNoteId: string | null;
+  setPinnedInboxNoteId: (id: string | null) => void;
 
   // Active surface state - determines which surface (canvas vs hypercube) elements are created in
   activeSurface: 'canvas' | 'hypercube';
@@ -382,6 +390,10 @@ export const useCXDStore = create<CXDState>()(
       focusedSection: null,
       canvasViewMode: 'canvas',
       defaultView: 'canvas', // User's preferred default view
+      canvasFocusMode: false,
+      setCanvasFocusMode: (on) => set({ canvasFocusMode: on }),
+      pinnedInboxNoteId: null,
+      setPinnedInboxNoteId: (id) => set({ pinnedInboxNoteId: id }),
       activeSurface: 'canvas', // default to canvas surface
       projects: [],
       currentProjectId: null,
@@ -440,7 +452,7 @@ export const useCXDStore = create<CXDState>()(
 
         // When switching canvas view mode, also update activeSurface
         const newSurface = mode === 'hexagon' ? 'hypercube' : 'canvas';
-        set({ canvasViewMode: mode, activeSurface: newSurface });
+        set({ canvasViewMode: mode, activeSurface: newSurface, canvasFocusMode: false });
 
         // Apply appropriate viewport
         if (mode === 'hexagon') {
