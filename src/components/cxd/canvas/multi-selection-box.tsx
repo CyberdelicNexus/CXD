@@ -121,13 +121,15 @@ export function MultiSelectionBox({
 
   // Calculate bounding box with padding to separate group handles from element connector anchors
   const GROUP_PADDING = 30; // px of padding between elements and group outline
+  // `bounds` is null while the selection ids point at elements not yet in the
+  // store (e.g. a multi-duplicate that lands a frame later). Don't return early
+  // here: every hook below must still run, or React throws error #300.
   const bounds = calculateBounds(selectedElements);
-  if (!bounds) return null;
 
-  const minX = bounds.minX - GROUP_PADDING;
-  const minY = bounds.minY - GROUP_PADDING;
-  const maxX = bounds.maxX + GROUP_PADDING;
-  const maxY = bounds.maxY + GROUP_PADDING;
+  const minX = (bounds?.minX ?? 0) - GROUP_PADDING;
+  const minY = (bounds?.minY ?? 0) - GROUP_PADDING;
+  const maxX = (bounds?.maxX ?? 0) + GROUP_PADDING;
+  const maxY = (bounds?.maxY ?? 0) + GROUP_PADDING;
   const width = maxX - minX;
   const height = maxY - minY;
 
@@ -366,7 +368,7 @@ export function MultiSelectionBox({
     };
   }, [isResizing, resizeStart, resizeHandle, canvasZoom, shiftKey, onUpdateElements, snapToGrid, snapValue]);
 
-  if (isReadOnly) return null;
+  if (!bounds || isReadOnly) return null;
 
   return (
     <>
