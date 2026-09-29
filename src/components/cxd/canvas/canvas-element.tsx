@@ -130,6 +130,7 @@ import {
   AlignCenter,
   AlignRight,
   MousePointerClick,
+  PanelTopOpen,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
@@ -252,6 +253,8 @@ interface CanvasElementRendererProps {
   /** True when a line-family tool is active — presses belong to the line-draw
    * pipeline (LineLayer), so this element must not select/drag on press. */
   lineToolActive?: boolean;
+  /** Selected as part of a whole group: the group outline stands in for the per-element ring. */
+  hideSelectionRing?: boolean;
 }
 
 export function CanvasElementRenderer({
@@ -284,6 +287,7 @@ export function CanvasElementRenderer({
   tourId,
   showGroupHover,
   lineToolActive = false,
+  hideSelectionRing = false,
 }: CanvasElementRendererProps) {
   // Stabilize onUpdate via ref so that effects and sub-component callbacks
   // that depend on onUpdate don't re-fire just because the parent re-rendered
@@ -808,6 +812,7 @@ export function CanvasElementRenderer({
         "ring-2 ring-purple-400/70 shadow-[0_0_24px_rgba(167,139,250,0.35)] animate-[highlightGlow_4s_cubic-bezier(0.4,0,0.2,1)_1s_forwards]",
         // Selection ring for non-text elements (excluding lines which handle their own visualization)
         isSelected &&
+        !hideSelectionRing &&
         !isHighlighted &&
         element.type !== "board" &&
         element.type !== "text" &&
@@ -816,6 +821,7 @@ export function CanvasElementRenderer({
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
         // Selection ring for freeform cards - rounded (except documents)
         isSelected &&
+        !hideSelectionRing &&
         !isHighlighted &&
         element.type === "freeform" &&
         !(element as FreeformElement).isDocument &&
@@ -1709,6 +1715,20 @@ export function CanvasElementRenderer({
           >
             <Copy className="w-4 h-4" />
           </button>
+          {/* Keep open: pin this note in a floating editor that stays up while
+              moving around the canvas */}
+          {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle !== undefined) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                useCXDStore.getState().setPinnedInboxNoteId(element.id);
+              }}
+              className="p-1.5 rounded hover:bg-cyan-500/20 text-muted-foreground hover:text-cyan-300 transition-colors"
+              title="Keep open while you move around the canvas"
+            >
+              <PanelTopOpen className="w-4 h-4" />
+            </button>
+          )}
           {/* Send to Inbox button - only for note cards (not documents) */}
           {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle || (element as any).emoji === '🤖') && !element.inInbox && !(element as FreeformElement).isDocument && (
             <button

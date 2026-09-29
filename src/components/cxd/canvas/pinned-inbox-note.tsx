@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, GripHorizontal, Minus, Plus, X } from "lucide-react";
+import { FileText, GripHorizontal, Minus, Plus, Type, X } from "lucide-react";
 import { useCXDStore } from "@/store/cxd-store";
 import type { FreeformElement } from "@/types/canvas-elements";
 import { NoteRichTextEditor } from "./note-rich-text-editor";
@@ -26,6 +26,21 @@ export function PinnedInboxNote() {
   });
 
   const [collapsed, setCollapsed] = useState(false);
+  const [showFormatting, setShowFormatting] = useState(() => {
+    try {
+      return localStorage.getItem("cxd:pinned-note-formatting") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const toggleFormatting = () => {
+    setShowFormatting((prev) => {
+      try {
+        localStorage.setItem("cxd:pinned-note-formatting", prev ? "0" : "1");
+      } catch {}
+      return !prev;
+    });
+  };
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
 
@@ -48,7 +63,7 @@ export function PinnedInboxNote() {
   const noop = useCallback(() => {}, []);
 
   const onHeaderMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button")) return;
+    if ((e.target as HTMLElement).closest("button, input")) return;
     e.preventDefault();
     const rect = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
     dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
@@ -90,9 +105,23 @@ export function PinnedInboxNote() {
       >
         <GripHorizontal className="w-3.5 h-3.5 text-white/30" />
         <FileText className="w-3.5 h-3.5 text-cyan-400" />
-        <span className="flex-1 text-xs font-medium text-white/70 truncate">
-          {noteTitle.trim() || "Untitled Note"}
-        </span>
+        <input
+          value={noteTitle}
+          onChange={(e) => syncNoteFields(e.target.value, noteBody)}
+          onMouseDown={(e) => e.stopPropagation()}
+          placeholder="Untitled Note"
+          className="flex-1 min-w-0 bg-transparent text-sm font-semibold text-white placeholder-white/30 outline-none cursor-text"
+        />
+        {!collapsed && (
+          <button
+            className={`p-1 rounded hover:bg-white/10 ${showFormatting ? "text-cyan-300" : "text-white/40 hover:text-white"}`}
+            onClick={toggleFormatting}
+            title={showFormatting ? "Hide formatting" : "Show formatting"}
+            type="button"
+          >
+            <Type className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button
           className="p-1 rounded text-white/40 hover:text-white hover:bg-white/10"
           onClick={() => setCollapsed((c) => !c)}
@@ -111,21 +140,16 @@ export function PinnedInboxNote() {
         </button>
       </div>
       {!collapsed && (
-        // No overflow clipping here: the editor's toolbar and its colour menus
-        // hang off the panel's right edge. The text area scrolls on its own.
+        // No overflow clipping here: the toolbar's colour menus drop below it
+        // and may overhang the panel. The text area scrolls on its own.
         <div className="px-4 py-3 select-text">
-          <input
-            value={noteTitle}
-            onChange={(e) => syncNoteFields(e.target.value, noteBody)}
-            placeholder="Untitled Note"
-            className="w-full bg-transparent text-base font-semibold text-white placeholder-white/30 outline-none mb-1"
-          />
           <NoteRichTextEditor
             key={note.id}
             value={noteBody}
             textColor="#ffffff"
             isSelected
-            toolbarSide="right"
+            toolbarSide="top"
+            hideToolbar={!showFormatting}
             contentMaxHeight="55vh"
             onChange={(nextHtml) => syncNoteFields(noteTitle, nextHtml)}
             onBlurCard={noop}

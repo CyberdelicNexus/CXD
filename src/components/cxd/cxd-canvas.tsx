@@ -56,6 +56,9 @@ const MAX_ZOOM = 3;
  * disambiguate. Falls back to the old +20/+20 diagonal offset when width is
  * missing/unusable (e.g. 0).
  */
+// Boards with more elements than this only render what's near the viewport.
+const VIEWPORT_CULL_THRESHOLD = 150;
+
 function getDuplicateOffset(element: { width?: number }): { dx: number; dy: number } {
   const w = element.width;
   if (typeof w === "number" && w > 0) {
@@ -869,17 +872,26 @@ export function CXDCanvas() {
 
   // Snap to grid and alignment guides state
   const snapToGrid = false;
+  // Group the user has "entered" (clicked a member of an already-selected group):
+  // clicks and drags then act on individual members instead of the whole group.
+  const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null);
+  // Pointer-down info for the element being pressed, read by onSelect on click.
+  const elementPressRef = useRef<{ x: number; y: number; wholeGroupSelected: boolean } | null>(null);
+
   const [showAlignmentGuides, setShowAlignmentGuides] = useState(true);
+  // Guide segments: a horizontal guide runs at `at` from `from` to `to` along x,
+  // a vertical one along y. Only spans the aligned elements, not the board.
+  type GuideSegment = { at: number; from: number; to: number };
   const [alignmentGuides, setAlignmentGuides] = useState<{
-    horizontal: number[];
-    vertical: number[];
+    horizontal: GuideSegment[];
+    vertical: GuideSegment[];
   }>({ horizontal: [], vertical: [] });
 
   // Grid constants - use settings.gridSize for main grid
   const GRID_SIZE = settings.gridSize; // Main grid size from settings
   const MINOR_GRID_SIZE = Math.floor(settings.gridSize / 2); // Minor grid for finer snapping
   const SNAP_THRESHOLD = 6; // Distance threshold for snapping
-  const ALIGNMENT_THRESHOLD = 5; // Distance for alignment guide detection
+  const ALIGNMENT_THRESHOLD = 6; // Screen px within which an edge/centre snaps to a guide
 
   // Snap a value to the nearest grid increment
   const snapToGridValue = useCallback((value: number, useMinorGrid: boolean = false): number => {
@@ -1044,87 +1056,72 @@ export function CXDCanvas() {
     newX: number,
     newY: number,
     excludeIds?: Set<string>,
-  ): { horizontal: number[]; vertical: number[]; snapX?: number; snapY?: number } => {
+  ): { horizontal: GuideSegment[]; vertical: GuideSegment[]; snapX?: number; snapY?: number } => {
     if (!showAlignmentGuides) return { horizontal: [], vertical: [] };
 
-    const horizontal: number[] = [];
-    const vertical: number[] = [];
-    let snapX: number | undefined;
-    let snapY: number | undefined;
+    // Threshold in screen pixels, so snapping feels the same at every zoom.
+    const threshold = ALIGNMENT_THRESHOLD / Math.max(canvasZoom, 0.05);
+    // A dragged container's own children move with it: never align to them.
+    const ownChildren =
+      draggingEl.type === "container" ? getContainerDescendantIds(draggingEl.id, canvasElements) : null;
 
-    const draggingCenterX = newX + draggingEl.width / 2;
-    const draggingCenterY = newY + draggingEl.height / 2;
-    const draggingRight = newX + draggingEl.width;
-    const draggingBottom = newY + draggingEl.height;
+    type Cand = { line: number; snap: number; dist: number; el: CanvasElement };
+    const yCands: Cand[] = [];
+    const xCands: Cand[] = [];
+    const w = draggingEl.width;
+    const h = draggingEl.height;
+    // Edge pairs checked per axis: [dragged edge offset, other edge fraction]
+    const OFFSETS: Array<[number, number]> = [[0, 0], [1, 1], [0.5, 0.5], [0, 1], [1, 0]];
 
-    // Check against all other elements (skip dragging, selected, and explicitly excluded)
     canvasElements.forEach((el) => {
       if (el.id === draggingEl.id) return;
       if (selectedElementIds.has(el.id)) return;
       if (excludeIds?.has(el.id)) return;
-
-      const elCenterX = el.x + el.width / 2;
-      const elCenterY = el.y + el.height / 2;
-      const elRight = el.x + el.width;
-      const elBottom = el.y + el.height;
-
-      // Horizontal alignment checks (Y-axis alignments)
-      // Top edge alignment
-      if (Math.abs(newY - el.y) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(el.y);
-        if (!snapY) snapY = el.y;
-      }
-      // Bottom edge alignment
-      if (Math.abs(draggingBottom - elBottom) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(elBottom);
-        if (!snapY) snapY = elBottom - draggingEl.height;
-      }
-      // Center Y alignment
-      if (Math.abs(draggingCenterY - elCenterY) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(elCenterY);
-        if (!snapY) snapY = elCenterY - draggingEl.height / 2;
-      }
-      // Top to bottom alignment
-      if (Math.abs(newY - elBottom) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(elBottom);
-        if (!snapY) snapY = elBottom;
-      }
-      // Bottom to top alignment
-      if (Math.abs(draggingBottom - el.y) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(el.y);
-        if (!snapY) snapY = el.y - draggingEl.height;
-      }
-
-      // Vertical alignment checks (X-axis alignments)
-      // Left edge alignment
-      if (Math.abs(newX - el.x) < ALIGNMENT_THRESHOLD) {
-        vertical.push(el.x);
-        if (!snapX) snapX = el.x;
-      }
-      // Right edge alignment
-      if (Math.abs(draggingRight - elRight) < ALIGNMENT_THRESHOLD) {
-        vertical.push(elRight);
-        if (!snapX) snapX = elRight - draggingEl.width;
-      }
-      // Center X alignment
-      if (Math.abs(draggingCenterX - elCenterX) < ALIGNMENT_THRESHOLD) {
-        vertical.push(elCenterX);
-        if (!snapX) snapX = elCenterX - draggingEl.width / 2;
-      }
-      // Left to right alignment
-      if (Math.abs(newX - elRight) < ALIGNMENT_THRESHOLD) {
-        vertical.push(elRight);
-        if (!snapX) snapX = elRight;
-      }
-      // Right to left alignment
-      if (Math.abs(draggingRight - el.x) < ALIGNMENT_THRESHOLD) {
-        vertical.push(el.x);
-        if (!snapX) snapX = el.x - draggingEl.width;
+      if (ownChildren?.has(el.id)) return;
+      if (el.type === "line" || el.type === "connector") return;
+      for (const [mine, theirs] of OFFSETS) {
+        const lineY = el.y + el.height * theirs;
+        const dy = Math.abs(newY + h * mine - lineY);
+        if (dy < threshold) yCands.push({ line: lineY, snap: lineY - h * mine, dist: dy, el });
+        const lineX = el.x + el.width * theirs;
+        const dx = Math.abs(newX + w * mine - lineX);
+        if (dx < threshold) xCands.push({ line: lineX, snap: lineX - w * mine, dist: dx, el });
       }
     });
 
+    // One guide per axis: the closest alignment wins, and the drawn segment spans
+    // only the dragged element and the elements sharing that exact line.
+    const pick = (cands: Cand[]) => {
+      if (cands.length === 0) return null;
+      const best = cands.reduce((a, c) => (c.dist < a.dist ? c : a));
+      const aligned = cands.filter((c) => Math.abs(c.line - best.line) < 0.5).map((c) => c.el);
+      return { best, aligned };
+    };
+    const py = pick(yCands);
+    const px = pick(xCands);
+    const snapY = py?.best.snap;
+    const snapX = px?.best.snap;
+    const finalX = snapX ?? newX;
+    const finalY = snapY ?? newY;
+    const PAD = 12;
+
+    const horizontal: GuideSegment[] = py
+      ? [{
+          at: py.best.line,
+          from: Math.min(finalX, ...py.aligned.map((e) => e.x)) - PAD,
+          to: Math.max(finalX + w, ...py.aligned.map((e) => e.x + e.width)) + PAD,
+        }]
+      : [];
+    const vertical: GuideSegment[] = px
+      ? [{
+          at: px.best.line,
+          from: Math.min(finalY, ...px.aligned.map((e) => e.y)) - PAD,
+          to: Math.max(finalY + h, ...px.aligned.map((e) => e.y + e.height)) + PAD,
+        }]
+      : [];
+
     return { horizontal, vertical, snapX, snapY };
-  }, [showAlignmentGuides, canvasElements, selectedElementIds]);
+  }, [showAlignmentGuides, canvasElements, selectedElementIds, canvasZoom]);
 
 
   // Line creation callback from LineLayer
@@ -2434,7 +2431,7 @@ export function CXDCanvas() {
       // If this element belongs to a group, auto-select all group members immediately
       // UNLESS Ctrl/Cmd is held (user wants individual element selection)
       let effectiveSelectedIds = selectedElementIds;
-      if (element?.groupId && !e.ctrlKey && !e.metaKey) {
+      if (element?.groupId && !e.ctrlKey && !e.metaKey && element.groupId !== enteredGroupId) {
         const groupMembers = canvasElements
           .filter((el) => el.groupId === element.groupId)
           .map((el) => el.id);
@@ -2509,7 +2506,7 @@ export function CXDCanvas() {
       setDragElementStart({ x: e.clientX, y: e.clientY });
       setSelectedElementId(elementId);
     },
-    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition, canEdit],
+    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition, canEdit, enteredGroupId],
   );
 
   // Move a set of elements onto a (child) board, either preserving their current
@@ -3577,10 +3574,18 @@ export function CXDCanvas() {
           if (e.key === "ArrowUp") deltaY = -moveAmount;
           if (e.key === "ArrowDown") deltaY = moveAmount;
 
-          // Move all selected elements
+          // Move all selected elements, plus everything nested inside selected
+          // containers (children use absolute coords, so they must move too).
+          const moveIds = new Set(selectedElementIds);
           selectedElementIds.forEach((id) => {
+            const el = canvasElements.find((c) => c.id === id);
+            if (el?.type === 'container') {
+              getContainerDescendantIds(id, canvasElements).forEach((d) => moveIds.add(d));
+            }
+          });
+          moveIds.forEach((id) => {
             const element = canvasElements.find((el) => el.id === id);
-            if (element) {
+            if (element && !(element.locked && !selectedElementIds.has(id))) {
               if (element.type === 'line' && 'start' in element && 'end' in element) {
                 // Lines use start/end/bend coordinates, not x/y
                 const line = element as any;
@@ -3601,11 +3606,11 @@ export function CXDCanvas() {
             }
           });
 
-          // Move bend points of edges connecting two selected elements
-          if (selectedElementIds.size > 1) {
+          // Move bend points of edges connecting two moved elements
+          if (moveIds.size > 1) {
             canvasEdges.forEach((edge) => {
-              const fromSelected = selectedElementIds.has(edge.fromNodeId);
-              const toSelected = selectedElementIds.has(edge.toNodeId);
+              const fromSelected = moveIds.has(edge.fromNodeId);
+              const toSelected = moveIds.has(edge.toNodeId);
               // Only move bend if BOTH endpoints are selected
               if (fromSelected && toSelected && edge.bend) {
                 syncUpdateEdge(edge.id, {
@@ -3873,6 +3878,26 @@ export function CXDCanvas() {
         return;
       }
 
+      // GROUP: Ctrl/Cmd + G  ·  UNGROUP: Ctrl/Cmd + Shift + G
+      if (isMod && (e.key === "g" || e.key === "G")) {
+        if (!canEdit) return;
+        e.preventDefault();
+        const selected = canvasElements.filter((el) => selectedElementIds.has(el.id));
+        if (e.shiftKey) {
+          const groupIds = new Set(selected.map((el) => el.groupId).filter(Boolean) as string[]);
+          if (groupIds.size > 0) {
+            pushCanvasHistory();
+            groupIds.forEach((gid) => ungroup(gid));
+            setEnteredGroupId(null);
+          }
+        } else if (selected.length >= 2) {
+          pushCanvasHistory();
+          createGroup(selected.map((el) => el.id));
+          setEnteredGroupId(null);
+        }
+        return;
+      }
+
       // DUPLICATE: Ctrl/Cmd + D
       if (isMod && e.key === "d" && selectedElementIds.size > 0) {
         if (!canEdit) return;
@@ -3954,6 +3979,8 @@ export function CXDCanvas() {
     duplicateElements,
     canvasFocusMode,
     setCanvasFocusMode,
+    createGroup,
+    ungroup,
   ]);
 
   // Keep zoomSensitivity in a ref so the wheel handler never needs to be recreated.
@@ -4425,6 +4452,26 @@ export function CXDCanvas() {
     if (!firstGroupId) return false;
     return selectedElementsArray.every((el) => el.groupId === firstGroupId);
   }, [selectedElementsArray]);
+
+  // The group whose members are ALL selected (and nothing else): it reads as one
+  // object, so only the group outline shows, not every member's ring.
+  const wholeGroupSelectedId = useMemo(() => {
+    if (!allSameGroup) return null;
+    const gid = selectedElementsArray[0].groupId!;
+    const memberCount = canvasElements.filter((el) => el.groupId === gid).length;
+    return memberCount === selectedElementsArray.length ? gid : null;
+  }, [allSameGroup, selectedElementsArray, canvasElements]);
+
+  // Leave a drilled-into group once the selection moves outside it.
+  useEffect(() => {
+    if (!enteredGroupId) return;
+    const stillInside =
+      selectedElementIds.size > 0 &&
+      Array.from(selectedElementIds).every(
+        (id) => canvasElements.find((el) => el.id === id)?.groupId === enteredGroupId,
+      );
+    if (!stillInside) setEnteredGroupId(null);
+  }, [enteredGroupId, selectedElementIds, canvasElements]);
 
   const handleMultiSelectUpdateElements = useCallback(
     (updates: Map<string, Partial<CanvasElement>>) => {
@@ -5015,9 +5062,33 @@ export function CXDCanvas() {
               .filter((el) => el.type === 'container' && (el as ContainerElement).collapsed)
               .map((el) => el.id),
           );
+          // Viewport culling on large boards: only mount elements within a
+          // screen's margin of the visible area (plus anything selected or being
+          // dragged). Off-screen elements cost a full React render on every pan
+          // and zoom frame otherwise.
+          let inView: (el: CanvasElement) => boolean = () => true;
+          if (canvasElements.length > VIEWPORT_CULL_THRESHOLD && typeof window !== "undefined") {
+            const vw = window.innerWidth / canvasZoom;
+            const vh = window.innerHeight / canvasZoom;
+            const left = -canvasPosition.x / canvasZoom - vw;
+            const top = -canvasPosition.y / canvasZoom - vh;
+            const right = left + vw * 3;
+            const bottom = top + vh * 3;
+            inView = (el) =>
+              el.x <= right &&
+              el.x + (el.width || 0) >= left &&
+              el.y <= bottom &&
+              el.y + (el.height || 0) >= top;
+          }
           return canvasElements
             .filter((el) => el.type !== 'line')
             .filter((el) => !el.containerId || !collapsedIds.has(el.containerId))
+            .filter((el) =>
+              inView(el) ||
+              selectedElementIds.has(el.id) ||
+              selectedElementId === el.id ||
+              draggingElement === el.id,
+            )
             .map((element, _elIdx) => (
             <CanvasElementRenderer
                 key={element.id}
@@ -5037,6 +5108,11 @@ export function CXDCanvas() {
                   }
                 }}
                 onDragStart={(e) => {
+                  elementPressRef.current = {
+                    x: e.clientX,
+                    y: e.clientY,
+                    wholeGroupSelected: !!element.groupId && element.groupId === wholeGroupSelectedId,
+                  };
                   // Prevent dragging while connecting
                   if (!isConnecting) {
                     handleElementDragStart(element.id, e);
@@ -5044,6 +5120,7 @@ export function CXDCanvas() {
                 }}
                 onDragEnd={handleElementDragEnd}
                 isDragging={draggingElement === element.id}
+                hideSelectionRing={!!element.groupId && element.groupId === wholeGroupSelectedId}
                 isSelected={
                   selectedElementId === element.id ||
                   selectedElementIds.has(element.id)
@@ -5116,8 +5193,19 @@ export function CXDCanvas() {
                   setSelectedElementIds(newSelected);
                   setSelectedElementId(element.id);
                 } else {
-                  // Single select - also select all group members
-                  if (element.groupId) {
+                  // Single select. First click on a grouped element selects the
+                  // whole group; clicking a member of the already-selected group
+                  // (without dragging) enters it and selects just that member.
+                  const press = elementPressRef.current;
+                  const moved = press && e ? Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4 : false;
+                  const drillIn =
+                    !!element.groupId &&
+                    (element.groupId === enteredGroupId || (!!press?.wholeGroupSelected && !moved));
+                  if (drillIn) {
+                    setEnteredGroupId(element.groupId!);
+                    setSelectedElementId(element.id);
+                    setSelectedElementIds(new Set([element.id]));
+                  } else if (element.groupId) {
                     const groupElements = canvasElements.filter(
                       (el) => el.groupId === element.groupId
                     );
@@ -5241,31 +5329,29 @@ export function CXDCanvas() {
             }}
           >
             {/* Horizontal alignment guides (Y-axis lines that run left-to-right) */}
-            {alignmentGuides.horizontal.map((y, i) => (
+            {alignmentGuides.horizontal.map((g, i) => (
               <line
-                key={`h-${i}-${y}`}
-                x1={0}
-                y1={y + 5000}
-                x2={10000}
-                y2={y + 5000}
-                stroke="hsl(280 100% 70%)"
-                strokeWidth={1}
-                strokeDasharray="4,4"
-                opacity={0.8}
+                key={`h-${i}-${g.at}`}
+                x1={g.from + 5000}
+                y1={g.at + 5000}
+                x2={g.to + 5000}
+                y2={g.at + 5000}
+                stroke="hsl(300 100% 72%)"
+                strokeWidth={1 / canvasZoom}
+                opacity={0.95}
               />
             ))}
             {/* Vertical alignment guides (X-axis lines that run top-to-bottom) */}
-            {alignmentGuides.vertical.map((x, i) => (
+            {alignmentGuides.vertical.map((g, i) => (
               <line
-                key={`v-${i}-${x}`}
-                x1={x + 5000}
-                y1={0}
-                x2={x + 5000}
-                y2={10000}
-                stroke="hsl(280 100% 70%)"
-                strokeWidth={1}
-                strokeDasharray="4,4"
-                opacity={0.8}
+                key={`v-${i}-${g.at}`}
+                x1={g.at + 5000}
+                y1={g.from + 5000}
+                x2={g.at + 5000}
+                y2={g.to + 5000}
+                stroke="hsl(300 100% 72%)"
+                strokeWidth={1 / canvasZoom}
+                opacity={0.95}
               />
             ))}
           </svg>

@@ -22,6 +22,8 @@ import {
   ArrowUp,
   ArrowDown,
   Palette,
+  ChevronsLeft,
+  MoreHorizontal,
 } from "lucide-react";
 
 // Container tint definitions (mirrored from canvas-element.tsx)
@@ -117,6 +119,24 @@ export function MultiSelectionBox({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
+  }, []);
+
+  // Compact toolbar by default (colour, group, duplicate, delete); the rest
+  // (align, distribute, layers, lock) behind an expand toggle. Remembered.
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("cxd:selection-toolbar-expanded") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleExpanded = useCallback(() => {
+    setExpanded((prev) => {
+      try {
+        localStorage.setItem("cxd:selection-toolbar-expanded", prev ? "0" : "1");
+      } catch {}
+      return !prev;
+    });
   }, []);
 
   // Calculate bounding box with padding to separate group handles from element connector anchors
@@ -421,6 +441,7 @@ export function MultiSelectionBox({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Alignment & Distribution tools */}
+        {expanded && (
         <div className="flex items-center gap-0.5 pr-2 border-r border-border/50">
           {/* Horizontal align — cycles: Left → Center → Right */}
           <ToolButton
@@ -452,6 +473,7 @@ export function MultiSelectionBox({
             </>
           )}
         </div>
+        )}
 
         {/* Color picker — shown when all selected elements share the same type */}
         {(() => {
@@ -587,25 +609,25 @@ export function MultiSelectionBox({
             <button
               onClick={(e) => { e.stopPropagation(); onUngroup(); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/20 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-all"
-              title="Ungroup"
+              title="Ungroup (Ctrl/Cmd + Shift + G)"
             >
               <Ungroup className="w-3.5 h-3.5" />
-              Ungroup
+              {expanded && "Ungroup"}
             </button>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onCreateGroup(); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white shadow-[0_0_10px_rgba(139,92,246,0.3)] hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] transition-all"
-              title="Create Group"
+              title="Group (Ctrl/Cmd + G)"
             >
               <Group className="w-3.5 h-3.5" />
-              Group
+              {expanded && "Group"}
             </button>
           )}
         </div>
 
         {/* Z-index controls — hidden when only containers are selected (containers always stay at back) */}
-        {selectedElements.some((el) => el.type !== 'container') && (
+        {expanded && selectedElements.some((el) => el.type !== 'container') && (
           <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
             <ToolButton icon={<ArrowUp className="w-4 h-4" />} title="Bring Forward" onClick={onBringForward} />
             <ToolButton icon={<ArrowDown className="w-4 h-4" />} title="Send Backward" onClick={onSendBackward} />
@@ -613,6 +635,7 @@ export function MultiSelectionBox({
         )}
 
         {/* Lock/Unlock */}
+        {expanded && (
         <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
           {allLocked ? (
             <ToolButton icon={<Unlock className="w-4 h-4" />} title="Unlock All" onClick={onUnlockElements} />
@@ -620,9 +643,10 @@ export function MultiSelectionBox({
             <ToolButton icon={<Lock className="w-4 h-4" />} title="Lock All" onClick={onLockElements} />
           )}
         </div>
+        )}
 
         {/* Duplicate & Delete */}
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 pl-1">
           <ToolButton icon={<Copy className="w-4 h-4" />} title="Duplicate" onClick={onDuplicateElements} />
           <ToolButton
             icon={<Trash2 className="w-4 h-4" />}
@@ -632,9 +656,13 @@ export function MultiSelectionBox({
           />
         </div>
 
-        {/* Selection count badge */}
-        <div className="ml-2 px-2 py-0.5 text-[10px] bg-primary/20 text-primary rounded-full">
-          {selectedElements.length} selected
+        {/* Expand / compact */}
+        <div className="flex items-center pl-1 ml-0.5 border-l border-border/50">
+          <ToolButton
+            icon={expanded ? <ChevronsLeft className="w-4 h-4" /> : <MoreHorizontal className="w-4 h-4" />}
+            title={expanded ? "Compact toolbar" : "More options (align, layers, lock)"}
+            onClick={toggleExpanded}
+          />
         </div>
       </div>
     </>

@@ -44,7 +44,7 @@ const SHORTCUTS: ShortcutItem[] = [
     category: "Precision Layout",
     shortcuts: [
       { keys: ["↑", "↓", "←", "→"], description: "Move selected 1px" },
-      { keys: ["Shift", "+", "↑↓←→"], description: "Move selected 10px" },
+      { keys: ["Shift", "+", "↑↓←→"], description: "Move selected 10px (containers carry their contents)" },
     ],
   },
   {
@@ -64,6 +64,9 @@ const SHORTCUTS: ShortcutItem[] = [
     category: "Selection & Grouping",
     shortcuts: [
       { keys: ["Click"], description: "Select element (or entire group)" },
+      { keys: ["Click again"], description: "Select an element inside the selected group" },
+      { keys: ["Ctrl/Cmd", "+", "G"], description: "Group selection" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "G"], description: "Ungroup" },
       { keys: ["Shift", "+", "Click"], description: "Add/remove from selection" },
       { keys: ["Ctrl/Cmd", "+", "Click"], description: "Select individual in group" },
       { keys: ["Drag"], description: "Marquee select (elements & lines)" },

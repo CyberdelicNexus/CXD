@@ -30,8 +30,11 @@ interface NoteRichTextEditorProps {
   textColor: string;
   isSelected: boolean;
   isFocusMode?: boolean;
-  /** Put the formatting toolbar on the editor's right instead of its left. */
-  toolbarSide?: "left" | "right";
+  /** Where the formatting toolbar sits: floating left/right of the editor, or
+   *  a horizontal bar inline above it ("top"). */
+  toolbarSide?: "left" | "right" | "top";
+  /** Hide the toolbar while keeping the editor editable. */
+  hideToolbar?: boolean;
   /** Scroll the text area itself past this height (keeps the toolbar unclipped). */
   contentMaxHeight?: string;
   onChange: (nextHtml: string) => void;
@@ -70,6 +73,7 @@ export function NoteRichTextEditor({
   isSelected,
   isFocusMode = false,
   toolbarSide = "left",
+  hideToolbar = false,
   contentMaxHeight,
   onChange,
   onBlurCard,
@@ -298,18 +302,24 @@ export function NoteRichTextEditor({
 
   if (!editor) return null;
 
+  // Colour/style popovers open beside a vertical toolbar, or below a top bar.
+  const subMenuPos =
+    toolbarSide === "top" ? "left-0 top-full mt-2" : "left-full top-1/2 ml-2 -translate-y-1/2";
+
   return (
     <div ref={editorWrapRef} className="relative w-full overflow-visible">
       <div className="relative overflow-visible">
-        {isSelected && (
+        {isSelected && !hideToolbar && (
           <div className={cn(
-            "absolute z-20 flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
-            toolbarSide === "right"
-              ? "left-full ml-3 top-0"
-              : isFocusMode
-                ? "right-full mr-3 top-0"
-                : "right-full mr-6"
-          )} style={isFocusMode || toolbarSide === "right" ? undefined : { top: -105 }}>
+            "z-20 flex gap-1 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+            toolbarSide === "top"
+              ? "relative mb-2 flex-row flex-wrap"
+              : toolbarSide === "right"
+                ? "absolute flex-col left-full ml-3 top-0"
+                : isFocusMode
+                  ? "absolute flex-col right-full mr-3 top-0"
+                  : "absolute flex-col right-full mr-6"
+          )} style={isFocusMode || toolbarSide !== "left" ? undefined : { top: -105 }}>
             {editorButtons.map((button) => (
               <button
                 key={button.title}
@@ -358,7 +368,7 @@ export function NoteRichTextEditor({
             </button>
 
             {menu === "style" && (
-              <div className="absolute left-full top ml-2 min-w-[150px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+              <div className={cn("absolute min-w-[150px] rounded-xl", toolbarSide === "top" ? subMenuPos : "left-full ml-2 -translate-y-1/2", "border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2 shadow-[0_8px_32px_rgba(0,0,0,0.4)]")}>
                 {[
                   { value: "heading", label: "Heading" },
                   { value: "subheading", label: "Subheading" },
@@ -382,7 +392,7 @@ export function NoteRichTextEditor({
             )}
 
             {menu === "textColor" && (
-              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+              <div className={cn("absolute min-w-[122px] rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]", subMenuPos)}>
                 <div className="grid grid-cols-3 place-items-center gap-1.5">
                   {TEXT_COLORS.map((color) => (
                     <button
@@ -413,7 +423,7 @@ export function NoteRichTextEditor({
             )}
 
             {menu === "highlight" && (
-              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+              <div className={cn("absolute min-w-[122px] rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]", subMenuPos)}>
                 <div className="grid grid-cols-3 place-items-center gap-1.5">
                   {HIGHLIGHT_COLORS.map((color) => (
                     <button
