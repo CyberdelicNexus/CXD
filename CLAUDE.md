@@ -161,3 +161,11 @@ children referencing them by `containerId` (zIndex 1), absolute coords.
 - Confirm before destructive/outward-facing actions; commit only when asked.
 - After nontrivial changes, run `npm run build` (green = the real gate) and, for pure
   logic, an `__verify__` tsx script.
+
+## Commits & Vercel (Hobby plan)
+
+The Vercel project is on the Hobby plan, which blocks any deployment whose commit
+lists a collaborator other than the account owner. A `Co-Authored-By:` trailer
+counts as one, so **never add `Co-Authored-By` trailers** to commits in this repo,
+and author commits as the owner's GitHub identity (`Jose <connect@cyberdelic.nexus>`).
+`.claude/settings.json` disables Claude Code's automatic co-author trailer.
