@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { CANVAS_OVERLAY_LAYER_ID } from "./canvas-overlay";
 import { CanvasElement, ImageElement, ShapeElement, PRESET_COLORS } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { ShapeColorPicker, StoryboardColorPicker } from "./canvas-element";
@@ -428,7 +430,9 @@ export function MultiSelectionBox({
         )}
       </div>
 
-      {/* Floating toolbar */}
+      {/* Floating toolbar — portaled into the canvas overlay layer so it paints
+          above the selected elements (which are lifted to z 2e9) */}
+      {portalToOverlay(
       <div
         className="absolute z-[1000] flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg pointer-events-auto"
         style={{
@@ -665,8 +669,15 @@ export function MultiSelectionBox({
           />
         </div>
       </div>
+      )}
     </>
   );
+}
+
+function portalToOverlay(node: React.ReactNode): React.ReactNode {
+  if (typeof document === "undefined") return node;
+  const layer = document.getElementById(CANVAS_OVERLAY_LAYER_ID);
+  return layer ? createPortal(node, layer) : node;
 }
 
 // Calculate bounding box for multiple elements

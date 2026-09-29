@@ -14,7 +14,9 @@ export type CanvasElementType =
   | 'table';
 
 // Shape types available in the shape palette
-export type ShapeType = 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'hexagon' | 'star';
+export type ShapeType =
+  | 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'hexagon' | 'star'
+  | 'pill' | 'parallelogram' | 'cylinder' | 'document' | 'arrow' | 'callout';
 
 // Preset colors for cards and shapes (dark cyberdelic gradients)
 export const PRESET_COLORS = [
@@ -253,7 +255,8 @@ export interface ImageElement extends CanvasElementBase {
 export interface ShapeElement extends CanvasElementBase {
   type: 'shape';
   shapeType: ShapeType;
-  content?: string; // Text inside the shape
+  content?: string; // Text inside the shape (plain; kept in sync with richContent)
+  richContent?: string; // Same text as HTML with per-selection formatting (sizes, bold...)
   style?: ElementStyle;
   taskMetadata?: TaskMetadata;       // Plan Tab task extension
 }
@@ -315,6 +318,9 @@ export interface TextElement extends CanvasElementBase {
   style?: ElementStyle;
   textAlign?: 'left' | 'center' | 'right';
   wrapWidth?: number; // Custom width for text wrapping (defaults to auto if not set)
+  // true: box hugs the text (no wrapping except explicit line breaks).
+  // false/undefined: fixed width, text wraps. Height always follows content.
+  autoWidth?: boolean;
   taskMetadata?: TaskMetadata;       // Plan Tab task extension
 }
 
@@ -591,10 +597,16 @@ export const CANVAS_TOOLS: ToolDefinition[] = [
 export const SHAPE_TYPES: { type: ShapeType; label: string }[] = [
   { type: 'rectangle', label: 'Rectangle' },
   { type: 'circle', label: 'Circle' },
-  { type: 'diamond', label: 'Diamond' },
-  { type: 'triangle', label: 'Triangle' },
+  { type: 'pill', label: 'Start / End' },
+  { type: 'diamond', label: 'Decision' },
+  { type: 'parallelogram', label: 'Input / Output' },
   { type: 'hexagon', label: 'Hexagon' },
+  { type: 'triangle', label: 'Triangle' },
   { type: 'star', label: 'Star' },
+  { type: 'cylinder', label: 'Database' },
+  { type: 'document', label: 'Document' },
+  { type: 'arrow', label: 'Arrow' },
+  { type: 'callout', label: 'Callout' },
 ];
 
 // Helper function to get anchor position on an element

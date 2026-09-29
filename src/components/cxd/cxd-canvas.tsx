@@ -11,6 +11,10 @@ import { CanvasElementRenderer } from "./canvas/canvas-element";
 import { canResizeFreeformCard, sanitizeFreeformResizeUpdate } from "./canvas/card-type-utils";
 import { ExperienceInspector } from "./canvas/experience-inspector";
 import { PinnedInboxNote } from "./canvas/pinned-inbox-note";
+import { CANVAS_OVERLAY_LAYER_ID } from "./canvas/canvas-overlay";
+import { QuickColorFan } from "./canvas/quick-color-fan";
+import { SHAPE_DEFAULT_SIZES } from "@/lib/shape-geometry";
+import { DEFAULT_SHAPE_STYLE } from "@/lib/style-presets";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
 import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
@@ -26,6 +30,7 @@ import {
   DEFAULT_ELEMENT_SIZES,
   ShapeType,
   ShapeElement,
+  FreeformElement,
   LineElement,
   getAnchorPosition,
   getClosestAnchors,
@@ -872,6 +877,10 @@ export function CXDCanvas() {
 
   // Snap to grid and alignment guides state
   const snapToGrid = false;
+  // Element just placed that the quick colour fan is offering colours for.
+  const [quickColorTargetId, setQuickColorTargetId] = useState<string | null>(null);
+  const closeQuickColor = useCallback(() => setQuickColorTargetId(null), []);
+
   // Group the user has "entered" (clicked a member of an already-selected group):
   // clicks and drags then act on individual members instead of the whole group.
   const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null);
@@ -2010,7 +2019,9 @@ export function CXDCanvas() {
       },
     ) => {
       if (!canEdit) return;
-      const size = DEFAULT_ELEMENT_SIZES[type];
+      const size =
+        (type === "shape" && SHAPE_DEFAULT_SIZES[options?.shapeType || "rectangle"]) ||
+        DEFAULT_ELEMENT_SIZES[type];
       const placedWidth = options?.width ?? size.width;
       const placedHeight = options?.height ?? size.height;
       const maxZIndex = canvasElements.reduce(
@@ -2075,6 +2086,7 @@ export function CXDCanvas() {
             ...baseElement,
             type: "shape",
             shapeType: options?.shapeType || "rectangle",
+            style: { ...DEFAULT_SHAPE_STYLE },
           };
           break;
         case "container":
@@ -2101,7 +2113,11 @@ export function CXDCanvas() {
             ...baseElement,
             type: "text",
             content: "",
-            width: 400,
+            // A click places auto-width text that hugs what you type; dragging
+            // out a box gives fixed-width text that wraps at that width.
+            ...(options?.width
+              ? { width: placedWidth, autoWidth: false }
+              : { width: 60, height: 50, autoWidth: true }),
             style: { fontSize: 32, fontWeight: 'bold' },
           };
           break;
@@ -2214,6 +2230,15 @@ export function CXDCanvas() {
 
       // Select the freshly placed element (a captured-container draw selects the container).
       setSelectedElementIds(new Set([newElement.id]));
+
+      // Offer the quick colour fan so the next click can style it.
+      const isPlainNote =
+        newElement.type === "freeform" &&
+        (newElement as FreeformElement).cardType === "note" &&
+        !(newElement as FreeformElement).isDocument;
+      if (newElement.type === "shape" || newElement.type === "container" || isPlainNote) {
+        setQuickColorTargetId(newElement.id);
+      }
     },
     [
       canvasElements,
@@ -5044,6 +5069,19 @@ export function CXDCanvas() {
         />
       )}
 
+      {/* Overlay layer for floating per-element UI (toolbars, popovers): same
+          transform as the content layer, but stacked above elements (z 10),
+          container lines (z 11) and the side toolkits (z 10–40). */}
+      <div
+        id={CANVAS_OVERLAY_LAYER_ID}
+        className="absolute pointer-events-none"
+        style={{
+          transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
+          transformOrigin: "0 0",
+          transition: canvasTransformTransition,
+          zIndex: 45,
+        }}
+      />
       {/* Canvas Content - z-index 10 to render above connector lines (z-index 5) */}
       <div
         className="absolute will-change-transform"
@@ -5876,7 +5914,7 @@ export function CXDCanvas() {
                       } else if (elType === 'task') {
                         newEl = { ...base, type: 'freeform', x: worldX - 125, y: worldY - 70, width: 250, height: 140, cardType: 'task', content: 'Task Title', emoji: '✅', taskMetadata: { isActionable: true, subtasks: [] }, style: { bgColor: DEFAULT_BG, textColor: '#ffffff' } } as CanvasElement;
                       } else if (elType === 'shape') {
-                        newEl = { ...base, type: 'shape', x: worldX - 75, y: worldY - 75, width: 150, height: 150, shapeType: 'rectangle', content: '', style: { bgColor: 'hsl(var(--primary) / 0.3)', borderColor: 'hsl(var(--primary))' } } as CanvasElement;
+                        newEl = { ...base, type: 'shape', x: worldX - 80, y: worldY - 50, width: 160, height: 100, shapeType: 'rectangle', content: '', style: { ...DEFAULT_SHAPE_STYLE } } as CanvasElement;
                       } else if (elType === 'container') {
                         newEl = { ...base, type: 'container', x: worldX - 160, y: worldY - 120, width: 320, height: 240, label: '', zIndex: CONTAINER_Z_BASE } as CanvasElement;
                       } else if (elType === 'image') {
@@ -6194,6 +6232,23 @@ export function CXDCanvas() {
         canvasZoom={canvasZoom}
       />
       )}
+      {/* Quick colour fan after placing an element */}
+      {quickColorTargetId && (() => {
+        const target = canvasElements.find((el) => el.id === quickColorTargetId);
+        if (!target) return null;
+        return (
+          <QuickColorFan
+            element={target}
+            canvasPosition={canvasPosition}
+            canvasZoom={canvasZoom}
+            onApply={(updates) => {
+              pushCanvasHistory();
+              syncUpdateElement(target.id, updates);
+            }}
+            onClose={closeQuickColor}
+          />
+        );
+      })()}
       {/* Inbox note pinned open for writing — stays up in focus mode too */}
       {canEdit && <PinnedInboxNote />}
       {/* Canvas AI Assistant — canvas view only, edit mode only */}
@@ -6420,13 +6475,13 @@ export function CXDCanvas() {
               let newElement: CanvasElement;
               switch (type) {
                 case 'text':
-                  newElement = { ...baseElement, type: 'text', content: '', width: 400, style: { fontSize: 32, fontWeight: 'bold' } };
+                  newElement = { ...baseElement, type: 'text', content: '', width: 60, height: 50, autoWidth: true, style: { fontSize: 32, fontWeight: 'bold' } };
                   break;
                 case 'image':
                   newElement = { ...baseElement, type: 'image', src: '', alt: '' };
                   break;
                 case 'shape':
-                  newElement = { ...baseElement, type: 'shape', shapeType: 'rectangle' as ShapeType, style: {} };
+                  newElement = { ...baseElement, type: 'shape', shapeType: 'rectangle' as ShapeType, width: 160, height: 100, style: { ...DEFAULT_SHAPE_STYLE } };
                   break;
                 case 'link':
                   newElement = { ...baseElement, type: 'link', url: '', title: '', linkMode: 'embed' };

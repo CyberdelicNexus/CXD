@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import NextImage from "next/image";
 import { createPortal } from "react-dom";
 import {
@@ -32,6 +32,7 @@ import {
   useShapeStylePresets,
   addStylePreset,
   removeStylePreset,
+  DEFAULT_SHAPE_STYLE,
   type ShapeStylePreset,
 } from "@/lib/style-presets";
 import { Textarea } from "@/components/ui/textarea";
@@ -47,6 +48,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCXDStore } from "@/store/cxd-store";
+import { shapePath, shapeTextInsets, SHAPE_DEFS } from "@/lib/shape-geometry";
+import { ShapeRichTextEditor, plainTextToHtml } from "./shape-rich-text";
+import { ShapeGlyph } from "./shape-glyph";
+import { CANVAS_OVERLAY_LAYER_ID } from "./canvas-overlay";
 import {
   CXDProject,
   REALITY_PLANES,
@@ -756,9 +761,10 @@ export function CanvasElementRenderer({
 
   // Any freeform card rendered with height:auto needs its element.height synced
   // from the DOM so connectors and selection math target the real rendered bounds.
-  const isAutoHeightFreeform =
-    element.type === "freeform" &&
-    !(element as FreeformElement).isDocument;
+  // Documents included: their height is the icon + title, measured, so a
+  // document inside a container doesn't leave a band of empty space below.
+  const isAutoHeightFreeform = element.type === "freeform";
+  const isDocumentCard = element.type === "freeform" && !!(element as FreeformElement).isDocument;
 
   // Observe actual DOM size via ResizeObserver and sync element.width/height so
   // connectors, group reflow, and alignment guides target the real rendered bounds.
@@ -768,7 +774,7 @@ export function CanvasElementRenderer({
     if (!isAutoHeightFreeform) return;
     const el = elementRef.current;
     if (!el) return;
-    const minHeight = freeformCardType === "task" ? 0 : 300;
+    const minHeight = freeformCardType === "task" || isDocumentCard ? 0 : 300;
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
@@ -788,7 +794,7 @@ export function CanvasElementRenderer({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [isAutoHeightFreeform, freeformCardType]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAutoHeightFreeform, freeformCardType, isDocumentCard]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Don't render connectors as regular elements
   if (element.type === "connector") return null;
@@ -826,6 +832,11 @@ export function CanvasElementRenderer({
         element.type === "freeform" &&
         !(element as FreeformElement).isDocument &&
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
+        // Text: a hairline box that hugs the glyphs (handles do the rest)
+        isSelected &&
+        !hideSelectionRing &&
+        element.type === "text" &&
+        "outline outline-1 outline-primary/70",
         // Documents: no selection ring or outline
         element.type === "freeform" &&
         (element as FreeformElement).isDocument &&
@@ -890,7 +901,7 @@ export function CanvasElementRenderer({
         minHeight:
           element.type === "freeform"
             ? (element as FreeformElement).isDocument
-              ? "100px"
+              ? undefined
               : "300px"
             : undefined,
         zIndex:
@@ -1532,6 +1543,11 @@ export function CanvasElementRenderer({
                   </option>
                 ))}
               </select>
+              {/* Font size: − / value / + (steps through a type scale) */}
+              <TextSizeControl
+                value={(element as TextElement).style?.fontSize || 16}
+                onChange={(fontSize) => onUpdate({ style: { ...element.style, fontSize } })}
+              />
               {/* Bold toggle */}
               <button
                 onClick={(e) => {
@@ -1801,8 +1817,13 @@ export function CanvasElementRenderer({
         // behind neighbouring elements (the in-place z 2e9 pop was not enough — the text
         // wrapper's own stacking context trapped the left-opening colour/font popovers).
         // Portaling is strictly safe: it can only raise the toolbar, never lower it.
-        if ((element.type === "container" || element.type === "text") && typeof document !== "undefined") {
-          const layer = elementRef.current?.parentElement;
+        //
+        // Now every element type does this, into the dedicated overlay layer
+        // (same pan/zoom transform, stacked above elements, connector lines and
+        // the side toolkits) so a toolbar can never render behind anything.
+        if (typeof document !== "undefined") {
+          const layer =
+            document.getElementById(CANVAS_OVERLAY_LAYER_ID) ?? elementRef.current?.parentElement;
           if (layer) {
             return createPortal(
               <div
@@ -1909,6 +1930,21 @@ export function CanvasElementRenderer({
                   />
                 </>
               ) : null
+            ) : element.type === "text" ? (
+              !isReadOnly && !element.locked ? (
+                <>
+                  {(["nw", "ne", "sw", "se", "e", "w"] as const).map((pos) => (
+                    <TextResizeHandle
+                      key={pos}
+                      position={pos}
+                      element={element as TextElement}
+                      onUpdate={onUpdate}
+                      canvasZoom={canvasZoom}
+                      onResizeStart={pushCanvasHistory}
+                    />
+                  ))}
+                </>
+              ) : null
             ) : (
               <>
                 <ResizeHandle
@@ -1963,15 +1999,6 @@ export function CanvasElementRenderer({
             side={element.type === "image" ? "right" : "bottom"}
           />
         )}
-      {/* Text font-size resize handle - shown when text selected and not editing */}
-      {isSelected && !isEditing && element.type === "text" && !isReadOnly && (
-        <TextFontSizeHandle
-          element={element as TextElement}
-          onUpdate={onUpdate}
-          canvasZoom={canvasZoom}
-          onResizeStart={pushCanvasHistory}
-        />
-      )}
     </div>
   );
 }
@@ -2233,6 +2260,163 @@ function ResizeHandle({
   );
 }
 
+const TEXT_SIZE_STEPS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 64, 72, 96, 128, 160, 200];
+
+/** Compact font-size stepper for the text toolbar; the value is also typeable. */
+function TextSizeControl({ value, onChange }: { value: number; onChange: (size: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = (raw: string) => {
+    const n = Math.round(parseFloat(raw));
+    if (Number.isFinite(n)) onChange(Math.max(6, Math.min(400, n)));
+    else setDraft(String(value));
+  };
+  const step = (dir: 1 | -1) => {
+    const next =
+      dir > 0
+        ? TEXT_SIZE_STEPS.find((s) => s > value) ?? value + 8
+        : [...TEXT_SIZE_STEPS].reverse().find((s) => s < value) ?? Math.max(6, value - 2);
+    onChange(next);
+  };
+  return (
+    <div
+      className="flex items-center rounded border border-border/50 bg-card/80"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button className="px-1.5 py-1 text-muted-foreground hover:text-primary" onClick={() => step(-1)} title="Smaller">
+        <Minus className="w-3 h-3" />
+      </button>
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+          if (e.key === "ArrowUp") { e.preventDefault(); step(1); }
+          if (e.key === "ArrowDown") { e.preventDefault(); step(-1); }
+        }}
+        className="w-8 bg-transparent text-center text-xs tabular-nums outline-none"
+        title="Font size"
+      />
+      <button className="px-1.5 py-1 text-muted-foreground hover:text-primary" onClick={() => step(1)} title="Larger">
+        <Plus className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
+// Text resize handles (Miro-style):
+// - corners SCALE the text: font size and box grow/shrink together;
+// - left/right sides set a WRAP WIDTH (text becomes fixed-width and wraps);
+//   double-clicking a side handle returns to auto width (box hugs the text).
+// Height is never set by hand; it always follows the content.
+function TextResizeHandle({
+  position,
+  element,
+  onUpdate,
+  canvasZoom,
+  onResizeStart,
+}: {
+  position: "nw" | "ne" | "sw" | "se" | "e" | "w";
+  element: TextElement;
+  onUpdate: (updates: Partial<CanvasElement>) => void;
+  canvasZoom: number;
+  onResizeStart?: () => void;
+}) {
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      onResizeStart?.();
+
+      const startX = e.clientX;
+      const startW = element.width;
+      const startH = element.height;
+      const startPosX = element.x;
+      const startPosY = element.y;
+      const startFont = element.style?.fontSize || 16;
+      const isCorner = position.length === 2;
+      const fromLeft = position.includes("w");
+      const fromTop = position.includes("n");
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const dx = (moveEvent.clientX - startX) / canvasZoom;
+        const signedDx = fromLeft ? -dx : dx;
+        if (isCorner) {
+          const scale = Math.max(0.1, (startW + signedDx) / startW);
+          const fontSize = Math.max(6, Math.min(400, Math.round(startFont * scale)));
+          const k = fontSize / startFont;
+          const newW = Math.max(12, startW * k);
+          const newH = Math.max(8, startH * k);
+          onUpdate({
+            style: { ...(element.style || {}), fontSize },
+            width: newW,
+            height: newH,
+            x: fromLeft ? startPosX + (startW - newW) : startPosX,
+            y: fromTop ? startPosY + (startH - newH) : startPosY,
+          } as Partial<CanvasElement>);
+        } else {
+          const minW = Math.max(24, startFont * 1.2);
+          const newW = Math.max(minW, startW + signedDx);
+          onUpdate({
+            width: newW,
+            x: fromLeft ? startPosX + (startW - newW) : startPosX,
+            autoWidth: false,
+          } as Partial<CanvasElement>);
+        }
+      };
+
+      const handleMouseUp = () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [element, onUpdate, position, canvasZoom, onResizeStart],
+  );
+
+  const s = 1 / canvasZoom;
+  const isSide = position === "e" || position === "w";
+  const style: React.CSSProperties = isSide
+    ? {
+        top: "50%",
+        [position === "e" ? "right" : "left"]: -3,
+        transform: `translateY(-50%) scale(${s})`,
+        transformOrigin: position === "e" ? "center right" : "center left",
+        cursor: "ew-resize",
+      }
+    : {
+        [position.includes("n") ? "top" : "bottom"]: -4,
+        [position.includes("w") ? "left" : "right"]: -4,
+        transform: `scale(${s})`,
+        transformOrigin: `${position.includes("n") ? "top" : "bottom"} ${position.includes("w") ? "left" : "right"}`,
+        cursor: position === "nw" || position === "se" ? "nwse-resize" : "nesw-resize",
+      };
+
+  return (
+    <div
+      className={cn(
+        "absolute z-10 bg-white border border-primary shadow-sm",
+        isSide ? "w-1.5 h-4 rounded-full" : "w-2 h-2 rounded-[2px]",
+      )}
+      style={style}
+      onMouseDown={handleMouseDown}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        if (isSide) {
+          onResizeStart?.();
+          onUpdate({ autoWidth: true } as Partial<CanvasElement>);
+        }
+      }}
+      title={isSide ? "Drag to set wrap width · double-click to fit text" : "Drag to scale text"}
+    />
+  );
+}
+
 // Rotation handle — line + dot extending from the element, drag to rotate
 function RotationHandle({
   element,
@@ -2351,93 +2535,6 @@ function RotationHandle({
   );
 }
 
-// Text font-size resize handle - drag to scale font size
-function TextFontSizeHandle({
-  element,
-  onUpdate,
-  canvasZoom,
-  onResizeStart,
-}: {
-  element: TextElement;
-  onUpdate: (updates: Partial<TextElement>) => void;
-  canvasZoom: number;
-  onResizeStart?: () => void;
-}) {
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-
-      // Capture history before starting resize for undo support
-      onResizeStart?.();
-
-      setIsDragging(true);
-
-      const startY = e.clientY;
-      const startFontSize = element.style?.fontSize || 16;
-
-      const handleMouseMove = (moveEvent: MouseEvent) => {
-        // Calculate delta - vertical only (down increases, up decreases)
-        const deltaY = (moveEvent.clientY - startY) / canvasZoom;
-        const delta = deltaY;
-
-        // Scale factor: each 10px of drag = 1px font size change
-        const fontSizeChange = Math.round(delta / 10);
-        let newFontSize = startFontSize + fontSizeChange;
-
-        // Clamp to reasonable bounds
-        newFontSize = Math.max(8, Math.min(180, newFontSize));
-
-        onUpdate({
-          style: {
-            ...element.style,
-            fontSize: newFontSize,
-          },
-        });
-      };
-
-      const handleMouseUp = () => {
-        setIsDragging(false);
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    },
-    [element, onUpdate, canvasZoom, onResizeStart],
-  );
-
-  // Scale handle inversely with zoom to keep it visible at all zoom levels
-  const handleScale = 1 / canvasZoom;
-  const baseScale = isDragging ? 1.25 : 1;
-
-  // Offset the handle below the element
-  const handleOffset = 8;
-
-  return (
-    <div
-      className={cn(
-        "absolute w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-ns-resize transition-all hover:scale-110",
-        isDragging && "shadow-lg",
-      )}
-      style={{
-        position: 'absolute',
-        left: '50%',
-        bottom: `-${handleOffset}px`,
-        transform: `translateX(-50%) scale(${handleScale * baseScale})`,
-      }}
-      onMouseDown={handleMouseDown}
-      title="Drag to resize text"
-    >
-      <ALargeSmall className="w-3.5 h-3.5 text-background" />
-    </div>
-  );
-}
-
-
 // Color picker popover - always opens below the toolbar
 function ColorPicker({
   currentColor,
@@ -2490,14 +2587,11 @@ function ShapeTypePicker({
   onTypeSelect: (shapeType: ShapeType) => void;
   onClose: () => void;
 }) {
-  const shapeTypes: { type: ShapeType; label: string; icon: React.ReactNode }[] = [
-    { type: "rectangle", label: "Rectangle", icon: <div className="w-4 h-3 bg-current rounded-sm" /> },
-    { type: "circle", label: "Circle", icon: <div className="w-4 h-4 bg-current rounded-full" /> },
-    { type: "diamond", label: "Diamond", icon: <div className="w-3 h-3 bg-current rotate-45" /> },
-    { type: "triangle", label: "Triangle", icon: <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-current" /> },
-    { type: "hexagon", label: "Hexagon", icon: <div className="w-4 h-4 bg-current" style={{ clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }} /> },
-    { type: "star", label: "Star", icon: <Star className="w-4 h-4 fill-current" /> },
-  ];
+  const shapeTypes = SHAPE_DEFS.map(({ type, label }) => ({
+    type,
+    label,
+    icon: <ShapeGlyph type={type} className="w-5 h-5" />,
+  }));
 
   return (
     <div
@@ -2505,7 +2599,7 @@ function ShapeTypePicker({
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-1 px-1.5 py-1">
+      <div className="grid grid-cols-6 gap-1 px-1 py-1">
         {shapeTypes.map(({ type, label, icon }) => (
           <button
             key={type}
@@ -2790,7 +2884,7 @@ export function ShapeColorPicker({
   const customColorRef = useRef<HTMLInputElement>(null);
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
-  const currentFontSize = fontSize || 16;
+  const currentFontSize = fontSize || 14; // matches ShapeCard's default
 
   const colorToHex = (color?: string): string => {
     if (!color || color === "transparent" || color === "inherit") return "#ffffff";
@@ -6244,7 +6338,7 @@ function FreeformCard({
         boxShadow: element.isDocument ? "none" : "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
         minWidth: element.isDocument ? "100px" : isNote ? "200px" : "100%",
         maxWidth: element.isDocument ? "100px" : undefined,
-        minHeight: element.isDocument ? "100px" : isNote ? "300px" : "100%",
+        minHeight: element.isDocument ? undefined : isNote ? "300px" : "100%",
       }}
     >
       {/* Task indicator - subtle corner badge */}
@@ -6270,9 +6364,18 @@ function FreeformCard({
             className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105"
             onDoubleClick={(e) => { e.stopPropagation(); setIsNoteFocusMode(true); }}
           >
-            <div className="text-4xl mb-1">{element.emoji || '📄'}</div>
+            <div className="text-4xl leading-none mb-1">{element.emoji || '📄'}</div>
             <div className="w-full px-1">
               <textarea
+                rows={1}
+                ref={(ta) => {
+                  // Fit the title on mount too (not just on typing), so a
+                  // one-line title doesn't reserve an empty second row.
+                  if (ta) {
+                    ta.style.height = 'auto';
+                    ta.style.height = ta.scrollHeight + 'px';
+                  }
+                }}
                 value={localNoteTitle}
                 onChange={(e) => {
                   setLocalNoteTitle(e.target.value);
@@ -8301,17 +8404,17 @@ function ShapeCard({
   isSelected?: boolean;
   onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void;
 }) {
-  const [localContent, setLocalContent] = useLocalInput(
-    element.content || "",
-    (v) => onUpdate({ content: v }),
-  );
-
-  const bgColor = element.style?.bgColor || "hsl(var(--primary) / 0.3)";
-  const borderColor = element.style?.borderColor || "hsl(var(--primary))";
-  const borderWidth = element.style?.borderWidth || 2;
-  const textColor = element.style?.textColor || "inherit";
+  // Unstyled shapes fall back to the default preset (gradient fill + ring).
+  const bgColor = element.style?.bgColor || DEFAULT_SHAPE_STYLE.bgColor!;
+  const borderColor = element.style?.borderColor || DEFAULT_SHAPE_STYLE.borderColor!;
+  const borderWidth = element.style?.borderWidth ?? DEFAULT_SHAPE_STYLE.borderWidth!;
+  const textColor = element.style?.textColor || DEFAULT_SHAPE_STYLE.textColor!;
   const fillOpacity =
-    element.style?.fillOpacity !== undefined ? element.style.fillOpacity : 100;
+    element.style?.fillOpacity !== undefined
+      ? element.style.fillOpacity
+      : element.style?.bgColor
+        ? 100
+        : DEFAULT_SHAPE_STYLE.fillOpacity!;
 
   // Convert fillOpacity (0-100) to CSS opacity (0-1) and apply to background
   const getBackgroundWithOpacity = (color: string, opacity: number): string => {
@@ -8419,134 +8522,33 @@ function ShapeCard({
       </defs>
     );
 
-    switch (element.shapeType) {
-      case "circle":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <circle
-              cx="50"
-              cy="50"
-              r="48"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "diamond":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <polygon
-              points="50,5 95,50 50,95 5,50"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "hexagon":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <polygon
-              points="50,5 93.3,25 93.3,75 50,95 6.7,75 6.7,25"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "star":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <path
-              d="M50,10 L61,40 L92,40 L68,60 L78,90 L50,70 L22,90 L32,60 L8,40 L39,40 Z"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "triangle":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <polygon
-              points="50,10 90,90 10,90"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      default: // rectangle
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <rect
-              x="2"
-              y="2"
-              width="96"
-              height="96"
-              rx="8"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-    }
+    // Drawn at the element's real pixel size (no stretched viewBox), inset by
+    // half the stroke so it isn't clipped.
+    const w = Math.max(1, element.width || 100);
+    const h = Math.max(1, element.height || 100);
+    const { d, detail } = shapePath(element.shapeType, w, h, Math.max(1, strokeWidth / 2));
+    return (
+      <svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        className="absolute inset-0"
+        style={{ overflow: "visible" }}
+      >
+        {gradientDefs}
+        <path
+          d={d}
+          fill={fill}
+          fillOpacity={opacity}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          strokeLinejoin="round"
+        />
+        {detail && (
+          <path d={detail} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeLinecap="round" />
+        )}
+      </svg>
+    );
   };
 
   // Check if this shape is actionable
@@ -8562,9 +8564,16 @@ function ShapeCard({
   const shapeFontStyle = element.style?.fontStyle || 'normal';
   const shapeTextDecoration = element.style?.textDecoration || 'none';
 
+  const baseFontSize = element.style?.fontSize || 14;
+  const textInsets = shapeTextInsets(element.shapeType);
+  const renderedRichContent = useMemo(
+    () => (element.richContent ? DOMPurify.sanitize(element.richContent, { USE_PROFILES: { html: true } }) : ""),
+    [element.richContent],
+  );
+
   // Common text styles (shared between editing and display)
   const baseTextStyle: React.CSSProperties = {
-    fontSize: element.style?.fontSize || 14,
+    fontSize: baseFontSize,
     fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
     fontFamily: element.style?.fontFamily || 'inherit',
     fontStyle: shapeFontStyle,
@@ -8597,9 +8606,9 @@ function ShapeCard({
       )}
       {renderSVGShape()}
       <div
-        className="absolute inset-0 z-10 overflow-hidden"
+        className={cn("absolute inset-0 z-10", isEditing ? "overflow-visible" : "overflow-hidden")}
         style={{
-          padding: '8%',
+          padding: `${textInsets[0] * 100}% ${textInsets[1] * 100}% ${textInsets[2] * 100}% ${textInsets[3] * 100}%`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -8607,32 +8616,26 @@ function ShapeCard({
         }}
       >
         {isEditing ? (
-          <textarea
-            ref={(el) => {
-              if (el) {
-                el.focus();
-                // Auto-size to content
-                el.style.height = 'auto';
-                el.style.height = `${Math.min(el.scrollHeight, el.parentElement?.clientHeight || 9999)}px`;
-              }
-            }}
-            value={localContent}
-            onChange={(e) => {
-              setLocalContent(e.target.value);
-              // Re-size on content change
-              const target = e.target;
-              target.style.height = 'auto';
-              target.style.height = `${Math.min(target.scrollHeight, target.parentElement?.clientHeight || 9999)}px`;
-            }}
-            onBlur={onBlur}
-            className="w-full bg-transparent border-0 focus:outline-none resize-none"
+          <ShapeRichTextEditor
+            html={element.richContent || plainTextToHtml(element.content || "")}
+            baseFontSize={baseFontSize}
+            textStyle={{ ...baseTextStyle, ...textColorStyle }}
+            onChange={(html, plain) => onUpdate({ richContent: html, content: plain })}
+            onBlur={() => onBlur()}
+          />
+        ) : element.richContent ? (
+          <div
+            key={isGradientText ? textColor : 'solid'}
+            className="shape-rich-display w-full [&_p]:m-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
             style={{
               ...baseTextStyle,
               ...textColorStyle,
+              display: isGradientText ? 'inline-block' : 'block',
+              maxWidth: '100%',
               maxHeight: '100%',
+              overflow: 'hidden',
             }}
-            placeholder="Text..."
-            data-no-drag
+            dangerouslySetInnerHTML={{ __html: renderedRichContent }}
           />
         ) : (
           <span
@@ -8966,6 +8969,11 @@ function ContainerCard({
 }
 
 // Text card component - clean, auto-sizing, context menu controls
+// Inner padding of a text element's box, per side. Kept small so the selection
+// box hugs the glyphs (was 8px, which made small text float in a big frame).
+const TEXT_PAD = 4;
+const TEXT_LINE_HEIGHT = 1.3;
+
 function TextCard({
   element,
   onUpdate,
@@ -8980,7 +8988,6 @@ function TextCard({
   const measureRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [originalContent, setOriginalContent] = useState("");
 
   const [localContent, setLocalContent, onLocalBlur] = useLocalInput(
     element.content || "",
@@ -8993,16 +9000,11 @@ function TextCard({
   const textColor = element.style?.textColor || "#ffffff";
   const gradient = element.style?.bgColor; // We'll use bgColor to store gradient
   const textAlign = element.textAlign || "left";
-  const wrapWidth = element.wrapWidth; // Can be undefined for auto-width
+  // Auto-width text hugs its content (no wrapping except explicit line breaks);
+  // fixed-width text wraps at element.width. Height always follows the content.
+  const autoWidth = !!element.autoWidth;
 
-  // Store original content when entering edit mode
-  useEffect(() => {
-    if (isEditing) {
-      setOriginalContent(element.content);
-    }
-  }, [isEditing]);
-
-  // Click outside to deselect/exit edit mode
+  // Click outside to exit edit mode
   useEffect(() => {
     if (!isEditing) return;
 
@@ -9026,101 +9028,58 @@ function TextCard({
     };
   }, [isEditing, onBlur]);
 
-  // Auto-grow textarea height while editing — uses refs to avoid re-render cascades
-  const elementHeightRef = useRef(element.height);
-  elementHeightRef.current = element.height;
-
-  const autoGrowTextarea = useCallback(() => {
-    if (textareaRef.current) {
-      const textarea = textareaRef.current;
-      // Reset height to auto to get accurate scrollHeight
-      textarea.style.height = "0px";
-      // Set height to scrollHeight to show all content
-      const newHeight = Math.max(30, textarea.scrollHeight);
-      textarea.style.height = newHeight + "px";
-
-      // Update element height to match (plus padding)
-      const totalHeight = newHeight + 16;
-      if (Math.abs(elementHeightRef.current - totalHeight) > 2) {
-        onUpdate({ height: totalHeight });
-      }
-    }
-  }, [onUpdate]);
-
-  // Auto-grow on mount (enter edit mode)
+  // Focus with the caret at the end when editing starts
   useEffect(() => {
-    if (isEditing) {
-      // Small delay to ensure textarea is rendered
-      if (typeof window !== "undefined") {
-        window.requestAnimationFrame(() => {
-          autoGrowTextarea();
-          // Focus WITHOUT selecting all - normal typing behavior
-          if (textareaRef.current) {
-            textareaRef.current.focus();
-            // Move cursor to end of text
-            const length = textareaRef.current.value.length;
-            textareaRef.current.setSelectionRange(length, length);
-          }
-        });
-      }
+    if (isEditing && typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (ta) {
+          ta.focus();
+          const length = ta.value.length;
+          ta.setSelectionRange(length, length);
+        }
+      });
     }
-  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isEditing]);
 
-  // Auto-size: only adjust HEIGHT to fit content, never change width
-  // Width is controlled by the user via resize handles
-  useEffect(() => {
-    if (!isEditing && measureRef.current && element.content) {
-      const measured = measureRef.current.getBoundingClientRect();
-
-      // Height: auto-size to fit wrapped content within current width
-      const newHeight = Math.max(30, Math.ceil(measured.height) + 16);
-
-      // Only update height if changed significantly
-      if (Math.abs(element.height - newHeight) > 8) {
-        onUpdate({ height: newHeight });
-      }
+  // Size the box to the text. A hidden mirror renders the same text with the
+  // same font; its size (plus padding) becomes the element's size. Runs on
+  // every input that affects layout — including font size, which the old
+  // version ignored, so shrinking text left a tall empty box.
+  const shownText = isEditing ? localContent : element.content || "";
+  const sizeRef = useRef({ w: element.width, h: element.height });
+  sizeRef.current = { w: element.width, h: element.height };
+  useLayoutEffect(() => {
+    const m = measureRef.current;
+    if (!m) return;
+    const rect = m.getBoundingClientRect();
+    // getBoundingClientRect is in screen px (canvas is scaled); offset* are layout px.
+    const mw = m.offsetWidth || rect.width;
+    const mh = m.offsetHeight || rect.height;
+    const minLine = Math.ceil(fontSize * TEXT_LINE_HEIGHT);
+    const nextH = Math.max(minLine, Math.ceil(mh)) + TEXT_PAD * 2;
+    const updates: Partial<TextElement> = {};
+    if (Math.abs(sizeRef.current.h - nextH) >= 1) updates.height = nextH;
+    if (autoWidth) {
+      const nextW = Math.max(Math.ceil(fontSize * 0.6), Math.ceil(mw) + 2) + TEXT_PAD * 2;
+      if (Math.abs(sizeRef.current.w - nextW) >= 1) updates.width = nextW;
     }
-  }, [
-    element.content,
-    wrapWidth,
-    isEditing,
-    onUpdate,
-    element.width, // Re-measure height when width changes (text reflows)
-    // within existing bounds via CSS.
-  ]);
-
-  // Removed automatic click-outside blur - user must click outside or press Escape to exit editing
+    if (updates.width !== undefined || updates.height !== undefined) onUpdate(updates);
+  }, [shownText, fontSize, fontWeight, fontFamily, autoWidth, element.width, onUpdate]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Prevent ALL canvas shortcuts from triggering while editing
     e.stopPropagation();
-
     // Escape exits edit mode WITHOUT reverting changes
     if (e.key === "Escape") {
       e.preventDefault();
       onBlur();
     }
-
-    // Enter creates new line - default behavior works
-    // No need to prevent or handle
   };
 
-  // Handle content change with auto-grow
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setLocalContent(e.target.value);
-    // Auto-grow after content update
-    if (typeof window !== "undefined") {
-      window.requestAnimationFrame(autoGrowTextarea);
-    }
-  };
-
-  // Determine text style (solid color or gradient)
   // CRITICAL: Apply gradient directly to text span, not container
   const hasGradient = gradient?.startsWith("linear-gradient");
-
-  // Get the effective width for the text
-  const effectiveWidth = wrapWidth || element.width;
 
   // Check if this text is actionable
   const isActionable =
@@ -9129,14 +9088,22 @@ function TextCard({
     element.content?.includes("[x]") ||
     (element.hypercubeTags && element.hypercubeTags.length > 0);
 
+  const textStyle: React.CSSProperties = {
+    fontSize,
+    fontWeight,
+    fontFamily,
+    textAlign,
+    lineHeight: TEXT_LINE_HEIGHT,
+    whiteSpace: autoWidth ? "pre" : "pre-wrap",
+    wordBreak: autoWidth ? "normal" : "break-word",
+    overflowWrap: autoWidth ? "normal" : "break-word",
+  };
+
   return (
     <div
       ref={containerRef}
-      className="w-full h-full flex items-start justify-center p-2 relative"
-      style={{
-        // Allow overflow when editing so text isn't clipped
-        overflow: "visible", // Changed from conditional to always visible to prevent clipping at zoom
-      }}
+      className="w-full h-full relative"
+      style={{ padding: TEXT_PAD, overflow: "visible" }}
     >
       {/* Task indicator */}
       {isActionable && (
@@ -9145,62 +9112,36 @@ function TextCard({
           title="Actionable task"
         />
       )}
-      {/* Hidden measurement element - respects wrapWidth */}
-      {!isEditing && element.content && (
-        <div
-          ref={measureRef}
-          className="absolute opacity-0 pointer-events-none whitespace-pre-wrap"
-          style={{
-            fontSize,
-            fontWeight,
-            fontFamily,
-            textAlign,
-            maxWidth: wrapWidth ? `${wrapWidth - 16}px` : undefined,
-            width: wrapWidth ? `${wrapWidth - 16}px` : "auto",
-          }}
-        >
-          {element.content}
-        </div>
-      )}
-      {/* Text content */}
+      {/* Hidden mirror used to size the box (trailing newline needs a glyph) */}
+      <div
+        ref={measureRef}
+        aria-hidden
+        className="absolute left-0 top-0 opacity-0 pointer-events-none"
+        style={{
+          ...textStyle,
+          width: autoWidth ? "max-content" : Math.max(1, element.width - TEXT_PAD * 2),
+        }}
+      >
+        {(shownText || " ") + (shownText.endsWith("\n") ? "\u200b" : "")}
+      </div>
       {isEditing ? (
         <textarea
           ref={textareaRef}
           value={localContent}
-          onChange={handleContentChange}
+          onChange={(e) => setLocalContent(e.target.value)}
           onBlur={onLocalBlur}
           onKeyDown={handleKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           autoFocus
-          className="resize-none border-0 bg-transparent p-0 focus:outline-none"
-          style={{
-            fontSize,
-            fontWeight,
-            fontFamily,
-            textAlign,
-            color: textColor,
-            width: effectiveWidth - 16,
-            minHeight: 24,
-            overflow: "visible", // Allow text to be fully visible while editing
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
+          wrap={autoWidth ? "off" : "soft"}
+          className="block w-full h-full resize-none border-0 bg-transparent p-0 m-0 focus:outline-none overflow-hidden"
+          style={{ ...textStyle, color: textColor, caretColor: textColor.startsWith("#") ? textColor : "#ffffff" }}
           placeholder="Type text..."
           data-no-drag
         />
       ) : (
-        <div
-          className="w-full whitespace-pre-wrap"
-          style={{
-            fontSize,
-            fontWeight,
-            fontFamily,
-            textAlign,
-            maxWidth: wrapWidth ? `${wrapWidth - 16}px` : undefined,
-            overflow: "visible", // Prevent text clipping
-          }}
-        >
+        <div className="w-full" style={textStyle}>
           {element.content ? (
             <span
               key={hasGradient ? gradient : textColor}
@@ -9220,7 +9161,7 @@ function TextCard({
               {element.content}
             </span>
           ) : (
-            <span className="text-muted-foreground text-sm">
+            <span className="text-muted-foreground" style={{ fontSize: Math.min(fontSize, 14) }}>
               Double-click to edit
             </span>
           )}
