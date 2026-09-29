@@ -17,6 +17,7 @@
  * - onError callback fires when consecutiveFailures >= 5
  */
 
+import { YJS_FINGERPRINT_FIELD, fingerprintYjsState } from './state-fingerprint';
 import * as Y from 'yjs';
 import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@/supabase/client';
@@ -61,6 +62,8 @@ export class SupabasePersistence {
   private updateHandler: (update: Uint8Array, origin: unknown) => void;
   /** Tracks the currently running save promise so destroy() can await it. */
   private activeSavePromise: Promise<boolean> | null = null;
+  private queuedSavePromise: Promise<boolean> | null = null;
+  private loadedFingerprint: string | null = null;
   private consecutiveFailures = 0;
   private onPersistenceError?: (error: string) => void;
   private onStatusChange?: (status: PersistenceSaveStatus, message?: string) => void;
@@ -102,6 +105,16 @@ export class SupabasePersistence {
     this.doc.on('update', this.updateHandler);
   }
 
+  /** The yjs_state binary as last read from (or written to) the DB. */
+  getLoadedState(): Uint8Array | null {
+    return this.lastLoadedState;
+  }
+
+  /** Fingerprint of the yjs_state read by load(), or null if none was loaded. */
+  getLoadedFingerprint(): string | null {
+    return this.loadedFingerprint;
+  }
+
   /**
    * Load persisted Y.Doc state from Supabase.
    * Returns true if state was found and applied, false if no persisted state exists.
@@ -122,6 +135,7 @@ export class SupabasePersistence {
       // Safety net: snapshot the existing DB state before we load it
       createSnapshot(this.projectId, 'Pre-load backup').catch(() => {});
 
+      this.loadedFingerprint = fingerprintYjsState(data.yjs_state);
       // yjs_state is stored as a base64-encoded binary
       const binary = Uint8Array.from(atob(data.yjs_state), (c) => c.charCodeAt(0));
       Y.applyUpdate(this.doc, binary, 'persistence');
@@ -175,8 +189,19 @@ export class SupabasePersistence {
   async save(retryAttempt = 0): Promise<boolean> {
     if (this.destroyed) return false;
     if (!this.ready) return true; // nothing to persist yet — loading in progress
-    // If a save is already running, don't stack another — join its result.
-    if (this.activeSavePromise) return this.activeSavePromise;
+    // A save already running encoded the doc when it STARTED, so edits made
+    // since are not in it. Joining it (the old behaviour) left those edits with
+    // no save scheduled, while callers like flush() reported success. Queue ONE
+    // follow-up save instead; concurrent callers share it.
+    if (this.activeSavePromise) {
+      if (!this.queuedSavePromise) {
+        this.queuedSavePromise = this.activeSavePromise.then(() => {
+          this.queuedSavePromise = null;
+          return this.save(retryAttempt);
+        });
+      }
+      return this.queuedSavePromise;
+    }
 
     this.activeSavePromise = this._executeSave(retryAttempt).finally(() => {
       this.activeSavePromise = null;
@@ -278,7 +303,10 @@ export class SupabasePersistence {
         }
         this.lastSavedElementCount = docElementCount;
 
-        projectData = mergeProjectWithDoc(base, fromDoc, savedAt);
+        projectData = {
+          ...mergeProjectWithDoc(base, fromDoc, savedAt),
+          [YJS_FINGERPRINT_FIELD]: fingerprintYjsState(base64),
+        } as CXDProject;
       }
 
       const { error } = await supabase

@@ -309,32 +309,89 @@ export function seedProjectExtrasIntoYDoc(doc: Y.Doc, project: CXDProject): void
  * write project_data only, so for these two fields project_data is always
  * at-least-as-fresh as doc meta (canvas renames write both).
  *
- * Returns seed counts so the caller can emit telemetry — divergence should be
- * visible in Sentry, not silent.
+ * MODIFICATIONS (pass `dbState`, the yjs_state binary exactly as loaded from
+ * the DB): every writer of yjs_state also writes project_data in the same
+ * UPDATE, so when project_data's version of a known element differs from the
+ * DB yjs_state's version, project_data was written LATER by a project_data-only
+ * path (a session that ran without the CRDT, e.g. every post-reload session
+ * before the reload fix). "Doc wins for known ids" silently reverted those
+ * edits; instead project_data's version replaces the doc's. Elements the live
+ * doc changed beyond the DB state (unsaved IndexedDB edits) are unaffected:
+ * they only get replaced where project_data itself diverged from the DB.
+ *
+ * Returns seed/repair counts so the caller can emit telemetry — divergence
+ * should be visible in Sentry, not silent.
  */
 export function reconcileCanvasIntoYDoc(
   doc: Y.Doc,
-  project: CXDProject
-): { seededElements: number; seededEdges: number } {
+  project: CXDProject,
+  dbState?: Uint8Array | null
+): { seededElements: number; seededEdges: number; repairedElements: number; repairedEdges: number } {
   const elements = project.canvasLayout?.elements ?? [];
   const edges = project.canvasLayout?.edges ?? [];
   let seededElements = 0;
   let seededEdges = 0;
+  let repairedElements = 0;
+  let repairedEdges = 0;
+
+  // Canonical forms of the DB yjs_state's elements/edges, and a normalizer that
+  // round-trips project_data items through the same serializer so formatting
+  // differences (Y.Text, JSON arrays, undefined keys) never read as edits.
+  let dbElements: Map<string, string> | null = null;
+  let dbEdges: Map<string, string> | null = null;
+  const scratch = new Y.Doc();
+  const scratchEls = scratch.getMap<Y.Map<unknown>>('els');
+  const scratchEdges = scratch.getMap<Y.Map<unknown>>('edges');
+  const normElement = (el: CanvasElement): string => {
+    scratchEls.set('x', canvasElementToYMap(el));
+    return stableStringify(yMapToCanvasElement(scratchEls.get('x')!));
+  };
+  const normEdge = (edge: CanvasEdge): string => {
+    scratchEdges.set('x', canvasEdgeToYMap(edge));
+    return stableStringify(yMapToCanvasEdge(scratchEdges.get('x')!));
+  };
+  if (dbState && dbState.length > 0) {
+    try {
+      const dbDoc = new Y.Doc();
+      Y.applyUpdate(dbDoc, dbState);
+      dbElements = new Map();
+      dbEdges = new Map();
+      dbDoc.getMap<Y.Map<unknown>>(YDOC_KEYS.ELEMENTS).forEach((yEl, id) => {
+        if (yEl instanceof Y.Map) dbElements!.set(id, normElement(yMapToCanvasElement(yEl)));
+      });
+      dbDoc.getMap<Y.Map<unknown>>(YDOC_KEYS.EDGES).forEach((yEdge, id) => {
+        if (yEdge instanceof Y.Map) dbEdges!.set(id, normEdge(yMapToCanvasEdge(yEdge)));
+      });
+      dbDoc.destroy();
+    } catch (err) {
+      console.warn('[reconcile] Could not decode DB yjs_state; skipping modification repair:', err);
+      dbElements = null;
+      dbEdges = null;
+    }
+  }
 
   doc.transact(() => {
     const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
     for (const element of elements) {
-      if (element?.id && !yElements.has(element.id)) {
+      if (!element?.id) continue;
+      if (!yElements.has(element.id)) {
         yElements.set(element.id, canvasElementToYMap(element));
         seededElements++;
+      } else if (dbElements?.has(element.id) && dbElements.get(element.id) !== normElement(element)) {
+        yElements.set(element.id, canvasElementToYMap(element));
+        repairedElements++;
       }
     }
 
     const yEdges = doc.getMap(YDOC_KEYS.EDGES);
     for (const edge of edges) {
-      if (edge?.id && !yEdges.has(edge.id)) {
+      if (!edge?.id) continue;
+      if (!yEdges.has(edge.id)) {
         yEdges.set(edge.id, canvasEdgeToYMap(edge));
         seededEdges++;
+      } else if (dbEdges?.has(edge.id) && dbEdges.get(edge.id) !== normEdge(edge)) {
+        yEdges.set(edge.id, canvasEdgeToYMap(edge));
+        repairedEdges++;
       }
     }
 
@@ -346,8 +403,23 @@ export function reconcileCanvasIntoYDoc(
       }
     }
   }, 'initialization');
+  scratch.destroy();
 
-  return { seededElements, seededEdges };
+  return { seededElements, seededEdges, repairedElements, repairedEdges };
+}
+
+/** JSON with sorted keys and undefined dropped, for order-insensitive equality. */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v).sort()) {
+        if (v[k] !== undefined) sorted[k] = v[k];
+      }
+      return sorted;
+    }
+    return v;
+  });
 }
 
 // ─── Conversion: Y.Doc → CXDProject ─────────────────────────────────────────

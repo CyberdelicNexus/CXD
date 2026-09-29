@@ -126,5 +126,60 @@ console.log('— tombstone caveat is bounded: deleted-in-doc element resurrects 
   doc.destroy();
 }
 
+console.log('— with dbState: project_data-only edits win over the DB yjs_state —');
+{
+  // DB yjs_state: A at x=0. Live doc loaded from it.
+  const dbDoc = createProjectYDoc();
+  initializeYDoc(dbDoc, project([el('A', 'a'), el('B', 'b')], [edge('E1', 'A', 'B')]));
+  const dbState = Y.encodeStateAsUpdate(dbDoc);
+  const doc = createProjectYDoc();
+  Y.applyUpdate(doc, dbState);
+
+  // A session without the CRDT edited A (moved + retexted) in project_data only.
+  const movedA = { ...el('A', 'edited-in-json'), x: 480 } as CanvasElement;
+  const r = reconcileCanvasIntoYDoc(doc, project([movedA, el('B', 'b')], [edge('E1', 'A', 'B')]), dbState);
+  check('repairs exactly the edited element', r.repairedElements === 1);
+  check('no false repair for identical B / E1', r.repairedEdges === 0);
+  const a = getYDocElements(doc).find((e) => e.id === 'A') as { content?: string; x?: number };
+  check('doc takes project_data content', a?.content === 'edited-in-json');
+  check('doc takes project_data position', a?.x === 480);
+  const again = reconcileCanvasIntoYDoc(doc, project([movedA, el('B', 'b')], [edge('E1', 'A', 'B')]), dbState);
+  check('re-running against the same DB state converges (same content, no seeds)', again.repairedElements === 1 && again.seededElements === 0);
+  dbDoc.destroy();
+  doc.destroy();
+}
+
+console.log('— with dbState: unsaved local (IndexedDB) edits survive when project_data matches DB —');
+{
+  const dbDoc = createProjectYDoc();
+  initializeYDoc(dbDoc, project([el('A', 'a')], []));
+  const dbState = Y.encodeStateAsUpdate(dbDoc);
+  const doc = createProjectYDoc();
+  Y.applyUpdate(doc, dbState);
+  // Local unsaved edit on top of the DB state
+  const yA = doc.getMap(YDOC_KEYS.ELEMENTS).get('A') as Y.Map<unknown>;
+  yA.set('x', 999);
+  const r = reconcileCanvasIntoYDoc(doc, project([el('A', 'a')], []), dbState);
+  check('nothing repaired when project_data == DB', r.repairedElements === 0);
+  const a = getYDocElements(doc).find((e) => e.id === 'A') as { x?: number };
+  check('local edit kept', a?.x === 999);
+  dbDoc.destroy();
+  doc.destroy();
+}
+
+console.log('— with dbState: edited edge restored —');
+{
+  const dbDoc = createProjectYDoc();
+  initializeYDoc(dbDoc, project([el('A', 'a'), el('B', 'b')], [edge('E1', 'A', 'B')]));
+  const dbState = Y.encodeStateAsUpdate(dbDoc);
+  const doc = createProjectYDoc();
+  Y.applyUpdate(doc, dbState);
+  const e1 = { ...edge('E1', 'A', 'B'), label: { text: 'new label' } } as unknown as CanvasEdge;
+  const r = reconcileCanvasIntoYDoc(doc, project([el('A', 'a'), el('B', 'b')], [e1]), dbState);
+  check('edge repaired', r.repairedEdges === 1);
+  dbDoc.destroy();
+  doc.destroy();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
