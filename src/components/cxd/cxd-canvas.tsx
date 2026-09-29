@@ -1476,6 +1476,10 @@ export function CXDCanvas() {
         const alignExclude = new Set<string>();
         if (currentBoardTargetId) alignExclude.add(currentBoardTargetId);
         if (currentContainerTargetId) alignExclude.add(currentContainerTargetId);
+        // Everything moving with this drag (incl. children of selected containers,
+        // captured at drag start) must not be a snap target: it would snap to its
+        // own previous-frame position and make the drag feel sticky.
+        dragOriginalPositionsRef.current.forEach((_pos, id) => alignExclude.add(id));
 
         // If multiple items are selected, move them all
         if (
@@ -5235,6 +5239,7 @@ export function CXDCanvas() {
                   // whole group; clicking a member of the already-selected group
                   // (without dragging) enters it and selects just that member.
                   const press = elementPressRef.current;
+                  elementPressRef.current = null; // one press, one click
                   const moved = press && e ? Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4 : false;
                   const drillIn =
                     !!element.groupId &&

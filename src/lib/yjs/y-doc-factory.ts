@@ -30,6 +30,8 @@ import {
   yMapToCanvasElement,
   canvasEdgeToYMap,
   yMapToCanvasEdge,
+  applyElementUpdates,
+  applyEdgeUpdates,
 } from './element-serializers';
 import { versionToYMap, okrToYMap, yMapToVersion, yMapToOKR } from './yjs-version-actions';
 import { commentToYMap, yMapToComment } from './yjs-comment-actions';
@@ -337,18 +339,31 @@ export function reconcileCanvasIntoYDoc(
   // Canonical forms of the DB yjs_state's elements/edges, and a normalizer that
   // round-trips project_data items through the same serializer so formatting
   // differences (Y.Text, JSON arrays, undefined keys) never read as edits.
-  let dbElements: Map<string, string> | null = null;
-  let dbEdges: Map<string, string> | null = null;
+  let dbElements: Map<string, Record<string, unknown>> | null = null;
+  let dbEdges: Map<string, Record<string, unknown>> | null = null;
   const scratch = new Y.Doc();
   const scratchEls = scratch.getMap<Y.Map<unknown>>('els');
   const scratchEdges = scratch.getMap<Y.Map<unknown>>('edges');
-  const normElement = (el: CanvasElement): string => {
+  const normElement = (el: CanvasElement): Record<string, unknown> => {
     scratchEls.set('x', canvasElementToYMap(el));
-    return stableStringify(yMapToCanvasElement(scratchEls.get('x')!));
+    return JSON.parse(stableStringify(yMapToCanvasElement(scratchEls.get('x')!)));
   };
-  const normEdge = (edge: CanvasEdge): string => {
+  const normEdge = (edge: CanvasEdge): Record<string, unknown> => {
     scratchEdges.set('x', canvasEdgeToYMap(edge));
-    return stableStringify(yMapToCanvasEdge(scratchEdges.get('x')!));
+    return JSON.parse(stableStringify(yMapToCanvasEdge(scratchEdges.get('x')!)));
+  };
+  // Keys whose value differs between project_data and the DB state. Only these
+  // are written to the live doc, so unsaved local edits to OTHER fields of the
+  // same element (IndexedDB, peers) are kept.
+  const changedKeys = (fromPd: Record<string, unknown>, fromDb: Record<string, unknown>) => {
+    const set: Record<string, unknown> = {};
+    const removed: string[] = [];
+    for (const k of Object.keys(fromPd)) {
+      if (k === 'id') continue;
+      if (stableStringify(fromPd[k]) !== stableStringify(fromDb[k])) set[k] = fromPd[k];
+    }
+    for (const k of Object.keys(fromDb)) if (!(k in fromPd)) removed.push(k);
+    return { set, removed };
   };
   if (dbState && dbState.length > 0) {
     try {
@@ -377,9 +392,14 @@ export function reconcileCanvasIntoYDoc(
       if (!yElements.has(element.id)) {
         yElements.set(element.id, canvasElementToYMap(element));
         seededElements++;
-      } else if (dbElements?.has(element.id) && dbElements.get(element.id) !== normElement(element)) {
-        yElements.set(element.id, canvasElementToYMap(element));
-        repairedElements++;
+      } else if (dbElements?.has(element.id)) {
+        const { set, removed } = changedKeys(normElement(element), dbElements.get(element.id)!);
+        const yEl = yElements.get(element.id);
+        if ((Object.keys(set).length > 0 || removed.length > 0) && yEl instanceof Y.Map) {
+          applyElementUpdates(yEl, set as Partial<CanvasElement>);
+          removed.forEach((k) => yEl.delete(k));
+          repairedElements++;
+        }
       }
     }
 
@@ -389,9 +409,14 @@ export function reconcileCanvasIntoYDoc(
       if (!yEdges.has(edge.id)) {
         yEdges.set(edge.id, canvasEdgeToYMap(edge));
         seededEdges++;
-      } else if (dbEdges?.has(edge.id) && dbEdges.get(edge.id) !== normEdge(edge)) {
-        yEdges.set(edge.id, canvasEdgeToYMap(edge));
-        repairedEdges++;
+      } else if (dbEdges?.has(edge.id)) {
+        const { set, removed } = changedKeys(normEdge(edge), dbEdges.get(edge.id)!);
+        const yEdge = yEdges.get(edge.id);
+        if ((Object.keys(set).length > 0 || removed.length > 0) && yEdge instanceof Y.Map) {
+          applyEdgeUpdates(yEdge, set as Partial<CanvasEdge>);
+          removed.forEach((k) => yEdge.delete(k));
+          repairedEdges++;
+        }
       }
     }
 

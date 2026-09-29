@@ -181,5 +181,21 @@ console.log('— with dbState: edited edge restored —');
   doc.destroy();
 }
 
+console.log('— with dbState: repair is per-field, local edits to other fields survive —');
+{
+  const dbDoc = createProjectYDoc();
+  initializeYDoc(dbDoc, project([el('A', 'a')], []));
+  const dbState = Y.encodeStateAsUpdate(dbDoc);
+  const doc = createProjectYDoc();
+  Y.applyUpdate(doc, dbState);
+  (doc.getMap(YDOC_KEYS.ELEMENTS).get('A') as Y.Map<unknown>).set('x', 777); // unsaved local move
+  const r = reconcileCanvasIntoYDoc(doc, project([el('A', 'retexted-in-json')], []), dbState);
+  const a = getYDocElements(doc).find((e) => e.id === 'A') as { content?: string; x?: number };
+  check('content repaired from project_data', r.repairedElements === 1 && a?.content === 'retexted-in-json');
+  check('unrelated local edit (x) kept', a?.x === 777);
+  dbDoc.destroy();
+  doc.destroy();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

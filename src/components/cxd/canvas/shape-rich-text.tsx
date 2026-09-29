@@ -35,8 +35,11 @@ export function ShapeRichTextEditor({
   textStyle,
   onChange,
   onBlur,
+  replaceWithChar,
 }: {
   html: string;
+  /** Editing was started by typing this character on the selected shape: it replaces the text. */
+  replaceWithChar?: string | null;
   baseFontSize: number;
   textStyle: React.CSSProperties;
   onChange: (html: string, plainText: string) => void;
@@ -81,6 +84,16 @@ export function ShapeRichTextEditor({
       onBlur();
     },
   });
+
+  // Type-to-edit: the key that opened the editor replaces the shape's text.
+  const appliedCharRef = useRef(false);
+  useEffect(() => {
+    if (!editor || !replaceWithChar || appliedCharRef.current) return;
+    appliedCharRef.current = true;
+    editor.chain().setContent(`<p>${escapeHtml(replaceWithChar)}</p>`).focus("end").run();
+    flush(editor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, replaceWithChar]);
 
   // Never drop the last keystrokes when editing ends by unmount.
   useEffect(() => {

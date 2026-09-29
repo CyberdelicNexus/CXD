@@ -482,6 +482,12 @@ export function CanvasElementRenderer({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isEditing]);
 
+  // Character that started editing a selected shape by typing (see below).
+  const [shapeTypedChar, setShapeTypedChar] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isEditing) setShapeTypedChar(null);
+  }, [isEditing]);
+
   // Auto-typing for shapes: when selected and user types, start editing
   useEffect(() => {
     if (element.type !== "shape" || !isSelected || isEditing || isReadOnly) return;
@@ -500,10 +506,12 @@ export function CanvasElementRenderer({
       // textarea. Auto-typing starts only from printable characters.
       if (e.key.length !== 1) return;
 
-      // Start editing with the typed character
+      // Start editing with the typed character. It is handed to the editor
+      // directly: writing `content` here lost the key (richContent wins over
+      // content, and in CRDT mode the store update lands a frame later).
       e.preventDefault();
       e.stopPropagation();
-      onUpdate({ content: e.key });
+      setShapeTypedChar(e.key);
       setIsEditing(true);
     };
 
@@ -676,6 +684,7 @@ export function CanvasElementRenderer({
             element={element}
             onUpdate={onUpdate}
             isEditing={isEditing}
+            typedChar={shapeTypedChar}
             onBlur={handleBlur}
             isSelected={isSelected}
             onCreateConnectedShape={onCreateConnectedShape}
@@ -698,6 +707,7 @@ export function CanvasElementRenderer({
             element={element}
             onUpdate={onUpdate}
             isEditing={isEditing}
+            isSelected={isSelected}
             onBlur={handleBlur}
           />
         );
@@ -961,7 +971,7 @@ export function CanvasElementRenderer({
           />
         )}
       {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
-      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && (() => {
+      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && !(isEditing && element.type === "shape") && (() => {
         /* Counter-rotation wrapper: un-rotates around element center so menu stays fixed above */
         const toolbar = (
         <div
@@ -2345,6 +2355,7 @@ function TextResizeHandle({
         const dx = (moveEvent.clientX - startX) / canvasZoom;
         const signedDx = fromLeft ? -dx : dx;
         if (isCorner) {
+          if (!(startW > 0)) return;
           const scale = Math.max(0.1, (startW + signedDx) / startW);
           const fontSize = Math.max(6, Math.min(400, Math.round(startFont * scale)));
           const k = fontSize / startFont;
@@ -8393,6 +8404,7 @@ function ShapeCard({
   element,
   onUpdate,
   isEditing,
+  typedChar,
   onBlur,
   isSelected,
   onCreateConnectedShape,
@@ -8400,6 +8412,7 @@ function ShapeCard({
   element: ShapeElement;
   onUpdate: (updates: Partial<ShapeElement>) => void;
   isEditing: boolean;
+  typedChar?: string | null;
   onBlur: (e?: React.FocusEvent) => void;
   isSelected?: boolean;
   onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void;
@@ -8618,6 +8631,7 @@ function ShapeCard({
         {isEditing ? (
           <ShapeRichTextEditor
             html={element.richContent || plainTextToHtml(element.content || "")}
+            replaceWithChar={typedChar}
             baseFontSize={baseFontSize}
             textStyle={{ ...baseTextStyle, ...textColorStyle }}
             onChange={(html, plain) => onUpdate({ richContent: html, content: plain })}
@@ -8978,11 +8992,13 @@ function TextCard({
   element,
   onUpdate,
   isEditing,
+  isSelected = false,
   onBlur,
 }: {
   element: TextElement;
   onUpdate: (updates: Partial<TextElement>) => void;
   isEditing: boolean;
+  isSelected?: boolean;
   onBlur: (e?: React.FocusEvent) => void;
 }) {
   const measureRef = useRef<HTMLDivElement>(null);
@@ -9049,7 +9065,18 @@ function TextCard({
   const shownText = isEditing ? localContent : element.content || "";
   const sizeRef = useRef({ w: element.width, h: element.height });
   sizeRef.current = { w: element.width, h: element.height };
+  // Re-measure once web fonts finish loading (first paint may use a fallback).
+  const [fontsReady, setFontsReady] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    document.fonts?.ready.then(() => alive && setFontsReady((n) => n + 1)).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   useLayoutEffect(() => {
+    // Only the client working on this text writes its measured size. Two
+    // clients measuring slightly differently (fonts, subpixels) would
+    // otherwise keep overwriting each other's width.
+    if (!isEditing && !isSelected) return;
     const m = measureRef.current;
     if (!m) return;
     const rect = m.getBoundingClientRect();
@@ -9065,7 +9092,7 @@ function TextCard({
       if (Math.abs(sizeRef.current.w - nextW) >= 1) updates.width = nextW;
     }
     if (updates.width !== undefined || updates.height !== undefined) onUpdate(updates);
-  }, [shownText, fontSize, fontWeight, fontFamily, autoWidth, element.width, onUpdate]);
+  }, [shownText, fontSize, fontWeight, fontFamily, autoWidth, element.width, onUpdate, isEditing, isSelected, fontsReady]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
