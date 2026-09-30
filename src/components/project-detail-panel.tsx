@@ -243,7 +243,7 @@ export function ProjectDetailPanel({
     // The cover header is a flex-shrink-0 sibling of the scroll body, so it stays
     // pinned while only the body scrolls (global dark-purple scrollbar).
     <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl overflow-hidden bg-black/20 border border-white/10 flex flex-col">
-      <div className="relative h-28 flex-shrink-0">
+      <div className="relative h-24 flex-shrink-0">
         {coverImage && coverImage.startsWith("http") ? (
           <Image src={coverImage} alt={project.name} fill className="object-cover opacity-70" unoptimized />
         ) : (
@@ -269,84 +269,74 @@ export function ProjectDetailPanel({
           {isOwner && canDelete && onDelete &&
             iconAction("delete", "Delete", <Trash2 className="w-4 h-4" />, onDelete, "hover:bg-red-500/40 hover:text-red-300")}
         </div>
-        <div className="absolute bottom-3 left-4 right-12">
+        <div className="absolute bottom-3 left-4 right-36">
           <h3 className="font-bold text-white text-xl truncate">{project.name}</h3>
         </div>
+        {/* Primary action lives in the pinned header so it never scrolls away */}
+        <button
+          onClick={() => onEnterProject(project.id)}
+          className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium shadow-lg shadow-violet-900/40 transition-colors"
+          title="Open this canvas"
+        >
+          <LogIn className="w-4 h-4" />
+          Enter Canvas
+        </button>
       </div>
 
-      <div className="p-4 flex-1 min-h-0 overflow-y-auto grid grid-cols-2 gap-3 content-start">
-        {(project.description || concept) && (
-          <div className="col-span-2 space-y-2">
-            {project.description && <p className="text-sm text-white/60 line-clamp-2">{project.description}</p>}
-            {concept && (
-              <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
-                <p className="text-[10px] uppercase tracking-wide text-violet-300/70 mb-1">Core Concept</p>
-                <p className="text-sm text-white/80 line-clamp-3">{concept}</p>
-              </div>
-            )}
-          </div>
+      <div className="p-3 flex-1 min-h-0 overflow-y-auto grid grid-cols-2 gap-2.5 content-start">
+        {(concept || project.description) && (
+          <p className="col-span-2 text-sm text-white/65 line-clamp-2">{concept || project.description}</p>
         )}
 
-        {/* Task progress bar + status breakdown */}
-        <div className="col-span-2 p-3 rounded-lg bg-white/5">
-          <div className="flex items-center justify-between mb-2">
+        {/* At a glance: tasks and roadmap in one card */}
+        <div className="col-span-2 p-3 rounded-lg bg-white/5 space-y-2">
+          <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-white/70 flex items-center gap-1.5">
-              <ListTodo className="w-3.5 h-3.5 text-cyan-400" /> Task Progress
+              <ListTodo className="w-3.5 h-3.5 text-cyan-400" /> Tasks
             </span>
             <span className="text-xs text-white/50">
-              {taskStats.done}/{taskStats.total}
+              {taskStats.done}/{taskStats.total} done
             </span>
           </div>
-          <div className="h-2 rounded-full bg-white/10 overflow-hidden mb-2.5">
+          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all"
               style={{ width: `${taskDone}%` }}
             />
           </div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {[
-              { label: "To do", value: taskStats.notStarted, color: "text-white/70" },
-              { label: "In progress", value: taskStats.inProgress, color: "text-amber-300" },
-              { label: "Blocked", value: taskStats.blocked, color: "text-rose-300" },
-              { label: "Done", value: taskStats.done, color: "text-emerald-300" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-md bg-black/20 py-1.5 text-center">
-                <p className={`text-sm font-bold ${s.color}`}>{s.value}</p>
-                <p className="text-[9px] text-white/40 leading-tight">{s.label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Roadmap progress */}
-        <div className="col-span-2 p-3 rounded-lg bg-white/5">
-          <div className="flex items-center justify-between mb-2">
+          <p className="text-[11px] text-white/45">
+            {taskStats.notStarted} to do · <span className="text-amber-300/80">{taskStats.inProgress} in progress</span>
+            {taskStats.blocked > 0 && <> · <span className="text-rose-300/80">{taskStats.blocked} blocked</span></>}
+          </p>
+          <div className="flex items-center justify-between pt-1 border-t border-white/5">
             <span className="text-xs font-medium text-white/70 flex items-center gap-1.5">
               <MapIcon className="w-3.5 h-3.5 text-violet-400" /> Roadmap
             </span>
             <span className="text-xs text-white/50">
-              {versions.length > 0 ? `${completedVersions}/${versions.length} versions` : "No versions"}
+              {versions.length > 0 ? `${completedVersions}/${versions.length} versions` : "No versions yet"}
             </span>
           </div>
-          {versions.length > 0 ? (
-            <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+          {versions.length > 0 && (
+            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-400 transition-all"
                 style={{ width: `${roadmapPercent}%` }}
               />
             </div>
-          ) : (
-            <p className="text-[11px] text-white/40">Add versions in the Plan view to track a roadmap.</p>
           )}
         </div>
 
-        {/* OKRs */}
+        {/* OKRs: collapsed by default */}
         {okrRows.length > 0 && (
-          <div className="col-span-2 p-3 rounded-lg bg-white/5">
-            <span className="text-xs font-medium text-white/70 flex items-center gap-1.5 mb-2">
-              <Target className="w-3.5 h-3.5 text-emerald-400" /> OKRs
-            </span>
-            <div className="space-y-2">
+          <details className="col-span-2 group rounded-lg bg-white/5">
+            <summary className="flex items-center justify-between cursor-pointer list-none p-3 text-xs font-medium text-white/70">
+              <span className="flex items-center gap-1.5">
+                <Target className="w-3.5 h-3.5 text-emerald-400" /> OKRs
+                <span className="text-white/40 font-normal">({okrRows.length})</span>
+              </span>
+              <span className="text-white/30 group-open:rotate-90 transition-transform">›</span>
+            </summary>
+            <div className="space-y-2 px-3 pb-3">
               {okrRows.map((o, i) => {
                 const cfg = OKR_STATUS_CONFIG[o.status as keyof typeof OKR_STATUS_CONFIG] || OKR_STATUS_CONFIG.on_track;
                 return (
@@ -370,82 +360,74 @@ export function ProjectDetailPanel({
                 );
               })}
             </div>
-          </div>
+          </details>
         )}
 
-        {/* AI insights — on-demand (spends credits), cached per project version */}
-        <div className="col-span-2 p-3 rounded-lg bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-white/70 flex items-center gap-1.5">
+        {/* AI insights: on-demand (spends credits), collapsed by default */}
+        <details className="col-span-2 group rounded-lg bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20">
+          <summary className="flex items-center justify-between cursor-pointer list-none p-3 text-xs font-medium text-white/70">
+            <span className="flex items-center gap-1.5">
               <Lightbulb className="w-3.5 h-3.5 text-amber-300" /> AI Insights
             </span>
-            {insights && (
-              <button
-                onClick={generateInsights}
-                disabled={insightsLoading}
-                className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 disabled:opacity-50"
-                title="Regenerate (uses AI credits)"
-              >
-                <RefreshCw className={`w-3 h-3 ${insightsLoading ? "animate-spin" : ""}`} /> Refresh
-              </button>
+            <span className="text-white/30 group-open:rotate-90 transition-transform">›</span>
+          </summary>
+          <div className="px-3 pb-3">
+            {insights ? (
+              <div className="space-y-2.5">
+                <div className="flex justify-end">
+                  <button
+                    onClick={generateInsights}
+                    disabled={insightsLoading}
+                    className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 disabled:opacity-50"
+                    title="Regenerate (uses AI credits)"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${insightsLoading ? "animate-spin" : ""}`} /> Refresh
+                  </button>
+                </div>
+                <p className="text-xs text-white/75 leading-relaxed">{insights.summary}</p>
+                {insights.recommendations.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-violet-300/70 mb-1">Prioritize</p>
+                    <ol className="space-y-1">
+                      {insights.recommendations.map((r, i) => (
+                        <li key={i} className="text-[11px] text-white/70 flex gap-1.5">
+                          <span className="text-violet-400 font-semibold flex-shrink-0">{i + 1}.</span>
+                          <span>{r}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[11px] text-white/40">
+                  A summary of this experience plus prioritized recommendations. Uses AI credits.
+                </p>
+                {insightsError && <p className="text-[11px] text-rose-300">{insightsError}</p>}
+                <button
+                  onClick={generateInsights}
+                  disabled={insightsLoading}
+                  className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-500 text-white text-xs font-medium transition-colors disabled:opacity-60"
+                >
+                  {insightsLoading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" /> Generate AI insights
+                    </>
+                  )}
+                </button>
+              </div>
             )}
           </div>
+        </details>
 
-          {insights ? (
-            <div className="space-y-2.5">
-              <p className="text-xs text-white/75 leading-relaxed">{insights.summary}</p>
-              {insights.recommendations.length > 0 && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-violet-300/70 mb-1">Prioritize</p>
-                  <ol className="space-y-1">
-                    {insights.recommendations.map((r, i) => (
-                      <li key={i} className="text-[11px] text-white/70 flex gap-1.5">
-                        <span className="text-violet-400 font-semibold flex-shrink-0">{i + 1}.</span>
-                        <span>{r}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-[11px] text-white/40">
-                Generate a summary of this experience plus prioritized recommendations. Uses AI credits.
-              </p>
-              {insightsError && <p className="text-[11px] text-rose-300">{insightsError}</p>}
-              <button
-                onClick={generateInsights}
-                disabled={insightsLoading}
-                className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-500 text-white text-xs font-medium transition-colors disabled:opacity-60"
-              >
-                {insightsLoading ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5" /> Generate AI insights
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="col-span-2 flex items-center gap-1.5 text-xs text-white/40">
-          <Calendar className="w-3.5 h-3.5" />
+        <div className="col-span-2 flex items-center gap-1.5 text-[11px] text-white/35">
+          <Calendar className="w-3 h-3" />
           Updated {new Date(project.updatedAt).toLocaleDateString()}
-        </div>
-
-        <div className="col-span-2 pt-1">
-          <button
-            onClick={() => onEnterProject(project.id)}
-            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
-          >
-            <LogIn className="w-4 h-4" />
-            Enter Canvas
-          </button>
         </div>
       </div>
     </div>

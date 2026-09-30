@@ -9072,11 +9072,12 @@ function TextCard({
     document.fonts?.ready.then(() => alive && setFontsReady((n) => n + 1)).catch(() => {});
     return () => { alive = false; };
   }, []);
+  // The textarea is sized from this LOCAL measurement, not from element.width/
+  // height: those arrive a frame (or more) later through the store, and a
+  // textarea that is briefly too small scrolls itself, which showed up as the
+  // text box jumping up and down while typing.
+  const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
-    // Only the client working on this text writes its measured size. Two
-    // clients measuring slightly differently (fonts, subpixels) would
-    // otherwise keep overwriting each other's width.
-    if (!isEditing && !isSelected) return;
     const m = measureRef.current;
     if (!m) return;
     const rect = m.getBoundingClientRect();
@@ -9085,14 +9086,27 @@ function TextCard({
     const mh = m.offsetHeight || rect.height;
     const minLine = Math.ceil(fontSize * TEXT_LINE_HEIGHT);
     const nextH = Math.max(minLine, Math.ceil(mh)) + TEXT_PAD * 2;
+    const nextW = autoWidth
+      ? Math.max(Math.ceil(fontSize * 0.6), Math.ceil(mw) + 2) + TEXT_PAD * 2
+      : sizeRef.current.w;
+    setMeasured((prev) => (prev && prev.w === nextW && prev.h === nextH ? prev : { w: nextW, h: nextH }));
+    // Only the client working on this text writes its measured size. Two
+    // clients measuring slightly differently (fonts, subpixels) would
+    // otherwise keep overwriting each other's width.
+    if (!isEditing && !isSelected) return;
     const updates: Partial<TextElement> = {};
     if (Math.abs(sizeRef.current.h - nextH) >= 1) updates.height = nextH;
-    if (autoWidth) {
-      const nextW = Math.max(Math.ceil(fontSize * 0.6), Math.ceil(mw) + 2) + TEXT_PAD * 2;
-      if (Math.abs(sizeRef.current.w - nextW) >= 1) updates.width = nextW;
-    }
+    if (autoWidth && Math.abs(sizeRef.current.w - nextW) >= 1) updates.width = nextW;
     if (updates.width !== undefined || updates.height !== undefined) onUpdate(updates);
   }, [shownText, fontSize, fontWeight, fontFamily, autoWidth, element.width, onUpdate, isEditing, isSelected, fontsReady]);
+
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.scrollTop = 0;
+      ta.scrollLeft = 0;
+    }
+  }, [measured, isEditing]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -9162,8 +9176,14 @@ function TextCard({
           onClick={(e) => e.stopPropagation()}
           autoFocus
           wrap={autoWidth ? "off" : "soft"}
-          className="block w-full h-full resize-none border-0 bg-transparent p-0 m-0 focus:outline-none overflow-hidden"
-          style={{ ...textStyle, color: textColor, caretColor: textColor.startsWith("#") ? textColor : "#ffffff" }}
+          className="block resize-none border-0 bg-transparent p-0 m-0 focus:outline-none overflow-hidden"
+          style={{
+            ...textStyle,
+            color: textColor,
+            caretColor: textColor.startsWith("#") ? textColor : "#ffffff",
+            width: autoWidth && measured ? measured.w - TEXT_PAD * 2 : "100%",
+            height: measured ? measured.h - TEXT_PAD * 2 : "100%",
+          }}
           placeholder="Type text..."
           data-no-drag
         />

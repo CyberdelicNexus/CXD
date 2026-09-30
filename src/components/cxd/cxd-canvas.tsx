@@ -13,6 +13,7 @@ import { ExperienceInspector } from "./canvas/experience-inspector";
 import { PinnedInboxNote } from "./canvas/pinned-inbox-note";
 import { CANVAS_OVERLAY_LAYER_ID } from "./canvas/canvas-overlay";
 import { QuickColorFan } from "./canvas/quick-color-fan";
+import { ExportDialog } from "./canvas/export-dialog";
 import { SHAPE_DEFAULT_SIZES } from "@/lib/shape-geometry";
 import { DEFAULT_SHAPE_STYLE } from "@/lib/style-presets";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
@@ -227,6 +228,7 @@ function CanvasContextMenu({
   onDuplicate,
   onDelete,
   onDownloadImage,
+  onExport,
   onConnectSelected,
   onAutoOrganize,
   hasSelection,
@@ -244,6 +246,7 @@ function CanvasContextMenu({
   onDuplicate: () => void;
   onDelete: () => void;
   onDownloadImage?: () => void;
+  onExport?: () => void;
   onConnectSelected?: () => void;
   onAutoOrganize?: () => void;
   hasSelection: boolean;
@@ -374,6 +377,17 @@ function CanvasContextMenu({
             </button>
           )}
         </>
+      )}
+
+      {onExport && (
+        <button
+          onClick={onExport}
+          className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          {hasSelection ? 'Export selection…' : 'Export board…'}
+          <span className="ml-auto text-xs text-muted-foreground">{typeof navigator !== 'undefined' && navigator.platform.includes('Mac') ? '⇧⌘E' : 'Ctrl+⇧+E'}</span>
+        </button>
       )}
 
       {hasClipboard && (
@@ -886,6 +900,9 @@ export function CXDCanvas() {
   const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null);
   // Pointer-down info for the element being pressed, read by onSelect on click.
   const elementPressRef = useRef<{ x: number; y: number; wholeGroupSelected: boolean } | null>(null);
+
+  // Export dialog (PNG / JPEG / PDF of the board or the selection).
+  const [exportDialog, setExportDialog] = useState<null | { scope: 'selection' | 'board' }>(null);
 
   const [showAlignmentGuides, setShowAlignmentGuides] = useState(true);
   // Guide segments: a horizontal guide runs at `at` from `from` to `to` along x,
@@ -2236,11 +2253,11 @@ export function CXDCanvas() {
       setSelectedElementIds(new Set([newElement.id]));
 
       // Offer the quick colour fan so the next click can style it.
-      const isPlainNote =
+      const isColourableCard =
         newElement.type === "freeform" &&
-        (newElement as FreeformElement).cardType === "note" &&
+        ((newElement as FreeformElement).cardType === "note" || (newElement as FreeformElement).cardType === "task") &&
         !(newElement as FreeformElement).isDocument;
-      if (newElement.type === "shape" || newElement.type === "container" || isPlainNote) {
+      if (newElement.type === "shape" || newElement.type === "container" || isColourableCard) {
         setQuickColorTargetId(newElement.id);
       }
     },
@@ -3066,6 +3083,10 @@ export function CXDCanvas() {
         boardId: activeBoardId,
         surface: activeSurface,
       });
+      // Task and note cards dragged out of the inbox get the quick colour fan too.
+      if (element?.type === "freeform" && !(element as FreeformElement).isDocument) {
+        setQuickColorTargetId(elementId);
+      }
     },
     [pushCanvasHistory, updateCanvasElement, project, activeBoardId, activeSurface]
   );
@@ -3523,6 +3544,16 @@ export function CXDCanvas() {
     );
   }, []);
 
+  // Other parts of the app (navbar, hub) can ask the canvas to open the export dialog.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const scope = (e as CustomEvent<{ scope?: 'selection' | 'board' }>).detail?.scope ?? 'board';
+      setExportDialog({ scope });
+    };
+    window.addEventListener('cxd:export-canvas', open);
+    return () => window.removeEventListener('cxd:export-canvas', open);
+  }, []);
+
   // Global keyboard shortcut system
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -3904,6 +3935,13 @@ export function CXDCanvas() {
         // z-index alongside the pasted copies.
         setSelectedElementIds(new Set(prepared.map((el) => el.id)));
         setSelectedElementId(prepared.length > 0 ? prepared[0].id : null);
+        return;
+      }
+
+      // EXPORT: Ctrl/Cmd + Shift + E
+      if (isMod && e.shiftKey && (e.key === "e" || e.key === "E")) {
+        e.preventDefault();
+        setExportDialog({ scope: selectedElementIds.size > 0 ? "selection" : "board" });
         return;
       }
 
@@ -5327,6 +5365,7 @@ export function CXDCanvas() {
             onUpdateElements={handleMultiSelectUpdateElements}
             onDeleteElements={handleMultiSelectDeleteElements}
             onDuplicateElements={handleMultiSelectDuplicateElements}
+            onExport={() => setExportDialog({ scope: 'selection' })}
             onCreateGroup={handleMultiSelectCreateGroup}
             onUngroup={handleMultiSelectUngroup}
             onBringForward={handleMultiSelectBringForward}
@@ -6224,6 +6263,7 @@ export function CXDCanvas() {
           else updateSettings({ gridVisible: false, gridMajorDots: false });
         }}
         onEnterFocusMode={() => setCanvasFocusMode(true)}
+        onExport={() => setExportDialog({ scope: selectedElementIds.size > 0 ? 'selection' : 'board' })}
       />
       )}
       {/* Task Inbox - for tasks created in Plan Tab */}
@@ -6236,6 +6276,17 @@ export function CXDCanvas() {
         onGoToPlanTab={() => setCanvasViewMode('plan')}
         canvasZoom={canvasZoom}
       />
+      )}
+      {exportDialog && (
+        <ExportDialog
+          open
+          initialScope={exportDialog.scope}
+          onClose={() => setExportDialog(null)}
+          elements={canvasElements}
+          edges={canvasEdges}
+          selectedIds={selectedElementIds}
+          projectName={project?.name || 'canvas'}
+        />
       )}
       {/* Quick colour fan after placing an element */}
       {quickColorTargetId && (() => {
@@ -6642,6 +6693,11 @@ export function CXDCanvas() {
           })()}
           onConnectSelected={() => { connectSelectedElements(); setContextMenuPos(null); setContextMenuTarget(null); }}
           onAutoOrganize={() => { autoOrganizeSelected(); setContextMenuPos(null); setContextMenuTarget(null); }}
+          onExport={() => {
+            setExportDialog({ scope: selectedElementIds.size > 0 ? 'selection' : 'board' });
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
           onDownloadImage={async () => {
             if (selectedElementId) {
               const element = canvasElements.find(el => el.id === selectedElementId);

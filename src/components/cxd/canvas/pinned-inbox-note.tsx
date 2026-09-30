@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { FileText, GripHorizontal, Minus, Plus, Type, X } from "lucide-react";
 import { useCXDStore } from "@/store/cxd-store";
 import type { FreeformElement } from "@/types/canvas-elements";
@@ -83,14 +84,17 @@ export function PinnedInboxNote() {
     document.addEventListener("mouseup", up);
   };
 
-  if (!note) return null;
+  if (!note || typeof document === "undefined") return null;
 
   const left = pos?.x ?? 88;
   const top = pos?.y ?? (canvasFocusMode ? 24 : 96);
 
-  return (
+  // Portaled to <body>: inside the canvas container it lives in that container's
+  // stacking context, where connector lines and radial menus (z 9998+) paint
+  // over it. 10000 sits above all canvas content and below app modals/menus.
+  return createPortal(
     <div
-      className="fixed z-[45] flex flex-col rounded-xl border border-cyan-500/25 bg-[rgba(12,10,22,0.94)] backdrop-blur-xl shadow-2xl"
+      className="fixed z-[10000] flex flex-col rounded-xl border border-cyan-500/25 bg-[rgba(12,10,22,0.94)] backdrop-blur-xl shadow-2xl"
       style={{ left, top, width: PANEL_WIDTH }}
       data-prevent-canvas-wheel="true"
       // Keep canvas handlers (pan, marquee, deselect, context menu) out of the panel.
@@ -158,6 +162,7 @@ export function PinnedInboxNote() {
           />
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
