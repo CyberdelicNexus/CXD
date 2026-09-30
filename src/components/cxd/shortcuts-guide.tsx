@@ -57,6 +57,7 @@ const SHORTCUTS: ShortcutItem[] = [
       { keys: ["Ctrl/Cmd", "+", "X"], description: "Cut selected" },
       { keys: ["Ctrl/Cmd", "+", "V"], description: "Paste at cursor" },
       { keys: ["Ctrl/Cmd", "+", "D"], description: "Duplicate selected" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "E"], description: "Export selection or board (PNG / JPEG / PDF)" },
       { keys: ["Delete / Backspace"], description: "Delete selected" },
     ],
   },

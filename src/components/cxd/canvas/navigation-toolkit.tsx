@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip, Focus } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip, Focus, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface NavigationToolkitProps {
@@ -18,6 +18,7 @@ export interface NavigationToolkitProps {
   gridMajorDots?: boolean;
   onCycleGrid?: () => void;
   onEnterFocusMode?: () => void;
+  onExport?: () => void;
 }
 
 export function NavigationToolkit({
@@ -36,6 +37,7 @@ export function NavigationToolkit({
   gridMajorDots,
   onCycleGrid,
   onEnterFocusMode,
+  onExport,
 }: NavigationToolkitProps) {
   return (
     // Vertically centered on the page regardless of viewport height (top-1/2 +
@@ -112,6 +114,17 @@ export function NavigationToolkit({
       >
         <Grid3X3 className="w-4 h-4" />
       </Button>
+      {onExport && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onExport}
+          className="bg-card/80 backdrop-blur border border-border"
+          title="Export as PNG / JPEG / PDF (Ctrl/Cmd + Shift + E)"
+        >
+          <Download className="w-4 h-4" />
+        </Button>
+      )}
       {onEnterFocusMode && (
         <Button
           variant="ghost"

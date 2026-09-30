@@ -25,6 +25,7 @@ import {
   ArrowDown,
   Palette,
   ChevronsLeft,
+  Download,
   MoreHorizontal,
 } from "lucide-react";
 
@@ -52,6 +53,7 @@ interface MultiSelectionBoxProps {
   onUpdateElements: (updates: Map<string, Partial<CanvasElement>>) => void;
   onDeleteElements: () => void;
   onDuplicateElements: () => void;
+  onExport?: () => void;
   onCreateGroup: () => void;
   onUngroup: () => void;
   onBringForward: () => void;
@@ -75,6 +77,7 @@ export function MultiSelectionBox({
   onUpdateElements,
   onDeleteElements,
   onDuplicateElements,
+  onExport,
   onCreateGroup,
   onUngroup,
   onBringForward,
@@ -652,6 +655,9 @@ export function MultiSelectionBox({
         {/* Duplicate & Delete */}
         <div className="flex items-center gap-0.5 pl-1">
           <ToolButton icon={<Copy className="w-4 h-4" />} title="Duplicate" onClick={onDuplicateElements} />
+          {onExport && (
+            <ToolButton icon={<Download className="w-4 h-4" />} title="Export selection (Ctrl/Cmd + Shift + E)" onClick={onExport} />
+          )}
           <ToolButton
             icon={<Trash2 className="w-4 h-4" />}
             title="Delete"
