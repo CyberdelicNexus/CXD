@@ -602,27 +602,44 @@ export function CXDNavbar() {
 
           {project && viewMode !== "home" && (
             <div className="flex items-center gap-2">
-              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 shadow-lg group">
-                {isRenaming ? (
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onBlur={handleRenameSubmit}
-                    onKeyDown={(e) => e.key === "Enter" && handleRenameSubmit()}
-                    className="bg-transparent border-none text-sm text-white focus:outline-none min-w-[120px]"
-                  />
-                ) : (
-                  <span
-                    className="text-sm font-medium text-white/70 cursor-pointer hover:text-white transition-colors"
-                    onClick={() => {
-                      setRenameValue(project.name);
-                      setIsRenaming(true);
-                    }}
-                  >
-                    {project.name}
-                  </span>
-                )}
+              {/* Experience name: a circle with an icon that expands on hover (and
+                  stays open while renaming) so the name doesn't eat the navbar. */}
+              <div
+                className="hidden md:flex items-center h-9 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 shadow-lg group/name overflow-hidden transition-colors hover:bg-white/[0.08] focus-within:bg-white/[0.08]"
+                title={isRenaming ? undefined : project.name}
+              >
+                <span className="w-9 h-9 flex items-center justify-center flex-shrink-0 text-violet-300">
+                  <Box className="w-4 h-4" />
+                </span>
+                <div
+                  className={cn(
+                    "overflow-hidden whitespace-nowrap transition-[max-width,opacity,padding] duration-300 ease-out",
+                    isRenaming
+                      ? "max-w-[320px] opacity-100 pr-4"
+                      : "max-w-0 opacity-0 group-hover/name:max-w-[320px] group-hover/name:opacity-100 group-hover/name:pr-4 group-focus-within/name:max-w-[320px] group-focus-within/name:opacity-100 group-focus-within/name:pr-4",
+                  )}
+                >
+                  {isRenaming ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={handleRenameSubmit}
+                      onKeyDown={(e) => e.key === "Enter" && handleRenameSubmit()}
+                      className="bg-transparent border-none text-sm text-white focus:outline-none min-w-[120px]"
+                    />
+                  ) : (
+                    <span
+                      className="text-sm font-medium text-white/70 cursor-pointer hover:text-white transition-colors"
+                      onClick={() => {
+                        setRenameValue(project.name);
+                        setIsRenaming(true);
+                      }}
+                    >
+                      {project.name}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Breadcrumbs - shown when inside a board */}

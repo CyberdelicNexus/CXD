@@ -504,9 +504,20 @@ export function CanvasElementRenderer({
       // intercepted here (they fall through to the canvas's delete handler).
       // Only while EDITING does Delete act on text, handled natively by the
       // textarea. Auto-typing starts only from printable characters.
-      if (e.key.length !== 1) return;
+      // Enter opens the editor with the caret at the end of the existing text.
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsEditing(true);
+        return;
+      }
+      // Space belongs to the canvas (hand tool); it must never start editing.
+      if (e.key.length !== 1 || e.key === " ") return;
 
-      // Start editing with the typed character. It is handed to the editor
+      // Typing on a selected shape starts editing. An empty shape takes the
+      // character as its text; a shape that already has text keeps it and the
+      // character is appended (it used to REPLACE the text, which is how a
+      // stray key wiped a label). The character is handed to the editor
       // directly: writing `content` here lost the key (richContent wins over
       // content, and in CRDT mode the store update lands a frame later).
       e.preventDefault();
@@ -676,6 +687,7 @@ export function CanvasElementRenderer({
             isSelected={isSelected}
             isReadOnly={isReadOnly}
             onCropModeChange={setIsCroppingImage}
+            canvasZoom={canvasZoom}
           />
         );
       case "shape":
@@ -1058,8 +1070,6 @@ export function CanvasElementRenderer({
                     strokeColor={(element as ShapeElement).style?.borderColor}
                     strokeWidth={(element as ShapeElement).style?.borderWidth}
                     fillOpacity={(element as ShapeElement).style?.fillOpacity}
-                    textColor={(element as ShapeElement).style?.textColor}
-                    fontSize={(element as ShapeElement).style?.fontSize}
                     currentStyle={(element as ShapeElement).style}
                     onApplyStyle={(partial) =>
                       onUpdate({ style: { ...element.style, ...partial } })
@@ -1082,51 +1092,8 @@ export function CanvasElementRenderer({
                         style: { ...element.style, fillOpacity: opacity },
                       })
                     }
-                    onTextColorChange={(color) =>
-                      onUpdate({ style: { ...element.style, textColor: color } })
-                    }
-                    onFontSizeChange={(size) =>
-                      onUpdate({ style: { ...element.style, fontSize: size } })
-                    }
                     onClose={() => setShowColorPicker(false)}
                     defaultMode={colorPickerDefaultMode}
-                  />
-                )}
-              </div>
-
-              {/* Text Formatting Dropdown */}
-              <div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    if (showTextStyleMenu) {
-                      closeAllSubmenus();
-                    } else {
-                      closeAllSubmenus();
-                      setShowTextStyleMenu(true);
-                    }
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showTextStyleMenu && "bg-primary/20 text-primary",
-                  )}
-                  title="Text Formatting"
-                >
-                  <Type className="w-4 h-4" />
-                </button>
-                {showTextStyleMenu && (
-                  <ShapeTextStylePicker
-                    style={(element as ShapeElement).style}
-                    onStyleChange={(updates) =>
-                      onUpdate({ style: { ...element.style, ...updates } })
-                    }
-                    onOpenColorPicker={() => {
-                      setShowTextStyleMenu(false);
-                      setColorPickerDefaultMode("text");
-                      openColorPicker();
-                    }}
-                    onClose={() => setShowTextStyleMenu(false)}
                   />
                 )}
               </div>
@@ -2629,123 +2596,6 @@ function ShapeTypePicker({
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-// Shape text style picker - simplified to only show font weight (secondary popover)
-function ShapeTextStylePicker({
-  style,
-  onStyleChange,
-  onOpenColorPicker,
-  onClose,
-}: {
-  style?: ElementStyle;
-  onStyleChange: (updates: Partial<ElementStyle>) => void;
-  onOpenColorPicker?: () => void;
-  onClose: () => void;
-}) {
-  const currentFontWeight = style?.fontWeight || 'normal';
-  const currentFontFamily = style?.fontFamily || 'inherit';
-  const currentFontSize = style?.fontSize || 14;
-  const isBold = currentFontWeight === 'bold' || currentFontWeight === 'semibold';
-  const isItalic = style?.fontStyle === 'italic';
-  const isUnderline = style?.textDecoration === 'underline';
-  const currentTextAlign = style?.textAlign || 'center';
-
-  return (
-    <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {/* Font family */}
-      <select
-        value={currentFontFamily}
-        onChange={(e) => onStyleChange({ fontFamily: e.target.value })}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full h-7 px-2 mb-2 text-[11px] rounded bg-muted/50 border border-border/50 text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/50"
-      >
-        {FONT_FAMILIES.map(({ value, label }) => (
-          <option key={value} value={value}>{label}</option>
-        ))}
-      </select>
-
-      {/* Font size slider */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] text-muted-foreground w-8">Size</span>
-        <input
-          type="range" value={currentFontSize}
-          onChange={(e) => onStyleChange({ fontSize: parseInt(e.target.value) })}
-          min={8} max={72} step={1}
-          className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
-        />
-        <span className="text-[10px] text-muted-foreground w-6 text-right">{currentFontSize}</span>
-      </div>
-
-      {/* Formatting buttons row: B | I | U | divider | AlignLeft | AlignCenter | AlignRight */}
-      <div className="flex items-center gap-1 mb-2">
-        {/* Bold */}
-        <button
-          onClick={() => onStyleChange({ fontWeight: isBold ? 'normal' : 'bold' })}
-          className={cn("p-1.5 rounded transition-colors text-xs font-bold", isBold ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Bold"
-        >
-          B
-        </button>
-        {/* Italic */}
-        <button
-          onClick={() => onStyleChange({ fontStyle: isItalic ? 'normal' : 'italic' })}
-          className={cn("p-1.5 rounded transition-colors text-xs italic", isItalic ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Italic"
-        >
-          I
-        </button>
-        {/* Underline */}
-        <button
-          onClick={() => onStyleChange({ textDecoration: isUnderline ? 'none' : 'underline' })}
-          className={cn("p-1.5 rounded transition-colors text-xs underline", isUnderline ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Underline"
-        >
-          U
-        </button>
-        {/* Divider */}
-        <div className="w-px h-4 bg-border/50 mx-0.5" />
-        {/* Align Left */}
-        <button
-          onClick={() => onStyleChange({ textAlign: 'left' })}
-          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'left' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Left"
-        >
-          <AlignLeft className="w-3.5 h-3.5" />
-        </button>
-        {/* Align Center */}
-        <button
-          onClick={() => onStyleChange({ textAlign: 'center' })}
-          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'center' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Center"
-        >
-          <AlignCenter className="w-3.5 h-3.5" />
-        </button>
-        {/* Align Right */}
-        <button
-          onClick={() => onStyleChange({ textAlign: 'right' })}
-          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'right' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Right"
-        >
-          <AlignRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Text color button */}
-      {onOpenColorPicker && (
-        <button
-          onClick={() => { onClose(); onOpenColorPicker(); }}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded hover:bg-white/5 transition-colors"
-        >
-          <Palette className="w-3.5 h-3.5" /> Text Color
-        </button>
-      )}
     </div>
   );
 }
@@ -5763,13 +5613,16 @@ function FreeformCard({
     element.taskMetadata?.description || "",
     (v) => onUpdate({ taskMetadata: { ...element.taskMetadata, description: v } }),
   );
+  // Stable { __html } object (see richHtmlProp in ShapeCard for why).
   const renderedNoteBody = useMemo(
-    () => DOMPurify.sanitize(
-      noteBody
-        .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
-        .replace(/>\s*\n+\s*</g, '><'),
-      { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }
-    ),
+    () => ({
+      __html: DOMPurify.sanitize(
+        noteBody
+          .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
+          .replace(/>\s*\n+\s*</g, '><'),
+        { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }
+      ),
+    }),
     [noteBody],
   );
 
@@ -6637,7 +6490,7 @@ function FreeformCard({
                     <div
                       className="w-full break-words overflow-wrap-anywhere [&_a]:text-purple-300 [&_a]:underline [&_h1]:mt-1 [&_h1]:mb-0.5 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-1 [&_h2]:mb-0.5 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mt-0.5 [&_h3]:mb-0 [&_h3]:text-base [&_h3]:font-semibold [&_p]:my-0.5 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_p]:break-words [&_h1]:break-words [&_h2]:break-words [&_h3]:break-words [&_li]:break-words"
                       style={{ wordWrap: "break-word", overflowWrap: "anywhere" }}
-                      dangerouslySetInnerHTML={{ __html: renderedNoteBody }}
+                      dangerouslySetInnerHTML={renderedNoteBody}
                     />
                   ) : (
                     <span className="text-white/40">Write your note...</span>
@@ -7355,13 +7208,51 @@ function ImageCard({
   isSelected,
   isReadOnly = false,
   onCropModeChange,
+  canvasZoom = 1,
 }: {
   element: ImageElement;
   onUpdate: (updates: Partial<ImageElement>) => void;
   isSelected: boolean;
   isReadOnly?: boolean;
   onCropModeChange?: (cropping: boolean) => void;
+  canvasZoom?: number;
 }) {
+  // The image toolbar renders in the canvas overlay layer (above every element and
+  // line) and at a constant on-screen size. Inside the element it was scaled with
+  // the canvas (huge when zoomed in), painted under neighbours, and overlapped
+  // whatever sat below the image.
+  const overlayToolbar = (node: React.ReactNode, tone: "default" | "crop" = "default") => {
+    const layer = typeof document !== "undefined" ? document.getElementById(CANVAS_OVERLAY_LAYER_ID) : null;
+    const inner = (
+      <div
+        className={cn(
+          "absolute left-1/2 flex items-center gap-0.5 px-1.5 py-1 rounded-xl pointer-events-auto",
+          "bg-zinc-950/95 backdrop-blur-2xl border shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
+          tone === "crop" ? "border-cyan-500/50" : "border-violet-500/25",
+        )}
+        style={{
+          top: "100%",
+          marginTop: 12 / canvasZoom,
+          transform: `translateX(-50%) scale(${1 / canvasZoom})`,
+          transformOrigin: "top center",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {node}
+      </div>
+    );
+    if (!layer) return inner;
+    return createPortal(
+      <div
+        className="absolute pointer-events-none"
+        style={{ left: element.x, top: element.y, width: element.width, height: element.height, zIndex: 2000000002 }}
+      >
+        {inner}
+      </div>,
+      layer,
+    );
+  };
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
   const [isCropping, setIsCropping] = useState(false);
@@ -7870,7 +7761,7 @@ function ImageCard({
               className="gap-2"
               data-no-drag
             >
-              <Upload className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
               Upload Image
             </Button>
             <div className="text-xs text-muted-foreground">
@@ -8247,12 +8138,8 @@ function ImageCard({
       </div>
       {/* Image edit toolbar — single icon-only pill below the image.
           Positioned at -bottom-16 to clear the rotation handle (~ -39px stem). */}
-      {isSelected && !isCropping && !isReadOnly && (
-        <div
-          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
+      {isSelected && !isCropping && !isReadOnly && overlayToolbar(
+        <>
           {/* Replace the image file (storyboard keeps its cell ratio; a plain
               image block re-fits to the new image's aspect ratio). */}
           <input
@@ -8264,17 +8151,17 @@ function ImageCard({
           />
           <button
             onClick={() => replaceInputRef.current?.click()}
-            className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            className="p-1.5 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
             title="Replace image"
             disabled={isUploading}
           >
             {isUploading ? (
-              <RotateCcw className="w-4 h-4 animate-spin" />
+              <RotateCcw className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <Upload className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
             )}
           </button>
-          <div className="w-px h-5 bg-border mx-0.5" />
+          <div className="w-px h-4 bg-border mx-0.5" />
           <button
             onClick={() => {
               setIsCropping(true);
@@ -8284,34 +8171,34 @@ function ImageCard({
                   : crop,
               );
             }}
-            className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            className="p-1.5 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
             title="Crop"
           >
-            <Crop className="w-4 h-4" />
+            <Crop className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={toggleFlipH}
             className={cn(
-              "p-2 rounded-md transition-colors",
+              "p-1.5 rounded-md transition-colors",
               flipH
                 ? "bg-primary/20 text-primary"
                 : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
             )}
             title="Flip horizontal"
           >
-            <FlipHorizontal className="w-4 h-4" />
+            <FlipHorizontal className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={toggleFlipV}
             className={cn(
-              "p-2 rounded-md transition-colors",
+              "p-1.5 rounded-md transition-colors",
               flipV
                 ? "bg-primary/20 text-primary"
                 : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
             )}
             title="Flip vertical"
           >
-            <FlipVertical className="w-4 h-4" />
+            <FlipVertical className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => {
@@ -8335,65 +8222,62 @@ function ImageCard({
               onUpdate({ storyboard: !element.storyboard });
             }}
             className={cn(
-              "p-2 rounded-md transition-colors",
+              "p-1.5 rounded-md transition-colors",
               isStoryboard
                 ? "bg-primary/20 text-primary"
                 : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
             )}
             title={isStoryboard ? "Remove caption frame" : "Add caption (storyboard)"}
           >
-            <Captions className="w-4 h-4" />
+            <Captions className="w-3.5 h-3.5" />
           </button>
           {isStoryboard && (
             <button
               onClick={() => setIsRepositioning((v) => !v)}
               className={cn(
-                "p-2 rounded-md transition-colors",
+                "p-1.5 rounded-md transition-colors",
                 isRepositioning
                   ? "bg-cyan-500/20 text-cyan-400"
                   : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
               )}
               title={isRepositioning ? "Done repositioning" : "Reposition image (drag focal point)"}
             >
-              <Move className="w-4 h-4" />
+              <Move className="w-3.5 h-3.5" />
             </button>
           )}
           {hasEdits && (
             <>
-              <div className="w-px h-5 bg-border mx-0.5" />
+              <div className="w-px h-4 bg-border mx-0.5" />
               <button
                 onClick={resetImage}
-                className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                className="p-1.5 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
                 title="Reset image"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="w-3.5 h-3.5" />
               </button>
             </>
           )}
-        </div>
+        </>,
       )}
       {/* Crop controls */}
-      {isCropping && (
-        <div
-          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-cyan-500/50 shadow-lg z-10"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
+      {isCropping && overlayToolbar(
+        <>
           <button
             onClick={applyCrop}
             title="Apply crop"
-            className="p-2 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 transition-colors flex items-center justify-center"
+            className="p-1.5 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 transition-colors flex items-center justify-center"
           >
             <Check className="w-4 h-4" />
           </button>
           <button
             onClick={cancelCrop}
             title="Cancel"
-            className="p-2 rounded-md bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
+            className="p-1.5 rounded-md bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
           >
             <X className="w-4 h-4" />
           </button>
-        </div>
+        </>,
+        "crop",
       )}
     </div>
   );
@@ -8579,8 +8463,12 @@ function ShapeCard({
 
   const baseFontSize = element.style?.fontSize || 14;
   const textInsets = shapeTextInsets(element.shapeType);
-  const renderedRichContent = useMemo(
-    () => (element.richContent ? DOMPurify.sanitize(element.richContent, { USE_PROFILES: { html: true } }) : ""),
+  // The { __html } OBJECT must be referentially stable: with the React bundled in
+  // Next 14 a new object each render makes React reset innerHTML, which replaces
+  // the text node under the pointer between mousedown and mouseup, so the browser
+  // never fires click/dblclick and the shape can't be re-entered.
+  const richHtmlProp = useMemo(
+    () => ({ __html: element.richContent ? DOMPurify.sanitize(element.richContent, { USE_PROFILES: { html: true } }) : "" }),
     [element.richContent],
   );
 
@@ -8632,6 +8520,8 @@ function ShapeCard({
           <ShapeRichTextEditor
             html={element.richContent || plainTextToHtml(element.content || "")}
             replaceWithChar={typedChar}
+            shapeStyle={element.style}
+            onShapeStyleChange={(updates) => onUpdate({ style: { ...element.style, ...updates } })}
             baseFontSize={baseFontSize}
             textStyle={{ ...baseTextStyle, ...textColorStyle }}
             onChange={(html, plain) => onUpdate({ richContent: html, content: plain })}
@@ -8649,7 +8539,7 @@ function ShapeCard({
               maxHeight: '100%',
               overflow: 'hidden',
             }}
-            dangerouslySetInnerHTML={{ __html: renderedRichContent }}
+            dangerouslySetInnerHTML={richHtmlProp}
           />
         ) : (
           <span

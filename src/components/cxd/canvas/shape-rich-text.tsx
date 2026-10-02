@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { TextStyle, FontSize, Color } from "@tiptap/extension-text-style";
-import { Bold, Italic, Minus, Plus, Underline } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Minus, Plus, Underline } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FONT_FAMILIES, TEXT_GRADIENTS, type ElementStyle } from "@/types/canvas-elements";
+
+const TEXT_SWATCHES = ["#ffffff", "#a3a3a3", "#404040", "#c084fc", "#22d3ee", "#34d399", "#f472b6", "#fbbf24", "#f87171"];
 
 const SIZE_STEPS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 64, 72, 96];
 
@@ -36,9 +39,14 @@ export function ShapeRichTextEditor({
   onChange,
   onBlur,
   replaceWithChar,
+  shapeStyle,
+  onShapeStyleChange,
 }: {
+  /** Shape-level text style (colour, family, alignment): the bar edits it. */
+  shapeStyle?: ElementStyle;
+  onShapeStyleChange?: (updates: Partial<ElementStyle>) => void;
   html: string;
-  /** Editing was started by typing this character on the selected shape: it replaces the text. */
+  /** Editing was started by typing this character on the selected shape: it is appended to the text. */
   replaceWithChar?: string | null;
   baseFontSize: number;
   textStyle: React.CSSProperties;
@@ -49,6 +57,7 @@ export function ShapeRichTextEditor({
   onChangeRef.current = onChange;
   const pending = useRef<number | null>(null);
   const [, force] = useState(0);
+  const [showColors, setShowColors] = useState(false);
 
   const flush = (ed: { getHTML: () => string; getText: (o?: { blockSeparator?: string }) => string }) => {
     if (pending.current !== null) {
@@ -90,7 +99,8 @@ export function ShapeRichTextEditor({
   useEffect(() => {
     if (!editor || !replaceWithChar || appliedCharRef.current) return;
     appliedCharRef.current = true;
-    editor.chain().setContent(`<p>${escapeHtml(replaceWithChar)}</p>`).focus("end").run();
+    // Append at the end (empty shape: becomes the first character).
+    editor.chain().focus("end").insertContent(escapeHtml(replaceWithChar)).run();
     flush(editor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, replaceWithChar]);
@@ -104,20 +114,49 @@ export function ShapeRichTextEditor({
   }, [editor]);
 
   if (!editor) return null;
+  const ed = editor;
 
   const currentSize = (() => {
     const raw = editor.getAttributes("textStyle")?.fontSize as string | undefined;
     const n = raw ? parseFloat(raw) : NaN;
     return Number.isFinite(n) ? n : baseFontSize;
   })();
+  // Formatting applies to the selected text; with nothing selected it applies to
+  // ALL the text (what you'd expect when you just click a shape and pick a size).
+  const applyScoped = (fn: (chain: ReturnType<typeof ed.chain>) => ReturnType<typeof ed.chain>) => {
+    const { from, to, empty } = editor.state.selection;
+    if (!empty) {
+      fn(editor.chain().focus()).run();
+      return;
+    }
+    const end = editor.state.doc.content.size - 1;
+    fn(editor.chain().focus().setTextSelection({ from: 1, to: Math.max(1, end) })).setTextSelection({ from, to }).run();
+  };
   const stepSize = (dir: 1 | -1) => {
     const next =
       dir > 0
         ? SIZE_STEPS.find((s) => s > currentSize) ?? SIZE_STEPS[SIZE_STEPS.length - 1]
         : [...SIZE_STEPS].reverse().find((s) => s < currentSize) ?? SIZE_STEPS[0];
-    editor.chain().focus().setFontSize(`${next}px`).run();
+    applyScoped((c) => c.setFontSize(`${next}px`));
   };
+  const pickColor = (value: string) => {
+    const gradient = value.startsWith("linear-gradient");
+    if (gradient) {
+      // A gradient can't be a per-selection mark: it colours the whole text.
+      editor.chain().focus().setTextSelection({ from: 1, to: Math.max(1, editor.state.doc.content.size - 1) }).unsetColor().run();
+      onShapeStyleChange?.({ textColor: value });
+    } else {
+      const wholeText = editor.state.selection.empty;
+      applyScoped((c) => c.setColor(value));
+      if (wholeText) onShapeStyleChange?.({ textColor: value });
+    }
+    setShowColors(false);
+  };
+  const align = shapeStyle?.textAlign || "center";
+  const nextAlign = align === "left" ? "center" : align === "center" ? "right" : "left";
+  const AlignIcon = align === "left" ? AlignLeft : align === "right" ? AlignRight : AlignCenter;
   const hasSelection = !editor.state.selection.empty;
+  const currentColor = (editor.getAttributes("textStyle")?.color as string | undefined) || shapeStyle?.textColor || "#ffffff";
 
   const btn = (active: boolean) =>
     cn(
@@ -144,15 +183,50 @@ export function ShapeRichTextEditor({
           <Plus className="w-3 h-3" />
         </button>
         <div className="w-px h-4 bg-white/10 mx-0.5" />
-        <button type="button" className={btn(editor.isActive("bold"))} onClick={() => editor.chain().focus().toggleBold().run()} title="Bold">
+        <button type="button" className={btn(editor.isActive("bold"))} onClick={() => applyScoped((c) => c.toggleBold())} title="Bold">
           <Bold className="w-3 h-3" />
         </button>
-        <button type="button" className={btn(editor.isActive("italic"))} onClick={() => editor.chain().focus().toggleItalic().run()} title="Italic">
+        <button type="button" className={btn(editor.isActive("italic"))} onClick={() => applyScoped((c) => c.toggleItalic())} title="Italic">
           <Italic className="w-3 h-3" />
         </button>
-        <button type="button" className={btn(editor.isActive("underline"))} onClick={() => editor.chain().focus().toggleUnderline().run()} title="Underline">
+        <button type="button" className={btn(editor.isActive("underline"))} onClick={() => applyScoped((c) => c.toggleUnderline())} title="Underline">
           <Underline className="w-3 h-3" />
         </button>
+        <div className="w-px h-4 bg-white/10 mx-0.5" />
+        <div className="relative">
+          <button type="button" className={btn(showColors)} onClick={() => setShowColors((v) => !v)} title="Text colour">
+            <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ background: shapeStyle?.textColor?.startsWith("linear-gradient") ? shapeStyle.textColor : currentColor }} />
+          </button>
+          {showColors && (
+            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 p-2 rounded-lg bg-zinc-900/95 border border-white/10 shadow-xl w-[132px]">
+              <div className="grid grid-cols-5 gap-1.5 mb-1.5">
+                {TEXT_SWATCHES.map((c) => (
+                  <button key={c} type="button" className="w-5 h-5 rounded-full border border-white/25 hover:scale-110 transition-transform" style={{ background: c }} onClick={() => pickColor(c)} title={c} />
+                ))}
+              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {TEXT_GRADIENTS.slice(0, 5).map((g, i) => (
+                  <button key={i} type="button" className="w-5 h-5 rounded-full border border-white/25 hover:scale-110 transition-transform" style={{ background: g }} onClick={() => pickColor(g)} title="Gradient (whole text)" />
+                ))}
+              </div>
+              <p className="mt-1.5 text-[9px] text-white/40 leading-tight">{hasSelection ? "Colours the selected text" : "Colours all the text"}</p>
+            </div>
+          )}
+        </div>
+        <button type="button" className={btn(false)} onClick={() => onShapeStyleChange?.({ textAlign: nextAlign })} title={`Align ${align} (click for ${nextAlign})`}>
+          <AlignIcon className="w-3 h-3" />
+        </button>
+        <select
+          value={shapeStyle?.fontFamily || "inherit"}
+          onChange={(e) => onShapeStyleChange?.({ fontFamily: e.target.value })}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="h-6 max-w-[84px] text-[11px] rounded-md bg-white/5 border border-white/10 text-white/80 px-1 focus:outline-none"
+          title="Font"
+        >
+          {FONT_FAMILIES.map((f) => (
+            <option key={f.value} value={f.value} className="bg-zinc-900">{f.label}</option>
+          ))}
+        </select>
       </div>
       <div
         className="w-full max-h-full overflow-hidden cursor-text"

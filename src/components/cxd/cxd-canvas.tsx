@@ -229,6 +229,7 @@ function CanvasContextMenu({
   onDelete,
   onDownloadImage,
   onExport,
+  allowCreate = true,
   onConnectSelected,
   onAutoOrganize,
   hasSelection,
@@ -247,6 +248,8 @@ function CanvasContextMenu({
   onDelete: () => void;
   onDownloadImage?: () => void;
   onExport?: () => void;
+  /** False in focus mode: elements are added from the toolbar only. */
+  allowCreate?: boolean;
   onConnectSelected?: () => void;
   onAutoOrganize?: () => void;
   hasSelection: boolean;
@@ -305,7 +308,7 @@ function CanvasContextMenu({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {target.type === 'canvas' && (
+      {target.type === 'canvas' && allowCreate && (
         <>
           <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
             Create Element
@@ -900,6 +903,18 @@ export function CXDCanvas() {
   const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null);
   // Pointer-down info for the element being pressed, read by onSelect on click.
   const elementPressRef = useRef<{ x: number; y: number; wholeGroupSelected: boolean } | null>(null);
+
+  // True while the view is moving (pan/zoom) and shortly after; see willChange below.
+  const [isTransforming, setIsTransforming] = useState(false);
+  const transformIdleTimer = useRef<number | null>(null);
+  useEffect(() => {
+    setIsTransforming(true);
+    if (transformIdleTimer.current !== null) window.clearTimeout(transformIdleTimer.current);
+    transformIdleTimer.current = window.setTimeout(() => setIsTransforming(false), 220);
+    return () => {
+      if (transformIdleTimer.current !== null) window.clearTimeout(transformIdleTimer.current);
+    };
+  }, [canvasPosition.x, canvasPosition.y, canvasZoom]);
 
   // Export dialog (PNG / JPEG / PDF of the board or the selection).
   const [exportDialog, setExportDialog] = useState<null | { scope: 'selection' | 'board' }>(null);
@@ -2753,6 +2768,16 @@ export function CXDCanvas() {
     // an edge (mid-removal, or left attached after an undo) must not make the container
     // chase/expand to swallow it back.
     const enteredContainers = new Set<string>();
+    // …and WHICH elements entered each one. The grow pass fits only these: fitting
+    // every child that carries the containerId stretched the box towards stale or
+    // far-away children (left behind by align/distribute, undo, remote merges),
+    // which read as the container expanding to fit things that were never there.
+    const enteredByContainer = new Map<string, Set<string>>();
+    const markEntered = (cid: string, id: string) => {
+      enteredContainers.add(cid);
+      if (!enteredByContainer.has(cid)) enteredByContainer.set(cid, new Set());
+      enteredByContainer.get(cid)!.add(id);
+    };
 
     // Check if elements were dropped into a container (support multi-drop)
     if (dropTargetContainerId) {
@@ -2792,10 +2817,11 @@ export function CXDCanvas() {
         // once, below, by the unified drop-time grow pass (growContainersToFit) — never here
         // and never reactively — so it can grow on ANY side (origin-shifting for left/top).
         elementsToDrop.forEach((id) => {
+          const wasChild = canvasElements.find((e) => e.id === id)?.containerId === targetContainer.id;
           syncAddNodeToContainer(id, targetContainer.id);
+          // Re-arranging something already inside never resizes its container.
+          if (!wasChild) markEntered(targetContainer.id, id);
         });
-        // Explicit drop into a container is an intentional "put INTO" → grow to fit it.
-        enteredContainers.add(targetContainer.id);
       }
     }
 
@@ -2848,7 +2874,7 @@ export function CXDCanvas() {
         if (foundContainer && el.containerId !== foundContainer) {
           // Attach to new container
           syncAddNodeToContainer(id, foundContainer);
-          enteredContainers.add(foundContainer);
+          markEntered(foundContainer, id);
         } else if (!foundContainer && el.containerId) {
           // Detach from old container
           syncRemoveNodeFromContainer(id);
@@ -2869,7 +2895,6 @@ export function CXDCanvas() {
       const PAD = 20;
       const liveEls = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
       const containersToFit = new Set<string>(enteredContainers);
-      if (dropTargetContainerId) containersToFit.add(dropTargetContainerId);
 
       for (const cid of Array.from(containersToFit)) {
         const container = liveEls.find((e) => e.id === cid);
@@ -2878,8 +2903,9 @@ export function CXDCanvas() {
         // Lines/connectors have no meaningful x/y/w/h box (lines live at 0,0 with
         // start/end world coords) — including them here dragged the fit bounds to
         // the canvas origin and blew the container up on the next drop pass.
+        const entered = enteredByContainer.get(cid);
         const children = liveEls.filter(
-          (e) => e.containerId === cid && e.type !== 'line' && e.type !== 'connector',
+          (e) => entered?.has(e.id) && e.containerId === cid && e.type !== 'line' && e.type !== 'connector',
         );
         if (children.length === 0) continue;
 
@@ -3699,6 +3725,9 @@ export function CXDCanvas() {
           return;
         }
       }
+
+      // In focus mode elements are added from the toolbar only: no tool hotkeys.
+      if (canvasFocusMode && !isMod && /^[tcblioef]$/i.test(e.key)) return;
 
       // ONE-KEY TOOL ACTIVATION (only when no modifier keys are pressed)
       // T → Text tool
@@ -4556,6 +4585,35 @@ export function CXDCanvas() {
           return;
         }
         syncUpdateElement(id, update);
+
+        // Aligning or distributing a container moves it; everything nested in it
+        // (absolute coords) must move by the same offset, as it does when the
+        // container is dragged. Pure moves only: a resize leaves children alone.
+        if (
+          source?.type === "container" &&
+          update.width === undefined &&
+          update.height === undefined &&
+          (update.x !== undefined || update.y !== undefined)
+        ) {
+          const dx = (update.x ?? source.x) - source.x;
+          const dy = (update.y ?? source.y) - source.y;
+          if (dx === 0 && dy === 0) return;
+          getContainerDescendantIds(id, canvasElements).forEach((childId) => {
+            if (updates.has(childId)) return; // moved explicitly by this same operation
+            const child = canvasElements.find((el) => el.id === childId);
+            if (!child) return;
+            if (child.type === "line") {
+              const l = child as LineElement;
+              syncUpdateElement(childId, {
+                start: { x: l.start.x + dx, y: l.start.y + dy },
+                end: { x: l.end.x + dx, y: l.end.y + dy },
+                ...(l.bend ? { bend: { x: l.bend.x + dx, y: l.bend.y + dy } } : {}),
+              } as Partial<CanvasElement>);
+            } else {
+              syncUpdateElement(childId, { x: child.x + dx, y: child.y + dy });
+            }
+          });
+        }
       });
     },
     [pushCanvasHistory, syncUpdateElement, canvasElements]
@@ -5126,12 +5184,18 @@ export function CXDCanvas() {
       />
       {/* Canvas Content - z-index 10 to render above connector lines (z-index 5) */}
       <div
-        className="absolute will-change-transform"
+        className="absolute"
         style={{
           transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
           transformOrigin: "0 0",
           transition: canvasTransformTransition,
           zIndex: 10,
+          // GPU-promote the layer only WHILE panning/zooming. A permanent
+          // will-change: transform keeps the bitmap rastered at an old scale and
+          // just stretches it, so zoomed-in text and images looked soft/pixelated
+          // until something forced a repaint. Dropping it at rest makes the
+          // browser re-raster crisply at the final zoom.
+          willChange: isTransforming ? "transform" : "auto",
         }}
       >
         {/* Canvas Elements (freeform, images, shapes, etc.) - excluding lines which are rendered in overlay */}
@@ -6207,8 +6271,8 @@ export function CXDCanvas() {
         })()}
 
 
-      {/* Canvas Toolkit */}
-      {canEdit && !canvasFocusMode && (
+      {/* Canvas Toolkit — stays in focus mode: it is the one way to add elements there */}
+      {canEdit && (
         <CanvasToolkit
           onPlaceElement={handlePlaceElement}
           canvasRef={containerRef}
@@ -6503,6 +6567,7 @@ export function CXDCanvas() {
       {/* Context Menu */}
       {contextMenuPos && contextMenuTarget && (
         <CanvasContextMenu
+          allowCreate={!canvasFocusMode}
           position={contextMenuPos}
           target={contextMenuTarget}
           onClose={() => {

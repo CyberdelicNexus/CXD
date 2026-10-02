@@ -15,7 +15,7 @@ import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { useCXDStore } from '@/store/cxd-store';
 import * as Sentry from '@sentry/nextjs';
-import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2, seedProjectExtrasIntoYDoc, reconcileCanvasIntoYDoc } from '@/lib/yjs/y-doc-factory';
+import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2, seedProjectExtrasIntoYDoc, reconcileCanvasIntoYDoc, dedupeEdgesInYDoc } from '@/lib/yjs/y-doc-factory';
 import { YjsZustandBridge, BridgeCallbacks } from '@/lib/yjs/y-zustand-bridge';
 import { LocalPersistence } from '@/lib/yjs/indexeddb-persistence';
 import { SupabasePersistence } from '@/lib/yjs/supabase-persistence';
@@ -275,6 +275,11 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
           }
         }
       }
+
+      // One-time repair: collapse duplicate connectors from the old
+      // double-completed connection bug (same from→to pair, board and surface).
+      const removedEdges = dedupeEdgesInYDoc(newDoc);
+      if (removedEdges > 0) console.warn(`[YjsProject] Removed ${removedEdges} duplicate connector(s)`);
 
       // One-time repair: remove duplicate reality planes that may have accumulated
       // in IndexedDB from a previous bug where initializeYDoc lacked an idempotency guard.

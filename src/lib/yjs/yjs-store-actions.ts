@@ -180,11 +180,30 @@ export function yjsDuplicateElement(doc: Y.Doc, elementId: string): string | nul
 
 // ─── Canvas Edges ────────────────────────────────────────────────────────────
 
-export function yjsAddEdge(doc: Y.Doc, edge: CanvasEdge): void {
+/**
+ * Add an edge unless one with the same id, or the same from→to pair on the same
+ * board and surface, already exists. One gesture can complete a connection
+ * twice (the port's mouseup and the canvas's mouseup both fire), each with a
+ * fresh id, so de-duplicating by id alone is not enough. Returns whether it wrote.
+ */
+export function yjsAddEdge(doc: Y.Doc, edge: CanvasEdge): boolean {
+  const yEdges = doc.getMap(YDOC_KEYS.EDGES);
+  if (yEdges.has(edge.id)) return false;
+  let duplicate = false;
+  yEdges.forEach((v) => {
+    if (duplicate || !(v instanceof Y.Map)) return;
+    if (
+      v.get('fromNodeId') === edge.fromNodeId &&
+      v.get('toNodeId') === edge.toNodeId &&
+      (v.get('boardId') ?? null) === (edge.boardId ?? null) &&
+      (v.get('surface') ?? null) === (edge.surface ?? null)
+    ) duplicate = true;
+  });
+  if (duplicate) return false;
   doc.transact(() => {
-    const yEdges = doc.getMap(YDOC_KEYS.EDGES);
     yEdges.set(edge.id, canvasEdgeToYMap(edge));
   }, 'local');
+  return true;
 }
 
 export function yjsUpdateEdge(doc: Y.Doc, edgeId: string, updates: Partial<CanvasEdge>): void {

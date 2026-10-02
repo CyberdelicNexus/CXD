@@ -158,6 +158,13 @@ export function MultiSelectionBox({
   const width = maxX - minX;
   const height = maxY - minY;
 
+  // Alignment targets the ELEMENTS' own bounds, not the padded selection box
+  // (using the padded edges shifted everything by GROUP_PADDING on every align).
+  const aMinX = minX + GROUP_PADDING;
+  const aMinY = minY + GROUP_PADDING;
+  const aMaxX = maxX - GROUP_PADDING;
+  const aMaxY = maxY - GROUP_PADDING;
+
   // Check if all elements are locked
   const allLocked = selectedElements.every((el) => el.locked);
   const someLocked = selectedElements.some((el) => el.locked);
@@ -166,52 +173,52 @@ export function MultiSelectionBox({
   const alignLeft = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { x: minX });
+      updates.set(el.id, { x: aMinX });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minX, onUpdateElements]);
+  }, [selectedElements, aMinX, onUpdateElements]);
 
   const alignCenterH = useCallback(() => {
-    const centerX = minX + width / 2;
+    const centerX = (aMinX + aMaxX) / 2;
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
       updates.set(el.id, { x: centerX - el.width / 2 });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minX, width, onUpdateElements]);
+  }, [selectedElements, aMinX, aMaxX, onUpdateElements]);
 
   const alignRight = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { x: maxX - el.width });
+      updates.set(el.id, { x: aMaxX - el.width });
     });
     onUpdateElements(updates);
-  }, [selectedElements, maxX, onUpdateElements]);
+  }, [selectedElements, aMaxX, onUpdateElements]);
 
   const alignTop = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { y: minY });
+      updates.set(el.id, { y: aMinY });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minY, onUpdateElements]);
+  }, [selectedElements, aMinY, onUpdateElements]);
 
   const alignMiddle = useCallback(() => {
-    const centerY = minY + height / 2;
+    const centerY = (aMinY + aMaxY) / 2;
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
       updates.set(el.id, { y: centerY - el.height / 2 });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minY, height, onUpdateElements]);
+  }, [selectedElements, aMinY, aMaxY, onUpdateElements]);
 
   const alignBottom = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { y: maxY - el.height });
+      updates.set(el.id, { y: aMaxY - el.height });
     });
     onUpdateElements(updates);
-  }, [selectedElements, maxY, onUpdateElements]);
+  }, [selectedElements, aMaxY, onUpdateElements]);
 
   // Distribute evenly: place elements sequentially with a fixed 20px gap
   const DISTRIBUTE_GAP = 20;

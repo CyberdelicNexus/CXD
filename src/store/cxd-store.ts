@@ -382,6 +382,17 @@ interface CXDState {
   isTourCompleted: (tourId: 'canvas' | 'map' | 'plan') => boolean;
 }
 
+/** Same id, or the same from→to pair on the same board and surface. */
+function isDuplicateEdge(a: CanvasEdge, b: CanvasEdge): boolean {
+  return (
+    a.id === b.id ||
+    (a.fromNodeId === b.fromNodeId &&
+      a.toNodeId === b.toNodeId &&
+      (a.boardId ?? null) === (b.boardId ?? null) &&
+      (a.surface ?? null) === (b.surface ?? null))
+  );
+}
+
 export const useCXDStore = create<CXDState>()(
   persist(
     (set, get) => ({
@@ -1670,11 +1681,19 @@ export const useCXDStore = create<CXDState>()(
         const activeBoardId = get().activeBoardId;
         const activeSurface = get().activeSurface;
 
-        const prepared = edges.map(e => ({
-          ...e,
-          boardId: e.boardId !== undefined ? e.boardId : activeBoardId,
-          surface: e.surface !== undefined ? e.surface : activeSurface,
-        }));
+        const existingEdges = currentProject.canvasLayout?.edges || [];
+        const prepared: CanvasEdge[] = [];
+        for (const e of edges) {
+          const withScope = {
+            ...e,
+            boardId: e.boardId !== undefined ? e.boardId : activeBoardId,
+            surface: e.surface !== undefined ? e.surface : activeSurface,
+          };
+          // Skip edges that already exist (or repeat within this batch).
+          if (existingEdges.some((x) => isDuplicateEdge(x, withScope)) || prepared.some((x) => isDuplicateEdge(x, withScope))) continue;
+          prepared.push(withScope);
+        }
+        if (prepared.length === 0) return;
 
         // Direct Zustand update (single setState — no Yjs observer cascade)
         set((state) => ({
@@ -2037,8 +2056,10 @@ export const useCXDStore = create<CXDState>()(
 
         const { yDoc } = get();
         if (yDoc) {
-          yjsAddEdge(yDoc, edgeWithBoardAndSurface);
+          yjsAddEdge(yDoc, edgeWithBoardAndSurface); // ignores duplicates (id or same pair)
         } else {
+          const existing = currentProject.canvasLayout?.edges || [];
+          if (existing.some((e) => isDuplicateEdge(e, edgeWithBoardAndSurface))) return;
           get().pushCanvasHistory();
           set((state) => ({
             projects: state.projects.map((p) =>

@@ -217,8 +217,11 @@ export function FloatingPort({
     window.addEventListener('mouseup', onMouseUp);
   }, [isDragging, port, elementId, onStartConnector]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (isConnecting) {
+      // The canvas also completes a connection on mouseup over a hovered element;
+      // letting this bubble created a second edge for the same gesture.
+      e.stopPropagation();
       onEndConnector(elementId, port.side);
     }
   }, [isConnecting, elementId, port.side, onEndConnector]);

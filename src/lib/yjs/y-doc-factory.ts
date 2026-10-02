@@ -433,6 +433,36 @@ export function reconcileCanvasIntoYDoc(
   return { seededElements, seededEdges, repairedElements, repairedEdges };
 }
 
+/**
+ * Remove duplicate edges (same from→to pair on the same board and surface)
+ * left behind by the old double-completed connection bug. Keeps the richest
+ * edge of each group (label, then custom styling), otherwise the first.
+ * Returns how many were removed.
+ */
+export function dedupeEdgesInYDoc(doc: Y.Doc): number {
+  const yEdges = doc.getMap(YDOC_KEYS.EDGES);
+  const groups = new Map<string, Array<{ id: string; score: number }>>();
+  yEdges.forEach((v, id) => {
+    if (!(v instanceof Y.Map)) return;
+    const key = [v.get('fromNodeId'), v.get('toNodeId'), v.get('boardId') ?? '', v.get('surface') ?? ''].join('|');
+    const score = (v.has('label') ? 2 : 0) + (v.has('style') ? 1 : 0);
+    const list = groups.get(key) ?? [];
+    list.push({ id, score });
+    groups.set(key, list);
+  });
+  let removed = 0;
+  doc.transact(() => {
+    groups.forEach((list) => {
+      if (list.length < 2) return;
+      const keep = list.reduce((best, cur) => (cur.score > best.score ? cur : best), list[0]);
+      list.forEach((e) => {
+        if (e.id !== keep.id) { yEdges.delete(e.id); removed++; }
+      });
+    });
+  }, 'initialization');
+  return removed;
+}
+
 /** JSON with sorted keys and undefined dropped, for order-insensitive equality. */
 function stableStringify(value: unknown): string {
   return JSON.stringify(value, (_key, v) => {
