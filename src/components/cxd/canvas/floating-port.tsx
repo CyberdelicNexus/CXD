@@ -15,6 +15,8 @@ interface FloatingPortProps {
   isFreeform?: boolean;          // freeform/note cards: corner dead zones to avoid resize handle conflict
   isImage?: boolean;             // images: corner dead zones to avoid resize handle conflict
   isBoard?: boolean;             // boards: anchor to hexagon geometry, fixed midpoint positions
+  /** Non-rectangular shapes: point on the outline (element-local px) for a side + offset (0..1). */
+  outlineAt?: (side: 'top' | 'right' | 'bottom' | 'left', offset: number) => { x: number; y: number } | null;
   onStartConnector: (
     elementId: string,
     anchor: 'top' | 'right' | 'bottom' | 'left',
@@ -48,6 +50,7 @@ export function FloatingPort({
   isFreeform = false,
   isImage = false,
   isBoard = false,
+  outlineAt,
   onStartConnector,
   onEndConnector,
 }: FloatingPortProps) {
@@ -76,6 +79,29 @@ export function FloatingPort({
     // For boards: use a larger proximity zone since cursor might be inside the outer
     // element rect but far from the hex
     const proximity = isBoard ? 24 : PROXIMITY_PX;
+
+    // Shapes that don't fill their box: the port belongs on the OUTLINE. Offer it
+    // on whichever side's outline point is nearest the cursor.
+    if (outlineAt && isShape) {
+      const z = canvasZoom || 1;
+      const sides: Array<'top' | 'right' | 'bottom' | 'left'> = ['top', 'right', 'bottom', 'left'];
+      let best: { side: typeof sides[number]; offset: number; d: number } | null = null;
+      for (const sd of sides) {
+        const horizontalSide = sd === 'left' || sd === 'right';
+        const frac = horizontalSide ? (cy - rect.top) / rect.height : (cx - rect.left) / rect.width;
+        const pct = clamp(frac * 100, 5, 95);
+        const pt = outlineAt(sd, pct / 100);
+        if (!pt) continue;
+        const d = Math.hypot(cx - (rect.left + pt.x * z), cy - (rect.top + pt.y * z));
+        if (d <= PROXIMITY_PX + 6 && (!best || d < best.d)) best = { side: sd, offset: pct, d };
+      }
+      if (best) {
+        // Same dead zones as the box border: + buttons at midpoints, resize handles at corners
+        if (best.offset < 14 || best.offset > 86 || (best.offset > 38 && best.offset < 62)) return null;
+        return { visible: true, side: best.side, offset: best.offset };
+      }
+      return null;
+    }
 
     const dLeft   = cx - rect.left;
     const dRight  = rect.right - cx;
@@ -169,7 +195,7 @@ export function FloatingPort({
     }
 
     return { visible: true, side, offset };
-  }, [getBoundsRect, isBoard, isShape, isContainer, isCollapsed, isFreeform, isImage]);
+  }, [getBoundsRect, isBoard, isShape, isContainer, isCollapsed, isFreeform, isImage, outlineAt, canvasZoom]);
 
   useEffect(() => {
     const el = elementRef.current;
@@ -262,6 +288,9 @@ export function FloatingPort({
       case 'left':   orbStyle = { ...orbStyle, left: ox + HEX_INSET_X - ORB_OUTSET,   top: oy + ih * pct  }; break;
       case 'right':  orbStyle = { ...orbStyle, left: ox + iw - HEX_INSET_X + ORB_OUTSET, top: oy + ih * pct }; break;
     }
+  } else if (outlineAt && isShape && outlineAt(port.side, port.offset / 100)) {
+    const pt = outlineAt(port.side, port.offset / 100)!;
+    orbStyle = { ...orbStyle, left: pt.x, top: pt.y };
   } else {
     switch (port.side) {
       case 'top':    orbStyle = { ...orbStyle, top: 0,      left: `${port.offset}%` }; break;

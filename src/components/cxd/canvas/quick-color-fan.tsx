@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import type { CanvasElement } from "@/types/canvas-elements";
+import { BOARD_HEX_COLORS } from "./canvas-element";
 
 // Quick colour fan: right after an element is placed, a half-circle of colour
 // swatches fans out under it so the NEXT click can style it — no toolbar, no
@@ -52,8 +53,30 @@ const TINTS: Array<[NonNullable<Extract<CanvasElement, { type: "container" }>["t
   ["glacier", "#67e8f9"],
 ];
 
+const EXPERIENCE_SWATCHES = [
+  "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
+  "linear-gradient(135deg, #0B1B2B 0%, #123A5A 100%)",
+  "linear-gradient(135deg, #0F2230 0%, #0F3A3A 100%)",
+  "linear-gradient(135deg, #2B0F2A 0%, #3B1842 100%)",
+  "linear-gradient(135deg, #3a1f0a 0%, #4a2a12 100%)",
+  "linear-gradient(135deg, #1B1024 0%, #351A45 100%)",
+  "linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)",
+];
+
 export function swatchesFor(el: CanvasElement): Swatch[] {
   switch (el.type) {
+    case "experienceBlock":
+      return EXPERIENCE_SWATCHES.map((bg, i) => ({
+        key: `exp-${i}`,
+        preview: bg,
+        updates: (e) => ({ style: { ...((e as { style?: object }).style || {}), bgColor: bg } }) as Partial<CanvasElement>,
+      }));
+    case "board":
+      return BOARD_HEX_COLORS.slice(0, 7).map((c) => ({
+        key: c.id,
+        preview: c.gradient,
+        updates: () => ({ hexColor: c.gradient }) as Partial<CanvasElement>,
+      }));
     case "shape":
       return SHAPE_SWATCHES.map(([key, fill, ring]) => ({
         key,
@@ -139,7 +162,9 @@ export function QuickColorFan({
   const top = canvasPosition.y + element.y * canvasZoom;
   // Fan below the element; flip above when too close to the bottom edge.
   const flip = typeof window !== "undefined" && bottom + 110 > window.innerHeight - 64;
-  const cy = flip ? top - 14 : bottom + 14;
+  // Tall elements (experience blocks) can run off-screen: keep the fan in view.
+  const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+  const cy = Math.max(110, Math.min(vh - 120, flip ? top - 14 : bottom + 14));
   const R = 62;
   const n = swatches.length;
 

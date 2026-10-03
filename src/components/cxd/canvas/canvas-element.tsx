@@ -27,6 +27,7 @@ import {
   HYPERCUBE_FACE_TAGS,
   ElementStyle,
 } from "@/types/canvas-elements";
+import * as LucideIcons from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useShapeStylePresets,
@@ -49,6 +50,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCXDStore } from "@/store/cxd-store";
 import { shapePath, shapeTextInsets, SHAPE_DEFS } from "@/lib/shape-geometry";
+import { shapeOutlinePoint } from "@/lib/shape-outline";
 import { ShapeRichTextEditor, plainTextToHtml } from "./shape-rich-text";
 import { ShapeGlyph } from "./shape-glyph";
 import { CANVAS_OVERLAY_LAYER_ID } from "./canvas-overlay";
@@ -260,6 +262,18 @@ interface CanvasElementRendererProps {
   lineToolActive?: boolean;
   /** Selected as part of a whole group: the group outline stands in for the per-element ring. */
   hideSelectionRing?: boolean;
+}
+
+// "Open this element for typing as soon as it exists" (a freshly placed text).
+// The element may not be mounted yet when this is called (in CRDT mode it appears
+// a frame later), so remember the id and let the renderer claim it on mount; if it
+// is already mounted, the event reaches it immediately.
+let pendingEditElementId: string | null = null;
+export function requestStartEditing(elementId: string) {
+  pendingEditElementId = elementId;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("cxd:start-editing", { detail: { elementId } }));
+  }
 }
 
 export function CanvasElementRenderer({
@@ -487,6 +501,22 @@ export function CanvasElementRenderer({
   useEffect(() => {
     if (!isEditing) setShapeTypedChar(null);
   }, [isEditing]);
+
+  // Claim a pending "start editing" request (see requestStartEditing).
+  useEffect(() => {
+    const claim = () => {
+      if (pendingEditElementId === element.id) {
+        pendingEditElementId = null;
+        setIsEditing(true);
+      }
+    };
+    claim();
+    const onRequest = (e: Event) => {
+      if ((e as CustomEvent<{ elementId: string }>).detail?.elementId === element.id) claim();
+    };
+    window.addEventListener("cxd:start-editing", onRequest);
+    return () => window.removeEventListener("cxd:start-editing", onRequest);
+  }, [element.id]);
 
   // Auto-typing for shapes: when selected and user types, start editing
   useEffect(() => {
@@ -978,6 +1008,11 @@ export function CanvasElementRenderer({
             isFreeform={element.type === 'freeform'}
             isImage={element.type === 'image'}
             isBoard={element.type === 'board'}
+            outlineAt={
+              element.type === 'shape' && (element as ShapeElement).shapeType !== 'rectangle'
+                ? (side, offset) => shapeOutlinePoint((element as ShapeElement).shapeType, element.width, element.height, side, offset)
+                : undefined
+            }
             onStartConnector={onStartConnector}
             onEndConnector={onEndConnector ?? (() => {})}
           />
@@ -1168,56 +1203,8 @@ export function CanvasElementRenderer({
                   />
                 )}
               </div>
-              <div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    showEmojiPicker ? closeAllSubmenus() : openEmojiPicker();
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showEmojiPicker && "bg-primary/20 text-primary",
-                  )}
-                  title="Emoji"
-                >
-                  <Smile className="w-4 h-4" />
-                </button>
-                {showEmojiPicker && element.type === "freeform" && (
-                  <EmojiPicker
-                    onEmojiSelect={(emoji) => {
-                      onUpdate({ emoji } as Partial<CanvasElement>);
-                      setShowEmojiPicker(false);
-                    }}
-                    onClose={() => setShowEmojiPicker(false)}
-                  />
-                )}
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const isBold =
-                    (element as FreeformElement).style?.fontWeight === "bold" ||
-                    (element as FreeformElement).style?.fontWeight ===
-                    "semibold";
-                  onUpdate({
-                    style: {
-                      ...element.style,
-                      fontWeight: isBold ? "normal" : "bold",
-                    },
-                  });
-                }}
-                className={cn(
-                  "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                  ((element as FreeformElement).style?.fontWeight === "bold" ||
-                    (element as FreeformElement).style?.fontWeight ===
-                    "semibold") &&
-                  "bg-primary/20 text-primary",
-                )}
-                title="Bold"
-              >
-                <Bold className="w-4 h-4" />
-              </button>
+              {/* Emoji: click the emoji on the card itself. Bold and layer arrows
+                  were removed from card toolbars (selected cards already pop to the top). */}
               {/* Mark as Task button */}
               <button
                 onClick={(e) => {
@@ -1515,7 +1502,7 @@ export function CanvasElementRenderer({
                 title="Font Family"
               >
                 {FONT_FAMILIES.map((f) => (
-                  <option key={f.value} value={f.value}>
+                  <option key={f.value} value={f.value} style={{ fontFamily: f.value === "inherit" ? undefined : f.value }}>
                     {f.label}
                   </option>
                 ))}
@@ -1592,7 +1579,9 @@ export function CanvasElementRenderer({
                         style: {
                           ...element.style,
                           textColor: color,
-                          bgColor: undefined,
+                          // '' not undefined: the Yjs serializer skips undefined, so the
+                          // old gradient survived and "solid" never took effect.
+                          bgColor: "",
                         },
                       })
                     }
@@ -1601,7 +1590,7 @@ export function CanvasElementRenderer({
                         style: {
                           ...element.style,
                           bgColor: gradient,
-                          textColor: undefined,
+                          textColor: "",
                         },
                       })
                     }
@@ -1660,7 +1649,7 @@ export function CanvasElementRenderer({
               </>
             )}
           {/* Universal actions — z-order controls hidden for containers (they always stay at back) */}
-          {element.type !== 'container' && (
+          {element.type !== 'container' && element.type !== 'freeform' && (
             <>
               <button
                 onClick={(e) => {
@@ -2527,8 +2516,8 @@ function ColorPicker({
   return (
     <div
       className={cn(
-        "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
-        "p-3 grid grid-cols-4 gap-2",
+        "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-fit rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
+        "p-2 grid grid-cols-4 gap-1.5",
       )}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -3567,61 +3556,115 @@ function HypercubeTagPicker({
   );
 }
 
-// Emoji picker (simple version)
-const COMMON_EMOJIS = [
-  // Marks & energy
-  "💡", "⭐", "❤️", "🎯", "🚀", "✅", "⚡", "🔥", "💎", "🌟", "📌", "🎨",
-  // Emotions & people
-  "😀", "🥹", "😮", "🤯", "😌", "😖", "🤔", "🫶", "👀", "🧠", "🫀", "🙌",
-  // Nature & atmosphere
-  "🌊", "🌙", "☀️", "🌈", "🌱", "🍄", "🌀", "❄️", "🌋", "🪐", "✨", "🌸",
-  // Objects & tools
-  "🔮", "🎧", "🎬", "📷", "🕹️", "🧭", "🗝️", "⏳", "🧪", "📖", "🛠️", "🎁",
-  // Symbols & flow
-  "♾️", "☯️", "🔺", "🟣", "🔗", "❓", "❗", "💭", "🗯️", "🎪", "🏁", "🙏",
+// Emoji picker: categorized, scrollable. Opens anchored under the emoji it edits.
+const EMOJI_CATEGORIES: Array<{ key: string; icon: string; emojis: string[] }> = [
+  {
+    key: "Marks",
+    icon: "⭐",
+    emojis: ["💡", "⭐", "🌟", "✨", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🎯", "🚀", "✅", "❌", "⚡", "🔥", "💎", "📌", "📍", "🏁", "🚩", "❓", "❗", "💭", "🗯️", "🔔", "⚠️", "🛑", "♻️", "🔖", "🏷️", "🎖️", "🏆", "🥇", "🔑", "🗝️", "🔒", "🔓"],
+  },
+  {
+    key: "People",
+    icon: "😀",
+    emojis: ["😀", "😃", "😄", "😁", "😅", "😂", "🙂", "😉", "😊", "😍", "🥰", "😘", "🤩", "🥹", "😮", "🤯", "😌", "😖", "😴", "🤔", "🫠", "🫶", "👀", "🧠", "🫀", "🙌", "👏", "🙏", "💪", "👍", "👎", "🤝", "✌️", "🤞", "🫡", "🧘", "🕺", "💃", "🧑‍💻", "🧑‍🎨"],
+  },
+  {
+    key: "Nature",
+    icon: "🌿",
+    emojis: ["🌊", "🌙", "☀️", "🌈", "🌱", "🌿", "🍀", "🍄", "🌀", "❄️", "🔥", "🌋", "🪐", "🌍", "🌌", "🌸", "🌺", "🌻", "🌲", "🌴", "🍃", "🪷", "🦋", "🐝", "🐙", "🦉", "🐬", "🦄", "🐉", "🌵", "⛰️", "🏔️", "🌅", "🌠", "☁️", "⛈️", "💧", "🪨", "🪵", "🐚"],
+  },
+  {
+    key: "Objects",
+    icon: "🛠️",
+    emojis: ["🔮", "🎧", "🎬", "📷", "🎥", "📹", "🕹️", "🎮", "🧭", "⏳", "⌛", "⏰", "🧪", "🔬", "🔭", "📖", "📚", "📝", "✏️", "🖊️", "📎", "📊", "📈", "📉", "🗂️", "📁", "🗒️", "📅", "💻", "🖥️", "📱", "⌨️", "🖱️", "🛠️", "🔧", "🧰", "🎁", "💰", "🧲", "🔦"],
+  },
+  {
+    key: "Activities",
+    icon: "🎨",
+    emojis: ["🎨", "🎭", "🎪", "🎤", "🎵", "🎶", "🎹", "🥁", "🎸", "🎻", "🎲", "🧩", "♟️", "🎳", "🏹", "⚽", "🏀", "🎾", "🏄", "🧗", "🚴", "🏃", "🤸", "🧑‍🏫", "🎓", "🏛️", "🎡", "🎢", "🎠", "🪩", "🕯️", "🪔", "🧿", "🪬", "🎆", "🎇", "🎉", "🎊", "🥂", "🍷"],
+  },
+  {
+    key: "Places",
+    icon: "🏠",
+    emojis: ["🏠", "🏡", "🏢", "🏫", "🏥", "🏨", "🏰", "🛖", "⛩️", "🕌", "⛪", "🗼", "🗽", "🌉", "🚪", "🪟", "🛋️", "🛏️", "🚗", "🚕", "🚌", "🚆", "✈️", "🛸", "🚁", "⛵", "🚢", "🗺️", "🧳", "🎒", "⛺", "🏕️", "🏝️", "🏜️", "🌐", "📡", "🛰️", "🔭", "🚀", "🧭"],
+  },
+  {
+    key: "Symbols",
+    icon: "♾️",
+    emojis: ["♾️", "☯️", "🔺", "🔻", "🔷", "🔶", "🔵", "🟣", "🟢", "🟡", "🟠", "🔴", "⚫", "⚪", "🟥", "🟦", "🟩", "🟨", "🟪", "⬛", "⬜", "◼️", "◻️", "▶️", "⏸️", "⏩", "🔁", "🔀", "➕", "➖", "✖️", "➗", "💯", "🔗", "🧬", "⚛️", "🕉️", "☮️", "🔱", "♈"],
+  },
 ];
+const COMMON_EMOJIS = EMOJI_CATEGORIES.flatMap((c) => c.emojis);
 
 function EmojiPicker({
   onEmojiSelect,
   onClose,
+  anchored = false,
 }: {
   onEmojiSelect: (emoji: string) => void;
   onClose: () => void;
+  /** true: popover under the emoji being edited. false: left-side toolbar submenu. */
+  anchored?: boolean;
 }) {
+  const [cat, setCat] = useState(0);
+  const category = EMOJI_CATEGORIES[cat];
   return (
-    // Left-side panel (same convention as the other toolbar submenus); the
-    // expanded emoji set scrolls inside a fixed-height window.
     <div
-      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150 p-2 grid grid-cols-6 gap-1 max-h-[264px] overflow-y-auto"
+      className={cn(
+        "z-[100] pointer-events-auto w-[260px] rounded-xl bg-zinc-900 border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in duration-150 p-2",
+        anchored
+          ? "absolute top-full left-1/2 -translate-x-1/2 mt-2 text-left"
+          : "absolute right-full top-1/2 -translate-y-1/2 mr-3 slide-in-from-right-2",
+      )}
       onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      data-prevent-canvas-wheel="true"
     >
-      {COMMON_EMOJIS.map((emoji) => (
-        <button
-          key={emoji}
-          className="w-8 h-8 rounded hover:bg-primary/20 transition-colors flex items-center justify-center text-lg"
-          onClick={() => {
-            onEmojiSelect(emoji);
-            onClose();
-          }}
-        >
-          {emoji}
-        </button>
-      ))}
+      <div className="flex items-center gap-0.5 mb-1.5 pb-1.5 border-b border-white/10">
+        {EMOJI_CATEGORIES.map((c, i) => (
+          <button
+            key={c.key}
+            type="button"
+            title={c.key}
+            onClick={() => setCat(i)}
+            className={cn("flex-1 h-7 rounded text-base flex items-center justify-center transition-colors", i === cat ? "bg-primary/25" : "hover:bg-white/10")}
+          >
+            {c.icon}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-8 gap-0.5 max-h-[168px] overflow-y-auto pr-0.5">
+        {category.emojis.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            className="w-8 h-8 rounded hover:bg-primary/20 transition-colors flex items-center justify-center text-lg"
+            onClick={() => {
+              onEmojiSelect(emoji);
+              onClose();
+            }}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
       <button
-        className="w-8 h-8 rounded hover:bg-destructive/20 transition-colors flex items-center justify-center text-xs text-muted-foreground"
+        type="button"
+        className="w-full mt-1.5 py-1 rounded text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
         onClick={() => {
           onEmojiSelect("");
           onClose();
         }}
       >
-        ✕
+        Remove emoji
       </button>
     </div>
   );
 }
 
 // Board colors - curated cyberdelic palette that looks good with white icons
-const BOARD_HEX_COLORS = [
+export const BOARD_HEX_COLORS = [
   {
     id: "purple",
     gradient:
@@ -3696,8 +3739,15 @@ const BOARD_HEX_COLORS = [
   },
 ];
 
-// Board icon picker
-const BOARD_ICONS = [
+// Board icon picker. The first eight keep their original ids (saved boards use
+// them); the rest are looked up by lucide name.
+type BoardIconDef = { id: string; Icon: React.ComponentType<{ className?: string }>; label: string };
+const lucideByName = (name: string, label: string, id = name.toLowerCase()): BoardIconDef => ({
+  id,
+  Icon: ((LucideIcons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[name] ?? LayoutGrid),
+  label,
+});
+const BOARD_ICONS: BoardIconDef[] = [
   { id: "grid", Icon: LayoutGrid, label: "Grid" },
   { id: "star", Icon: Star, label: "Star" },
   { id: "globe", Icon: Globe, label: "Globe" },
@@ -3706,6 +3756,67 @@ const BOARD_ICONS = [
   { id: "link", Icon: Link2, label: "Link" },
   { id: "box", Icon: Box, label: "Box" },
   { id: "heart", Icon: Heart, label: "Heart" },
+  lucideByName("Lightbulb", "Idea"),
+  lucideByName("Rocket", "Launch"),
+  lucideByName("Target", "Goal"),
+  lucideByName("Flag", "Milestone"),
+  lucideByName("Bookmark", "Bookmark"),
+  lucideByName("Folder", "Folder"),
+  lucideByName("Layers", "Layers"),
+  lucideByName("Map", "Map"),
+  lucideByName("Compass", "Compass"),
+  lucideByName("Sparkles", "Sparkles"),
+  lucideByName("Flame", "Energy"),
+  lucideByName("Leaf", "Nature"),
+  lucideByName("Mountain", "Mountain"),
+  lucideByName("Sun", "Sun"),
+  lucideByName("Moon", "Moon"),
+  lucideByName("Waves", "Waves"),
+  lucideByName("Music", "Music"),
+  lucideByName("Headphones", "Audio"),
+  lucideByName("Camera", "Camera"),
+  lucideByName("Film", "Film"),
+  lucideByName("Mic", "Voice"),
+  lucideByName("Palette", "Design"),
+  lucideByName("Brush", "Brush"),
+  lucideByName("Puzzle", "Puzzle"),
+  lucideByName("Gamepad2", "Game"),
+  lucideByName("Trophy", "Trophy"),
+  lucideByName("Gift", "Gift"),
+  lucideByName("Shield", "Shield"),
+  lucideByName("KeyRound", "Key"),
+  lucideByName("Users", "People"),
+  lucideByName("User", "Person"),
+  lucideByName("MessageCircle", "Chat"),
+  lucideByName("Mail", "Mail"),
+  lucideByName("Calendar", "Calendar"),
+  lucideByName("Clock", "Time"),
+  lucideByName("House", "Home", "home"),
+  lucideByName("Building2", "Place", "building"),
+  lucideByName("GraduationCap", "Learning"),
+  lucideByName("BookOpen", "Book"),
+  lucideByName("Hammer", "Build"),
+  lucideByName("Wrench", "Tools"),
+  lucideByName("Package", "Package"),
+  lucideByName("ShoppingBag", "Shop"),
+  lucideByName("Cpu", "Tech"),
+  lucideByName("Code", "Code"),
+  lucideByName("Database", "Data"),
+  lucideByName("Wifi", "Signal"),
+  lucideByName("Activity", "Pulse"),
+  lucideByName("HeartPulse", "Wellbeing"),
+  lucideByName("Brain", "Mind"),
+  lucideByName("Eye", "Vision"),
+  lucideByName("Hand", "Touch"),
+  lucideByName("Ear", "Hearing"),
+  lucideByName("Atom", "Atom"),
+  lucideByName("Orbit", "Orbit"),
+  lucideByName("Telescope", "Explore"),
+  lucideByName("Plane", "Travel"),
+  lucideByName("Anchor", "Anchor"),
+  lucideByName("Coffee", "Coffee"),
+  lucideByName("Zap", "Spark"),
+  lucideByName("Infinity", "Infinity"),
 ];
 
 function BoardIconPicker({
@@ -3719,15 +3830,16 @@ function BoardIconPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-4 gap-1 w-[165px] h-[96px]"
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-zinc-900 border border-border shadow-xl z-50 grid grid-cols-6 gap-1 w-[252px] max-h-[216px] overflow-y-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
+      data-prevent-canvas-wheel="true"
     >
       {BOARD_ICONS.map(({ id, Icon, label }) => (
         <button
           key={id}
           className={cn(
-            "w-10 h-10 rounded hover:bg-primary/20 transition-colors flex items-center justify-center",
+            "w-9 h-9 rounded hover:bg-primary/20 transition-colors flex items-center justify-center",
             currentIcon === id && "bg-primary/30 ring-1 ring-primary",
           )}
           onClick={() => {
@@ -5568,6 +5680,11 @@ function FreeformCard({
 }) {
   // Use the passed-in onBlur handler (from the parent renderer) to avoid undefined refs.
   const handleBlur = onBlur;
+  // Clicking the card's emoji opens the picker right there.
+  const [showCardEmoji, setShowCardEmoji] = useState(false);
+  useEffect(() => {
+    if (!isSelected) setShowCardEmoji(false);
+  }, [isSelected]);
   const bgColor =
     element.style?.bgColor ||
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
@@ -6212,8 +6329,28 @@ function FreeformCard({
           title="Actionable task"
         />
       )}
-      {/* Emoji display (top-left) - hide for documents */}
-      {element.emoji && !element.isDocument && (
+      {/* Emoji (click to change) - notes only; documents have theirs in the icon view */}
+      {!element.isDocument && element.cardType !== "task" && (element.emoji || isSelected) && (
+        <div className="relative z-10 w-full text-center py-[7px] leading-none">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center justify-center rounded-md transition-colors hover:bg-white/10 cursor-pointer",
+              element.emoji ? "text-lg px-1.5 py-0.5" : "text-xs px-2 py-1 text-white/45 border border-dashed border-white/20",
+            )}
+            title="Change emoji"
+            // No stopPropagation: the same click also selects the card (the picker
+            // closes whenever the card is not selected).
+            onClick={() => setShowCardEmoji((v) => !v)}
+          >
+            {element.emoji || "+ Emoji"}
+          </button>
+          {showCardEmoji && (
+            <EmojiPicker anchored onEmojiSelect={(emoji) => onUpdate({ emoji } as Partial<FreeformElement>)} onClose={() => setShowCardEmoji(false)} />
+          )}
+        </div>
+      )}
+      {element.emoji && !element.isDocument && element.cardType === "task" && (
         <div className="top-2 text-lg leading-none z-10 right-[auto] left-[50%] static w-full text-center py-[7px]">
           {element.emoji}
         </div>
@@ -6228,7 +6365,20 @@ function FreeformCard({
             className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105"
             onDoubleClick={(e) => { e.stopPropagation(); setIsNoteFocusMode(true); }}
           >
-            <div className="text-4xl leading-none mb-1">{element.emoji || '📄'}</div>
+            <div className="relative">
+              <button
+                type="button"
+                className="text-4xl leading-none mb-1 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
+                title="Change emoji"
+                onClick={() => setShowCardEmoji((v) => !v)}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                {element.emoji || '📄'}
+              </button>
+              {showCardEmoji && (
+                <EmojiPicker anchored onEmojiSelect={(emoji) => onUpdate({ emoji } as Partial<FreeformElement>)} onClose={() => setShowCardEmoji(false)} />
+              )}
+            </div>
             <div className="w-full px-1">
               <textarea
                 rows={1}
@@ -9211,6 +9361,10 @@ function LinkCard({
         fileSize: file.size,
         linkMode: "file",
         fileViewMode: element.fileViewMode || "bookmark",
+        // A wide bookmark-bar box squeezes the file card's icon: square it up.
+        ...(element.width / Math.max(1, element.height) > 1.6 && (element.fileViewMode || "bookmark") === "bookmark"
+          ? { width: 200, height: 200 }
+          : {}),
       });
     } catch (err) {
       console.error("File upload error:", err);

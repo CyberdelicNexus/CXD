@@ -7,7 +7,7 @@ import { useCXDStore } from "@/store/cxd-store";
 import { CXD_SECTIONS, CXDSectionId } from "@/types/cxd-schema";
 import { ExperienceFlowDrawer } from "./canvas/experience-flow-drawer";
 import { CanvasToolkit } from "./canvas/canvas-toolkit";
-import { CanvasElementRenderer } from "./canvas/canvas-element";
+import { CanvasElementRenderer, requestStartEditing } from "./canvas/canvas-element";
 import { canResizeFreeformCard, sanitizeFreeformResizeUpdate } from "./canvas/card-type-utils";
 import { ExperienceInspector } from "./canvas/experience-inspector";
 import { PinnedInboxNote } from "./canvas/pinned-inbox-note";
@@ -2170,8 +2170,11 @@ export function CXDCanvas() {
               height: 360,
             }),
             // For file mode, set file view mode to bookmark by default
+            // File cards are a vertical icon + name layout: square by default (the
+            // wide bookmark-bar default squeezed the icon). A dragged-out size wins.
             ...(linkMode === "file" && {
               fileViewMode: "bookmark" as const,
+              ...(options?.width ? {} : { width: 200, height: 200 }),
             }),
           };
           break;
@@ -2267,12 +2270,15 @@ export function CXDCanvas() {
       // Select the freshly placed element (a captured-container draw selects the container).
       setSelectedElementIds(new Set([newElement.id]));
 
+      // A placed text is ready for typing: no double-click needed.
+      if (newElement.type === "text") requestStartEditing(newElement.id);
+
       // Offer the quick colour fan so the next click can style it.
       const isColourableCard =
         newElement.type === "freeform" &&
         ((newElement as FreeformElement).cardType === "note" || (newElement as FreeformElement).cardType === "task") &&
         !(newElement as FreeformElement).isDocument;
-      if (newElement.type === "shape" || newElement.type === "container" || isColourableCard) {
+      if (newElement.type === "shape" || newElement.type === "container" || newElement.type === "board" || isColourableCard) {
         setQuickColorTargetId(newElement.id);
       }
     },
@@ -3185,8 +3191,9 @@ export function CXDCanvas() {
             0,
           );
 
+          const experienceBlockId = uuidv4();
           addElement({
-            id: uuidv4(),
+            id: experienceBlockId,
             type: "experienceBlock" as const,
             componentKey: draggingExperienceBlock.sectionId as any,
             title: draggingExperienceBlock.label,
@@ -3199,6 +3206,10 @@ export function CXDCanvas() {
             boardId: boardId,
             surface: surface,
           } as any);
+          // Offer the colour fan for the freshly dropped block.
+          setSelectedElementId(experienceBlockId);
+          setSelectedElementIds(new Set([experienceBlockId]));
+          setQuickColorTargetId(experienceBlockId);
         }
       }
 
@@ -6597,6 +6608,7 @@ export function CXDCanvas() {
               switch (type) {
                 case 'text':
                   newElement = { ...baseElement, type: 'text', content: '', width: 60, height: 50, autoWidth: true, style: { fontSize: 32, fontWeight: 'bold' } };
+                  requestStartEditing(baseElement.id);
                   break;
                 case 'image':
                   newElement = { ...baseElement, type: 'image', src: '', alt: '' };

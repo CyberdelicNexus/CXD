@@ -57,7 +57,11 @@ export function ShapeRichTextEditor({
   onChangeRef.current = onChange;
   const pending = useRef<number | null>(null);
   const [, force] = useState(0);
-  const [showColors, setShowColors] = useState(false);
+  // One submenu at a time: opening one closes the other.
+  const [openMenu, setOpenMenu] = useState<"none" | "colors" | "fonts">("none");
+  const showColors = openMenu === "colors";
+  const setShowColors = (v: boolean | ((p: boolean) => boolean)) =>
+    setOpenMenu((prev) => ((typeof v === "function" ? v(prev === "colors") : v) ? "colors" : "none"));
 
   const flush = (ed: { getHTML: () => string; getText: (o?: { blockSeparator?: string }) => string }) => {
     if (pending.current !== null) {
@@ -90,6 +94,9 @@ export function ShapeRichTextEditor({
     onSelectionUpdate: () => force((n) => n + 1),
     onBlur: ({ editor: ed }) => {
       flush(ed);
+      // The window losing focus (e.g. the native colour picker opening) is not
+      // the user leaving the text.
+      if (typeof document !== "undefined" && !document.hasFocus()) return;
       onBlur();
     },
   });
@@ -203,6 +210,20 @@ export function ShapeRichTextEditor({
                 {TEXT_SWATCHES.map((c) => (
                   <button key={c} type="button" className="w-5 h-5 rounded-full border border-white/25 hover:scale-110 transition-transform" style={{ background: c }} onClick={() => pickColor(c)} title={c} />
                 ))}
+                {/* Rainbow wheel: any colour. The input is clickable but never takes focus (mousedown is prevented), so the editor keeps its selection. */}
+                <span
+                  className="relative w-5 h-5 rounded-full border border-white/25 hover:scale-110 transition-transform overflow-hidden"
+                  style={{ background: "conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)" }}
+                  title="Any colour"
+                >
+                  <input
+                    type="color"
+                    value={/^#[0-9a-f]{6}$/i.test(currentColor) ? currentColor : "#ffffff"}
+                    onChange={(e) => pickColor(e.target.value)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    tabIndex={-1}
+                  />
+                </span>
               </div>
               <div className="grid grid-cols-5 gap-1.5">
                 {TEXT_GRADIENTS.slice(0, 5).map((g, i) => (
@@ -216,17 +237,35 @@ export function ShapeRichTextEditor({
         <button type="button" className={btn(false)} onClick={() => onShapeStyleChange?.({ textAlign: nextAlign })} title={`Align ${align} (click for ${nextAlign})`}>
           <AlignIcon className="w-3 h-3" />
         </button>
-        <select
-          value={shapeStyle?.fontFamily || "inherit"}
-          onChange={(e) => onShapeStyleChange?.({ fontFamily: e.target.value })}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="h-6 max-w-[84px] text-[11px] rounded-md bg-white/5 border border-white/10 text-white/80 px-1 focus:outline-none"
-          title="Font"
-        >
-          {FONT_FAMILIES.map((f) => (
-            <option key={f.value} value={f.value} className="bg-zinc-900">{f.label}</option>
-          ))}
-        </select>
+        <div className="relative">
+          <button
+            type="button"
+            className="h-6 max-w-[96px] px-1.5 rounded-md bg-white/5 border border-white/10 text-[11px] text-white/80 truncate hover:bg-white/10"
+            style={{ fontFamily: shapeStyle?.fontFamily && shapeStyle.fontFamily !== "inherit" ? shapeStyle.fontFamily : undefined }}
+            onClick={() => setOpenMenu((m) => (m === "fonts" ? "none" : "fonts"))}
+            title="Font"
+          >
+            {FONT_FAMILIES.find((f) => f.value === (shapeStyle?.fontFamily || "inherit"))?.label ?? "Font"}
+          </button>
+          {openMenu === "fonts" && (
+            <div className="absolute bottom-full mb-2 right-0 z-50 w-44 max-h-56 overflow-y-auto rounded-lg bg-zinc-900 border border-white/10 shadow-xl p-1" data-prevent-canvas-wheel="true">
+              {FONT_FAMILIES.map((f) => (
+                <button
+                  key={f.value}
+                  type="button"
+                  className={cn("w-full text-left px-2 py-1 rounded text-sm text-white/85 hover:bg-white/10", (shapeStyle?.fontFamily || "inherit") === f.value && "bg-white/15")}
+                  style={{ fontFamily: f.value === "inherit" ? undefined : f.value }}
+                  onClick={() => {
+                    onShapeStyleChange?.({ fontFamily: f.value });
+                    setOpenMenu("none");
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       <div
         className="w-full max-h-full overflow-hidden cursor-text"
