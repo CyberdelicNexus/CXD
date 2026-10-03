@@ -262,10 +262,47 @@ export function CXDNavbar() {
     updateCanvasBackground,
     boardPath,
     navigateToBoardPath,
+    renameBoard,
   } = useCXDStore();
+  const [renamingBoardId, setRenamingBoardId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const yDoc = useCXDStore((s) => s.yDoc);
   const { toast } = useToast();
   const project = getCurrentProject();
+
+  // Breadcrumb entry: click navigates, double-click renames in place.
+  const renderCrumb = (board: { id: string; title: string }, index: number, className: string) =>
+    renamingBoardId === board.id ? (
+      <input
+        autoFocus
+        value={renameDraft}
+        onChange={(e) => setRenameDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={() => {
+          renameBoard(board.id, renameDraft);
+          setRenamingBoardId(null);
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") setRenamingBoardId(null);
+        }}
+        className="w-[140px] rounded bg-white/10 border border-primary/50 px-1.5 py-0.5 text-sm text-white outline-none"
+        maxLength={80}
+      />
+    ) : (
+      <button
+        onClick={() => navigateToBoardPath(index)}
+        onDoubleClick={() => {
+          setRenameDraft(board.title);
+          setRenamingBoardId(board.id);
+        }}
+        className={className}
+        title={`${board.title} (double-click to rename)`}
+      >
+        {board.title}
+      </button>
+    );
 
   // Deduplicate boardPath to prevent duplicate breadcrumb entries
   const dedupedBoardPath = useMemo(() => {
@@ -444,7 +481,7 @@ export function CXDNavbar() {
 
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-50 h-20 backdrop-blur-md border-b border-white/10 transition-colors duration-500 overflow-visible"
+      className="fixed top-0 left-0 right-0 z-[125] h-20 backdrop-blur-md border-b border-white/10 transition-colors duration-500 overflow-visible"
       style={{ backgroundColor: navBgColor }}
     >
       {/* Glass Reflection Effects */}
@@ -666,17 +703,15 @@ export function CXDNavbar() {
                     dedupedBoardPath.map((board, index) => (
                       <div key={board.id} className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
-                        <button
-                          onClick={() => navigateToBoardPath(index)}
-                          className={`text-sm transition-colors truncate max-w-[100px] lg:max-w-[120px] xl:max-w-[150px] ${
+                        {renderCrumb(
+                          board,
+                          index,
+                          `text-sm transition-colors truncate max-w-[100px] lg:max-w-[120px] xl:max-w-[150px] ${
                             index === dedupedBoardPath.length - 1
                               ? "text-primary font-medium"
                               : "text-white/60 hover:text-white"
-                          }`}
-                          title={board.title}
-                        >
-                          {board.title}
-                        </button>
+                          }`,
+                        )}
                       </div>
                     ))
                   ) : (
@@ -684,13 +719,7 @@ export function CXDNavbar() {
                     <>
                       <div className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
-                        <button
-                          onClick={() => navigateToBoardPath(0)}
-                          className="text-sm text-white/60 hover:text-white transition-colors truncate max-w-[80px]"
-                          title={dedupedBoardPath[0].title}
-                        >
-                          {dedupedBoardPath[0].title}
-                        </button>
+                        {renderCrumb(dedupedBoardPath[0], 0, "text-sm text-white/60 hover:text-white transition-colors truncate max-w-[80px]")}
                       </div>
                       <div className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
@@ -701,17 +730,15 @@ export function CXDNavbar() {
                         return (
                           <div key={board.id} className="flex items-center flex-shrink-0">
                             <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
-                            <button
-                              onClick={() => navigateToBoardPath(index)}
-                              className={`text-sm transition-colors truncate max-w-[100px] ${
+                            {renderCrumb(
+                              board,
+                              index,
+                              `text-sm transition-colors truncate max-w-[100px] ${
                                 index === dedupedBoardPath.length - 1
                                   ? "text-primary font-medium"
                                   : "text-white/60 hover:text-white"
-                              }`}
-                              title={board.title}
-                            >
-                              {board.title}
-                            </button>
+                              }`,
+                            )}
                           </div>
                         );
                       })}

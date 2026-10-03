@@ -6,7 +6,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { TextStyle, FontSize, Color } from "@tiptap/extension-text-style";
 import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Minus, Plus, Underline } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { FONT_FAMILIES, TEXT_GRADIENTS, type ElementStyle } from "@/types/canvas-elements";
+import { FontDropdown } from "./font-dropdown";
+import { TEXT_GRADIENTS, type ElementStyle } from "@/types/canvas-elements";
 
 const TEXT_SWATCHES = ["#ffffff", "#a3a3a3", "#404040", "#c084fc", "#22d3ee", "#34d399", "#f472b6", "#fbbf24", "#f87171"];
 
@@ -146,7 +147,7 @@ export function ShapeRichTextEditor({
         : [...SIZE_STEPS].reverse().find((s) => s < currentSize) ?? SIZE_STEPS[0];
     applyScoped((c) => c.setFontSize(`${next}px`));
   };
-  const pickColor = (value: string) => {
+  const pickColor = (value: string, keepOpen = false) => {
     const gradient = value.startsWith("linear-gradient");
     if (gradient) {
       // A gradient can't be a per-selection mark: it colours the whole text.
@@ -157,7 +158,7 @@ export function ShapeRichTextEditor({
       applyScoped((c) => c.setColor(value));
       if (wholeText) onShapeStyleChange?.({ textColor: value });
     }
-    setShowColors(false);
+    if (!keepOpen) setShowColors(false);
   };
   const align = shapeStyle?.textAlign || "center";
   const nextAlign = align === "left" ? "center" : align === "center" ? "right" : "left";
@@ -219,7 +220,7 @@ export function ShapeRichTextEditor({
                   <input
                     type="color"
                     value={/^#[0-9a-f]{6}$/i.test(currentColor) ? currentColor : "#ffffff"}
-                    onChange={(e) => pickColor(e.target.value)}
+                    onChange={(e) => pickColor(e.target.value, true)}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     tabIndex={-1}
                   />
@@ -237,35 +238,13 @@ export function ShapeRichTextEditor({
         <button type="button" className={btn(false)} onClick={() => onShapeStyleChange?.({ textAlign: nextAlign })} title={`Align ${align} (click for ${nextAlign})`}>
           <AlignIcon className="w-3 h-3" />
         </button>
-        <div className="relative">
-          <button
-            type="button"
-            className="h-6 max-w-[96px] px-1.5 rounded-md bg-white/5 border border-white/10 text-[11px] text-white/80 truncate hover:bg-white/10"
-            style={{ fontFamily: shapeStyle?.fontFamily && shapeStyle.fontFamily !== "inherit" ? shapeStyle.fontFamily : undefined }}
-            onClick={() => setOpenMenu((m) => (m === "fonts" ? "none" : "fonts"))}
-            title="Font"
-          >
-            {FONT_FAMILIES.find((f) => f.value === (shapeStyle?.fontFamily || "inherit"))?.label ?? "Font"}
-          </button>
-          {openMenu === "fonts" && (
-            <div className="absolute bottom-full mb-2 right-0 z-50 w-44 max-h-56 overflow-y-auto rounded-lg bg-zinc-900 border border-white/10 shadow-xl p-1" data-prevent-canvas-wheel="true">
-              {FONT_FAMILIES.map((f) => (
-                <button
-                  key={f.value}
-                  type="button"
-                  className={cn("w-full text-left px-2 py-1 rounded text-sm text-white/85 hover:bg-white/10", (shapeStyle?.fontFamily || "inherit") === f.value && "bg-white/15")}
-                  style={{ fontFamily: f.value === "inherit" ? undefined : f.value }}
-                  onClick={() => {
-                    onShapeStyleChange?.({ fontFamily: f.value });
-                    setOpenMenu("none");
-                  }}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <FontDropdown
+          value={shapeStyle?.fontFamily}
+          onChange={(fontFamily) => onShapeStyleChange?.({ fontFamily })}
+          open={openMenu === "fonts"}
+          onOpenChange={(o) => setOpenMenu(o ? "fonts" : "none")}
+          keepEditorFocus
+        />
       </div>
       <div
         className="w-full max-h-full overflow-hidden cursor-text"

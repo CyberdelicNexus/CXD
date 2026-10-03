@@ -1,5 +1,6 @@
 "use client";
 
+import { FontDropdown } from "./font-dropdown";
 import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import NextImage from "next/image";
 import { createPortal } from "react-dom";
@@ -122,6 +123,7 @@ import {
   Zap,
   Eye,
   EyeOff,
+  Heading,
   Brain,
   Users,
   Inbox,
@@ -327,6 +329,7 @@ export function CanvasElementRenderer({
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showLinkViewMenu, setShowLinkViewMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showFontMenu, setShowFontMenu] = useState(false);
   const [showBoardIconPicker, setShowBoardIconPicker] = useState(false);
   const [showBoardColorPicker, setShowBoardColorPicker] = useState(false);
   const [showExperienceViewMenu, setShowExperienceViewMenu] = useState(false);
@@ -1175,6 +1178,32 @@ export function CanvasElementRenderer({
           )}
           {element.type === "freeform" && (
             <>
+              {/* Documents: colour lives inside the opened document; the emoji is
+                  changed here because the icon itself is the drag/open handle. */}
+              {(element as FreeformElement).isDocument ? (
+                <div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      showEmojiPicker ? closeAllSubmenus() : openEmojiPicker();
+                    }}
+                    className={cn(
+                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                      showEmojiPicker && "bg-primary/20 text-primary",
+                    )}
+                    title="Change emoji"
+                  >
+                    <Smile className="w-4 h-4" />
+                  </button>
+                  {showEmojiPicker && (
+                    <EmojiPicker
+                      onEmojiSelect={(emoji) => onUpdate({ emoji } as Partial<FreeformElement>)}
+                      onClose={() => setShowEmojiPicker(false)}
+                    />
+                  )}
+                </div>
+              ) : (
               <div>
                 <button
                   onClick={(e) => {
@@ -1203,6 +1232,7 @@ export function CanvasElementRenderer({
                   />
                 )}
               </div>
+              )}
               {/* Emoji: click the emoji on the card itself. Bold and layer arrows
                   were removed from card toolbars (selected cards already pop to the top). */}
               {/* Mark as Task button */}
@@ -1489,24 +1519,14 @@ export function CanvasElementRenderer({
           {element.type === "text" && (
             <>
               {/* Font family dropdown */}
-              <select
-                value={(element as TextElement).style?.fontFamily || "inherit"}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  onUpdate({
-                    style: { ...element.style, fontFamily: e.target.value },
-                  });
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="text-xs bg-card/80 border border-border/50 rounded px-1.5 py-1 cursor-pointer max-w-[100px]"
+              <FontDropdown
+                value={(element as TextElement).style?.fontFamily}
+                onChange={(fontFamily) => onUpdate({ style: { ...element.style, fontFamily } })}
+                open={showFontMenu}
+                onOpenChange={setShowFontMenu}
+                className="max-w-[100px]"
                 title="Font Family"
-              >
-                {FONT_FAMILIES.map((f) => (
-                  <option key={f.value} value={f.value} style={{ fontFamily: f.value === "inherit" ? undefined : f.value }}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
+              />
               {/* Font size: − / value / + (steps through a type scale) */}
               <TextSizeControl
                 value={(element as TextElement).style?.fontSize || 16}
@@ -2516,7 +2536,7 @@ function ColorPicker({
   return (
     <div
       className={cn(
-        "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-fit rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
+        "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[132px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
         "p-2 grid grid-cols-4 gap-1.5",
       )}
       onClick={(e) => e.stopPropagation()}
@@ -6365,20 +6385,7 @@ function FreeformCard({
             className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105"
             onDoubleClick={(e) => { e.stopPropagation(); setIsNoteFocusMode(true); }}
           >
-            <div className="relative">
-              <button
-                type="button"
-                className="text-4xl leading-none mb-1 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
-                title="Change emoji"
-                onClick={() => setShowCardEmoji((v) => !v)}
-                onDoubleClick={(e) => e.stopPropagation()}
-              >
-                {element.emoji || '📄'}
-              </button>
-              {showCardEmoji && (
-                <EmojiPicker anchored onEmojiSelect={(emoji) => onUpdate({ emoji } as Partial<FreeformElement>)} onClose={() => setShowCardEmoji(false)} />
-              )}
-            </div>
+            <div className="text-4xl leading-none mb-1">{element.emoji || '📄'}</div>
             <div className="w-full px-1">
               <textarea
                 rows={1}
@@ -6449,10 +6456,10 @@ function FreeformCard({
                     onUpdate({ hideNoteTitle: !element.hideNoteTitle });
                   }}
                   className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
-                  title={element.hideNoteTitle ? "Show title" : "Hide title"}
+                  title={element.hideNoteTitle ? "Show note title" : "Hide note title"}
                   data-no-drag
                 >
-                  {element.hideNoteTitle ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  <Heading className={cn("h-3.5 w-3.5", element.hideNoteTitle && "opacity-40")} />
                 </button>
                 <button
                   type="button"
@@ -6589,10 +6596,10 @@ function FreeformCard({
                       onUpdate({ hideNoteTitle: !element.hideNoteTitle });
                     }}
                     className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
-                    title={element.hideNoteTitle ? "Show title" : "Hide title"}
+                    title={element.hideNoteTitle ? "Show note title" : "Hide note title"}
                     data-no-drag
                   >
-                    {element.hideNoteTitle ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                    <Heading className={cn("h-3.5 w-3.5", element.hideNoteTitle && "opacity-40")} />
                   </button>
                   <button
                     type="button"

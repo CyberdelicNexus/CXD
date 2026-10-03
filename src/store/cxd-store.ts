@@ -294,6 +294,7 @@ interface CXDState {
   enterBoard: (boardId: string, title: string) => void;
   exitBoard: () => void;
   navigateToBoardPath: (index: number) => void;
+  renameBoard: (childBoardId: string, title: string) => void;
   createBoard: (title: string) => string;
   setActiveBoardId: (boardId: string | null) => void;
   getActiveBoardId: () => string | null;
@@ -1743,14 +1744,16 @@ export const useCXDStore = create<CXDState>()(
 
         const activeBoardId = get().activeBoardId;
         const activeSurface = get().activeSurface;
+        // AI output is board-agnostic (the sanitizer stamps boardId: null), so
+        // new elements always land where the user is: the board in the breadcrumb.
         const preparedAdds = batch.addElements.map(el => ({
           ...el,
-          boardId: el.boardId !== undefined ? el.boardId : activeBoardId,
+          boardId: activeBoardId,
           surface: el.surface !== undefined ? el.surface : activeSurface,
         }));
         const preparedEdges = batch.addEdges.map(e => ({
           ...e,
-          boardId: e.boardId !== undefined ? e.boardId : activeBoardId,
+          boardId: activeBoardId,
           surface: e.surface !== undefined ? e.surface : activeSurface,
         }));
         const removeSet = new Set(batch.removeElementIds);
@@ -2189,6 +2192,20 @@ export const useCXDStore = create<CXDState>()(
           // Restore viewport for the target canvas
           restoreViewport(targetCanvasId);
         }
+      },
+
+      // Rename a board from anywhere (breadcrumb): the board element is the source
+      // of truth; the breadcrumb entry is a cached copy of its title.
+      renameBoard: (childBoardId, title) => {
+        const trimmed = title.trim();
+        if (!trimmed) return;
+        const el = get()
+          .getCurrentProject()
+          ?.canvasLayout?.elements?.find((e) => e.type === 'board' && (e as { childBoardId?: string }).childBoardId === childBoardId);
+        if (el) get().updateCanvasElement(el.id, { title: trimmed } as Partial<CanvasElement>);
+        set((state) => ({
+          boardPath: state.boardPath.map((entry) => (entry.id === childBoardId ? { ...entry, title: trimmed } : entry)),
+        }));
       },
 
       navigateToBoardPath: (index) => {

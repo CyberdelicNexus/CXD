@@ -7,9 +7,9 @@ import { CanvasElement, ImageElement, ShapeElement, PRESET_COLORS } from "@/type
 import { cn } from "@/lib/utils";
 import { ShapeColorPicker, StoryboardColorPicker } from "./canvas-element";
 import {
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
+  AlignStartHorizontal,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
   AlignStartVertical,
   AlignCenterVertical,
   AlignEndVertical,
@@ -98,8 +98,7 @@ export function MultiSelectionBox({
   }, [snapToGrid]);
   const [showColorPicker, setShowColorPicker] = useState(false);
   // Cycling alignment modes: each click cycles to the next mode
-  const [hAlignMode, setHAlignMode] = useState<0 | 1 | 2>(0); // 0=left, 1=center, 2=right
-  const [vAlignMode, setVAlignMode] = useState<0 | 1 | 2>(0); // 0=top, 1=middle, 2=bottom
+  const [showAlignMenu, setShowAlignMenu] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState<{
@@ -248,21 +247,6 @@ export function MultiSelectionBox({
   }, [selectedElements, onUpdateElements]);
 
   // Cycling alignment handlers
-  const cycleHAlign = useCallback(() => {
-    const mode = hAlignMode;
-    if (mode === 0) alignLeft();
-    else if (mode === 1) alignCenterH();
-    else alignRight();
-    setHAlignMode(((mode + 1) % 3) as 0 | 1 | 2);
-  }, [hAlignMode, alignLeft, alignCenterH, alignRight]);
-
-  const cycleVAlign = useCallback(() => {
-    const mode = vAlignMode;
-    if (mode === 0) alignTop();
-    else if (mode === 1) alignMiddle();
-    else alignBottom();
-    setVAlignMode(((mode + 1) % 3) as 0 | 1 | 2);
-  }, [vAlignMode, alignTop, alignMiddle, alignBottom]);
 
   // Handle resize start
   const handleResizeStart = useCallback(
@@ -457,35 +441,44 @@ export function MultiSelectionBox({
         {/* Alignment & Distribution tools */}
         {expanded && (
         <div className="flex items-center gap-0.5 pr-2 border-r border-border/50">
-          {/* Horizontal align — cycles: Left → Center → Right */}
-          <ToolButton
-            icon={hAlignMode === 0 ? <AlignLeft className="w-4 h-4" /> : hAlignMode === 1 ? <AlignCenter className="w-4 h-4" /> : <AlignRight className="w-4 h-4" />}
-            title={hAlignMode === 0 ? "Align Left (click to cycle)" : hAlignMode === 1 ? "Align Center (click to cycle)" : "Align Right (click to cycle)"}
-            onClick={cycleHAlign}
-          />
-          {/* Vertical align — cycles: Top → Middle → Bottom */}
-          <ToolButton
-            icon={vAlignMode === 0 ? <AlignStartVertical className="w-4 h-4" /> : vAlignMode === 1 ? <AlignCenterVertical className="w-4 h-4" /> : <AlignEndVertical className="w-4 h-4" />}
-            title={vAlignMode === 0 ? "Align Top (click to cycle)" : vAlignMode === 1 ? "Align Middle (click to cycle)" : "Align Bottom (click to cycle)"}
-            onClick={cycleVAlign}
-          />
-          {selectedElements.length >= 2 && (
-            <>
-              <div className="w-px h-4 bg-border/30 mx-0.5" />
-              {/* Distribute horizontal spacing evenly */}
-              <ToolButton
-                icon={<AlignHorizontalSpaceAround className="w-4 h-4" />}
-                title="Distribute Horizontal Spacing"
-                onClick={distributeH}
-              />
-              {/* Distribute vertical spacing evenly */}
-              <ToolButton
-                icon={<AlignVerticalSpaceAround className="w-4 h-4" />}
-                title="Distribute Vertical Spacing"
-                onClick={distributeV}
-              />
-            </>
-          )}
+          {/* One Align button; the popover shows every option at once. Icons are
+              bar-and-blocks glyphs: the bar is the edge everything snaps to. */}
+          <div className="relative">
+            <ToolButton
+              icon={<AlignStartVertical className="w-4 h-4" />}
+              title="Align"
+              onClick={() => setShowAlignMenu((v) => !v)}
+              className={showAlignMenu ? "bg-primary/20 text-primary" : undefined}
+            />
+            {showAlignMenu && (
+              <div
+                className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-10 p-2 rounded-lg bg-zinc-900 border border-white/10 shadow-xl whitespace-nowrap"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <p className="px-1 pb-1 text-[9px] uppercase tracking-wide text-white/40">Align horizontally</p>
+                <div className="flex gap-0.5">
+                  <ToolButton icon={<AlignStartVertical className="w-4 h-4" />} title="Align left edges" onClick={alignLeft} />
+                  <ToolButton icon={<AlignCenterVertical className="w-4 h-4" />} title="Align centers (horizontal)" onClick={alignCenterH} />
+                  <ToolButton icon={<AlignEndVertical className="w-4 h-4" />} title="Align right edges" onClick={alignRight} />
+                </div>
+                <p className="px-1 pt-2 pb-1 text-[9px] uppercase tracking-wide text-white/40">Align vertically</p>
+                <div className="flex gap-0.5">
+                  <ToolButton icon={<AlignStartHorizontal className="w-4 h-4" />} title="Align top edges" onClick={alignTop} />
+                  <ToolButton icon={<AlignCenterHorizontal className="w-4 h-4" />} title="Align middles (vertical)" onClick={alignMiddle} />
+                  <ToolButton icon={<AlignEndHorizontal className="w-4 h-4" />} title="Align bottom edges" onClick={alignBottom} />
+                </div>
+                {selectedElements.length >= 2 && (
+                  <>
+                    <p className="px-1 pt-2 pb-1 text-[9px] uppercase tracking-wide text-white/40">Distribute evenly</p>
+                    <div className="flex gap-0.5">
+                      <ToolButton icon={<AlignHorizontalSpaceAround className="w-4 h-4" />} title="Distribute horizontally (even gaps)" onClick={distributeH} />
+                      <ToolButton icon={<AlignVerticalSpaceAround className="w-4 h-4" />} title="Distribute vertically (even gaps)" onClick={distributeV} />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         )}
 

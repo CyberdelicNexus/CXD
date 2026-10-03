@@ -91,6 +91,8 @@ export async function generateElementsFromPrompt(
     // top of it, instead of trusting the model's suggested coordinates.
     let dx = 0;
     let dy = 0;
+    // Place into the board the user is currently inside (breadcrumb), not the root.
+    const activeBoardId = store.activeBoardId ?? null;
     if (bbox) {
       const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1200;
       const viewportH = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
@@ -101,7 +103,7 @@ export async function generateElementsFromPrompt(
       const obstacles: BoundingBox[] = (project.canvasLayout?.elements || [])
         .filter(
           (el) =>
-            !el.inInbox && !el.boardId && el.surface !== 'hypercube' && el.type !== 'line' &&
+            !el.inInbox && (el.boardId ?? null) === activeBoardId && el.surface !== 'hypercube' && el.type !== 'line' &&
             el.width > 0 && el.height > 0
         )
         .map((el) => ({ minX: el.x, minY: el.y, maxX: el.x + el.width, maxY: el.y + el.height }));
@@ -117,7 +119,7 @@ export async function generateElementsFromPrompt(
       .filter(Boolean);
 
     const placed = laidOut.map((el) => {
-      const shifted = { ...el, x: el.x + dx, y: el.y + dy };
+      const shifted = { ...el, x: el.x + dx, y: el.y + dy, boardId: activeBoardId };
       // Tag hygiene: only top-level elements and containers carry face tags.
       // Children inside a container inherit their parent's tags at query time
       // in the Map views, so tagging each child would just be chip spam.
@@ -133,7 +135,7 @@ export async function generateElementsFromPrompt(
     // (addCanvasEdges is batched + freeze-proof and deliberately skips its own
     // history snapshot — see cxd-store.ts). Ids are preserved through layout.
     if (edges.length > 0) {
-      store.addCanvasEdges(edges);
+      store.addCanvasEdges(edges.map((e) => ({ ...e, boardId: activeBoardId })));
     }
 
     // Frame the camera on the freshly placed group, same UX as the wizard's

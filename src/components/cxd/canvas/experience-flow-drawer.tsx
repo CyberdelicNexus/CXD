@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useCXDStore } from "@/store/cxd-store";
 import { extractCenterColor, hexToRgba, cn } from "@/lib/utils";
 import {
@@ -238,8 +239,11 @@ export function ExperienceFlowDrawer() {
     setDragOverIndex(null);
   };
 
-  return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+  // Portaled to <body>: inside the canvas root's stacking context, connector
+  // lines (z up to maxElementZ + 1) painted over the drawer.
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed bottom-0 left-0 right-0 z-[90] pointer-events-none">
       {/* Thin connector line - spans the full screen, flush with the trigger's bottom edge.
           Only visible when collapsed; fades out once the drawer expands to a full-width bar. */}
       <div
@@ -742,6 +746,7 @@ export function ExperienceFlowDrawer() {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
