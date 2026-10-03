@@ -7,6 +7,8 @@ import { TextStyle, FontSize, Color } from "@tiptap/extension-text-style";
 import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Minus, Plus, Underline } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FontDropdown } from "./font-dropdown";
+import { GradientToolButton } from "./gradient-editor";
+import { isGradientCss } from "@/lib/gradient";
 import { TEXT_GRADIENTS, type ElementStyle } from "@/types/canvas-elements";
 
 const TEXT_SWATCHES = ["#ffffff", "#a3a3a3", "#404040", "#c084fc", "#22d3ee", "#34d399", "#f472b6", "#fbbf24", "#f87171"];
@@ -148,7 +150,7 @@ export function ShapeRichTextEditor({
     applyScoped((c) => c.setFontSize(`${next}px`));
   };
   const pickColor = (value: string, keepOpen = false) => {
-    const gradient = value.startsWith("linear-gradient");
+    const gradient = isGradientCss(value);
     if (gradient) {
       // A gradient can't be a per-selection mark: it colours the whole text.
       editor.chain().focus().setTextSelection({ from: 1, to: Math.max(1, editor.state.doc.content.size - 1) }).unsetColor().run();
@@ -203,7 +205,7 @@ export function ShapeRichTextEditor({
         <div className="w-px h-4 bg-white/10 mx-0.5" />
         <div className="relative">
           <button type="button" className={btn(showColors)} onClick={() => setShowColors((v) => !v)} title="Text colour">
-            <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ background: shapeStyle?.textColor?.startsWith("linear-gradient") ? shapeStyle.textColor : currentColor }} />
+            <span className="w-3.5 h-3.5 rounded-full border border-white/40" style={{ background: isGradientCss(shapeStyle?.textColor) ? shapeStyle.textColor : currentColor }} />
           </button>
           {showColors && (
             <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 p-2 rounded-lg bg-zinc-900/95 border border-white/10 shadow-xl w-[132px]">
@@ -227,9 +229,10 @@ export function ShapeRichTextEditor({
                 </span>
               </div>
               <div className="grid grid-cols-5 gap-1.5">
-                {TEXT_GRADIENTS.slice(0, 5).map((g, i) => (
+                {TEXT_GRADIENTS.slice(0, 4).map((g, i) => (
                   <button key={i} type="button" className="w-5 h-5 rounded-full border border-white/25 hover:scale-110 transition-transform" style={{ background: g }} onClick={() => pickColor(g)} title="Gradient (whole text)" />
                 ))}
+                <GradientToolButton compact value={shapeStyle?.textColor} onChange={(css) => pickColor(css, true)} tileClassName="w-5 h-5" title="Custom gradient (whole text)" />
               </div>
               <p className="mt-1.5 text-[9px] text-white/40 leading-tight">{hasSelection ? "Colours the selected text" : "Colours all the text"}</p>
             </div>

@@ -12,6 +12,7 @@
 // connectors, lines, tables, images) is drawn faithfully; embedded web content
 // (link embeds) is drawn as a card.
 
+import { parseGradient, stopCss, isGradientCss } from './gradient';
 import type {
   CanvasElement,
   CanvasEdge,
@@ -60,13 +61,13 @@ export interface ExportResult {
 }
 
 const QUALITY: Record<ExportQuality, { scale: number; maxDim: number }> = {
-  standard: { scale: 2, maxDim: 8192 },
-  high: { scale: 3, maxDim: 12000 },
+  standard: { scale: 2, maxDim: 12000 },
+  high: { scale: 3, maxDim: 16000 },
   // Vision models downscale large images, so cap the long side: text stays
   // legible and the file small.
   ai: { scale: 2, maxDim: 2400 },
 };
-const MAX_PIXELS = 80_000_000;
+const MAX_PIXELS = 120_000_000;
 const BG_DARK_INNER = '#1a0b2e';
 const BG_DARK_OUTER = '#050308';
 const DEFAULT_NOTE_BG = 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)';
@@ -194,34 +195,25 @@ export function sceneBounds(scene: ExportScene) {
 
 // ───────────────────────── colour / text helpers ─────────────────────────
 
-const COLOR_RE = /(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\)|transparent)\s*(-?\d+(?:\.\d+)?%)?/g;
-
 function makeGradient(ctx: CanvasRenderingContext2D, css: string, x: number, y: number, w: number, h: number): CanvasGradient | null {
-  const m = css.match(/linear-gradient\(([\s\S]*)\)\s*$/i);
-  if (!m) return null;
-  const body = m[1];
-  const ang = body.match(/(-?\d+(?:\.\d+)?)deg/);
-  let deg = ang ? parseFloat(ang[1]) : 180;
-  const toDir = body.match(/to\s+(top|bottom|left|right)(?:\s+(top|bottom|left|right))?/);
-  if (toDir) {
-    const d = [toDir[1], toDir[2]].filter(Boolean).join(' ');
-    deg = { top: 0, right: 90, bottom: 180, left: 270, 'top right': 45, 'right top': 45, 'bottom right': 135, 'right bottom': 135, 'bottom left': 225, 'left bottom': 225, 'top left': 315, 'left top': 315 }[d] ?? 180;
+  const m = parseGradient(css);
+  if (!m || m.stops.length === 0) return null;
+  let g: CanvasGradient;
+  if (m.kind === 'radial') {
+    const cx = x + (m.cx / 100) * w, cy = y + (m.cy / 100) * h;
+    // CSS default size: farthest-corner.
+    const r = Math.max(Math.hypot(cx - x, cy - y), Math.hypot(cx - (x + w), cy - y), Math.hypot(cx - x, cy - (y + h)), Math.hypot(cx - (x + w), cy - (y + h))) || 1;
+    g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  } else {
+    const a = (m.angle * Math.PI) / 180;
+    const dx = Math.sin(a), dy = -Math.cos(a);
+    const len = Math.abs(w * dx) + Math.abs(h * dy);
+    const cx = x + w / 2, cy = y + h / 2;
+    g = ctx.createLinearGradient(cx - (dx * len) / 2, cy - (dy * len) / 2, cx + (dx * len) / 2, cy + (dy * len) / 2);
   }
-  const stops: Array<{ c: string; p: number | null }> = [];
-  let s: RegExpExecArray | null;
-  COLOR_RE.lastIndex = 0;
-  const rest = body.replace(/^[^,]*?deg\s*,/, '').replace(/^to\s+[a-z ]+,/, '');
-  while ((s = COLOR_RE.exec(rest))) stops.push({ c: s[1], p: s[2] ? parseFloat(s[2]) / 100 : null });
-  if (stops.length === 0) return null;
-  const a = (deg * Math.PI) / 180;
-  const dx = Math.sin(a), dy = -Math.cos(a);
-  const len = Math.abs(w * dx) + Math.abs(h * dy);
-  const cx = x + w / 2, cy = y + h / 2;
-  const g = ctx.createLinearGradient(cx - (dx * len) / 2, cy - (dy * len) / 2, cx + (dx * len) / 2, cy + (dy * len) / 2);
-  stops.forEach((st, i) => {
-    const pos = st.p ?? (stops.length === 1 ? 0 : i / (stops.length - 1));
-    try { g.addColorStop(Math.max(0, Math.min(1, pos)), st.c); } catch { /* bad colour: skip */ }
-  });
+  for (const st of m.stops) {
+    try { g.addColorStop(Math.max(0, Math.min(1, st.pos / 100)), stopCss(st)); } catch { /* bad colour: skip */ }
+  }
   return g;
 }
 
@@ -412,7 +404,7 @@ function drawContainer(ctx: CanvasRenderingContext2D, el: ContainerElement) {
 function drawTextElement(ctx: CanvasRenderingContext2D, el: TextElement) {
   const size = el.style?.fontSize || 16;
   const pad = 4;
-  const gradient = el.style?.bgColor?.startsWith('linear-gradient') ? el.style.bgColor : undefined;
+  const gradient = isGradientCss(el.style?.bgColor) ? el.style.bgColor : undefined;
   const color = gradient
     ? paint(ctx, gradient, el.x, el.y, el.width, el.height, '#fff')
     : paint(ctx, el.style?.textColor, el.x, el.y, el.width, el.height, '#ffffff');
@@ -429,6 +421,93 @@ function drawTextElement(ctx: CanvasRenderingContext2D, el: TextElement) {
   });
 }
 
+/**
+ * Replays an SVG path string (M L H V C S Q T A Z, absolute and relative) as
+ * ctx path commands. Unlike Path2D it also works on the PDF context, which is
+ * what lets shapes export as true vector outlines.
+ */
+function traceSvgPath(ctx: CanvasRenderingContext2D, d: string) {
+  const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) || [];
+  let i = 0;
+  let cmd = '';
+  let x = 0, y = 0, sx = 0, sy = 0;
+  let lcx = 0, lcy = 0, prev = '';
+  const num = () => parseFloat(tokens[i++]);
+  ctx.beginPath();
+  while (i < tokens.length) {
+    if (/[a-zA-Z]/.test(tokens[i])) cmd = tokens[i++];
+    const rel = cmd === cmd.toLowerCase();
+    const C = cmd.toUpperCase();
+    if (C === 'Z') { ctx.closePath(); x = sx; y = sy; prev = 'Z'; continue; }
+    if (C === 'M') {
+      const nx = num() + (rel ? x : 0), ny = num() + (rel ? y : 0);
+      ctx.moveTo(nx, ny); x = sx = nx; y = sy = ny;
+      cmd = rel ? 'l' : 'L'; prev = 'M'; continue;
+    }
+    if (C === 'L') { const nx = num() + (rel ? x : 0), ny = num() + (rel ? y : 0); ctx.lineTo(nx, ny); x = nx; y = ny; }
+    else if (C === 'H') { const nx = num() + (rel ? x : 0); ctx.lineTo(nx, y); x = nx; }
+    else if (C === 'V') { const ny = num() + (rel ? y : 0); ctx.lineTo(x, ny); y = ny; }
+    else if (C === 'C') {
+      const x1 = num() + (rel ? x : 0), y1 = num() + (rel ? y : 0), x2 = num() + (rel ? x : 0), y2 = num() + (rel ? y : 0), nx = num() + (rel ? x : 0), ny = num() + (rel ? y : 0);
+      ctx.bezierCurveTo(x1, y1, x2, y2, nx, ny); lcx = x2; lcy = y2; x = nx; y = ny;
+    } else if (C === 'S') {
+      const x2 = num() + (rel ? x : 0), y2 = num() + (rel ? y : 0), nx = num() + (rel ? x : 0), ny = num() + (rel ? y : 0);
+      const x1 = prev === 'C' || prev === 'S' ? 2 * x - lcx : x, y1 = prev === 'C' || prev === 'S' ? 2 * y - lcy : y;
+      ctx.bezierCurveTo(x1, y1, x2, y2, nx, ny); lcx = x2; lcy = y2; x = nx; y = ny;
+    } else if (C === 'Q') {
+      const x1 = num() + (rel ? x : 0), y1 = num() + (rel ? y : 0), nx = num() + (rel ? x : 0), ny = num() + (rel ? y : 0);
+      ctx.quadraticCurveTo(x1, y1, nx, ny); lcx = x1; lcy = y1; x = nx; y = ny;
+    } else if (C === 'T') {
+      const nx = num() + (rel ? x : 0), ny = num() + (rel ? y : 0);
+      const x1 = prev === 'Q' || prev === 'T' ? 2 * x - lcx : x, y1 = prev === 'Q' || prev === 'T' ? 2 * y - lcy : y;
+      ctx.quadraticCurveTo(x1, y1, nx, ny); lcx = x1; lcy = y1; x = nx; y = ny;
+    } else if (C === 'A') {
+      const rx = num(), ry = num(), rot = num(), large = num(), sweep = num();
+      const nx = num() + (rel ? x : 0), ny = num() + (rel ? y : 0);
+      arcToBeziers(ctx, x, y, rx, ry, rot, !!large, !!sweep, nx, ny);
+      x = nx; y = ny;
+    } else { i++; continue; }
+    prev = C;
+  }
+}
+
+/** SVG endpoint arc -> cubic segments (SVG spec F.6). */
+function arcToBeziers(ctx: CanvasRenderingContext2D, x1: number, y1: number, rxIn: number, ryIn: number, rotDeg: number, large: boolean, sweep: boolean, x2: number, y2: number) {
+  let rx = Math.abs(rxIn), ry = Math.abs(ryIn);
+  if (!rx || !ry || (x1 === x2 && y1 === y2)) { ctx.lineTo(x2, y2); return; }
+  const phi = (rotDeg * Math.PI) / 180, cp = Math.cos(phi), sp = Math.sin(phi);
+  const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+  const x1p = cp * dx + sp * dy, y1p = -sp * dx + cp * dy;
+  const lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+  if (lam > 1) { const k = Math.sqrt(lam); rx *= k; ry *= k; }
+  const sign = large === sweep ? -1 : 1;
+  const num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+  const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+  const co = sign * Math.sqrt(Math.max(0, num / den));
+  const cxp = (co * rx * y1p) / ry, cyp = (-co * ry * x1p) / rx;
+  const cx = cp * cxp - sp * cyp + (x1 + x2) / 2, cy = sp * cxp + cp * cyp + (y1 + y2) / 2;
+  const ang = (ux: number, uy: number, vx: number, vy: number) => {
+    const a = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+    return a;
+  };
+  const th1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+  let dth = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+  if (!sweep && dth > 0) dth -= Math.PI * 2;
+  if (sweep && dth < 0) dth += Math.PI * 2;
+  const segs = Math.max(1, Math.ceil(Math.abs(dth) / (Math.PI / 2) - 1e-6));
+  const step = dth / segs;
+  const t = (4 / 3) * Math.tan(step / 4);
+  const pt = (a: number) => ({ x: cx + rx * Math.cos(a) * cp - ry * Math.sin(a) * sp, y: cy + rx * Math.cos(a) * sp + ry * Math.sin(a) * cp });
+  const dv = (a: number) => ({ x: -rx * Math.sin(a) * cp - ry * Math.cos(a) * sp, y: -rx * Math.sin(a) * sp + ry * Math.cos(a) * cp });
+  let a = th1;
+  for (let k = 0; k < segs; k++) {
+    const b = a + step;
+    const p0 = pt(a), p1 = pt(b), d0 = dv(a), d1 = dv(b);
+    ctx.bezierCurveTo(p0.x + t * d0.x, p0.y + t * d0.y, p1.x - t * d1.x, p1.y - t * d1.y, p1.x, p1.y);
+    a = b;
+  }
+}
+
 function drawShape(ctx: CanvasRenderingContext2D, el: ShapeElement) {
   const st = el.style || {};
   const bg = st.bgColor || DEFAULT_SHAPE_STYLE.bgColor!;
@@ -438,10 +517,9 @@ function drawShape(ctx: CanvasRenderingContext2D, el: ShapeElement) {
   const { d, detail } = shapePath(el.shapeType, el.width, el.height, Math.max(1, bw / 2));
   ctx.save();
   ctx.translate(el.x, el.y);
-  const path = new Path2D(d);
   ctx.globalAlpha = opacity;
   ctx.fillStyle = paint(ctx, bg, 0, 0, el.width, el.height, 'rgba(124,58,237,0.3)');
-  if (bg !== 'transparent') ctx.fill(path);
+  if (bg !== 'transparent') { traceSvgPath(ctx, d); ctx.fill(); }
   ctx.globalAlpha = 1;
   if (bw > 0 && border !== 'transparent') {
     ctx.lineWidth = bw;
@@ -450,8 +528,9 @@ function drawShape(ctx: CanvasRenderingContext2D, el: ShapeElement) {
     ctx.strokeStyle = paint(ctx, border, 0, 0, el.width, el.height, '#a78bfa');
     if (st.borderStyle === 'dashed') ctx.setLineDash([bw * 3, bw * 2]);
     if (st.borderStyle === 'dotted') ctx.setLineDash([bw, bw * 2]);
-    ctx.stroke(path);
-    if (detail) { ctx.setLineDash([]); ctx.stroke(new Path2D(detail)); }
+    traceSvgPath(ctx, d);
+    ctx.stroke();
+    if (detail) { ctx.setLineDash([]); traceSvgPath(ctx, detail); ctx.stroke(); }
   }
   ctx.restore();
   const text = el.content || htmlToPlain(el.richContent || '');
@@ -857,27 +936,8 @@ export function plannedSize(scene: ExportScene, opts: Pick<ExportOptions, 'quali
   return { bounds: b, pad, worldW, worldH, scale, width: Math.max(1, Math.round(worldW * scale)), height: Math.max(1, Math.round(worldH * scale)) };
 }
 
-export async function renderSceneToCanvas(scene: ExportScene, opts: Pick<ExportOptions, 'quality' | 'padding' | 'background' | 'maxDimensionOverride'>): Promise<HTMLCanvasElement> {
-  const plan = plannedSize(scene, opts);
-  if (!plan) throw new Error('Nothing to export');
-  const imgs = await preload(scene);
-  const canvas = document.createElement('canvas');
-  canvas.width = plan.width;
-  canvas.height = plan.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas is not available in this browser');
-
-  if ((opts.background ?? 'dark') === 'dark') {
-    const g = ctx.createRadialGradient(plan.width / 2, plan.height / 2, 0, plan.width / 2, plan.height / 2, Math.hypot(plan.width, plan.height) / 2);
-    g.addColorStop(0, BG_DARK_INNER);
-    g.addColorStop(1, BG_DARK_OUTER);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, plan.width, plan.height);
-  }
-
-  ctx.scale(plan.scale, plan.scale);
-  ctx.translate(plan.pad - plan.bounds.minX, plan.pad - plan.bounds.minY);
-
+/** Draws every element and edge in world coordinates onto any 2D-context-like target. */
+function paintScene(ctx: CanvasRenderingContext2D, scene: ExportScene, imgs: Images) {
   const byId = new Map(scene.elements.map((e) => [e.id, e]));
   const sorted = [...scene.elements].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
   // Containers sit under everything; lines under cards; connectors on top.
@@ -921,6 +981,30 @@ export async function renderSceneToCanvas(scene: ExportScene, opts: Pick<ExportO
       try { drawEdge(ctx, edge, f, t); } catch (err) { console.warn('[canvas-export] could not draw edge', edge.id, err); }
     }
   }
+}
+
+export async function renderSceneToCanvas(scene: ExportScene, opts: Pick<ExportOptions, 'quality' | 'padding' | 'background' | 'maxDimensionOverride'>): Promise<HTMLCanvasElement> {
+  const plan = plannedSize(scene, opts);
+  if (!plan) throw new Error('Nothing to export');
+  const imgs = await preload(scene);
+  const canvas = document.createElement('canvas');
+  canvas.width = plan.width;
+  canvas.height = plan.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas is not available in this browser');
+
+  if ((opts.background ?? 'dark') === 'dark') {
+    const g = ctx.createRadialGradient(plan.width / 2, plan.height / 2, 0, plan.width / 2, plan.height / 2, Math.hypot(plan.width, plan.height) / 2);
+    g.addColorStop(0, BG_DARK_INNER);
+    g.addColorStop(1, BG_DARK_OUTER);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, plan.width, plan.height);
+  }
+
+  ctx.scale(plan.scale, plan.scale);
+  ctx.translate(plan.pad - plan.bounds.minX, plan.pad - plan.bounds.minY);
+
+  paintScene(ctx, scene, imgs);
   return canvas;
 }
 
@@ -933,6 +1017,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, mime: string, quality?: number)
 export async function exportScene(scene: ExportScene, opts: ExportOptions): Promise<ExportResult> {
   // JPEG and PDF have no alpha: always paint the background for them.
   const background = opts.format === 'png' ? opts.background ?? 'dark' : 'dark';
+  if (opts.format === 'pdf') return exportPdf(scene, opts);
   const canvas = await renderSceneToCanvas(scene, { ...opts, background });
   if (opts.format === 'png') {
     return { blob: await canvasToBlob(canvas, 'image/png'), width: canvas.width, height: canvas.height, mime: 'image/png', ext: 'png' };
@@ -940,14 +1025,31 @@ export async function exportScene(scene: ExportScene, opts: ExportOptions): Prom
   if (opts.format === 'jpeg') {
     return { blob: await canvasToBlob(canvas, 'image/jpeg', 0.93), width: canvas.width, height: canvas.height, mime: 'image/jpeg', ext: 'jpg' };
   }
-  // PDF: a single page the size of the board, so a long flow chart is ONE page
-  // instead of being sliced across several.
+  throw new Error('Unsupported export format');
+}
+
+async function exportPdf(scene: ExportScene, opts: ExportOptions): Promise<ExportResult> {
+  // PDF: ONE page the size of the board, drawn as vector paths and real text
+  // (not a picture), so it stays sharp at any zoom and is ready for print.
   const plan = plannedSize(scene, opts)!;
-  const { jsPDF } = await import('jspdf');
+  const imgs = await preload(scene);
+  const { jsPDF, GState } = await import('jspdf');
+  const { PdfContext } = await import('./canvas-export-pdf');
   const pageW = Math.min(plan.worldW, 14000), pageH = plan.worldH * (pageW / plan.worldW);
-  const pdf = new jsPDF({ unit: 'px', format: [pageW, pageH], orientation: pageW > pageH ? 'landscape' : 'portrait', hotfixes: ['px_scaling'], compress: true });
-  pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, pageW, pageH, undefined, 'FAST');
-  return { blob: pdf.output('blob'), width: canvas.width, height: canvas.height, mime: 'application/pdf', ext: 'pdf' };
+  const pdf = new jsPDF({ unit: 'pt', format: [pageW, pageH], orientation: pageW > pageH ? 'landscape' : 'portrait', compress: true });
+  const k = pageW / plan.worldW;
+  const pctx = new PdfContext(pdf, GState, [k, 0, 0, k, 0, 0]);
+  // Dark board background as a vector fill (radial, like the image export).
+  pctx.beginPath();
+  pctx.rect(0, 0, plan.worldW, plan.worldH);
+  const bg = pctx.createRadialGradient(plan.worldW / 2, plan.worldH / 2, 0, plan.worldW / 2, plan.worldH / 2, Math.hypot(plan.worldW, plan.worldH) / 2);
+  bg.addColorStop(0, BG_DARK_INNER);
+  bg.addColorStop(1, BG_DARK_OUTER);
+  pctx.fillStyle = bg;
+  pctx.fill();
+  pctx.translate(plan.pad - plan.bounds.minX, plan.pad - plan.bounds.minY);
+  paintScene(pctx as unknown as CanvasRenderingContext2D, scene, imgs);
+  return { blob: pdf.output('blob'), width: Math.round(pageW), height: Math.round(pageH), mime: 'application/pdf', ext: 'pdf' };
 }
 
 export function exportFileName(projectName: string, scope: 'selection' | 'board', ext: string): string {

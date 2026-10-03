@@ -1,6 +1,8 @@
 "use client";
 
 import { FontDropdown } from "./font-dropdown";
+import { GradientToolButton, SvgGradientDef } from "./gradient-editor";
+import { isGradientCss } from "@/lib/gradient";
 import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import NextImage from "next/image";
 import { createPortal } from "react-dom";
@@ -416,6 +418,9 @@ export function CanvasElementRenderer({
         showTaskPriorityMenu;
 
       if (!anyMenuOpen) return;
+
+      // The gradient editor is portaled to <body>; clicks in it are "inside".
+      if ((e.target as HTMLElement | null)?.closest?.("[data-gradient-editor]")) return;
 
       // Check if click is outside the element
       if (
@@ -2560,6 +2565,12 @@ function ColorPicker({
           }}
         />
       ))}
+      <GradientToolButton
+        value={currentColor}
+        onChange={onColorChange}
+        className="rounded"
+        fallbackColor={currentColor}
+      />
     </div>
   );
 }
@@ -2918,6 +2929,11 @@ export function ShapeColorPicker({
               title={`Gradient ${i + 1}`}
             />
           ))}
+          <GradientToolButton
+            value={mode === "fill" ? fillColor : mode === "stroke" ? strokeColor : textColor}
+            onChange={handleColorChange}
+            fallbackColor={getCurrentColor()}
+          />
         </div>
       </div>
 
@@ -3066,6 +3082,7 @@ export function StoryboardColorPicker({
             className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
           />
         </button>
+        <GradientToolButton value={current} onChange={apply} tileClassName="w-7 h-7" className="rounded-md" fallbackColor={customHex} />
       </div>
 
       {/* Border width */}
@@ -3457,6 +3474,12 @@ function TextColorPicker({
               title={`Gradient ${index + 1}`}
             />
           ))}
+          <GradientToolButton
+            value={currentGradient}
+            onChange={onGradientChange}
+            tileClassName="w-7 h-7"
+            fallbackColor={currentColor}
+          />
         </div>
       )}
     </div>
@@ -3515,6 +3538,15 @@ function GradientPicker({
             title={`Gradient ${index + 1}`}
           />
         ))}
+      </div>
+      <div className="flex items-center gap-2 mt-2">
+        <GradientToolButton
+          value={currentGradient}
+          onChange={onGradientChange}
+          tileClassName="w-7 h-7"
+          title="Custom gradient"
+        />
+        <span className="text-xs text-muted-foreground">Custom gradient</span>
       </div>
       <button
         onClick={onClose}
@@ -3886,7 +3918,7 @@ function BoardColorPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px] h-[156px]"
+      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3907,6 +3939,12 @@ function BoardColorPicker({
           title={label}
         />
       ))}
+      <GradientToolButton
+        value={currentColor}
+        onChange={onColorSelect}
+        tileClassName="w-[30px] h-[30px]"
+        className="rounded-lg"
+      />
     </div>
   );
 }
@@ -8526,52 +8564,10 @@ function ShapeCard({
     const gradientDefs = (
       <defs>
         {bgColor.includes("gradient") && (
-          <linearGradient
-            id={`gradient-${element.id}`}
-            x1="0%"
-            y1="0%"
-            x2="100%"
-            y2="100%"
-          >
-            <stop
-              offset="0%"
-              style={{
-                stopColor: extractGradientColor(bgColor, 0),
-                stopOpacity: 1,
-              }}
-            />
-            <stop
-              offset="100%"
-              style={{
-                stopColor: extractGradientColor(bgColor, 1),
-                stopOpacity: 1,
-              }}
-            />
-          </linearGradient>
+          <SvgGradientDef id={`gradient-${element.id}`} css={bgColor} />
         )}
         {isGradientStroke && (
-          <linearGradient
-            id={`stroke-gradient-${element.id}`}
-            x1="0%"
-            y1="0%"
-            x2="100%"
-            y2="100%"
-          >
-            <stop
-              offset="0%"
-              style={{
-                stopColor: extractGradientColor(borderColor, 0),
-                stopOpacity: 1,
-              }}
-            />
-            <stop
-              offset="100%"
-              style={{
-                stopColor: extractGradientColor(borderColor, 1),
-                stopOpacity: 1,
-              }}
-            />
-          </linearGradient>
+          <SvgGradientDef id={`stroke-gradient-${element.id}`} css={borderColor} />
         )}
       </defs>
     );
@@ -9167,7 +9163,7 @@ function TextCard({
   };
 
   // CRITICAL: Apply gradient directly to text span, not container
-  const hasGradient = gradient?.startsWith("linear-gradient");
+  const hasGradient = isGradientCss(gradient);
 
   // Check if this text is actionable
   const isActionable =

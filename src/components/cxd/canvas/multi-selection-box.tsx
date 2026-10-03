@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { CANVAS_OVERLAY_LAYER_ID } from "./canvas-overlay";
+import { GradientToolButton } from "./gradient-editor";
 import { CanvasElement, ImageElement, ShapeElement, PRESET_COLORS } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { ShapeColorPicker, StoryboardColorPicker } from "./canvas-element";
@@ -602,6 +603,12 @@ export function MultiSelectionBox({
                           style={{ background: color }}
                         />
                       ))}
+                      <GradientToolButton
+                        onChange={(css) => applyColor(css)}
+                        tileClassName="h-10 w-full"
+                        className="rounded-md"
+                        title="Custom gradient"
+                      />
                     </div>
                   )}
                 </div>

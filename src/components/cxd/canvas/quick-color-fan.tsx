@@ -106,7 +106,7 @@ export function swatchesFor(el: CanvasElement): Swatch[] {
         updates: (e) => ({
           style: {
             ...((e as { style?: object }).style || {}),
-            ...(c.startsWith("linear-gradient") ? { bgColor: c } : { textColor: c, bgColor: "" }),
+            ...(c.includes("gradient(") ? { bgColor: c } : { textColor: c, bgColor: "" }),
           },
         }) as Partial<CanvasElement>,
       }));

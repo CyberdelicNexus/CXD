@@ -58,9 +58,9 @@ export function ExportDialog({
   open,
   initialScope,
   onClose,
-  elements,
-  edges,
-  selectedIds,
+  elements: liveElements,
+  edges: liveEdges,
+  selectedIds: liveSelectedIds,
   projectName,
 }: {
   open: boolean;
@@ -72,6 +72,13 @@ export function ExportDialog({
   selectedIds: Set<string>;
   projectName: string;
 }) {
+  // Freeze what is being exported at the moment the dialog opens. The parent
+  // re-renders (and rebuilds these arrays) on every mouse move, which used to
+  // restart the preview render constantly, and clicking inside the dialog could
+  // clear the canvas selection so a "Selection" export silently became the
+  // whole board.
+  const [frozen] = useState(() => ({ elements: liveElements, edges: liveEdges, selectedIds: new Set(liveSelectedIds) }));
+  const { elements, edges, selectedIds } = frozen;
   const [scope, setScope] = useState<Scope>(initialScope);
   const [format, setFormat] = useState<ExportFormat>("png");
   const [quality, setQuality] = useState<ExportQuality>("standard");
@@ -103,7 +110,6 @@ export function ExportDialog({
   useEffect(() => {
     if (!open) return;
     const token = ++previewToken.current;
-    setPreview(null);
     const t = window.setTimeout(async () => {
       try {
         const c = await renderSceneToCanvas(scene, { background: format === "png" ? background : "dark", maxDimensionOverride: 720 });
@@ -162,7 +168,14 @@ export function ExportDialog({
   return createPortal(
     <div
       className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      // React events bubble through portals: keep the canvas from seeing clicks
+      // made inside the dialog (it would clear the selection or start a pan).
+      onMouseDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) onClose(); }}
+      onMouseUp={(e) => e.stopPropagation()}
+      onMouseMove={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       data-prevent-canvas-wheel="true"
     >
@@ -227,8 +240,17 @@ export function ExportDialog({
 
           <div className="flex items-center justify-between text-[11px] text-white/40">
             <span className="truncate mr-2">{fileName}</span>
-            {plan && <span className="flex-shrink-0">{plan.width} × {plan.height}px</span>}
+            {plan && (
+              <span className="flex-shrink-0">
+                {format === "pdf" ? "Vector PDF, text stays text" : `${plan.width} × ${plan.height}px`}
+              </span>
+            )}
           </div>
+          {format !== "pdf" && plan && plan.scale < 1.2 && (
+            <p className="text-[11px] text-amber-200/80 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+              This board is very large, so the image is scaled down and small text may look soft. Choose PDF for sharp, selectable text at any zoom.
+            </p>
+          )}
 
           {error && <p className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">{error}</p>}
           {done && (
