@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { CANVAS_OVERLAY_LAYER_ID } from "./canvas-overlay";
-import { GradientToolButton } from "./gradient-editor";
+import { GradientToolButton, SavedGradients } from "./gradient-editor";
 import { CanvasElement, ImageElement, ShapeElement, PRESET_COLORS } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { ShapeColorPicker, StoryboardColorPicker } from "./canvas-element";
@@ -634,6 +634,7 @@ export function MultiSelectionBox({
                         className="rounded-md"
                         title="Custom gradient"
                       />
+                      <SavedGradients onPick={(css) => applyColor(css)} className="col-span-3" swatchClassName="w-10 h-10" />
                     </div>
                   )}
                 </div>

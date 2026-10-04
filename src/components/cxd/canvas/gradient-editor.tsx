@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeftRight, Minus, Pipette, Plus, RotateCw } from "lucide-react";
+import { ArrowLeftRight, Bookmark, Check, Minus, Pipette, Plus, RotateCw, X } from "lucide-react";
+import { removeSavedGradient, saveGradient, useSavedGradients } from "@/lib/saved-gradients";
 import { cn } from "@/lib/utils";
 import {
   buildGradientCss,
@@ -200,6 +201,7 @@ export function GradientEditor({
   const [model, setModel] = useState<GradientModel>(() => parseGradient(value) ?? defaultGradient(fallbackColor));
   const [selId, setSelId] = useState<string>(() => model.stops[0]?.id);
   const emitted = useRef<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
 
   const commit = useCallback(
     (next: GradientModel) => {
@@ -420,7 +422,76 @@ export function GradientEditor({
         </div>
       </div>
 
-      <div className="h-6 rounded-md border border-white/10" style={{ background: preview }} />
+      <div className="flex items-center gap-2">
+        <div className="h-7 flex-1 rounded-md border border-white/10" style={{ background: preview }} />
+        <button
+          type="button"
+          onClick={() => {
+            saveGradient(preview);
+            setJustSaved(true);
+            window.setTimeout(() => setJustSaved(false), 1400);
+          }}
+          className="h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] font-medium bg-violet-600/80 hover:bg-violet-500 text-white transition-colors"
+          title="Save this gradient to your colour menus"
+        >
+          {justSaved ? <Check className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+          {justSaved ? "Saved" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Swatches of the user's saved gradients, for colour menus. Click applies one;
+ * the small x (on hover) deletes it. Renders nothing until something is saved.
+ */
+export function SavedGradients({
+  onPick,
+  className,
+  swatchClassName = "w-6 h-6",
+  compact = false,
+}: {
+  onPick: (css: string) => void;
+  className?: string;
+  swatchClassName?: string;
+  /** Don't take focus from a text editor on mousedown. */
+  compact?: boolean;
+}) {
+  const list = useSavedGradients();
+  if (list.length === 0) return null;
+  return (
+    <div className={cn("flex flex-wrap gap-1.5", className)} data-saved-gradients="true">
+      {list.map((g) => (
+        <div key={g.id} className="relative group/sg">
+          <button
+            type="button"
+            title="Saved gradient"
+            onMouseDown={compact ? (e) => e.preventDefault() : undefined}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPick(g.css);
+            }}
+            className={cn("rounded-full border-2 border-border/50 hover:border-white/70 hover:scale-110 transition-transform", swatchClassName)}
+            style={{ background: g.css }}
+          />
+          <button
+            type="button"
+            title="Remove saved gradient"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              removeSavedGradient(g.id);
+            }}
+            className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-zinc-900 border border-white/30 text-white/80 hidden group-hover/sg:flex items-center justify-center"
+          >
+            <X className="w-2 h-2" />
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -458,9 +529,10 @@ export function GradientToolButton({
   useLayoutEffect(() => {
     if (!open) return;
     let raf = 0;
+    const stickyRef: { current: number | null } = { current: null };
     const W = 272, GAP = 14, M = 8;
     const hit = (a: { left: number; top: number; right: number; bottom: number }, b: DOMRect) =>
-      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      a.left < b.right - 2 && a.right > b.left + 2 && a.top < b.bottom - 2 && a.bottom > b.top + 2;
     const place = () => {
       const btn = btnRef.current, panel = panelRef.current;
       if (btn && panel) {
@@ -480,13 +552,26 @@ export function GradientToolButton({
           tr.right + GAP,
           ...(menu ? [menu.getBoundingClientRect().left - W - GAP] : []),
         ];
-        let left = lefts.find((x) => x >= M && x + W <= vw - M && !avoid.some((r) => hit({ left: x, top, right: x + W, bottom: top + H }, r)));
-        if (left === undefined) {
+        const fits = (x: number) =>
+          x >= M && x + W <= vw - M && !avoid.some((r) => hit({ left: x, top, right: x + W, bottom: top + H }, r));
+        // Sticky: once a side is chosen keep it for as long as it stays valid, so
+        // menus that are still animating in (their rects change per frame) can't
+        // make the panel flip back and forth between sides.
+        let idx = stickyRef.current;
+        if (idx === null || idx >= lefts.length || !fits(lefts[idx])) {
+          const found = lefts.findIndex(fits);
+          idx = found >= 0 ? found : null;
+          stickyRef.current = idx;
+        }
+        let left: number;
+        if (idx !== null) left = lefts[idx];
+        else {
           // No clear spot: take the roomier side of the element and clamp.
           left = tr.left > vw - tr.right ? Math.max(M, tr.left - W - GAP) : Math.min(vw - W - M, tr.right + GAP);
         }
-        panel.style.left = `${Math.round(left)}px`;
-        panel.style.top = `${Math.round(top)}px`;
+        const L = `${Math.round(left)}px`, T = `${Math.round(top)}px`;
+        if (panel.style.left !== L) panel.style.left = L;
+        if (panel.style.top !== T) panel.style.top = T;
         panel.style.visibility = "visible";
       }
       raf = requestAnimationFrame(place);

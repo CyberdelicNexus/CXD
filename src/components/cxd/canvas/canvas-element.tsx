@@ -1,7 +1,7 @@
 "use client";
 
 import { FontDropdown } from "./font-dropdown";
-import { GradientToolButton, SvgGradientDef } from "./gradient-editor";
+import { GradientToolButton, SavedGradients, SvgGradientDef } from "./gradient-editor";
 import { isGradientCss } from "@/lib/gradient";
 import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import NextImage from "next/image";
@@ -126,6 +126,9 @@ import {
   Eye,
   EyeOff,
   Heading,
+  Layers,
+  Radio,
+  Target,
   Brain,
   Users,
   Inbox,
@@ -155,15 +158,16 @@ import {
 import { FloatingPort } from "./floating-port";
 import DOMPurify from "dompurify";
 
-// Hypercube tag icons mapping (defined at top for use in JSX)
-const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
-  "Reality Planes": "🌐",
-  "Sensory Domains": "👁️",
-  "Presence Types": "🧘",
-  "State Mapping": "🎭",
-  "Trait Mapping": "💫",
-  "Meaning Architecture": "🏛️",
-  "Core": "🎯",
+// Hypercube tag icons: the same lucide icons the right-hand face panel uses,
+// so a tag on an element reads the same as the face it belongs to.
+const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, React.ComponentType<{ className?: string }>> = {
+  "Reality Planes": Layers,
+  "Sensory Domains": Eye,
+  "Presence Types": Radio,
+  "State Mapping": Brain,
+  "Trait Mapping": Heart,
+  "Meaning Architecture": Globe,
+  "Core": Target,
 };
 
 const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
@@ -1846,7 +1850,7 @@ export function CanvasElementRenderer({
             ref={tagBadgeRef}
             data-tag-badge="true"
             className="absolute left-1/2 pointer-events-auto"
-            style={{ top: -13, transform: `translateX(-50%) scale(${1 / canvasZoom})`, transformOrigin: "center bottom" }}
+            style={{ top: isSelected ? -94 : -40, transform: `translateX(-50%) scale(${1 / canvasZoom})`, transformOrigin: "center bottom" }}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           >
@@ -1869,7 +1873,7 @@ export function CanvasElementRenderer({
               {hasTags ? (
                 <>
                   {element.hypercubeTags!.slice(0, 3).map((tag) => (
-                    <span key={tag} className="leading-none">{HYPERCUBE_TAG_ICONS[tag]}</span>
+                    <span key={tag} className="leading-none text-cyan-300">{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-3.5 h-3.5" />; })()}</span>
                   ))}
                   {element.hypercubeTags!.length > 3 && (
                     <span className="text-[10px] text-cyan-400/80">+{element.hypercubeTags!.length - 3}</span>
@@ -2626,6 +2630,7 @@ function ColorPicker({
         className="rounded"
         fallbackColor={currentColor}
       />
+      <SavedGradients onPick={onColorChange} className="col-span-4 mt-0.5" />
     </div>
   );
 }
@@ -2991,6 +2996,7 @@ export function ShapeColorPicker({
             onChange={handleColorChange}
             fallbackColor={getCurrentColor()}
           />
+          <SavedGradients onPick={handleColorChange} className="w-full justify-center mt-0.5" />
         </div>
       </div>
 
@@ -3141,6 +3147,7 @@ export function StoryboardColorPicker({
           />
         </button>
         <GradientToolButton value={current} onChange={apply} tileClassName="w-7 h-7" className="rounded-md" fallbackColor={customHex} />
+        <SavedGradients onPick={apply} className="col-span-6" swatchClassName="w-7 h-7" />
       </div>
 
       {/* Border width */}
@@ -3540,6 +3547,7 @@ function TextColorPicker({
             tileClassName="w-7 h-7"
             fallbackColor={currentColor}
           />
+          <SavedGradients onPick={onGradientChange} className="w-full justify-center" swatchClassName="w-7 h-7" />
         </div>
       )}
     </div>
@@ -3612,6 +3620,7 @@ function GradientPicker({
         />
         <span className="text-xs text-muted-foreground">Custom gradient</span>
       </div>
+      <SavedGradients onPick={onLiveChange ?? onGradientChange} className="mt-2" swatchClassName="w-7 h-7" />
       <button
         onClick={onClose}
         className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -3642,9 +3651,10 @@ function HypercubeTagPicker({
   // Re-evaluated every frame so it follows pan, zoom and dragging.
   useLayoutEffect(() => {
     let raf = 0;
+    const sticky: { current: number | null } = { current: null };
     const W = 240, GAP = 12, M = 8, TOP = 72;
     const hit = (a: { left: number; top: number; right: number; bottom: number }, r: DOMRect) =>
-      a.left < r.right && a.right > r.left && a.top < r.bottom && a.bottom > r.top;
+      a.left < r.right - 2 && a.right > r.left + 2 && a.top < r.bottom - 2 && a.bottom > r.top + 2;
     const place = () => {
       const panel = panelRef.current, badge = anchorRef.current;
       const owner = badge?.closest("[data-element-id]") as HTMLElement | null;
@@ -3668,9 +3678,17 @@ function HypercubeTagPicker({
         const fits = (c: { left: number; top: number }) =>
           c.top >= TOP && c.top + H <= vh - M && c.left >= M && c.left + W <= vw - M &&
           !avoid.some((r) => hit({ left: c.left, top: c.top, right: c.left + W, bottom: c.top + H }, r));
-        const pick = cands.find(fits) ?? { left: clampX(er.right + GAP), top: clampY(er.top) };
-        panel.style.left = `${Math.round(pick.left)}px`;
-        panel.style.top = `${Math.round(pick.top)}px`;
+        // Sticky choice (see the gradient editor): no flipping while neighbours animate.
+        let idx = sticky.current;
+        if (idx === null || !fits(cands[idx])) {
+          const found = cands.findIndex(fits);
+          idx = found >= 0 ? found : null;
+          sticky.current = idx;
+        }
+        const pick = idx !== null ? cands[idx] : { left: clampX(er.right + GAP), top: clampY(er.top) };
+        const L = `${Math.round(pick.left)}px`, T = `${Math.round(pick.top)}px`;
+        if (panel.style.left !== L) panel.style.left = L;
+        if (panel.style.top !== T) panel.style.top = T;
         panel.style.visibility = "visible";
       }
       raf = requestAnimationFrame(place);
@@ -3711,7 +3729,7 @@ function HypercubeTagPicker({
                   : "hover:bg-primary/10 text-muted-foreground hover:text-foreground",
               )}
             >
-              <span className="text-base">{HYPERCUBE_TAG_ICONS[tag]}</span>
+              <span className="text-cyan-300">{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-4 h-4" />; })()}</span>
               <span className="flex-1">{tag}</span>
               {isSelected && <span className="text-primary">✓</span>}
             </button>
@@ -4072,6 +4090,7 @@ function BoardColorPicker({
         tileClassName="w-[30px] h-[30px]"
         className="rounded-lg"
       />
+      <SavedGradients onPick={onLiveChange ?? onColorSelect} className="col-span-3" swatchClassName="w-[30px] h-[30px]" />
     </div>
   );
 }
@@ -8734,8 +8753,7 @@ function ShapeCard({
   const isActionable =
     element.taskMetadata?.isActionable ||
     element.content?.includes("[ ]") ||
-    element.content?.includes("[x]") ||
-    (element.hypercubeTags && element.hypercubeTags.length > 0);
+    element.content?.includes("[x]");
 
   // Gradient text detection
   const isGradientText = textColor?.includes("gradient");
@@ -9298,8 +9316,7 @@ function TextCard({
   const isActionable =
     element.taskMetadata?.isActionable ||
     element.content?.includes("[ ]") ||
-    element.content?.includes("[x]") ||
-    (element.hypercubeTags && element.hypercubeTags.length > 0);
+    element.content?.includes("[x]");
 
   const textStyle: React.CSSProperties = {
     fontSize,

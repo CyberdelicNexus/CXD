@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
-  Loader2, X, LogIn, ListTodo, Calendar, Sparkles,
-  ImagePlus, UserPlus, BarChart3, Pencil, Trash2, Map as MapIcon, Target, Lightbulb, RefreshCw,
+  Loader2, X, Sparkles,
+  ImagePlus, UserPlus, BarChart3, Pencil, Trash2, Lightbulb, RefreshCw, ChevronRight,
 } from "lucide-react";
 import { fetchProjectById } from "@/lib/supabase-projects";
 import { queryTasks } from "@/utils/task-engine";
 import { SENSORY_DOMAINS } from "@/types/cxd-schema";
-import { calculateOKRProgress, OKR_STATUS_CONFIG } from "@/types/version-types";
+import { calculateOKRProgress, calculateObjectiveProgress, OKR_STATUS_CONFIG } from "@/types/version-types";
 import type { CanvasElement } from "@/types/canvas-elements";
 import type { CXDProject } from "@/types/cxd-schema";
 import type { ExperienceInsights } from "@/lib/ai/experience-insights";
@@ -136,6 +136,34 @@ export function ProjectDetailPanel({
     [okrs],
   );
 
+  // First objectives across all OKRs, with a few key results each (OKRs card).
+  const objectiveRows = useMemo(
+    () =>
+      okrs
+        .flatMap((o) => o.objectives || [])
+        .slice(0, 3)
+        .map((obj) => ({
+          title: obj.title || "Objective",
+          progress: calculateObjectiveProgress(obj),
+          keyResults: (obj.keyResults || []).slice(0, 3).map((kr) => ({ text: kr.description || "Key result", done: kr.completed })),
+        })),
+    [okrs],
+  );
+
+  // Roadmap card: the version in flight (else the next draft), a sparkline of
+  // how far along each version is, and the nearest open deadline.
+  const STATUS_PROGRESS: Record<string, number> = { complete: 100, testing: 75, active: 50, draft: 8 };
+  const sortedVersions = useMemo(() => [...versions].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), [versions]);
+  const currentVersion =
+    sortedVersions.find((v) => v.status === "active" || v.status === "testing") ??
+    sortedVersions.find((v) => v.status === "draft") ??
+    sortedVersions[sortedVersions.length - 1];
+  const sparkPoints = sortedVersions.map((v) => STATUS_PROGRESS[v.status] ?? 8);
+  const nextDeadline = sortedVersions
+    .filter((v) => v.status !== "complete" && v.targetDate)
+    .map((v) => v.targetDate as string)
+    .sort()[0];
+
   const concept = project?.intentionCore?.mainConcept || project?.intentionCore?.coreMessage;
 
   const sensoryBars = useMemo(
@@ -228,206 +256,258 @@ export function ProjectDetailPanel({
         e.stopPropagation();
         onClick();
       }}
-      className={`w-7 h-7 flex items-center justify-center rounded-lg bg-black/50 text-white/80 border border-white/10 backdrop-blur-sm transition-colors ${hoverClass}`}
+      className={`w-[7.4cqw] h-[7.4cqw] flex items-center justify-center rounded-full bg-violet-950/70 text-white/85 border border-white/10 transition-colors ${hoverClass}`}
       title={label}
     >
       {icon}
     </button>
   );
 
+  // Donut: the ring shows the work still open (by status), the centre shows done/total.
+  const ring = [
+    { key: "blocked", n: taskStats.blocked, color: "#c0463c" },
+    { key: "progress", n: taskStats.inProgress, color: "#c9c455" },
+    { key: "todo", n: taskStats.notStarted, color: "#6f6f75" },
+  ];
+  const ringTotal = ring.reduce((t, r) => t + r.n, 0);
+  const R = 38;
+  const C = 2 * Math.PI * R;
+  let acc = 0;
+  const arcs = ringTotal === 0
+    ? [{ key: "all", n: 0, color: taskStats.total > 0 ? "#34d399" : "#3a3a44", dash: C, offset: 0, mid: 0 }]
+    : ring.filter((r) => r.n > 0).map((r) => {
+        const len = (r.n / ringTotal) * C;
+        const arc = { ...r, dash: len, offset: -acc, mid: ((acc + len / 2) / C) * 2 * Math.PI - Math.PI / 2 };
+        acc += len;
+        return arc;
+      });
+
+  const card = "rounded-[2.4cqw] border-2 border-violet-400/35 bg-black/90 p-[2.2cqw] flex flex-col min-w-0";
+  const cardTitle = "text-center uppercase tracking-[0.12em] font-semibold text-white text-[3cqw] leading-none";
+
   return (
     // aspect-square + self-start gives the panel a DEFINITE height equal to its
-    // own width — which, spanning 2 columns, matches the 2-square-tall area — so
-    // its (possibly long) content can never stretch the grid rows and push the
-    // tile grid down. self-start stops the grid from stretching it past that.
-    // The cover header is a flex-shrink-0 sibling of the scroll body, so it stays
-    // pinned while only the body scrolls (global dark-purple scrollbar).
-    <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl overflow-hidden bg-black/20 border border-white/10 flex flex-col">
-      <div className="relative h-24 flex-shrink-0">
-        {coverImage && coverImage.startsWith("http") ? (
-          <Image src={coverImage} alt={project.name} fill className="object-cover opacity-70" unoptimized />
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-violet-900/60 via-purple-800/50 to-indigo-900/60" />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 p-1.5 rounded-full bg-black/50 hover:bg-black/70 text-white/70 hover:text-white transition-colors z-10"
-          title="Close"
-        >
-          <X className="w-4 h-4" />
-        </button>
-        {/* Quick actions — overlaid on the cover image (top-left) */}
-        <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
-          {onAddCover &&
-            iconAction("cover", "Add Cover Image", <ImagePlus className="w-4 h-4" />, onAddCover, "hover:bg-emerald-500/40 hover:text-white")}
-          {isOwner && onInvite &&
-            iconAction("invite", "Invite Collaborators", <UserPlus className="w-4 h-4" />, onInvite, "hover:bg-violet-500/40 hover:text-white")}
-          {iconAction("overview", "Project Overview", <BarChart3 className="w-4 h-4" />, () => router.push(`/cxd/overview/${project.id}`), "hover:bg-purple-500/40 hover:text-white")}
-          {onRename &&
-            iconAction("rename", "Rename", <Pencil className="w-4 h-4" />, onRename, "hover:bg-blue-500/40 hover:text-white")}
-          {isOwner && canDelete && onDelete &&
-            iconAction("delete", "Delete", <Trash2 className="w-4 h-4" />, onDelete, "hover:bg-red-500/40 hover:text-red-300")}
-        </div>
-        <div className="absolute bottom-3 left-4 right-36">
-          <h3 className="font-bold text-white text-xl truncate">{project.name}</h3>
-        </div>
-        {/* Primary action lives in the pinned header so it never scrolls away */}
-        <button
-          onClick={() => onEnterProject(project.id)}
-          className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium shadow-lg shadow-violet-900/40 transition-colors"
-          title="Open this canvas"
-        >
-          <LogIn className="w-4 h-4" />
-          Enter Canvas
-        </button>
-      </div>
-
-      <div className="p-3 flex-1 min-h-0 overflow-y-auto grid grid-cols-2 gap-2.5 content-start">
-        {(concept || project.description) && (
-          <p className="col-span-2 text-sm text-white/65 line-clamp-2">{concept || project.description}</p>
-        )}
-
-        {/* At a glance: tasks and roadmap in one card */}
-        <div className="col-span-2 p-3 rounded-lg bg-white/5 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-white/70 flex items-center gap-1.5">
-              <ListTodo className="w-3.5 h-3.5 text-cyan-400" /> Tasks
-            </span>
-            <span className="text-xs text-white/50">
-              {taskStats.done}/{taskStats.total} done
-            </span>
-          </div>
-          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all"
-              style={{ width: `${taskDone}%` }}
-            />
-          </div>
-          <p className="text-[11px] text-white/45">
-            {taskStats.notStarted} to do · <span className="text-amber-300/80">{taskStats.inProgress} in progress</span>
-            {taskStats.blocked > 0 && <> · <span className="text-rose-300/80">{taskStats.blocked} blocked</span></>}
-          </p>
-          <div className="flex items-center justify-between pt-1 border-t border-white/5">
-            <span className="text-xs font-medium text-white/70 flex items-center gap-1.5">
-              <MapIcon className="w-3.5 h-3.5 text-violet-400" /> Roadmap
-            </span>
-            <span className="text-xs text-white/50">
-              {versions.length > 0 ? `${completedVersions}/${versions.length} versions` : "No versions yet"}
-            </span>
-          </div>
-          {versions.length > 0 && (
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-400 transition-all"
-                style={{ width: `${roadmapPercent}%` }}
-              />
-            </div>
+    // own width, so it spans the 2x2 tile area without stretching grid rows.
+    // Sizes use container-query units (cqw) so the whole layout scales with the
+    // panel instead of being a fixed-px design.
+    <div
+      className="col-span-2 row-span-2 self-start aspect-square rounded-[2.6cqw] overflow-hidden bg-black border-2 border-violet-400/30 flex flex-col"
+      style={{ containerType: "inline-size" }}
+    >
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* Cover: full-bleed, fading into the page */}
+        <div className="relative h-[34cqw]">
+          {coverImage && coverImage.startsWith("http") ? (
+            <Image src={coverImage} alt={project.name} fill className="object-cover" unoptimized />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-br from-violet-900/70 via-purple-800/50 to-indigo-900/70" />
           )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
+          <button
+            onClick={onClose}
+            className="absolute top-[2.2cqw] right-[2.2cqw] w-[6cqw] h-[6cqw] flex items-center justify-center rounded-full bg-black/55 hover:bg-black/75 text-white/75 hover:text-white transition-colors z-10"
+            title="Close"
+          >
+            <X className="w-[3.2cqw] h-[3.2cqw]" />
+          </button>
+          <h3 className="absolute bottom-[3cqw] left-[4cqw] right-[4cqw] font-bold text-white text-[3.6cqw] leading-tight truncate drop-shadow">
+            {project.name}
+          </h3>
         </div>
 
-        {/* OKRs: collapsed by default */}
-        {okrRows.length > 0 && (
-          <details className="col-span-2 group rounded-lg bg-white/5">
-            <summary className="flex items-center justify-between cursor-pointer list-none p-3 text-xs font-medium text-white/70">
-              <span className="flex items-center gap-1.5">
-                <Target className="w-3.5 h-3.5 text-emerald-400" /> OKRs
-                <span className="text-white/40 font-normal">({okrRows.length})</span>
-              </span>
-              <span className="text-white/30 group-open:rotate-90 transition-transform">›</span>
-            </summary>
-            <div className="space-y-2 px-3 pb-3">
-              {okrRows.map((o, i) => {
-                const cfg = OKR_STATUS_CONFIG[o.status as keyof typeof OKR_STATUS_CONFIG] || OKR_STATUS_CONFIG.on_track;
-                return (
-                  <div key={i} className="space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-white/70 truncate">{o.name}</span>
-                      <span
-                        className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0"
-                        style={{ color: cfg.color, backgroundColor: cfg.bg }}
-                      >
-                        {cfg.label}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${o.progress}%`, backgroundColor: cfg.color }} />
-                      </div>
-                      <span className="text-[9px] text-white/40 w-8 text-right">{o.progress}%</span>
-                    </div>
-                  </div>
-                );
-              })}
+        <div className="px-[4cqw] pb-[3.5cqw] space-y-[3cqw]">
+          {/* Actions + primary button */}
+          <div className="flex items-center justify-between gap-[2cqw]">
+            <div className="flex items-center gap-[1.4cqw]">
+              {onAddCover &&
+                iconAction("cover", "Add Cover Image", <ImagePlus className="w-[3.2cqw] h-[3.2cqw]" />, onAddCover, "hover:bg-emerald-500/40 hover:text-white")}
+              {isOwner && onInvite &&
+                iconAction("invite", "Invite Collaborators", <UserPlus className="w-[3.2cqw] h-[3.2cqw]" />, onInvite, "hover:bg-violet-500/40 hover:text-white")}
+              {iconAction("overview", "Project Overview", <BarChart3 className="w-[3.2cqw] h-[3.2cqw]" />, () => router.push(`/cxd/overview/${project.id}`), "hover:bg-purple-500/40 hover:text-white")}
+              {onRename &&
+                iconAction("rename", "Rename", <Pencil className="w-[3.2cqw] h-[3.2cqw]" />, onRename, "hover:bg-blue-500/40 hover:text-white")}
+              {isOwner && canDelete && onDelete &&
+                iconAction("delete", "Delete", <Trash2 className="w-[3.2cqw] h-[3.2cqw]" />, onDelete, "hover:bg-red-500/40 hover:text-red-300")}
             </div>
-          </details>
-        )}
+            <button
+              onClick={() => onEnterProject(project.id)}
+              className="px-[4cqw] py-[1.6cqw] rounded-[1cqw] border border-violet-400/50 hover:border-violet-300 hover:bg-violet-500/15 text-white uppercase tracking-[0.1em] font-medium text-[3cqw] leading-none transition-colors"
+              title="Open this canvas"
+            >
+              Open canvas
+            </button>
+          </div>
 
-        {/* AI insights: on-demand (spends credits), collapsed by default */}
-        <details className="col-span-2 group rounded-lg bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20">
-          <summary className="flex items-center justify-between cursor-pointer list-none p-3 text-xs font-medium text-white/70">
-            <span className="flex items-center gap-1.5">
-              <Lightbulb className="w-3.5 h-3.5 text-amber-300" /> AI Insights
-            </span>
-            <span className="text-white/30 group-open:rotate-90 transition-transform">›</span>
-          </summary>
-          <div className="px-3 pb-3">
-            {insights ? (
-              <div className="space-y-2.5">
-                <div className="flex justify-end">
+          {(concept || project.description) && (
+            <p className="text-white/85 text-[2.5cqw] leading-snug line-clamp-3">{concept || project.description}</p>
+          )}
+
+          {/* Tasks / OKRs / Roadmap */}
+          <div className="grid grid-cols-3 gap-[2.4cqw]">
+            {/* TASKS */}
+            <div className={card}>
+              <h4 className={cardTitle}>Tasks</h4>
+              <div className="relative mt-[1.6cqw] mx-auto w-full max-w-[24cqw] aspect-square">
+                <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                  <circle cx="50" cy="50" r={R} fill="none" stroke="#1d1d24" strokeWidth="14" />
+                  {arcs.map((a) => (
+                    <circle
+                      key={a.key}
+                      cx="50" cy="50" r={R} fill="none"
+                      stroke={a.color} strokeWidth="14"
+                      strokeDasharray={`${Math.max(0, a.dash - (arcs.length > 1 ? 0.8 : 0))} ${C}`}
+                      strokeDashoffset={a.offset}
+                    />
+                  ))}
+                </svg>
+                {/* counts on the segments (unrotated overlay) */}
+                {ringTotal > 0 && arcs.map((a) => (
+                  <span
+                    key={`l-${a.key}`}
+                    className="absolute text-white font-semibold text-[2.1cqw] leading-none -translate-x-1/2 -translate-y-1/2"
+                    style={{ left: `${50 + Math.cos(a.mid) * R}%`, top: `${50 + Math.sin(a.mid) * R}%` }}
+                  >
+                    {a.n}
+                  </span>
+                ))}
+                <span className="absolute inset-0 flex items-center justify-center text-white font-medium text-[4.2cqw] tabular-nums">
+                  {taskStats.done}/{taskStats.total}
+                </span>
+              </div>
+              <p className="mt-[1.4cqw] text-center text-[1.5cqw] leading-tight text-white/55">
+                {taskStats.notStarted} to do · <span className="text-amber-300/85">{taskStats.inProgress} in progress</span>
+                {taskStats.blocked > 0 && <> · <span className="text-rose-300/85">{taskStats.blocked} blocked</span></>}
+              </p>
+            </div>
+
+            {/* OKRS */}
+            <div className={card}>
+              <h4 className={cardTitle}>OKRs</h4>
+              {objectiveRows.length === 0 ? (
+                <p className="flex-1 flex items-center justify-center text-center text-white/35 text-[1.9cqw] mt-[2cqw]">No OKRs yet</p>
+              ) : (
+                <div className="mt-[2cqw] space-y-[2cqw]">
+                  {objectiveRows.map((o, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_1fr] gap-x-[1.4cqw] items-center">
+                      <div className="min-w-0">
+                        <p className="text-white/85 text-[1.7cqw] leading-tight truncate" title={o.title}>{o.title}</p>
+                        <div className="mt-[0.8cqw] h-[1.9cqw] rounded-full bg-black border border-white/70 overflow-hidden">
+                          <div className="h-full bg-emerald-400/90" style={{ width: `${o.progress}%` }} />
+                        </div>
+                      </div>
+                      <ul className="min-w-0 space-y-[0.3cqw]">
+                        {o.keyResults.length === 0 && <li className="text-[1.4cqw] text-white/30">No key results</li>}
+                        {o.keyResults.map((k, j) => (
+                          <li key={j} className="flex items-center gap-[0.6cqw] text-[1.4cqw] leading-tight text-white/80 min-w-0">
+                            <span className={`flex-shrink-0 w-[1cqw] h-[1cqw] rounded-full border ${k.done ? "bg-amber-300 border-amber-300" : "border-white/70"}`} />
+                            <span className={`truncate ${k.done ? "line-through opacity-70" : ""}`}>{k.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ROADMAP */}
+            <div className={card}>
+              <h4 className={cardTitle}>Roadmap</h4>
+              {currentVersion ? (
+                <>
+                  <div className="mt-[2cqw] flex items-center gap-[1.4cqw] min-w-0">
+                    <span
+                      className="flex-shrink-0 w-[5cqw] h-[5cqw] rounded-full"
+                      style={{ background: `radial-gradient(circle at 35% 30%, ${currentVersion.color || "#a78bfa"}, #1e1b4b)` }}
+                    />
+                    <span className="min-w-0 truncate px-[1.6cqw] py-[1cqw] rounded-[0.8cqw] bg-indigo-900/80 text-white text-[2.6cqw] leading-none">
+                      {currentVersion.name}
+                    </span>
+                  </div>
+                  <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="mt-[1.6cqw] w-full h-[10cqw] overflow-visible">
+                    <path d="M2 38 H98 M2 2 V38" stroke="rgba(255,255,255,0.35)" strokeWidth="0.6" fill="none" vectorEffect="non-scaling-stroke" />
+                    {sparkPoints.length > 1 && (() => {
+                      const pts = sparkPoints.map((v, i) => [4 + (i / (sparkPoints.length - 1)) * 92, 36 - (v / 100) * 32] as const);
+                      const d = pts.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(" ");
+                      return (
+                        <>
+                          <path d={d} fill="none" stroke="#6d5bd0" strokeWidth="1.4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                          {pts.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="1.6" fill="#8b7bf0" />)}
+                        </>
+                      );
+                    })()}
+                  </svg>
+                  <p className="mt-[1.4cqw] text-center text-white text-[2.1cqw] leading-tight">
+                    {nextDeadline ? <>Deadline: {new Date(nextDeadline).toLocaleDateString()}</> : <span className="text-white/45">{completedVersions}/{versions.length} versions done</span>}
+                  </p>
+                </>
+              ) : (
+                <p className="flex-1 flex items-center justify-center text-center text-white/35 text-[1.9cqw] mt-[2cqw]">No versions yet</p>
+              )}
+            </div>
+          </div>
+
+          {/* AI insights: on-demand (spends credits), collapsed by default */}
+          <details className="group rounded-[1.8cqw] bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20">
+            <summary className="flex items-center justify-between cursor-pointer list-none px-[3cqw] py-[2.2cqw] text-white/85 text-[2.8cqw]">
+              <span className="flex items-center gap-[1.6cqw]">
+                <Lightbulb className="w-[3.2cqw] h-[3.2cqw] text-amber-300" /> AI Insights
+              </span>
+              <ChevronRight className="w-[3cqw] h-[3cqw] text-white/40 group-open:rotate-90 transition-transform" />
+            </summary>
+            <div className="px-[3cqw] pb-[3cqw]">
+              {insights ? (
+                <div className="space-y-[2cqw]">
+                  <div className="flex justify-end">
+                    <button
+                      onClick={generateInsights}
+                      disabled={insightsLoading}
+                      className="text-[1.8cqw] text-violet-300 hover:text-violet-200 flex items-center gap-1 disabled:opacity-50"
+                      title="Regenerate (uses AI credits)"
+                    >
+                      <RefreshCw className={`w-[2cqw] h-[2cqw] ${insightsLoading ? "animate-spin" : ""}`} /> Refresh
+                    </button>
+                  </div>
+                  <p className="text-[2.2cqw] text-white/80 leading-relaxed">{insights.summary}</p>
+                  {insights.recommendations.length > 0 && (
+                    <div>
+                      <p className="text-[1.7cqw] uppercase tracking-wide text-violet-300/70 mb-1">Prioritize</p>
+                      <ol className="space-y-1">
+                        {insights.recommendations.map((r, i) => (
+                          <li key={i} className="text-[2cqw] text-white/75 flex gap-[1cqw]">
+                            <span className="text-violet-400 font-semibold flex-shrink-0">{i + 1}.</span>
+                            <span>{r}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-[2cqw]">
+                  <p className="text-[2cqw] text-white/45">
+                    A summary of this experience plus prioritized recommendations. Uses AI credits.
+                  </p>
+                  {insightsError && <p className="text-[2cqw] text-rose-300">{insightsError}</p>}
                   <button
                     onClick={generateInsights}
                     disabled={insightsLoading}
-                    className="text-[10px] text-violet-300 hover:text-violet-200 flex items-center gap-1 disabled:opacity-50"
-                    title="Regenerate (uses AI credits)"
+                    className="flex items-center justify-center gap-[1.4cqw] w-full px-[3cqw] py-[1.8cqw] rounded-[1.2cqw] bg-violet-600/80 hover:bg-violet-500 text-white text-[2.3cqw] font-medium transition-colors disabled:opacity-60"
                   >
-                    <RefreshCw className={`w-3 h-3 ${insightsLoading ? "animate-spin" : ""}`} /> Refresh
+                    {insightsLoading ? (
+                      <>
+                        <Loader2 className="w-[2.6cqw] h-[2.6cqw] animate-spin" /> Generating…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-[2.6cqw] h-[2.6cqw]" /> Generate AI insights
+                      </>
+                    )}
                   </button>
                 </div>
-                <p className="text-xs text-white/75 leading-relaxed">{insights.summary}</p>
-                {insights.recommendations.length > 0 && (
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wide text-violet-300/70 mb-1">Prioritize</p>
-                    <ol className="space-y-1">
-                      {insights.recommendations.map((r, i) => (
-                        <li key={i} className="text-[11px] text-white/70 flex gap-1.5">
-                          <span className="text-violet-400 font-semibold flex-shrink-0">{i + 1}.</span>
-                          <span>{r}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-[11px] text-white/40">
-                  A summary of this experience plus prioritized recommendations. Uses AI credits.
-                </p>
-                {insightsError && <p className="text-[11px] text-rose-300">{insightsError}</p>}
-                <button
-                  onClick={generateInsights}
-                  disabled={insightsLoading}
-                  className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-500 text-white text-xs font-medium transition-colors disabled:opacity-60"
-                >
-                  {insightsLoading ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5" /> Generate AI insights
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-          </div>
-        </details>
-
-        <div className="col-span-2 flex items-center gap-1.5 text-[11px] text-white/35">
-          <Calendar className="w-3 h-3" />
-          Updated {new Date(project.updatedAt).toLocaleDateString()}
+              )}
+            </div>
+          </details>
         </div>
       </div>
     </div>

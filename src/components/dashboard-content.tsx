@@ -610,57 +610,57 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
               {/* Stats & Quick Actions — small equal-size squares, inline in
                   this same row (statistics are useful but not essential, so
                   they stay compact rather than taking their own row/column) */}
-              <div className="hidden lg:flex items-center gap-2">
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Total Maps">
-                  <Layers className="w-3.5 h-3.5 text-violet-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">{totalProjects}</span>
+              <div className="hidden lg:flex items-center gap-3">
+                <div className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 flex flex-col items-center justify-center gap-1.5 transition-all group" title="Total Maps">
+                  <Layers className="w-6 h-6 text-violet-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-xl font-bold text-white leading-none">{totalProjects}</span>
                 </div>
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-cyan-500/10 hover:border-cyan-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Active this week">
-                  <TrendingUp className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">
+                <div className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-cyan-500/10 hover:border-cyan-500/30 flex flex-col items-center justify-center gap-1.5 transition-all group" title="Active this week">
+                  <TrendingUp className="w-6 h-6 text-cyan-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-xl font-bold text-white leading-none">
                     {projects.filter((p) => new Date(p.updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
                   </span>
                 </div>
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Created this month">
-                  <Calendar className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">
+                <div className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 flex flex-col items-center justify-center gap-1.5 transition-all group" title="Created this month">
+                  <Calendar className="w-6 h-6 text-purple-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-xl font-bold text-white leading-none">
                     {projects.filter((p) => new Date(p.createdAt).getMonth() === new Date().getMonth()).length}
                   </span>
                 </div>
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Analytics">
-                  <BarChart3 className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">—</span>
+                <div className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 flex flex-col items-center justify-center gap-1.5 transition-all group" title="Analytics">
+                  <BarChart3 className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
+                  <span className="text-xl font-bold text-white leading-none">—</span>
                 </div>
 
-                <div className="w-px h-8 bg-white/10 mx-1" />
+                <div className="w-px h-14 bg-white/10 mx-1.5" />
 
                 <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 hover:from-violet-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 hover:from-violet-950/20 flex flex-col items-center justify-center gap-1.5 transition-all group"
                   onClick={() => setIsSupportOpen(true)}
                   title="Support"
                 >
-                  <HelpCircle className="w-3.5 h-3.5 text-violet-400 group-hover:scale-110 transition-transform" />
+                  <HelpCircle className="w-6 h-6 text-violet-400 group-hover:scale-110 transition-transform" />
                 </button>
                 <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 hover:from-purple-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 hover:from-purple-950/20 flex flex-col items-center justify-center gap-1.5 transition-all group"
                   onClick={() => router.push("/dashboard/docs")}
                   title="Docs"
                 >
-                  <FileText className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
+                  <FileText className="w-6 h-6 text-purple-400 group-hover:scale-110 transition-transform" />
                 </button>
                 <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 hover:from-emerald-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 hover:from-emerald-950/20 flex flex-col items-center justify-center gap-1.5 transition-all group"
                   onClick={() => router.push("/dashboard/tutorials")}
                   title="Tutorials"
                 >
-                  <PlayCircle className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                  <PlayCircle className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
                 </button>
                 <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-pink-500/10 hover:border-pink-500/30 hover:from-pink-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
+                  className="w-[88px] h-[88px] rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-pink-500/10 hover:border-pink-500/30 hover:from-pink-950/20 flex flex-col items-center justify-center gap-1.5 transition-all group"
                   onClick={() => router.push("/changelog")}
                   title="Changelog"
                 >
-                  <Newspaper className="w-3.5 h-3.5 text-pink-400 group-hover:scale-110 transition-transform" />
+                  <Newspaper className="w-6 h-6 text-pink-400 group-hover:scale-110 transition-transform" />
                 </button>
               </div>
 

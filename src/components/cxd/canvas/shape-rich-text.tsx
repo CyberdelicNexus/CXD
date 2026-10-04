@@ -7,7 +7,7 @@ import { TextStyle, FontSize, Color } from "@tiptap/extension-text-style";
 import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Minus, Plus, Underline } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FontDropdown } from "./font-dropdown";
-import { GradientToolButton } from "./gradient-editor";
+import { GradientToolButton, SavedGradients } from "./gradient-editor";
 import { isGradientCss } from "@/lib/gradient";
 import { TEXT_GRADIENTS, type ElementStyle } from "@/types/canvas-elements";
 
@@ -233,6 +233,7 @@ export function ShapeRichTextEditor({
                   <button key={i} type="button" className="w-5 h-5 rounded-full border border-white/25 hover:scale-110 transition-transform" style={{ background: g }} onClick={() => pickColor(g)} title="Gradient (whole text)" />
                 ))}
                 <GradientToolButton compact value={shapeStyle?.textColor} onChange={(css) => pickColor(css, true)} tileClassName="w-5 h-5" title="Custom gradient (whole text)" />
+                <SavedGradients compact onPick={(css) => pickColor(css, true)} className="col-span-5" swatchClassName="w-5 h-5" />
               </div>
               <p className="mt-1.5 text-[9px] text-white/40 leading-tight">{hasSelection ? "Colours the selected text" : "Colours all the text"}</p>
             </div>
