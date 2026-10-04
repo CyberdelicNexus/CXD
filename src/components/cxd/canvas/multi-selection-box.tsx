@@ -100,6 +100,26 @@ export function MultiSelectionBox({
   const [showColorPicker, setShowColorPicker] = useState(false);
   // Cycling alignment modes: each click cycles to the next mode
   const [showAlignMenu, setShowAlignMenu] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  // Toolbar popovers must not sit on top of the selection they edit: after each
+  // render, slide any open one clear of the selection box (up, else sideways).
+  // Local offsets are screen px * zoom because the toolbar is scaled by 1/zoom.
+  useEffect(() => {
+    const tb = toolbarRef.current;
+    const box = document.querySelector("[data-multi-selection-box]");
+    if (!tb || !box) return;
+    const target = box.getBoundingClientRect();
+    tb.querySelectorAll<HTMLElement>("[data-submenu]").forEach((p) => {
+      p.style.translate = "";
+      const pr = p.getBoundingClientRect();
+      if (!(pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top)) return;
+      const dy = target.top - 10 - pr.bottom;
+      if (pr.top + dy >= 8) { p.style.translate = `0 ${dy * canvasZoom}px`; return; }
+      let dx = target.left - 10 - pr.right;
+      if (pr.left + dx < 8) dx = target.right + 10 - pr.left;
+      p.style.translate = `${dx * canvasZoom}px 0`;
+    });
+  });
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState<{
@@ -391,6 +411,7 @@ export function MultiSelectionBox({
     <>
       {/* Bounding box - allows clicking anywhere inside to drag */}
       <div
+        data-multi-selection-box="true"
         className="absolute cursor-move"
         style={{
           left: minX,
@@ -429,6 +450,8 @@ export function MultiSelectionBox({
           above the selected elements (which are lifted to z 2e9) */}
       {portalToOverlay(
       <div
+        ref={toolbarRef}
+        data-avoid-selector="[data-multi-selection-box]"
         className="absolute z-[1000] flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg pointer-events-auto"
         style={{
           left: minX + width / 2,
@@ -453,7 +476,8 @@ export function MultiSelectionBox({
             />
             {showAlignMenu && (
               <div
-                className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-10 p-2 rounded-lg bg-zinc-900 border border-white/10 shadow-xl whitespace-nowrap"
+                data-submenu="true"
+                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 p-2 rounded-lg bg-zinc-900 border border-white/10 shadow-xl whitespace-nowrap"
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 <p className="px-1 pb-1 text-[9px] uppercase tracking-wide text-white/40">Align horizontally</p>
@@ -567,6 +591,7 @@ export function MultiSelectionBox({
               )}
               {showColorPicker && firstType !== 'shape' && !allStoryboards && (
                 <div
+                  data-submenu="true"
                   className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 p-3 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-[1001] pointer-events-auto"
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}

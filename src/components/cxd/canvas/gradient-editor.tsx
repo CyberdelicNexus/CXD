@@ -450,23 +450,49 @@ export function GradientToolButton({
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const active = isGradientCss(value);
 
+  // Placement: beside the element being edited (never on top of it), clear of
+  // the toolbar and the colour menu it was opened from, and it keeps following
+  // the element while the canvas pans, zooms or the element moves.
   useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
+    if (!open) return;
+    let raf = 0;
+    const W = 272, GAP = 14, M = 8;
+    const hit = (a: { left: number; top: number; right: number; bottom: number }, b: DOMRect) =>
+      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
     const place = () => {
-      const r = btnRef.current!.getBoundingClientRect();
-      const h = panelRef.current?.offsetHeight ?? 520;
-      const w = 272;
-      let left = r.left - w - 12;
-      if (left < 8) left = Math.min(window.innerWidth - w - 8, r.right + 12);
-      const top = Math.max(8, Math.min(window.innerHeight - h - 8, r.top - h / 3));
-      setPos({ left, top });
+      const btn = btnRef.current, panel = panelRef.current;
+      if (btn && panel) {
+        const holder = btn.closest("[data-avoid-selector]") as HTMLElement | null;
+        const sel = holder?.getAttribute("data-avoid-selector");
+        const target = (sel && document.querySelector(sel)) as HTMLElement | null;
+        const tr = (target ?? btn).getBoundingClientRect();
+        const avoid: DOMRect[] = [tr];
+        if (holder) avoid.push(holder.getBoundingClientRect());
+        const menu = btn.closest("[data-submenu]");
+        if (menu) avoid.push(menu.getBoundingClientRect());
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const H = panel.offsetHeight || 560;
+        const top = Math.max(M, Math.min(vh - H - M, tr.top + tr.height / 2 - H / 2));
+        const lefts = [
+          tr.left - W - GAP,
+          tr.right + GAP,
+          ...(menu ? [menu.getBoundingClientRect().left - W - GAP] : []),
+        ];
+        let left = lefts.find((x) => x >= M && x + W <= vw - M && !avoid.some((r) => hit({ left: x, top, right: x + W, bottom: top + H }, r)));
+        if (left === undefined) {
+          // No clear spot: take the roomier side of the element and clamp.
+          left = tr.left > vw - tr.right ? Math.max(M, tr.left - W - GAP) : Math.min(vw - W - M, tr.right + GAP);
+        }
+        panel.style.left = `${Math.round(left)}px`;
+        panel.style.top = `${Math.round(top)}px`;
+        panel.style.visibility = "visible";
+      }
+      raf = requestAnimationFrame(place);
     };
     place();
-    const t = window.setTimeout(place, 0); // once the panel has a measured height
-    return () => window.clearTimeout(t);
+    return () => cancelAnimationFrame(raf);
   }, [open]);
 
   useEffect(() => {
@@ -521,7 +547,7 @@ export function GradientToolButton({
             data-gradient-editor="true"
             data-prevent-canvas-wheel="true"
             className="fixed z-[10070] rounded-xl bg-zinc-900 border border-violet-500/30 shadow-[0_12px_48px_rgba(0,0,0,0.65)]"
-            style={{ left: pos?.left ?? -9999, top: pos?.top ?? 0 }}
+            style={{ left: 0, top: 0, visibility: "hidden" }}
             onMouseDown={(e) => {
               stop(e);
               // Compact (text-editing) mode must never move focus out of the editor.

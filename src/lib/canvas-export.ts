@@ -533,7 +533,8 @@ function drawShape(ctx: CanvasRenderingContext2D, el: ShapeElement) {
     if (detail) { ctx.setLineDash([]); traceSvgPath(ctx, detail); ctx.stroke(); }
   }
   ctx.restore();
-  const text = el.content || htmlToPlain(el.richContent || '');
+  // The canvas shows richContent when present; `content` can be a stale plain copy.
+  const text = (el.richContent ? htmlToPlain(el.richContent) : '') || el.content || '';
   if (text) {
     const [t, r, b, l] = shapeTextInsets(el.shapeType);
     const tx = el.x + el.width * l, ty = el.y + el.height * t;

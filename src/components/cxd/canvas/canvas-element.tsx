@@ -344,6 +344,12 @@ export function CanvasElementRenderer({
   const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
   const [newTaskTag, setNewTaskTag] = useState('');
   const elementRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const tagBadgeRef = useRef<HTMLDivElement>(null);
+  // Every element except lines, connectors and experience blocks (those ARE the
+  // cube faces) can be tagged.
+  const isTaggable = element.type !== "line" && element.type !== "connector" && element.type !== "experienceBlock";
+  const hasTags = !!element.hypercubeTags && element.hypercubeTags.length > 0;
   const menuContainerRef = useRef<HTMLDivElement>(null);
   const subtaskRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
   const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
@@ -402,6 +408,31 @@ export function CanvasElementRenderer({
   useEffect(() => {
     if (!isSelected) closeAllSubmenus();
   }, [isSelected, closeAllSubmenus]);
+
+  // Toolbar submenus must never sit on top of the element being edited. After
+  // every render, any open submenu that overlaps the element is slid clear of
+  // it (up first, then sideways). Positions are in screen px; the toolbar is
+  // scaled by 1/zoom, so local offsets are screen px * zoom.
+  useLayoutEffect(() => {
+    const tb = toolbarRef.current;
+    const el = elementRef.current;
+    if (!tb || !el) return;
+    const panels = tb.querySelectorAll<HTMLElement>("[data-submenu]");
+    if (panels.length === 0) return;
+    avoidElement(panels, el.getBoundingClientRect(), canvasZoom);
+  });
+
+  // The tag menu closes on any press outside the badge/menu (including on the
+  // element itself, which the generic handler below deliberately ignores).
+  useEffect(() => {
+    if (!showTagMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.("[data-tag-badge]")) return;
+      setShowTagMenu(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, [showTagMenu]);
 
   // Close all submenus when clicking outside
   useEffect(() => {
@@ -1036,6 +1067,8 @@ export function CanvasElementRenderer({
           }}
         >
         <div
+          ref={toolbarRef}
+          data-avoid-selector={`[data-element-id="${element.id}"]`}
           className={cn(
             "absolute left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl pointer-events-auto",
             "bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
@@ -1379,6 +1412,9 @@ export function CanvasElementRenderer({
                       } as Partial<CanvasElement>);
                       setShowBoardColorPicker(false);
                     }}
+                    onLiveChange={(gradient) =>
+                      onUpdate({ hexColor: gradient } as Partial<CanvasElement>)
+                    }
                     onClose={() => setShowBoardColorPicker(false)}
                   />
                 )}
@@ -1446,6 +1482,11 @@ export function CanvasElementRenderer({
                       });
                       setShowColorPicker(false);
                     }}
+                    onLiveChange={(gradient) =>
+                      onUpdate({
+                        style: { ...(element.style || {}), bgColor: gradient },
+                      })
+                    }
                     onClose={() => setShowColorPicker(false)}
                   />
                 )}
@@ -1626,53 +1667,6 @@ export function CanvasElementRenderer({
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
-          {/* Hypercube Tag - for taggable elements */}
-          {/* NOTE: experienceBlock is NOT taggable - they correspond to cube faces */}
-          {/* Cards (text, freeform), boards, containers, links, images ARE taggable */}
-          {(element.type === "board" ||
-            element.type === "container" ||
-            element.type === "text" ||
-            element.type === "freeform" ||
-            element.type === "link" ||
-            element.type === "image") && (
-              <>
-                <div className="relative">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      showTagMenu ? closeAllSubmenus() : openTagMenu();
-                    }}
-                    className={cn(
-                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                      showTagMenu && "bg-primary/20 text-primary",
-                      element.hypercubeTags &&
-                      element.hypercubeTags.length > 0 &&
-                      "text-cyan-400",
-                    )}
-                    title="Tag to Hypercube"
-                  >
-                    <Box className="w-4 h-4" />
-                  </button>
-                  {showTagMenu && (
-                    <HypercubeTagPicker
-                      currentTags={element.hypercubeTags || []}
-                      onTagToggle={(tag) => {
-                        const currentTags = element.hypercubeTags || [];
-                        const newTags = currentTags.includes(tag)
-                          ? currentTags.filter((t) => t !== tag)
-                          : [...currentTags, tag];
-                        onUpdate({
-                          hypercubeTags: newTags,
-                        } as Partial<CanvasElement>);
-                      }}
-                      onClose={() => setShowTagMenu(false)}
-                    />
-                  )}
-                </div>
-                <div className="w-px h-4 bg-border/50 mx-0.5" />
-              </>
-            )}
           {/* Universal actions — z-order controls hidden for containers (they always stay at back) */}
           {element.type !== 'container' && element.type !== 'freeform' && (
             <>
@@ -1840,22 +1834,66 @@ export function CanvasElementRenderer({
 
         return toolbar;
       })()}
-      {/* Hypercube tag indicators */}
-      {element.hypercubeTags && element.hypercubeTags.length > 0 && (
+      {/* Hypercube tag badge: sits on top of every taggable element. Tagged
+          elements always show their tag emoji; untagged ones only reveal the
+          tag icon while hovered/selected. Click opens the tag menu. */}
+      {isTaggable && !isDragging && !isCroppingImage && (hasTags || (!isReadOnly && !(isEditing && element.type === "shape"))) && (
         <div
-          className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 px-1.5 rounded-full bg-card/90 backdrop-blur border border-cyan-500/30 shadow-sm z-10 bottom-[-33px] h-[30px] py-[5px] top-[-62px] w-fit"
-          style={{ transform: "translate(-50%, 50%)" }}
+          className="absolute inset-0 pointer-events-none z-[60]"
+          style={{ transform: element.rotation ? `rotate(${-element.rotation}deg)` : undefined }}
         >
-          {element.hypercubeTags.slice(0, 3).map((tag) => (
-            <span key={tag} className="text-xs opacity-90" title={tag}>
-              {HYPERCUBE_TAG_ICONS[tag]}
-            </span>
-          ))}
-          {element.hypercubeTags.length > 3 && (
-            <span className="text-[10px] text-cyan-400/80 ml-0.5">
-              +{element.hypercubeTags.length - 3}
-            </span>
-          )}
+          <div
+            ref={tagBadgeRef}
+            data-tag-badge="true"
+            className="absolute left-1/2 pointer-events-auto"
+            style={{ top: -13, transform: `translateX(-50%) scale(${1 / canvasZoom})`, transformOrigin: "center bottom" }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              disabled={isReadOnly}
+              title={hasTags ? `Tags: ${element.hypercubeTags!.join(", ")}` : "Tag to Hypercube"}
+              onClick={(e) => {
+                e.stopPropagation();
+                showTagMenu ? setShowTagMenu(false) : openTagMenu();
+              }}
+              className={cn(
+                "flex items-center justify-center gap-0.5 h-6 min-w-6 px-1 rounded-full border shadow-sm backdrop-blur transition-opacity",
+                hasTags
+                  ? "bg-card/90 border-cyan-500/40 text-xs"
+                  : "bg-zinc-900/90 border-white/20 text-white/60 hover:text-white",
+                !hasTags && !isSelected && !showTagMenu && "opacity-0 group-hover:opacity-100",
+              )}
+            >
+              {hasTags ? (
+                <>
+                  {element.hypercubeTags!.slice(0, 3).map((tag) => (
+                    <span key={tag} className="leading-none">{HYPERCUBE_TAG_ICONS[tag]}</span>
+                  ))}
+                  {element.hypercubeTags!.length > 3 && (
+                    <span className="text-[10px] text-cyan-400/80">+{element.hypercubeTags!.length - 3}</span>
+                  )}
+                </>
+              ) : (
+                <Tag className="w-3.5 h-3.5" />
+              )}
+            </button>
+            {showTagMenu && (
+              <HypercubeTagPicker
+                anchorRef={tagBadgeRef}
+                currentTags={element.hypercubeTags || []}
+                onTagToggle={(tag) => {
+                  const currentTags = element.hypercubeTags || [];
+                  const newTags = currentTags.includes(tag)
+                    ? currentTags.filter((t) => t !== tag)
+                    : [...currentTags, tag];
+                  onUpdate({ hypercubeTags: newTags } as Partial<CanvasElement>);
+                }}
+                onClose={() => setShowTagMenu(false)}
+              />
+            )}
+          </div>
         </div>
       )}
       {/* Element content */}
@@ -2528,6 +2566,22 @@ function RotationHandle({
 }
 
 // Color picker popover - always opens below the toolbar
+/** Slides each panel clear of `target` (screen rect): up first, then left, then right. */
+function avoidElement(panels: Iterable<HTMLElement>, target: DOMRect, zoom: number) {
+  const gap = 10;
+  for (const p of Array.from(panels)) {
+    p.style.translate = "";
+    const pr = p.getBoundingClientRect();
+    const overlaps = pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top;
+    if (!overlaps) continue;
+    const dy = target.top - gap - pr.bottom;
+    if (pr.top + dy >= 8) { p.style.translate = `0 ${dy * zoom}px`; continue; }
+    let dx = target.left - gap - pr.right;
+    if (pr.left + dx < 8) dx = target.right + gap - pr.left;
+    p.style.translate = `${dx * zoom}px 0`;
+  }
+}
+
 function ColorPicker({
   currentColor,
   onColorChange,
@@ -2540,6 +2594,7 @@ function ColorPicker({
   // Submenus always open downward so the user never moves the cursor up to reach options.
   return (
     <div
+      data-submenu="true"
       className={cn(
         "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[132px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
         "p-2 grid grid-cols-4 gap-1.5",
@@ -2593,6 +2648,7 @@ function ShapeTypePicker({
 
   return (
     <div
+      data-submenu="true"
       className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -2814,6 +2870,7 @@ export function ShapeColorPicker({
 
   return (
     <div
+      data-submenu="true"
       className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -3027,6 +3084,7 @@ export function StoryboardColorPicker({
 
   return (
     <div
+      data-submenu="true"
       className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -3173,6 +3231,7 @@ function ContainerStylePicker({
 
   return (
     <div
+      data-submenu="true"
       className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -3378,6 +3437,7 @@ function TextColorPicker({
 
   return (
     <div
+      data-submenu="true"
       className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -3490,10 +3550,13 @@ function TextColorPicker({
 function GradientPicker({
   currentGradient,
   onGradientChange,
+  onLiveChange,
   onClose,
 }: {
   currentGradient?: string;
   onGradientChange: (gradient: string) => void;
+  /** Live edits from the gradient editor: apply without closing the menu. */
+  onLiveChange?: (gradient: string) => void;
   onClose: () => void;
 }) {
   const gradients = [
@@ -3513,6 +3576,7 @@ function GradientPicker({
 
   return (
     <div
+      data-submenu="true"
       className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -3542,7 +3606,7 @@ function GradientPicker({
       <div className="flex items-center gap-2 mt-2">
         <GradientToolButton
           value={currentGradient}
-          onChange={onGradientChange}
+          onChange={onLiveChange ?? onGradientChange}
           tileClassName="w-7 h-7"
           title="Custom gradient"
         />
@@ -3563,16 +3627,72 @@ function HypercubeTagPicker({
   currentTags,
   onTagToggle,
   onClose,
+  anchorRef,
 }: {
   currentTags: HypercubeFaceTag[];
   onTagToggle: (tag: HypercubeFaceTag) => void;
   onClose: () => void;
+  /** The tag badge; the menu is placed around the element that owns it. */
+  anchorRef: React.RefObject<HTMLElement | null>;
 }) {
-  return (
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Fixed, portaled placement that never covers the tagged element: above the
+  // badge (and its toolbar) when it fits, else beside the element, else below.
+  // Re-evaluated every frame so it follows pan, zoom and dragging.
+  useLayoutEffect(() => {
+    let raf = 0;
+    const W = 240, GAP = 12, M = 8, TOP = 72;
+    const hit = (a: { left: number; top: number; right: number; bottom: number }, r: DOMRect) =>
+      a.left < r.right && a.right > r.left && a.top < r.bottom && a.bottom > r.top;
+    const place = () => {
+      const panel = panelRef.current, badge = anchorRef.current;
+      const owner = badge?.closest("[data-element-id]") as HTMLElement | null;
+      if (panel && badge && owner) {
+        const id = owner.getAttribute("data-element-id");
+        const er = owner.getBoundingClientRect();
+        const br = badge.getBoundingClientRect();
+        const toolbar = document.querySelector(`[data-avoid-selector='[data-element-id="${id}"]']`);
+        const avoid = [er, ...(toolbar ? [toolbar.getBoundingClientRect()] : [])];
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const H = panel.offsetHeight || 360;
+        const clampX = (x: number) => Math.max(M, Math.min(vw - W - M, x));
+        const clampY = (y: number) => Math.max(TOP, Math.min(vh - H - M, y));
+        const topOfStack = Math.min(er.top, ...(toolbar ? [toolbar.getBoundingClientRect().top] : []));
+        const cands = [
+          { left: clampX(br.left + br.width / 2 - W / 2), top: topOfStack - GAP - H },
+          { left: er.right + GAP, top: clampY(er.top + er.height / 2 - H / 2) },
+          { left: er.left - GAP - W, top: clampY(er.top + er.height / 2 - H / 2) },
+          { left: clampX(br.left + br.width / 2 - W / 2), top: er.bottom + GAP },
+        ];
+        const fits = (c: { left: number; top: number }) =>
+          c.top >= TOP && c.top + H <= vh - M && c.left >= M && c.left + W <= vw - M &&
+          !avoid.some((r) => hit({ left: c.left, top: c.top, right: c.left + W, bottom: c.top + H }, r));
+        const pick = cands.find(fits) ?? { left: clampX(er.right + GAP), top: clampY(er.top) };
+        panel.style.left = `${Math.round(pick.left)}px`;
+        panel.style.top = `${Math.round(pick.top)}px`;
+        panel.style.visibility = "visible";
+      }
+      raf = requestAnimationFrame(place);
+    };
+    place();
+    return () => cancelAnimationFrame(raf);
+  }, [anchorRef]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      ref={panelRef}
+      data-tag-badge="true"
+      data-tag-menu="true"
+      data-prevent-canvas-wheel="true"
+      style={{ left: 0, top: 0, visibility: "hidden" }}
+      className={cn("fixed z-[10040] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
     >
       <div className="text-xs font-medium text-muted-foreground mb-2">
         Tag to Hypercube
@@ -3604,7 +3724,8 @@ function HypercubeTagPicker({
       >
         Done
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -3662,6 +3783,7 @@ function EmojiPicker({
   const category = EMOJI_CATEGORIES[cat];
   return (
     <div
+      data-submenu={anchored ? undefined : "true"}
       className={cn(
         "z-[100] pointer-events-auto w-[260px] rounded-xl bg-zinc-900 border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in duration-150 p-2",
         anchored
@@ -3882,7 +4004,8 @@ function BoardIconPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-zinc-900 border border-border shadow-xl z-50 grid grid-cols-6 gap-1 w-[252px] max-h-[216px] overflow-y-auto"
+      data-submenu="true"
+      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 rounded-lg bg-zinc-900 border border-border shadow-xl grid grid-cols-6 gap-1 w-[252px] max-h-[216px] overflow-y-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       data-prevent-canvas-wheel="true"
@@ -3910,15 +4033,19 @@ function BoardIconPicker({
 function BoardColorPicker({
   currentColor,
   onColorSelect,
+  onLiveChange,
   onClose,
 }: {
   currentColor?: string;
   onColorSelect: (gradient: string) => void;
+  /** Live edits from the gradient editor: apply without closing the menu. */
+  onLiveChange?: (gradient: string) => void;
   onClose: () => void;
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px]"
+      data-submenu="true"
+      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl grid grid-cols-3 gap-2 w-[133px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3941,7 +4068,7 @@ function BoardColorPicker({
       ))}
       <GradientToolButton
         value={currentColor}
-        onChange={onColorSelect}
+        onChange={onLiveChange ?? onColorSelect}
         tileClassName="w-[30px] h-[30px]"
         className="rounded-lg"
       />
@@ -3961,7 +4088,8 @@ function FileViewSubmenu({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-[14.75px] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 w-[120px]"
+      data-submenu="true"
+      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[120px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -4013,7 +4141,8 @@ function ExperienceViewSubmenu({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-[14.75px] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 w-[140px]"
+      data-submenu="true"
+      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[140px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >

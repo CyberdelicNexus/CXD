@@ -72,7 +72,6 @@ const mul = (m: Matrix, n: Matrix): Matrix => [
 
 // Characters the standard PDF fonts can encode (WinAnsi, plus a few typographic marks).
 const WIN_ANSI = /^[ -~ -ÿ•…–—‘’“”€™]*$/;
-const BAND_COUNT = 56;
 
 function pdfFontFor(family: string, weight: number, italic: boolean): { name: string; style: string } {
   const f = family.toLowerCase();
@@ -285,7 +284,7 @@ export class PdfContext {
       this.pdf.fill();
       return;
     }
-    // Gradient: clip to the path, then paint bands.
+    // Gradient: clip to the path, then paint it as one bitmap.
     this.pdf.saveGraphicsState();
     this.emitPath();
     this.pdf.clip();
@@ -325,90 +324,63 @@ export class PdfContext {
     this.path = saved;
   }
 
+  /**
+   * Paints a gradient into the current clip as one smooth bitmap. Vector bands
+   * left visible seams wherever a gradient or the shape opacity was translucent
+   * (bands either gap or double up their alpha); a bitmap has neither problem,
+   * and the shape outline, stroke and text stay vector.
+   */
   private paintGradient(g: PdfGradient) {
-    if (g.stops.length === 0) return;
-    const sampleAt = (t: number): Rgba => {
-      const s = g.stops;
-      if (t <= s[0].pos) return s[0].color;
-      if (t >= s[s.length - 1].pos) return s[s.length - 1].color;
-      for (let i = 1; i < s.length; i++) {
-        if (t <= s[i].pos) {
-          const a = s[i - 1], b = s[i];
-          const k = b.pos === a.pos ? 0 : (t - a.pos) / (b.pos - a.pos);
-          return {
-            r: a.color.r + (b.color.r - a.color.r) * k,
-            g: a.color.g + (b.color.g - a.color.g) * k,
-            b: a.color.b + (b.color.b - a.color.b) * k,
-            a: a.color.a + (b.color.a - a.color.a) * k,
-          };
-        }
-      }
-      return s[s.length - 1].color;
-    };
-    const saved = this.path;
-    if (g.kind === 'linear') {
-      const [x0, y0, x1, y1] = g.coords;
-      const dx = x1 - x0, dy = y1 - y0;
-      const len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len, uy = dy / len;
-      const nx = -uy, ny = ux;
-      const reach = 100000; // clip bounds the visible part
-      // Extend bands beyond both ends with the edge colours.
-      const total = BAND_COUNT;
-      for (let i = -1; i <= total; i++) {
-        const t0 = i / total, t1 = (i + 1) / total;
-        const tc = Math.max(0, Math.min(1, (t0 + t1) / 2));
-        const a = i < 0 ? -reach : t0 * len, b = i >= total ? reach : t1 * len;
-        const c = sampleAt(tc);
-        if (c.a * this.st.alpha <= 0) continue;
-        // Overlap bands by a hair so anti-aliasing never leaves seams.
-        const ov = c.a * this.st.alpha >= 0.999 ? 0.6 : 0.15;
-        const lo = a - (i < 0 ? 0 : ov), hi = b + (i >= total ? 0 : ov);
-        const P = (s: number, o: number) => [x0 + ux * s + nx * o, y0 + uy * s + ny * o] as const;
-        this.path = [];
-        const p1 = P(lo, -reach), p2 = P(hi, -reach), p3 = P(hi, reach), p4 = P(lo, reach);
-        this.moveTo(...p1); this.lineTo(...p2); this.lineTo(...p3); this.lineTo(...p4); this.closePath();
-        this.solid(c, false);
-        this.emitPath();
-        this.pdf.fill();
-      }
-    } else {
-      const [cx0, cy0, , cx1, cy1, r1] = g.coords;
-      const total = BAND_COUNT;
-      // Rings, not stacked discs: stacked translucent discs would composite
-      // their alphas on top of each other. Ring i spans radii [i, i+1] / total;
-      // the last one extends far out so it still covers the clipped area.
-      for (let i = 0; i <= total; i++) {
-        const t0 = i / total, t1 = (i + 1) / total;
-        const c = sampleAt(Math.min(1, (t0 + t1) / 2));
-        if (c.a * this.st.alpha <= 0) continue;
-        // Neighbours overlap a hair to hide seams; much less when translucent,
-        // where the overlap would add up alpha.
-        const ov = c.a * this.st.alpha >= 0.999 ? 0.4 : 0.12;
-        const rIn = i === 0 ? 0 : Math.max(0, t0 * r1 - ov);
-        const rOut = i >= total ? r1 * 4 + 100000 : t1 * r1 + ov;
-        const cxA = cx0 + (cx1 - cx0) * t0, cyA = cy0 + (cy1 - cy0) * t0;
-        this.path = [];
-        this.arc(cxA, cyA, Math.max(0.01, rOut), 0, Math.PI * 2);
-        this.closePath();
-        if (rIn > 0) {
-          this.moveTo(cxA + rIn, cyA);
-          this.arc(cxA, cyA, rIn, 0, Math.PI * 2, true);
-          this.closePath();
-        }
-        this.solid(c, false);
-        this.emitPath();
-        this.pdf.fill();
+    if (g.stops.length === 0 || this.path.length === 0) return;
+    // Device-space bounds of the path being filled.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of this.path) {
+      if (c.t === 'Z') continue;
+      const pts = c.t === 'C' ? [[c.x1, c.y1], [c.x2, c.y2], [c.x, c.y]] : [[c.x, c.y]];
+      for (const [px, py] of pts) {
+        minX = Math.min(minX, px); minY = Math.min(minY, py);
+        maxX = Math.max(maxX, px); maxY = Math.max(maxY, py);
       }
     }
-    this.path = saved;
+    const bw = maxX - minX, bh = maxY - minY;
+    if (!(bw > 0) || !(bh > 0)) return;
+    const res = Math.min(3, 1400 / Math.max(bw, bh));
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.ceil(bw * res));
+    cv.height = Math.max(1, Math.ceil(bh * res));
+    const cx = cv.getContext('2d');
+    if (!cx) return;
+    const dev = (x: number, y: number) => {
+      const p = this.tp(x, y);
+      return { x: (p.x - minX) * res, y: (p.y - minY) * res };
+    };
+    let grad: CanvasGradient;
+    if (g.kind === 'linear') {
+      const a = dev(g.coords[0], g.coords[1]), b = dev(g.coords[2], g.coords[3]);
+      grad = cx.createLinearGradient(a.x, a.y, b.x, b.y);
+    } else {
+      const a = dev(g.coords[0], g.coords[1]), b = dev(g.coords[3], g.coords[4]);
+      const k = this.scaleFactor * res;
+      grad = cx.createRadialGradient(a.x, a.y, g.coords[2] * k, b.x, b.y, g.coords[5] * k);
+    }
+    for (const st of g.stops) {
+      grad.addColorStop(Math.max(0, Math.min(1, st.pos)), `rgba(${Math.round(st.color.r)},${Math.round(st.color.g)},${Math.round(st.color.b)},${st.color.a})`);
+    }
+    cx.fillStyle = grad;
+    cx.fillRect(0, 0, cv.width, cv.height);
+    this.setAlpha(this.st.alpha);
+    try {
+      this.pdf.addImage(cv.toDataURL('image/png'), 'PNG', minX, minY, bw, bh, undefined, 'FAST');
+    } catch { /* leave the area unfilled rather than failing the export */ }
   }
 
   // ── text ──
   private parseFont() {
-    const m = this.st.font.match(/^(italic\s+)?(\d+)\s+([\d.]+)px\s+(.+)$/);
+    // "[italic] [weight] <size>px <family>"; the weight is optional (e.g. "36px Inter").
+    const m = this.st.font.match(/^(italic\s+)?(?:(\d+|bold|normal)\s+)?([\d.]+)px\s+(.+)$/);
     const italic = !!m?.[1];
-    const weight = m ? parseInt(m[2], 10) : 400;
+    const w = m?.[2];
+    const weight = w === 'bold' ? 700 : w && /^\d+$/.test(w) ? parseInt(w, 10) : 400;
     const size = m ? parseFloat(m[3]) : 10;
     const family = m ? m[4] : 'sans-serif';
     return { italic, weight, size, family };
@@ -457,7 +429,8 @@ export class PdfContext {
     this.pdf.setTextColor(Math.round(c.r), Math.round(c.g), Math.round(c.b));
     this.setAlpha(c.a * this.st.alpha);
     const baseline = this.st.textBaseline === 'top' ? 'top' : this.st.textBaseline === 'middle' ? 'middle' : 'alphabetic';
-    this.pdf.text(text, p.x, p.y, { baseline, angle: Math.abs(angle) < 0.01 ? undefined : angle } as never);
+    const align = this.st.textAlign === 'center' ? 'center' : this.st.textAlign === 'right' || this.st.textAlign === 'end' ? 'right' : 'left';
+    this.pdf.text(text, p.x, p.y, { baseline, align, angle: Math.abs(angle) < 0.01 ? undefined : angle } as never);
     this.pdf.setFontSize(f.size);
   }
 
@@ -467,8 +440,16 @@ export class PdfContext {
     const probe = document.createElement('canvas').getContext('2d');
     if (!probe) return;
     probe.font = this.st.font;
-    const w = Math.ceil(probe.measureText(text).width) + 4;
-    const h = Math.ceil(size * 1.5);
+    const tw = probe.measureText(text).width;
+    // Draw with the SAME baseline/alignment the caller asked for, inside a canvas
+    // with generous margins (emoji ascend/descend past the font size), then place
+    // the bitmap so its anchor lands exactly on (x, y).
+    const padX = Math.ceil(size * 0.5) + 2;
+    const padY = Math.ceil(size * 1.2);
+    const w = Math.ceil(tw) + padX * 2;
+    const h = padY * 2 + Math.ceil(size);
+    const align = this.st.textAlign === 'center' ? 'center' : this.st.textAlign === 'right' || this.st.textAlign === 'end' ? 'right' : 'left';
+    const ax = align === 'center' ? w / 2 : align === 'right' ? w - padX : padX;
     const cv = document.createElement('canvas');
     cv.width = Math.max(1, Math.ceil(w * sf * res));
     cv.height = Math.max(1, Math.ceil(h * sf * res));
@@ -476,11 +457,11 @@ export class PdfContext {
     if (!cx) return;
     cx.scale(sf * res, sf * res);
     cx.font = this.st.font;
-    cx.textBaseline = 'top';
-    cx.fillStyle = `rgb(${c.r},${c.g},${c.b})`;
-    cx.fillText(text, 2, 0);
-    const top = this.st.textBaseline === 'top' ? y : y - size * 0.8;
-    const p = this.tp(x - 2, top);
+    cx.textBaseline = this.st.textBaseline as CanvasTextBaseline;
+    cx.textAlign = align;
+    cx.fillStyle = `rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`;
+    cx.fillText(text, ax, padY);
+    const p = this.tp(x - ax, y - padY);
     this.setAlpha(c.a * this.st.alpha);
     try {
       this.pdf.addImage(cv.toDataURL('image/png'), 'PNG', p.x, p.y, w * sf, h * sf, undefined, 'FAST');
