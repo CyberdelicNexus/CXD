@@ -58,7 +58,7 @@ import { ERDGenerator } from "./erd-generator";
 import { generateDiagnostics, calculateFaceIntensities } from "@/utils/diagnostic-engine";
 import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 import type { EnrichedDiagnostic } from "@/types/diagnostics";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { TagSuggestionPanel } from "./tag-suggestion-panel";
 import {
   requestTagSuggestions,
@@ -589,6 +589,35 @@ function getRotationForFace(faceIndex: number): { x: number; y: number } {
       return { x: 0, y: 0 };
   }
 }
+
+// Short "what is this face, and how does it shape the whole" copy, shown beside
+// the cube while a face button is hovered.
+const FACE_BLURBS: Record<string, { essence: string; impact: string }> = {
+  realityPlanes: {
+    essence: "Where the experience lives: the technical layers from physical to virtual (PR, AR, VR, MR and beyond).",
+    impact: "Sets the medium and its limits. Every other face has to work inside the reality you choose.",
+  },
+  sensoryDomains: {
+    essence: "What people see, hear, smell, taste and feel while they are inside it.",
+    impact: "The raw material of presence. It decides how real, and how intense, everything else lands.",
+  },
+  presence: {
+    essence: "How people are there: mentally, emotionally, socially, physically, in the environment, in action.",
+    impact: "Shapes the kind of attention and involvement your sensory design has to support.",
+  },
+  stateMapping: {
+    essence: "The momentary states participants move through, from arrival to peak to release.",
+    impact: "Gives the experience its arc: pacing, intensity and recovery across the journey.",
+  },
+  traitMapping: {
+    essence: "The lasting qualities the experience cultivates once it is over.",
+    impact: "The durable change that justifies the states and senses you designed.",
+  },
+  contextAndMeaning: {
+    essence: "The world, story and magic that make the experience matter to the people in it.",
+    impact: "Ties every other face together into one coherent reason to care.",
+  },
+};
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
@@ -1828,7 +1857,7 @@ export function Hypercube3D({
   // camera (same normal-z convention as getFrontFaceFromRotation). Memoized per
   // frame here rather than inline so the six transforms are computed once.
   const perspectiveFaceLabels = useMemo(() => {
-    if (interactionMode !== "explore") return [];
+    if (interactionMode !== "explore" && previewFace === null) return [];
     const rx = (cubeRotation.x * Math.PI) / 180;
     const ry = (cubeRotation.y * Math.PI) / 180;
     const sinRx = Math.sin(rx), cosRx = Math.cos(rx);
@@ -1891,8 +1920,11 @@ export function Hypercube3D({
         transform,
         lines: splitLabelTwoLines(face.label),
       };
-    }).filter((l) => l.opacity > 0.02);
-  }, [interactionMode, outerCorners, cubeRotation.x, cubeRotation.y]);
+    })
+      .filter((l) => l.opacity > 0.02)
+      // Hover preview labels only the face being previewed.
+      .filter((l) => interactionMode === "explore" || l.faceIndex === previewFace);
+  }, [interactionMode, previewFace, outerCorners, cubeRotation.x, cubeRotation.y]);
 
 
   const focusedFace =
@@ -1953,7 +1985,7 @@ export function Hypercube3D({
     // Center position for default (no selection) and explore mode
     // In explore mode, apply zoom level
     // Default view gets a bigger cube: it is the hero of the page.
-    const baseScale = interactionMode === "explore" || !isDefaultView ? 0.85 : 1.75;
+    const baseScale = interactionMode === "explore" || !isDefaultView ? 0.85 : 1.6;
     const scale =
       interactionMode === "explore" ? baseScale * exploreZoom : baseScale;
     return { scale, x: "50%", y: "50%" };
@@ -2480,14 +2512,16 @@ export function Hypercube3D({
                 (EDGE_ADJACENT_FACES[selectedEdgeIndex][0] === faceIndex ||
                   EDGE_ADJACENT_FACES[selectedEdgeIndex][1] === faceIndex);
               // Dim non-front faces when we have a focused face
+              const isPreview = previewFace === faceIndex;
               const isDimmed =
-                focusedFaceIndex !== null && !isFocused && !isFrontFace;
+                (focusedFaceIndex !== null && !isFocused && !isFrontFace) ||
+                (previewFace !== null && !isPreview && !isFrontFace);
               // In default mode with selection, only highlight the front-facing face
               // When Core is selected, no faces should be active/highlighted
               const isActive =
                 !isCoreSelected && focusedFaceIndex !== null
                   ? isFrontFace
-                  : false;
+                  : isPreview && isFrontFace;
 
               // Corner indices for this face (shared with the depth sort above)
               const faceCorners = FACE_CORNER_INDICES[faceIndex].map((i) => outerCorners[i]);
@@ -2580,7 +2614,7 @@ export function Hypercube3D({
                   that otherwise wash out against the bright near-face center
                 • all 8 inner→outer connecting struts, so the hypercube reads
                   as one nested figure while the perspective labels are shown. */}
-          {interactionMode === "explore" && (
+          {(interactionMode === "explore" || previewFace !== null) && (
             <g style={{ pointerEvents: "none" }}>
               {cubeEdges.map(([i, j], idx) => (
                 <line
@@ -2644,14 +2678,72 @@ export function Hypercube3D({
           })}
         </svg>
 
+        {/* Hover preview: a reminder of what the hovered face is about, in the
+            free space to the right of the cube. */}
+        <AnimatePresence mode="wait">
+          {isDefaultView && previewFace !== null && CUBE_FACES[previewFace] && (() => {
+            const face = CUBE_FACES[previewFace];
+            const blurb = FACE_BLURBS[face.id];
+            const hue = face.id === "realityPlanes" ? 286 : face.tint.hue;
+            const Icon = FACE_ICONS[face.id] || Box;
+            const count = calculateFaceIntensity(face).elementCount;
+            return (
+              // Static wrapper centres vertically; framer owns only the inner slide/fade
+              // (its transform would otherwise override a centring translate).
+              <div
+                key={face.id}
+                className="absolute z-20 top-1/2 -translate-y-1/2 w-[300px] max-w-[26vw] pointer-events-none"
+                style={{ right: "clamp(24px, 5vw, 120px)" }}
+              >
+              <motion.div
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 12 }}
+                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div
+                  className="rounded-2xl border p-5 backdrop-blur-md"
+                  style={{
+                    background: `linear-gradient(160deg, hsl(${hue} 35% 12% / 0.85), hsl(${hue} 30% 5% / 0.85))`,
+                    borderColor: `hsl(${hue} 55% 55% / 0.45)`,
+                    boxShadow: `0 0 40px hsl(${hue} 70% 55% / 0.18), inset 0 1px 1px hsl(${hue} 70% 70% / 0.15)`,
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="w-12 h-12 rounded-full flex items-center justify-center border"
+                      style={{ borderColor: `hsl(${hue} 55% 55% / 0.6)`, background: `hsl(${hue} 40% 10%)`, boxShadow: `0 0 20px hsl(${hue} 70% 55% / 0.35)` }}
+                    >
+                      <Icon className="w-5 h-5" style={{ color: `hsl(${hue} 80% 75%)` } as React.CSSProperties} />
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="text-base font-semibold leading-tight" style={{ color: `hsl(${hue} 70% 88%)` }}>{face.label}</h3>
+                      <p className="text-[11px] uppercase tracking-[0.14em] mt-0.5" style={{ color: `hsl(${hue} 50% 65%)` }}>{face.semanticRole}</p>
+                    </div>
+                  </div>
+                  <p className="mt-4 text-sm leading-relaxed text-white/80">{blurb?.essence}</p>
+                  <div className="mt-4 pt-3 border-t" style={{ borderColor: `hsl(${hue} 40% 40% / 0.3)` }}>
+                    <p className="text-[10px] uppercase tracking-[0.16em] mb-1.5" style={{ color: `hsl(${hue} 50% 65%)` }}>How it shapes the whole</p>
+                    <p className="text-sm leading-relaxed text-white/65">{blurb?.impact}</p>
+                  </div>
+                  <p className="mt-4 text-[11px] text-white/45">
+                    {Number.isFinite(count) && count > 0 ? `${count} tagged element${count === 1 ? "" : "s"} on this face` : "Nothing tagged here yet"}
+                  </p>
+                </div>
+              </motion.div>
+              </div>
+            );
+          })()}
+        </AnimatePresence>
+
         {/* Default view: Hypercube Intelligence + Explore, side by side above the cube */}
         {isDefaultView && (
           <div className="absolute top-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3">
             <motion.div layoutId="hc-general" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
-              {renderGeneralButton(true)}
+              {renderGeneralButton(false)}
             </motion.div>
             <motion.div layoutId="hc-explore" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
-              {renderExploreButton(true)}
+              {renderExploreButton(false)}
             </motion.div>
           </div>
         )}
@@ -2669,7 +2761,7 @@ export function Hypercube3D({
               isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)
                 ? 336
                 : isDefaultView
-                  ? "max(20px, calc(50% - 370px))" // hugging the (larger) cube
+                  ? "max(20px, calc(50% - 450px))" // beside the (larger) cube, leaving room for hover labels
                   : 20,
           }}
           data-tour-id="map-face-selector"
