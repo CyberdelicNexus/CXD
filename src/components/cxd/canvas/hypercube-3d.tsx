@@ -58,6 +58,7 @@ import { ERDGenerator } from "./erd-generator";
 import { generateDiagnostics, calculateFaceIntensities } from "@/utils/diagnostic-engine";
 import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 import type { EnrichedDiagnostic } from "@/types/diagnostics";
+import { motion } from "framer-motion";
 import { TagSuggestionPanel } from "./tag-suggestion-panel";
 import {
   requestTagSuggestions,
@@ -711,6 +712,10 @@ export function Hypercube3D({
   const [cubeRotation, setCubeRotation] = useState({ x: -25, y: -35 });
   const [targetRotation, setTargetRotation] = useState({ x: -25, y: -35 });
   const [isAnimating, setIsAnimating] = useState(false);
+  // Hovering a face button (default view) turns the cube to show that face.
+  const [previewFace, setPreviewFace] = useState<number | null>(null);
+  const cubeRotationRef = useRef({ x: -25, y: -35 });
+  cubeRotationRef.current = cubeRotation;
   const [focusedFaceIndex, setFocusedFaceIndex] = useState<number | null>(null);
   const [isCoreSelected, setIsCoreSelected] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -835,6 +840,7 @@ export function Hypercube3D({
       focusedFaceIndex === null &&
       !isCoreSelected &&
       !isGeneralChatActive &&
+      previewFace === null &&
       !isAnimating;
 
     if (!shouldAutoRotate) {
@@ -872,7 +878,7 @@ export function Hypercube3D({
       }
       lastTimeRef.current = 0;
     };
-  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected, isGeneralChatActive]);
+  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected, isGeneralChatActive, previewFace]);
 
   // Layer 2: Generate real-time diagnostics with cooldown/deduplication
   const diagnostics = useMemo(() => {
@@ -1020,9 +1026,27 @@ export function Hypercube3D({
     };
   }, [isAnimating, targetRotation]);
 
+  // Shortest way round from `cur` to an equivalent angle of `target` (the
+  // auto-rotation accumulates far past 360, so a plain tween would spin back).
+  const nearestAngle = (cur: number, target: number) =>
+    cur + ((((target - cur) % 360) + 540) % 360) - 180;
+
+  // Hover a face button: turn the cube to that face. Leave: ease back to the
+  // resting tilt and let the slow auto-rotation resume. Ignored once a chat
+  // or Explore is open (selectFace owns the rotation then).
+  const previewFaceHover = useCallback((index: number | null) => {
+    if (!isDefaultViewRef.current) return;
+    setPreviewFace(index);
+    const cur = cubeRotationRef.current;
+    const base = index === null ? { x: -25, y: -35 } : getRotationForFace(index);
+    setTargetRotation({ x: base.x, y: nearestAngle(cur.y, base.y) });
+    setIsAnimating(true);
+  }, []);
+
   const selectFace = useCallback((index: number) => {
     const face = CUBE_FACES[index];
     if (!face) return;
+    setPreviewFace(null);
 
     // Set focused face and clear core/general chat
     setFocusedFaceIndex(index);
@@ -1032,7 +1056,7 @@ export function Hypercube3D({
     // Rotate cube to bring selected face to FRONT
     const targetRot = getRotationForFace(index);
 
-    setTargetRotation(targetRot);
+    setTargetRotation({ x: targetRot.x, y: nearestAngle(cubeRotationRef.current.y, targetRot.y) });
     setIsAnimating(true);
   }, []);
 
@@ -1914,6 +1938,11 @@ export function Hypercube3D({
   // Cube positioning based on selection state
   // When a face is selected: cube shrinks and moves to top-right as NAVIGATION MAP
   // Otherwise: cube is centered and visually prominent
+  const isDefaultView =
+    interactionMode === "default" && focusedFaceIndex === null && !isCoreSelected && !isGeneralChatActive;
+  const isDefaultViewRef = useRef(isDefaultView);
+  isDefaultViewRef.current = isDefaultView;
+
   const cubePosition = useMemo(() => {
     const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
 
@@ -1923,11 +1952,12 @@ export function Hypercube3D({
     }
     // Center position for default (no selection) and explore mode
     // In explore mode, apply zoom level
-    const baseScale = 0.85;
+    // Default view gets a bigger cube: it is the hero of the page.
+    const baseScale = interactionMode === "explore" || !isDefaultView ? 0.85 : 1.75;
     const scale =
       interactionMode === "explore" ? baseScale * exploreZoom : baseScale;
     return { scale, x: "50%", y: "50%" };
-  }, [interactionMode, focusedFaceIndex, isCoreSelected, isGeneralChatActive, exploreZoom]);
+  }, [interactionMode, focusedFaceIndex, isCoreSelected, isGeneralChatActive, exploreZoom, isDefaultView]);
 
   // Keep directional arrows aligned with the projected minimap cube center.
   const minimapVisualCenterOffset = useMemo(() => {
@@ -1956,6 +1986,90 @@ export function Hypercube3D({
     outerCorners,
     cubePosition.scale,
   ]);
+
+  // Default view = nothing selected and not exploring: the cube is large and
+  // centred, the face rail hugs it, and the two primary actions sit above it.
+  // Opening any chat (or Explore) docks them back into the rail.
+  const renderGeneralButton = (pill: boolean) => (
+    <button
+            data-tour-id="map-cyberdelic-tab"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasDragged) return;
+              openGeneralChat();
+            }}
+            className={cn(
+              "group relative flex items-center h-12 rounded-full border transition-all duration-300",
+              isGeneralChatActive && "z-10",
+              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-50",
+              "hover:opacity-100 hover:z-10",
+            )}
+            style={{
+              background: "linear-gradient(135deg, hsl(220 30% 12%) 0%, hsl(220 25% 8%) 50%, hsl(220 20% 5%) 100%)",
+              borderColor: isGeneralChatActive
+                ? "hsl(220 60% 60%)"
+                : "hsl(220 20% 25%)",
+              boxShadow: isGeneralChatActive
+                ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
+                : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
+            }}
+            title="Hypercube"
+          >
+            <span className="w-12 h-12 shrink-0 flex items-center justify-center">
+              <NextImage
+                src="/images/CXD Logo 2.png"
+                alt="AI"
+                width={28}
+                height={28}
+                className={cn(
+                  "w-7 h-7 object-contain transition-all duration-300",
+                  isGeneralChatActive ? "opacity-100" : "opacity-85",
+                )}
+              />
+            </span>
+            <span
+              className={cn(
+                "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
+                isGeneralChatActive || pill
+                  ? "max-w-[240px] pr-4 opacity-100"
+                  : "max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100",
+              )}
+              style={{ color: "hsl(220 60% 72%)" }}
+            >
+              {pill ? "Hypercube Intelligence" : "Hypercube"}
+            </span>
+          </button>
+  );
+  const renderExploreButton = (pill: boolean) => (
+    <button
+              onClick={enterExploreMode}
+              className="group relative flex items-center h-12 rounded-full border transition-all duration-300 hover:z-10"
+              style={{
+                background:
+                  "linear-gradient(135deg, hsl(35 40% 12%) 0%, hsl(35 35% 8%) 50%, hsl(35 30% 5%) 100%)",
+                borderColor: "hsl(35 40% 25%)",
+                boxShadow: "inset 0 1px 1px hsl(35 40% 20% / 0.3)",
+              }}
+              title="Enter Edge Resonance to rotate the cube and explore face relationships"
+            >
+              <span className="w-12 h-12 shrink-0 flex items-center justify-center">
+                <Compass className="w-5 h-5 text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 group-hover:scale-110" />
+              </span>
+              <span
+                className={cn(
+                  "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
+                  pill
+                    ? "max-w-[220px] pr-4 opacity-100 text-amber-300"
+                    : "max-w-0 opacity-0 group-hover:max-w-[220px] group-hover:pr-4 group-hover:opacity-100 text-amber-400/70 group-hover:text-amber-300",
+                )}
+                style={{
+                  textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
+                }}
+              >
+                {pill ? "Explore" : "Edge Resonance"}
+              </span>
+            </button>
+  );
 
   // Dynamic background based on canvas background preference
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
@@ -2530,6 +2644,18 @@ export function Hypercube3D({
           })}
         </svg>
 
+        {/* Default view: Hypercube Intelligence + Explore, side by side above the cube */}
+        {isDefaultView && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3">
+            <motion.div layoutId="hc-general" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+              {renderGeneralButton(true)}
+            </motion.div>
+            <motion.div layoutId="hc-explore" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+              {renderExploreButton(true)}
+            </motion.div>
+          </div>
+        )}
+
         {/* Face selector — compact vertical rail of icon circles that expand
             on hover (or while selected) to reveal their label. */}
         <div
@@ -2542,59 +2668,20 @@ export function Hypercube3D({
             left:
               isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)
                 ? 336
-                : 20,
+                : isDefaultView
+                  ? "max(20px, calc(50% - 370px))" // hugging the (larger) cube
+                  : 20,
           }}
           data-tour-id="map-face-selector"
         >
-          {/* General AI Chat button */}
-          <button
-            data-tour-id="map-cyberdelic-tab"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (hasDragged) return;
-              openGeneralChat();
-            }}
-            className={cn(
-              "group relative flex items-center h-12 rounded-full border transition-all duration-300",
-              isGeneralChatActive && "z-10",
-              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-50",
-              "hover:opacity-100 hover:z-10",
-            )}
-            style={{
-              background: "linear-gradient(135deg, hsl(220 30% 12%) 0%, hsl(220 25% 8%) 50%, hsl(220 20% 5%) 100%)",
-              borderColor: isGeneralChatActive
-                ? "hsl(220 60% 60%)"
-                : "hsl(220 20% 25%)",
-              boxShadow: isGeneralChatActive
-                ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
-                : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
-            }}
-            title="Hypercube"
-          >
-            <span className="w-12 h-12 shrink-0 flex items-center justify-center">
-              <NextImage
-                src="/images/CXD Logo 2.png"
-                alt="AI"
-                width={28}
-                height={28}
-                className={cn(
-                  "w-7 h-7 object-contain transition-all duration-300",
-                  isGeneralChatActive ? "opacity-100" : "opacity-85",
-                )}
-              />
-            </span>
-            <span
-              className={cn(
-                "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
-                isGeneralChatActive
-                  ? "max-w-[160px] pr-4 opacity-100"
-                  : "max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100",
-              )}
-              style={{ color: "hsl(220 60% 72%)" }}
-            >
-              Hypercube
-            </span>
-          </button>
+          {/* General AI Chat button: in the rail only while a chat/explore view is
+              active; in the default view it lives in the top bar. layoutId lets
+              framer animate it between the two places. */}
+          {!isDefaultView && (
+            <motion.div layoutId="hc-general" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+              {renderGeneralButton(false)}
+            </motion.div>
+          )}
 
           {/* Face buttons */}
           {CUBE_FACES.map((face, index) => {
@@ -2623,6 +2710,8 @@ export function Hypercube3D({
             return (
               <button
                 key={face.id}
+                onMouseEnter={() => previewFaceHover(index)}
+                onMouseLeave={() => previewFaceHover(null)}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (hasDragged) return;
@@ -2744,29 +2833,11 @@ export function Hypercube3D({
 
           {/* Explore mode toggle - moved to end */}
           {interactionMode !== "explore" ? (
-            <button
-              onClick={enterExploreMode}
-              className="group relative flex items-center h-12 rounded-full border transition-all duration-300 hover:z-10"
-              style={{
-                background:
-                  "linear-gradient(135deg, hsl(35 40% 12%) 0%, hsl(35 35% 8%) 50%, hsl(35 30% 5%) 100%)",
-                borderColor: "hsl(35 40% 25%)",
-                boxShadow: "inset 0 1px 1px hsl(35 40% 20% / 0.3)",
-              }}
-              title="Enter Edge Resonance to rotate the cube and explore face relationships"
-            >
-              <span className="w-12 h-12 shrink-0 flex items-center justify-center">
-                <Compass className="w-5 h-5 text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 group-hover:scale-110" />
-              </span>
-              <span
-                className="max-w-0 opacity-0 group-hover:max-w-[220px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 ease-out"
-                style={{
-                  textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
-                }}
-              >
-                Edge Resonance
-              </span>
-            </button>
+            isDefaultView ? null : (
+              <motion.div layoutId="hc-explore" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+                {renderExploreButton(false)}
+              </motion.div>
+            )
           ) : (
             <div className="flex items-center gap-1.5">
               <button

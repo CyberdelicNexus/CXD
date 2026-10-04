@@ -170,6 +170,18 @@ const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, React.ComponentType<{ classN
   "Core": Target,
 };
 
+// Each tag takes its face's colour (the hue of that face on the hypercube and
+// its button in the Map view). Icons stay grey until hovered.
+const HYPERCUBE_TAG_COLORS: Record<HypercubeFaceTag, string> = {
+  "Reality Planes": "hsl(286 70% 70%)",
+  "Sensory Domains": "hsl(45 85% 65%)",
+  "Presence Types": "hsl(195 80% 68%)",
+  "State Mapping": "hsl(160 65% 62%)",
+  "Trait Mapping": "hsl(260 75% 72%)",
+  "Meaning Architecture": "hsl(320 75% 70%)",
+  "Core": "hsl(270 80% 74%)",
+};
+
 const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
   visual: { icon: <Eye className="w-4 h-4" />, color: "from-blue-950 to-blue-400", colorRaw: "59, 130, 246" },
   auditory: { icon: <Ear className="w-4 h-4" />, color: "from-indigo-950 to-indigo-400", colorRaw: "99, 102, 241" },
@@ -1578,6 +1590,52 @@ export function CanvasElementRenderer({
           )}
           {element.type === "text" && (
             <>
+              {/* Color/Gradient picker: first in the toolbar. Deliberately NOT
+                  position:relative, so its menu anchors to the toolbar's bottom-left
+                  rather than to the button. */}
+              <div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showColorPicker && "bg-primary/20 text-primary",
+                  )}
+                  title="Color"
+                >
+                  <Palette className="w-4 h-4" />
+                </button>
+                {showColorPicker && element.type === "text" && (
+                  <TextColorPicker
+                    currentColor={(element as TextElement).style?.textColor}
+                    currentGradient={(element as TextElement).style?.bgColor}
+                    onColorChange={(color) =>
+                      onUpdate({
+                        style: {
+                          ...element.style,
+                          textColor: color,
+                          // '' not undefined: the Yjs serializer skips undefined, so the
+                          // old gradient survived and "solid" never took effect.
+                          bgColor: "",
+                        },
+                      })
+                    }
+                    onGradientChange={(gradient) =>
+                      onUpdate({
+                        style: {
+                          ...element.style,
+                          bgColor: gradient,
+                          textColor: "",
+                        },
+                      })
+                    }
+                    onClose={() => setShowColorPicker(false)}
+                  />
+                )}
+              </div>
               {/* Font family dropdown */}
               <FontDropdown
                 value={(element as TextElement).style?.fontFamily}
@@ -1634,52 +1692,6 @@ export function CanvasElementRenderer({
                 <option value="center">Center</option>
                 <option value="right">Right</option>
               </select>
-              {/* Color/Gradient picker. Deliberately NOT position:relative, so its menu
-                  anchors to the toolbar (bottom-left, by the font dropdown) rather than
-                  to this far-right button. */}
-              <div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    showColorPicker ? closeAllSubmenus() : openColorPicker();
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showColorPicker && "bg-primary/20 text-primary",
-                  )}
-                  title="Color"
-                >
-                  <Palette className="w-4 h-4" />
-                </button>
-                {showColorPicker && element.type === "text" && (
-                  <TextColorPicker
-                    currentColor={(element as TextElement).style?.textColor}
-                    currentGradient={(element as TextElement).style?.bgColor}
-                    onColorChange={(color) =>
-                      onUpdate({
-                        style: {
-                          ...element.style,
-                          textColor: color,
-                          // '' not undefined: the Yjs serializer skips undefined, so the
-                          // old gradient survived and "solid" never took effect.
-                          bgColor: "",
-                        },
-                      })
-                    }
-                    onGradientChange={(gradient) =>
-                      onUpdate({
-                        style: {
-                          ...element.style,
-                          bgColor: gradient,
-                          textColor: "",
-                        },
-                      })
-                    }
-                    onClose={() => setShowColorPicker(false)}
-                  />
-                )}
-              </div>
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
@@ -1875,9 +1887,9 @@ export function CanvasElementRenderer({
                 showTagMenu ? setShowTagMenu(false) : openTagMenu();
               }}
               className={cn(
-                "flex items-center justify-center gap-0.5 h-6 min-w-6 px-1 rounded-full border shadow-sm backdrop-blur transition-opacity",
+                "group/tag flex items-center justify-center gap-0.5 h-6 min-w-6 px-1 rounded-full border shadow-sm backdrop-blur transition-opacity",
                 hasTags
-                  ? "bg-card/90 border-cyan-500/40 text-xs"
+                  ? "bg-card/90 border-white/15 text-xs hover:border-white/30"
                   : "bg-zinc-900/90 border-white/20 text-white/60 hover:text-white",
                 !hasTags && !isSelected && !showTagMenu && "opacity-0 group-hover:opacity-100",
               )}
@@ -1885,10 +1897,14 @@ export function CanvasElementRenderer({
               {hasTags ? (
                 <>
                   {element.hypercubeTags!.slice(0, 3).map((tag) => (
-                    <span key={tag} className="leading-none text-cyan-300">{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-3.5 h-3.5" />; })()}</span>
+                    <span
+                      key={tag}
+                      className="leading-none text-white/45 transition-colors group-hover/tag:[color:var(--tag-c)]"
+                      style={{ "--tag-c": HYPERCUBE_TAG_COLORS[tag] } as React.CSSProperties}
+                    >{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-3.5 h-3.5" />; })()}</span>
                   ))}
                   {element.hypercubeTags!.length > 3 && (
-                    <span className="text-[10px] text-cyan-400/80">+{element.hypercubeTags!.length - 3}</span>
+                    <span className="text-[10px] text-white/45">+{element.hypercubeTags!.length - 3}</span>
                   )}
                 </>
               ) : (
@@ -3748,13 +3764,16 @@ function HypercubeTagPicker({
               key={tag}
               onClick={() => onTagToggle(tag)}
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-all text-left",
+                "group/row flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-all text-left",
                 isSelected
                   ? "bg-primary/20 text-primary"
                   : "hover:bg-primary/10 text-muted-foreground hover:text-foreground",
               )}
             >
-              <span className="text-cyan-300">{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-4 h-4" />; })()}</span>
+              <span
+                className={isSelected ? "" : "text-white/45 group-hover/row:[color:var(--tag-c)] transition-colors"}
+                style={{ "--tag-c": HYPERCUBE_TAG_COLORS[tag], ...(isSelected ? { color: HYPERCUBE_TAG_COLORS[tag] } : {}) } as React.CSSProperties}
+              >{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-4 h-4" />; })()}</span>
               <span className="flex-1">{tag}</span>
               {isSelected && <span className="text-primary">✓</span>}
             </button>
