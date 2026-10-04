@@ -619,6 +619,8 @@ const FACE_BLURBS: Record<string, { essence: string; impact: string }> = {
   },
 };
 
+// Cube glides to its top-right dock this slowly; the chat waits for it.
+const DOCK_DURATION_MS = 1300;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const DEFAULT_ZOOM = 1;
@@ -1012,7 +1014,7 @@ export function Hypercube3D({
     startRotationRef.current = cubeRotation;
     const startTime =
       typeof performance !== "undefined" ? performance.now() : 0;
-    const duration = 720;
+    const duration = 1100;
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime;
@@ -1975,6 +1977,21 @@ export function Hypercube3D({
   const isDefaultViewRef = useRef(isDefaultView);
   isDefaultViewRef.current = isDefaultView;
 
+  // The chat window (and System Insights drawer) wait for the cube to finish
+  // flying to its top-right dock before appearing, so the transition reads as
+  // two calm steps instead of everything at once. Closing is immediate; moving
+  // between faces while open does not re-trigger the wait.
+  const hasSelection = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
+  const [selectionReady, setSelectionReady] = useState(false);
+  useEffect(() => {
+    if (!hasSelection) {
+      setSelectionReady(false);
+      return;
+    }
+    const t = window.setTimeout(() => setSelectionReady(true), DOCK_DURATION_MS - 100);
+    return () => window.clearTimeout(t);
+  }, [hasSelection]);
+
   const cubePosition = useMemo(() => {
     const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
 
@@ -2126,7 +2143,7 @@ export function Hypercube3D({
         onGenerateQuestions={handleGenerateQuestions}
         onGeneratedQuestionClick={handleGeneratedQuestionClick}
         onRefresh={handleRefreshDiagnostics}
-        isOpen={isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)}
+        isOpen={isPanelOpen && hasSelection && selectionReady}
         onToggle={() => setIsPanelOpen(!isPanelOpen)}
       />
       {/* 3D Scene Container */}
@@ -2158,7 +2175,7 @@ export function Hypercube3D({
             transform: `translate(-50%, -50%) scale(${cubePosition.scale})`,
             // Premium easeOutQuint dock — fast to settle, no jarring stop
             transition:
-              "left 0.62s cubic-bezier(0.22,1,0.36,1), top 0.62s cubic-bezier(0.22,1,0.36,1), transform 0.62s cubic-bezier(0.22,1,0.36,1)",
+              `left ${DOCK_DURATION_MS}ms cubic-bezier(0.55,0,0.2,1), top ${DOCK_DURATION_MS}ms cubic-bezier(0.55,0,0.2,1), transform ${DOCK_DURATION_MS}ms cubic-bezier(0.55,0,0.2,1)`,
             width: "800px",
             height: "800px",
             // Filter halos (edge glow, vertex sparks) extend past the 800×800
@@ -2616,6 +2633,10 @@ export function Hypercube3D({
                   as one nested figure while the perspective labels are shown. */}
           {(interactionMode === "explore" || previewFace !== null) && (
             <g style={{ pointerEvents: "none" }}>
+              {/* One filter on the group, not per line: a perfectly horizontal or
+                  vertical line (a face turned straight on) has a zero-size bounding
+                  box, which makes a per-line SVG filter drop it entirely. */}
+              <g filter="url(#glow-stable)">
               {cubeEdges.map(([i, j], idx) => (
                 <line
                   key={`inner-explore-${idx}`}
@@ -2627,9 +2648,9 @@ export function Hypercube3D({
                   strokeWidth={1.75}
                   strokeLinecap="round"
                   opacity={0.75}
-                  filter="url(#glow-stable)"
                 />
               ))}
+              </g>
               {outerCorners.map((outer, i) => (
                 <line
                   key={`strut-explore-${i}`}
@@ -2692,8 +2713,9 @@ export function Hypercube3D({
               // (its transform would otherwise override a centring translate).
               <div
                 key={face.id}
-                className="absolute z-20 top-1/2 -translate-y-1/2 w-[300px] max-w-[26vw] pointer-events-none"
-                style={{ right: "clamp(24px, 5vw, 120px)" }}
+                className="absolute z-20 top-1/2 -translate-y-1/2 pointer-events-none"
+                // Just right of the cube: same breathing room as the face rail on its left.
+                style={{ left: `calc(50% + ${Math.round(cubePosition.scale * 122 + 120)}px)`, width: "clamp(210px, calc(50% - 340px), 300px)" }}
               >
               <motion.div
                 initial={{ opacity: 0, x: 24 }}
@@ -2738,7 +2760,7 @@ export function Hypercube3D({
 
         {/* Default view: Hypercube Intelligence + Explore, side by side above the cube */}
         {isDefaultView && (
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3">
+          <div className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-3" style={{ top: "max(24px, calc(50% - 330px))" }}>
             <motion.div layoutId="hc-general" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
               {renderGeneralButton(false)}
             </motion.div>
@@ -2758,11 +2780,13 @@ export function Hypercube3D({
             // Always visible. Sits just right of the System Insights drawer when
             // it's open; keeps a small left margin (not flush) when it's hidden.
             left:
-              isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)
+              isPanelOpen && hasSelection && selectionReady
                 ? 336
-                : isDefaultView
-                  ? "max(20px, calc(50% - 450px))" // beside the (larger) cube, leaving room for hover labels
-                  : 20,
+                : hasSelection
+                  ? 20
+                  : // Default view and Explore: hug the cube (its half-width grows
+                    // with the scale), leaving room for the hover labels.
+                    `max(20px, calc(50% - ${Math.round(cubePosition.scale * 150 + 210)}px))`,
           }}
           data-tour-id="map-face-selector"
         >
@@ -3589,7 +3613,7 @@ export function Hypercube3D({
           })()}
 
         {/* CENTER PANEL - AI Chatbot + Tagged Elements (bottom-right dock) */}
-        {interactionMode === "default" && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
+        {interactionMode === "default" && selectionReady && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
           <div className="absolute inset-0 flex flex-col justify-center pt-[16px] pb-[16px] pointer-events-none z-20">
             {/* Main Chat Area. Left padding clears the compact icon rail (more
                 when the System Insights drawer is open). Right padding clears
