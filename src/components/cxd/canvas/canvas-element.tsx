@@ -1634,8 +1634,10 @@ export function CanvasElementRenderer({
                 <option value="center">Center</option>
                 <option value="right">Right</option>
               </select>
-              {/* Color/Gradient picker */}
-              <div className="relative">
+              {/* Color/Gradient picker. Deliberately NOT position:relative, so its menu
+                  anchors to the toolbar (bottom-left, by the font dropdown) rather than
+                  to this far-right button. */}
+              <div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2594,7 +2596,12 @@ function avoidElement(panels: Iterable<HTMLElement>, target: DOMRect) {
     p.style.translate = "";
     const pr = p.getBoundingClientRect();
     const overlaps = pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top;
-    if (!overlaps) continue;
+    if (!overlaps) {
+      // Keep menus opened near a screen edge fully visible.
+      if (pr.left < 8) p.style.translate = `${8 - pr.left}px 0`;
+      else if (pr.right > vw - 8) p.style.translate = `${vw - 8 - pr.right}px 0`;
+      continue;
+    }
     const dy = target.top - gap - pr.bottom;
     if (pr.top + dy >= 8) { p.style.translate = `0 ${dy}px`; continue; }
     const dxL = target.left - gap - pr.right;
@@ -2618,7 +2625,7 @@ function ColorPicker({
     <div
       data-submenu="true"
       className={cn(
-        "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[132px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
+        "absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[132px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
         "p-2 grid grid-cols-4 gap-1.5",
       )}
       onClick={(e) => e.stopPropagation()}
@@ -2672,7 +2679,7 @@ function ShapeTypePicker({
   return (
     <div
       data-submenu="true"
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2894,7 +2901,7 @@ export function ShapeColorPicker({
   return (
     <div
       data-submenu="true"
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3109,7 +3116,7 @@ export function StoryboardColorPicker({
   return (
     <div
       data-submenu="true"
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3257,7 +3264,7 @@ function ContainerStylePicker({
   return (
     <div
       data-submenu="true"
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3463,7 +3470,7 @@ function TextColorPicker({
   return (
     <div
       data-submenu="true"
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3603,7 +3610,7 @@ function GradientPicker({
   return (
     <div
       data-submenu="true"
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3824,7 +3831,7 @@ function EmojiPicker({
         "z-[100] pointer-events-auto w-[260px] rounded-xl bg-zinc-900 border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in duration-150 p-2",
         anchored
           ? "absolute top-full left-1/2 -translate-x-1/2 mt-2 text-left"
-          : "absolute right-full top-1/2 -translate-y-1/2 mr-3 slide-in-from-right-2",
+          : "absolute right-full bottom-0 mr-3 slide-in-from-right-2",
       )}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -4041,7 +4048,7 @@ function BoardIconPicker({
   return (
     <div
       data-submenu="true"
-      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 rounded-lg bg-zinc-900 border border-border shadow-xl grid grid-cols-6 gap-1 w-[252px] max-h-[216px] overflow-y-auto"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 rounded-lg bg-zinc-900 border border-border shadow-xl grid grid-cols-6 gap-1 w-[252px] max-h-[216px] overflow-y-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       data-prevent-canvas-wheel="true"
@@ -4081,7 +4088,7 @@ function BoardColorPicker({
   return (
     <div
       data-submenu="true"
-      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl grid grid-cols-3 gap-2 w-[133px]"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl grid grid-cols-3 gap-2 w-[133px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -4126,7 +4133,7 @@ function FileViewSubmenu({
   return (
     <div
       data-submenu="true"
-      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[120px]"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[120px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -4179,7 +4186,7 @@ function ExperienceViewSubmenu({
   return (
     <div
       data-submenu="true"
-      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[140px]"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[140px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >

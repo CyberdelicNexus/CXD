@@ -607,61 +607,27 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 </div>
               </div>
 
-              {/* Stats & Quick Actions — small equal-size squares, inline in
-                  this same row (statistics are useful but not essential, so
-                  they stay compact rather than taking their own row/column) */}
-              <div className="hidden lg:flex items-center gap-2 2xl:gap-3 min-w-0">
-                <div className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 flex flex-col items-center justify-center gap-1 transition-all group" title="Total Maps">
-                  <Layers className="w-5 h-5 2xl:w-6 2xl:h-6 text-violet-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-base 2xl:text-xl font-bold text-white leading-none">{totalProjects}</span>
-                </div>
-                <div className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-cyan-500/10 hover:border-cyan-500/30 flex flex-col items-center justify-center gap-1 transition-all group" title="Active this week">
-                  <TrendingUp className="w-5 h-5 2xl:w-6 2xl:h-6 text-cyan-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-base 2xl:text-xl font-bold text-white leading-none">
-                    {projects.filter((p) => new Date(p.updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
-                  </span>
-                </div>
-                <div className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 flex flex-col items-center justify-center gap-1 transition-all group" title="Created this month">
-                  <Calendar className="w-5 h-5 2xl:w-6 2xl:h-6 text-purple-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-base 2xl:text-xl font-bold text-white leading-none">
-                    {projects.filter((p) => new Date(p.createdAt).getMonth() === new Date().getMonth()).length}
-                  </span>
-                </div>
-                <div className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 flex flex-col items-center justify-center gap-1 transition-all group" title="Analytics">
-                  <BarChart3 className="w-5 h-5 2xl:w-6 2xl:h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-base 2xl:text-xl font-bold text-white leading-none">—</span>
-                </div>
-
-                <div className="w-px h-10 2xl:h-12 bg-white/10 mx-1.5" />
-
-                <button
-                  className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 hover:from-violet-950/20 flex flex-col items-center justify-center gap-1 transition-all group"
-                  onClick={() => setIsSupportOpen(true)}
-                  title="Support"
-                >
-                  <HelpCircle className="w-5 h-5 2xl:w-6 2xl:h-6 text-violet-400 group-hover:scale-110 transition-transform" />
-                </button>
-                <button
-                  className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 hover:from-purple-950/20 flex flex-col items-center justify-center gap-1 transition-all group"
-                  onClick={() => router.push("/dashboard/docs")}
-                  title="Docs"
-                >
-                  <FileText className="w-5 h-5 2xl:w-6 2xl:h-6 text-purple-400 group-hover:scale-110 transition-transform" />
-                </button>
-                <button
-                  className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 hover:from-emerald-950/20 flex flex-col items-center justify-center gap-1 transition-all group"
-                  onClick={() => router.push("/dashboard/tutorials")}
-                  title="Tutorials"
-                >
-                  <PlayCircle className="w-5 h-5 2xl:w-6 2xl:h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
-                </button>
-                <button
-                  className="w-14 h-14 xl:w-16 xl:h-16 2xl:w-[72px] 2xl:h-[72px] rounded-xl flex-shrink-0 bg-gradient-to-br from-black to-violet-950/50 border border-pink-500/10 hover:border-pink-500/30 hover:from-pink-950/20 flex flex-col items-center justify-center gap-1 transition-all group"
-                  onClick={() => router.push("/changelog")}
-                  title="Changelog"
-                >
-                  <Newspaper className="w-5 h-5 2xl:w-6 2xl:h-6 text-pink-400 group-hover:scale-110 transition-transform" />
-                </button>
+              {/* Help links, centred in the row. Each tile shows its icon and
+                  swaps to its name on hover, so the icons never need guessing. */}
+              <div className="hidden lg:flex flex-1 items-center justify-center gap-2 2xl:gap-3 min-w-0">
+                {[
+                  { label: "Support", icon: HelpCircle, color: "text-violet-400", border: "hover:border-violet-500/40", onClick: () => setIsSupportOpen(true) },
+                  { label: "Docs", icon: FileText, color: "text-purple-400", border: "hover:border-purple-500/40", onClick: () => router.push("/dashboard/docs") },
+                  { label: "Tutorials", icon: PlayCircle, color: "text-emerald-400", border: "hover:border-emerald-500/40", onClick: () => router.push("/dashboard/tutorials") },
+                  { label: "Changelog", icon: Newspaper, color: "text-pink-400", border: "hover:border-pink-500/40", onClick: () => router.push("/changelog") },
+                ].map(({ label, icon: Icon, color, border, onClick }) => (
+                  <button
+                    key={label}
+                    className={`relative w-16 h-16 2xl:w-[72px] 2xl:h-[72px] flex-shrink-0 rounded-xl bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 ${border} hover:from-violet-950/30 transition-all group overflow-hidden`}
+                    onClick={onClick}
+                    aria-label={label}
+                  >
+                    <Icon className={`absolute inset-0 m-auto w-6 h-6 ${color} transition-all duration-200 group-hover:opacity-0 group-hover:scale-75`} />
+                    <span className="absolute inset-0 flex items-center justify-center px-1 text-[11px] 2xl:text-xs font-medium text-white opacity-0 scale-90 transition-all duration-200 group-hover:opacity-100 group-hover:scale-100">
+                      {label}
+                    </span>
+                  </button>
+                ))}
               </div>
 
               {/* Create Button */}

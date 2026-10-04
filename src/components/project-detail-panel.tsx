@@ -6,7 +6,7 @@ import Image from "next/image";
 import {
   Loader2, X, Sparkles, Camera, Check,
   ImagePlus, UserPlus, BarChart3, Pencil, Trash2, Lightbulb, RefreshCw, ChevronRight,
-  Layers, Eye, Radio, Brain, Heart, Globe, Target, Ear, Wind, Apple, Fingerprint,
+  Layers, Eye, Radio, Brain, Heart, Globe, Target,
   ListTodo, Flag, Map as MapIcon, Clock, Shapes,
 } from "lucide-react";
 import { fetchProjectById } from "@/lib/supabase-projects";
@@ -41,9 +41,6 @@ const FACE_ICON: Record<HypercubeFaceTag, React.ComponentType<{ className?: stri
   "Trait Mapping": Heart,
   "Meaning Architecture": Globe,
   "Core": Target,
-};
-const SENSE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
-  visual: Eye, auditory: Ear, olfactory: Wind, gustatory: Apple, haptic: Fingerprint,
 };
 
 const DAY = 86_400_000;
@@ -188,6 +185,7 @@ export function ProjectDetailPanel({
           progress: calculateObjectiveProgress(obj),
           krDone: (obj.keyResults || []).filter((k) => k.completed).length,
           krTotal: (obj.keyResults || []).length,
+          keyResults: (obj.keyResults || []).slice(0, 4).map((k) => ({ text: k.description || "Key result", done: k.completed })),
         })),
     [okrs],
   );
@@ -209,6 +207,7 @@ export function ProjectDetailPanel({
     return counts;
   }, [elements]);
   const facesCovered = HYPERCUBE_FACE_TAGS.filter((t) => faceCounts[t] > 0).length;
+  const faceRank = [...HYPERCUBE_FACE_TAGS].sort((a, b) => faceCounts[b] - faceCounts[a]);
   const contentCount = useMemo(() => elements.filter((e) => e.type !== "line" && e.type !== "connector" && !e.inInbox).length, [elements]);
 
   // Open tasks with a due date, soonest first (overdue sorts to the top).
@@ -226,15 +225,6 @@ export function ProjectDetailPanel({
 
   const concept = project?.intentionCore?.mainConcept || project?.intentionCore?.coreMessage;
 
-  const sensoryBars = useMemo(
-    () =>
-      SENSORY_DOMAINS
-        .map((s) => ({ code: s.code as string, label: s.label, value: project?.sensoryDomains?.[s.code] ?? 0 }))
-        .filter((s) => s.value > 0)
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 5),
-    [project],
-  );
 
   const taskDone = taskStats.total > 0 ? Math.round((taskStats.done / taskStats.total) * 100) : 0;
 
@@ -250,7 +240,10 @@ export function ProjectDetailPanel({
         elementCount: elements.length,
         taggedCount,
         tasks: taskStats,
-        sensory: sensoryBars,
+        // Not shown on the panel, but still useful context for the AI summary.
+        sensory: SENSORY_DOMAINS
+          .map((d) => ({ label: d.label, value: project.sensoryDomains?.[d.code] ?? 0 }))
+          .filter((d) => d.value > 0),
         roadmap: versions.map((v) => ({ name: v.name, status: v.status, type: v.type_label })),
         okrs: okrRows,
       };
@@ -495,13 +488,12 @@ export function ProjectDetailPanel({
           <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(104px, 1fr))" }}>
             {[
               { icon: <Shapes className="w-3.5 h-3.5 text-violet-300" />, value: contentCount, label: "Elements", tone: "text-white" },
-              { icon: <Layers className="w-3.5 h-3.5 text-cyan-300" />, value: `${facesCovered}/${faces.length}`, label: "Faces", tone: facesCovered === faces.length ? "text-emerald-300" : "text-white" },
               { icon: <ListTodo className="w-3.5 h-3.5 text-amber-300" />, value: openTasks, label: "Open tasks", tone: overdueCount > 0 ? "text-rose-300" : "text-white" },
               { icon: <Flag className="w-3.5 h-3.5 text-fuchsia-300" />, value: currentVersion ? currentVersion.name : "—", label: "Version", tone: "text-white" },
             ].map((k, i) => (
               <div key={i} className="rounded-xl border border-violet-500/15 bg-white/[0.03] px-3 py-2.5 min-w-0">
                 <div className="flex items-center gap-1.5">{k.icon}<span className="text-[10px] uppercase tracking-wider text-white/45 truncate">{k.label}</span></div>
-                <p className={`mt-1 text-xl font-semibold leading-none truncate ${k.tone}`}>{k.value}</p>
+                <p className={`mt-1 font-semibold leading-tight truncate ${typeof k.value === "number" ? "text-xl" : "text-sm"} ${k.tone}`}>{k.value}</p>
               </div>
             ))}
           </div>
@@ -557,9 +549,9 @@ export function ProjectDetailPanel({
               )}
             </div>
 
-            {/* Hypercube coverage */}
+            {/* Hypercube balance */}
             <div className={card}>
-              {cardHead(<Layers className="w-3.5 h-3.5 text-cyan-300" />, "Hypercube", <span className="text-[11px] text-white/45">{facesCovered}/{faces.length} faces</span>)}
+              {cardHead(<Layers className="w-3.5 h-3.5 text-cyan-300" />, "Hypercube balance")}
               <div className="relative mx-auto w-full max-w-[210px] aspect-square">
                 <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full overflow-visible">
                   {[0.35, 0.7, 1].map((k) => (
@@ -582,17 +574,24 @@ export function ProjectDetailPanel({
                   return (
                     <span
                       key={t}
-                      title={`${t}: ${faceCounts[t]}`}
-                      className={`absolute -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center border ${has ? "bg-violet-500/25 border-violet-400/50 text-cyan-200" : "bg-white/5 border-white/10 text-white/30"}`}
+                      className={`group/face absolute -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center border cursor-default hover:z-20 ${has ? "bg-violet-500/25 border-violet-400/50 text-cyan-200" : "bg-white/5 border-white/10 text-white/30"}`}
                       style={{ left: `${x}%`, top: `${y}%` }}
                     >
                       <Icon className="w-3 h-3" />
+                      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 whitespace-nowrap rounded-md bg-zinc-900 border border-white/15 px-2 py-1 text-[11px] text-white opacity-0 group-hover/face:opacity-100 transition-opacity">
+                        {t} · {faceCounts[t]} element{faceCounts[t] === 1 ? "" : "s"}
+                      </span>
                     </span>
                   );
                 })}
               </div>
-              <p className="mt-2 text-[11px] text-white/45 text-center">
-                {facesCovered === faces.length ? "Every face has content" : `Missing: ${faces.filter((t) => faceCounts[t] === 0).slice(0, 2).join(", ")}${faces.filter((t) => faceCounts[t] === 0).length > 2 ? "…" : ""}`}
+              <p className="mt-2 text-[11px] leading-snug text-white/50 text-center">
+                {faceCounts[faceRank[0]] === 0
+                  ? "Tag elements on the canvas to see how your design spreads across the faces."
+                  : <>Most developed: <span className="text-white/80">{faceRank[0]}</span>.{" "}
+                    {faceCounts[faceRank[faceRank.length - 1]] === 0
+                      ? <>Not started: <span className="text-white/80">{faces.filter((t) => faceCounts[t] === 0).slice(0, 2).join(", ")}{faces.filter((t) => faceCounts[t] === 0).length > 2 ? "…" : ""}</span>.</>
+                      : <>Lightest: <span className="text-white/80">{faceRank[faceRank.length - 1]}</span>.</>}</>}
               </p>
             </div>
 
@@ -630,52 +629,41 @@ export function ProjectDetailPanel({
               )}
             </div>
 
-            {/* OKRs */}
+            {/* OKRs: each objective is the main item, its key results the sub-items */}
             <div className={card}>
               {cardHead(<Target className="w-3.5 h-3.5 text-emerald-300" />, "OKRs", okrs.length > 0 ? <span className="text-[11px] text-white/45">{okrOverall}% overall</span> : undefined)}
               {objectiveRows.length === 0 ? (
                 <p className="text-xs text-white/40 py-6 text-center">No objectives defined yet.</p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   {objectiveRows.map((o, i) => (
                     <div key={i}>
-                      <div className="flex items-center justify-between gap-2 text-xs">
-                        <span className="truncate text-white/80" title={o.title}>{o.title}</span>
-                        <span className="flex-shrink-0 text-white/50 tabular-nums">{o.krTotal > 0 ? `${o.krDone}/${o.krTotal} KR` : `${o.progress}%`}</span>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Target className="w-3.5 h-3.5 flex-shrink-0 text-emerald-300" />
+                        <span className="truncate font-medium text-white" title={o.title}>{o.title}</span>
+                        <span className="ml-auto flex-shrink-0 text-xs text-white/55 tabular-nums">{o.progress}%</span>
                       </div>
-                      <div className="mt-1.5 h-2 rounded-full bg-white/10 overflow-hidden">
+                      <div className="mt-1.5 ml-[22px] h-1.5 rounded-full bg-white/10 overflow-hidden">
                         <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400" style={{ width: `${o.progress}%` }} />
                       </div>
+                      {o.keyResults.length > 0 && (
+                        <ul className="mt-2 ml-[22px] pl-3 border-l border-white/10 space-y-1">
+                          {o.keyResults.map((k, j) => (
+                            <li key={j} className="flex items-center gap-2 text-xs min-w-0">
+                              <span className={`w-3 h-3 rounded-full border flex-shrink-0 flex items-center justify-center ${k.done ? "bg-emerald-400 border-emerald-300 text-black" : "border-white/30"}`}>
+                                {k.done && <Check className="w-2 h-2" />}
+                              </span>
+                              <span className={`truncate ${k.done ? "text-white/40 line-through" : "text-white/70"}`} title={k.text}>{k.text}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
             </div>
           </div>
-
-          {/* Sensory profile */}
-          {sensoryBars.length > 0 && (
-            <div className={card}>
-              {cardHead(<Eye className="w-3.5 h-3.5 text-sky-300" />, "Sensory profile")}
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
-                {sensoryBars.map((sb) => {
-                  const Icon = SENSE_ICON[sb.code] ?? Eye;
-                  const pct = Math.max(0, Math.min(100, sb.value));
-                  return (
-                    <div key={sb.code} className="flex items-center gap-2.5 min-w-0">
-                      <Icon className="w-3.5 h-3.5 text-sky-300/80 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between text-[11px] text-white/65"><span>{sb.label}</span><span className="tabular-nums">{Math.round(pct)}</span></div>
-                        <div className="mt-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                          <div className="h-full rounded-full bg-gradient-to-r from-sky-500 to-violet-400" style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           {/* AI insights: on-demand (spends credits), collapsed by default */}
           <details className="group rounded-xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20">
