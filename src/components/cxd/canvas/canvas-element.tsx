@@ -413,18 +413,28 @@ export function CanvasElementRenderer({
     if (!isSelected) closeAllSubmenus();
   }, [isSelected, closeAllSubmenus]);
 
-  // Toolbar submenus must never sit on top of the element being edited. After
-  // every render, any open submenu that overlaps the element is slid clear of
-  // it (up first, then sideways). Positions are in screen px; the toolbar is
-  // scaled by 1/zoom, so local offsets are screen px * zoom.
-  useLayoutEffect(() => {
-    const tb = toolbarRef.current;
-    const el = elementRef.current;
-    if (!tb || !el) return;
-    const panels = tb.querySelectorAll<HTMLElement>("[data-submenu]");
-    if (panels.length === 0) return;
-    avoidElement(panels, el.getBoundingClientRect(), canvasZoom);
-  });
+  // Toolbar submenus must never sit on top of the element being edited. While a
+  // submenu is open, every frame any overlapping panel is slid clear of the
+  // element (see avoidElement). A per-frame pass, not a per-render one, because
+  // the toolbar settles and moves without React re-rendering (zoom, pan, drag).
+  const anySubmenuOpen =
+    showColorPicker || showLinkViewMenu || showEmojiPicker || showBoardIconPicker ||
+    showBoardColorPicker || showExperienceViewMenu || showTaskPriorityMenu;
+  useEffect(() => {
+    if (!anySubmenuOpen) return;
+    let raf = 0;
+    const tick = () => {
+      const tb = toolbarRef.current;
+      const el = elementRef.current;
+      if (tb && el) {
+        const panels = tb.querySelectorAll<HTMLElement>("[data-submenu]");
+        if (panels.length) avoidElement(panels, el.getBoundingClientRect());
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [anySubmenuOpen]);
 
   // The tag menu closes on any press outside the badge/menu (including on the
   // element itself, which the generic handler below deliberately ignores).
@@ -2570,19 +2580,27 @@ function RotationHandle({
 }
 
 // Color picker popover - always opens below the toolbar
-/** Slides each panel clear of `target` (screen rect): up first, then left, then right. */
-function avoidElement(panels: Iterable<HTMLElement>, target: DOMRect, zoom: number) {
+/**
+ * Slides each panel clear of `target` (screen rect): up first, then left, then
+ * right, but only to a spot that is fully on screen. When the element is so big
+ * (zoomed in) that no such spot exists, the panel stays where it opened rather
+ * than being pushed off screen. Toolbar and content layer scale cancel out
+ * (zoom * 1/zoom), so local translate px equal screen px.
+ */
+function avoidElement(panels: Iterable<HTMLElement>, target: DOMRect) {
   const gap = 10;
+  const vw = window.innerWidth;
   for (const p of Array.from(panels)) {
     p.style.translate = "";
     const pr = p.getBoundingClientRect();
     const overlaps = pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top;
     if (!overlaps) continue;
     const dy = target.top - gap - pr.bottom;
-    if (pr.top + dy >= 8) { p.style.translate = `0 ${dy * zoom}px`; continue; }
-    let dx = target.left - gap - pr.right;
-    if (pr.left + dx < 8) dx = target.right + gap - pr.left;
-    p.style.translate = `${dx * zoom}px 0`;
+    if (pr.top + dy >= 8) { p.style.translate = `0 ${dy}px`; continue; }
+    const dxL = target.left - gap - pr.right;
+    if (pr.left + dxL >= 8) { p.style.translate = `${dxL}px 0`; continue; }
+    const dxR = target.right + gap - pr.left;
+    if (pr.right + dxR <= vw - 8) { p.style.translate = `${dxR}px 0`; continue; }
   }
 }
 

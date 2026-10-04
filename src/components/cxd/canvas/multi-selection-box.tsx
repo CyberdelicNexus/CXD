@@ -101,25 +101,35 @@ export function MultiSelectionBox({
   // Cycling alignment modes: each click cycles to the next mode
   const [showAlignMenu, setShowAlignMenu] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  // Toolbar popovers must not sit on top of the selection they edit: after each
-  // render, slide any open one clear of the selection box (up, else sideways).
-  // Local offsets are screen px * zoom because the toolbar is scaled by 1/zoom.
+  // Toolbar popovers must not sit on top of the selection they edit: while one is
+  // open, every frame slide any overlapping panel clear of the selection box
+  // (up, else left, else right; only to a fully visible spot).
   useEffect(() => {
-    const tb = toolbarRef.current;
-    const box = document.querySelector("[data-multi-selection-box]");
-    if (!tb || !box) return;
-    const target = box.getBoundingClientRect();
-    tb.querySelectorAll<HTMLElement>("[data-submenu]").forEach((p) => {
-      p.style.translate = "";
-      const pr = p.getBoundingClientRect();
-      if (!(pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top)) return;
-      const dy = target.top - 10 - pr.bottom;
-      if (pr.top + dy >= 8) { p.style.translate = `0 ${dy * canvasZoom}px`; return; }
-      let dx = target.left - 10 - pr.right;
-      if (pr.left + dx < 8) dx = target.right + 10 - pr.left;
-      p.style.translate = `${dx * canvasZoom}px 0`;
-    });
-  });
+    if (!showColorPicker && !showAlignMenu) return;
+    let raf = 0;
+    const tick = () => {
+      const tb = toolbarRef.current;
+      const box = document.querySelector("[data-multi-selection-box]");
+      if (tb && box) {
+        const target = box.getBoundingClientRect();
+        const vw = window.innerWidth;
+        tb.querySelectorAll<HTMLElement>("[data-submenu]").forEach((p) => {
+          p.style.translate = "";
+          const pr = p.getBoundingClientRect();
+          if (!(pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top)) return;
+          const dy = target.top - 10 - pr.bottom;
+          if (pr.top + dy >= 8) { p.style.translate = `0 ${dy}px`; return; }
+          const dxL = target.left - 10 - pr.right;
+          if (pr.left + dxL >= 8) { p.style.translate = `${dxL}px 0`; return; }
+          const dxR = target.right + 10 - pr.left;
+          if (pr.right + dxR <= vw - 8) p.style.translate = `${dxR}px 0`;
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [showColorPicker, showAlignMenu]);
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState<{

@@ -273,7 +273,7 @@ function isValidUUID(str: string): boolean {
  */
 export async function updateProjectMetadata(
   projectId: string,
-  updates: { name?: string; description?: string; coverImage?: string }
+  updates: { name?: string; description?: string; coverImage?: string; coverPosition?: { x: number; y: number } }
 ): Promise<boolean> {
   if (!projectId || !isValidUUID(projectId)) return false;
 
@@ -301,6 +301,7 @@ export async function updateProjectMetadata(
   // pattern was a last-write-wins race).
   const jsonPatch: Record<string, any> = {};
   if (updates.coverImage !== undefined) jsonPatch.coverImage = updates.coverImage;
+  if (updates.coverPosition !== undefined) jsonPatch.coverPosition = updates.coverPosition;
   if (updates.name !== undefined) jsonPatch.name = updates.name;
   if (updates.description !== undefined) jsonPatch.description = updates.description;
 

@@ -1015,3 +1015,9 @@
     );
   }
 }
+
+/* Toolbar submenus are measured and slid clear of their element in JS; an
+   entrance transform animation would make that measurement drift mid-flight. */
+[data-submenu] {
+  animation: none !important;
+}
