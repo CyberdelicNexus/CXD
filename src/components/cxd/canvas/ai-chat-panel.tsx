@@ -278,8 +278,12 @@ export function AIChatPanel({
   });
 
   // Auto-scroll when new messages arrive or streaming
+  // The first pass (opening the panel with existing history) jumps straight to
+  // the end instead of visibly scrolling the whole conversation past.
+  const hasAutoScrolledRef = useRef(false);
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({ behavior: hasAutoScrolledRef.current ? "smooth" : "auto" });
+    if (messages.length > 0) hasAutoScrolledRef.current = true;
   }, [messages, isStreaming]);
 
   // Layer 2: Populate input from enriched insight context

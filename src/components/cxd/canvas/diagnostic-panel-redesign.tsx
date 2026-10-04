@@ -382,7 +382,7 @@ export function DiagnosticPanelRedesign({
       <button
         onClick={onToggle}
         className={cn(
-          "fixed left-0 top-20 z-50 p-2 rounded-r-lg backdrop-blur-xl border border-l-0 border-border shadow-lg transition-all duration-300",
+          "fixed left-0 top-20 z-50 p-2 rounded-r-lg backdrop-blur-xl border border-l-0 border-border shadow-lg transition-all duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           isOpen && "left-80"
         )}
         style={{ backgroundColor: panelBgColor }}
@@ -398,7 +398,7 @@ export function DiagnosticPanelRedesign({
       {/* Panel */}
       <div
         className={cn(
-          "fixed left-0 top-16 h-[calc(100vh-4rem)] w-80 backdrop-blur-xl border-r border-border shadow-2xl overflow-hidden flex flex-col z-40 transition-transform duration-300",
+          "fixed left-0 top-16 h-[calc(100vh-4rem)] w-80 backdrop-blur-xl border-r border-border shadow-2xl overflow-hidden flex flex-col z-40 transition-transform duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           !isOpen && "-translate-x-full"
         )}
         style={{ backgroundColor: panelBgColor }}

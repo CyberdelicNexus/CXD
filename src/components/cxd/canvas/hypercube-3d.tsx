@@ -1992,6 +1992,17 @@ export function Hypercube3D({
     return () => window.clearTimeout(t);
   }, [hasSelection]);
 
+  // The chat then fades in a beat after the drawer has settled.
+  const [chatFaded, setChatFaded] = useState(false);
+  useEffect(() => {
+    if (!selectionReady) {
+      setChatFaded(false);
+      return;
+    }
+    const t = window.setTimeout(() => setChatFaded(true), 350);
+    return () => window.clearTimeout(t);
+  }, [selectionReady]);
+
   const cubePosition = useMemo(() => {
     const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
 
@@ -2775,12 +2786,14 @@ export function Hypercube3D({
         <div
           // overflow must be fully visible: with overflow-y-auto the browser
           // forces overflow-x to auto too, clipping the Wizard button's glow.
-          className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30 items-start p-2 transition-[left] duration-300 ease-out overflow-visible"
+          className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30 items-start p-2 transition-[left] duration-[900ms] ease-[cubic-bezier(0.55,0,0.2,1)] overflow-visible"
           style={{
             // Always visible. Sits just right of the System Insights drawer when
             // it's open; keeps a small left margin (not flush) when it's hidden.
             left:
-              isPanelOpen && hasSelection && selectionReady
+              // On selecting, the rail glides ONCE to where it will sit beside the
+              // System Insights drawer; the drawer then slides in to meet it.
+              isPanelOpen && hasSelection
                 ? 336
                 : hasSelection
                   ? 20
@@ -3614,7 +3627,10 @@ export function Hypercube3D({
 
         {/* CENTER PANEL - AI Chatbot + Tagged Elements (bottom-right dock) */}
         {interactionMode === "default" && selectionReady && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
-          <div className="absolute inset-0 flex flex-col justify-center pt-[16px] pb-[16px] pointer-events-none z-20">
+          <div
+            className="absolute inset-0 flex flex-col justify-center pt-[16px] pb-[16px] pointer-events-none z-20 transition-[opacity,transform] duration-[800ms] ease-out"
+            style={{ opacity: chatFaded ? 1 : 0, transform: chatFaded ? "translateY(0)" : "translateY(14px)" }}
+          >
             {/* Main Chat Area. Left padding clears the compact icon rail (more
                 when the System Insights drawer is open). Right padding clears
                 the docked minimap cube + its directional arrows, which sit at
