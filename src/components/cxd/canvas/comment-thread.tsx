@@ -131,12 +131,23 @@ export function CommentThreadPanel({
         top: thread.root.position.y,
         transform: `scale(${pinScale}) translateX(40px)`,
         transformOrigin: "0 0",
-        zIndex: 9991,
+        // Above connector/edge layers (they can reach ~2e9), or lines draw through the panel.
+        zIndex: 2147483000,
       }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="w-72 rounded-xl border border-white/10 bg-[rgba(12,10,22,0.97)] backdrop-blur-xl shadow-2xl overflow-visible">
+      <div
+        className="w-72 rounded-xl border border-violet-300/15 backdrop-blur-xl overflow-visible"
+        style={{
+          // Depth instead of a flat slab: violet-tinted top fading to near black,
+          // a faint inner highlight along the top edge, and a soft violet halo.
+          background:
+            "radial-gradient(120% 70% at 15% 0%, rgba(124,58,237,0.22) 0%, rgba(124,58,237,0) 60%), linear-gradient(165deg, rgba(34,20,58,0.98) 0%, rgba(14,10,26,0.985) 52%, rgba(5,4,12,0.995) 100%)",
+          boxShadow:
+            "0 18px 50px rgba(0,0,0,0.65), 0 0 40px rgba(124,58,237,0.14), inset 0 1px 0 rgba(255,255,255,0.07)",
+        }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
           <span className="text-xs font-medium text-white/50">

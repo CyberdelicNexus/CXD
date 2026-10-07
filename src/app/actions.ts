@@ -92,7 +92,18 @@ export const signInAction = async (formData: FormData) => {
 
   if (error) {
     const params = redirectTo ? `?redirectTo=${encodeURIComponent(redirectTo)}` : "";
-    return encodedRedirect("error", `/sign-in${params}`, error.message);
+    // When the auth server times out or fails (e.g. the database is overloaded)
+    // supabase-js can hand back a message of "{}" or nothing, which used to be
+    // shown to the user verbatim. Say what is actually going on instead.
+    const msg = (error.message || "").trim();
+    const unreachable = !msg || msg === "{}" || ((error as { status?: number }).status ?? 0) >= 500;
+    return encodedRedirect(
+      "error",
+      `/sign-in${params}`,
+      unreachable
+        ? "We can't reach the sign-in service right now. Your data is safe. Please try again in a few minutes."
+        : msg,
+    );
   }
 
   return redirect(redirectTo || "/dashboard");

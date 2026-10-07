@@ -8,6 +8,11 @@ const path = require('path');
 // after switching between `npm run dev` and `npm run build`.
 const distDir = process.env.NODE_ENV === 'production' ? '.next' : '.next-dev';
 
+// The Vercel preview toolbar (comments/feedback) only exists on preview deployments.
+const isPreview = process.env.VERCEL_ENV === 'preview';
+const vercelLive = isPreview ? ' https://vercel.live' : '';
+const vercelLiveWs = isPreview ? ' https://vercel.live wss://ws-us3.pusher.com https://sockjs-us3.pusher.com' : '';
+
 const nextConfig = {
     distDir,
     // Keep stale pages in memory longer during dev so rapid saves don't evict
@@ -30,7 +35,7 @@ const nextConfig = {
                     // (file-preview PDFs are served from *.supabase.co) + arbitrary https
                     // origins (the canvas "embed" link mode iframes user-supplied URLs).
                     // media-src: Supabase storage powers file-preview <video>/<audio>.
-                    { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: data: https://*.supabase.co; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://generativelanguage.googleapis.com https://api.anthropic.com https://integrate.api.nvidia.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io; frame-src 'self' https:; object-src 'none'; base-uri 'self';" },
+                    { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com" + vercelLive + "; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: data: https://*.supabase.co; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://generativelanguage.googleapis.com https://api.anthropic.com https://integrate.api.nvidia.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io" + vercelLiveWs + "; frame-src 'self' https:; object-src 'none'; base-uri 'self';" },
                 ],
             },
         ];
