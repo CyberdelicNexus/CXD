@@ -111,8 +111,13 @@ async function processProject(id: string): Promise<void> {
     element_count: beforeEls,
     edge_count: beforeEdges,
   });
-  if (snapErr) throw new Error(`ABORT: snapshot failed: ${snapErr.message}`);
-  console.log(`  backup: ${backupFile} + cxd_project_snapshots row`);
+  if (snapErr) {
+    // Multi-tens-of-MB rows can exceed the API payload/statement limits. The local
+    // JSON copy above is already on disk, so continue but say so loudly.
+    console.warn(`  ! DB snapshot failed (${snapErr.message}); continuing with the local backup only: ${backupFile}`);
+  } else {
+    console.log(`  backup: ${backupFile} + cxd_project_snapshots row`);
+  }
 
   // 2. Upload
   const map = new Map<string, string>();
@@ -136,12 +141,16 @@ async function processProject(id: string): Promise<void> {
   }
   doc.destroy();
 
-  const { error: saveErr } = await admin
+  const { data: saved, error: saveErr } = await admin
     .from('cxd_projects')
     .update({ yjs_state: base64, project_data: newProjectData })
     .eq('id', id)
-    .eq('updated_at', row.updated_at as string); // fail if a tab saved in the meantime
+    .eq('updated_at', row.updated_at as string) // fail if a tab saved in the meantime
+    .select('id');
   if (saveErr) throw new Error(`WRITE FAILED (row untouched, backup exists): ${saveErr.message}`);
+  if (!saved || saved.length === 0) {
+    throw new Error('WRITE MATCHED 0 ROWS: the project was saved by someone else since it was read (close all tabs and re-run). Row untouched.');
+  }
   console.log(`  ✓ rewritten: project_data ${mb(JSON.stringify(newProjectData).length)}, yjs_state ${mb(base64.length)}`);
 }
 
