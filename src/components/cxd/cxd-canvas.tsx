@@ -15,6 +15,7 @@ import { CANVAS_OVERLAY_LAYER_ID } from "./canvas/canvas-overlay";
 import { QuickColorFan } from "./canvas/quick-color-fan";
 import { ExportDialog } from "./canvas/export-dialog";
 import { SHAPE_DEFAULT_SIZES } from "@/lib/shape-geometry";
+import { uploadCanvasImage } from "@/lib/canvas-image-upload";
 import { DEFAULT_SHAPE_STYLE } from "@/lib/style-presets";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
 import { LineLayer } from "./canvas/line-layer";
@@ -3411,9 +3412,17 @@ export function CXDCanvas() {
           const file = item.getAsFile();
           if (!file) continue;
           const reader = new FileReader();
-          reader.onload = (evt) => {
-            const src = evt.target?.result as string;
-            if (!src) return;
+          reader.onload = async (evt) => {
+            const dataUri = evt.target?.result as string;
+            if (!dataUri) return;
+            // Prefer a Storage URL: data URIs bloat the project row on every save.
+            // Falls back to the data URI only if the upload fails.
+            const uploaded = await uploadCanvasImage(
+              file,
+              file.name || 'pasted',
+              useCXDStore.getState().uploadMaxBytes,
+            );
+            const src = uploaded?.url ?? dataUri;
             // Read natural dimensions before creating the element so we preserve aspect ratio
             const img = new window.Image();
             img.onload = () => {

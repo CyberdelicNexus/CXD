@@ -332,6 +332,9 @@ export async function updateProjectMetadata(
   const dbUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
   if (updates.name !== undefined) dbUpdate.name = updates.name;
   if (updates.description !== undefined) dbUpdate.description = updates.description;
+  // Real columns the dashboard listing reads (avoids detoasting project_data).
+  if (updates.coverImage !== undefined) dbUpdate.cover_image = updates.coverImage || null;
+  if (updates.coverPosition !== undefined) dbUpdate.cover_position = updates.coverPosition;
 
   if (Object.keys(dbUpdate).length > 1) {
     const { error } = await supabase

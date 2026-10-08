@@ -11,10 +11,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const isListing = searchParams.get('listing') === 'true';
 
-    // For listing mode, use PostgREST column aliasing to extract only coverImage
-    // from the JSONB column, avoiding fetching the full 1-5MB project_data.
+    // Listing mode reads the dedicated cover columns. Never select anything out
+    // of project_data here: even a single JSON key forces Postgres to detoast the
+    // whole multi-MB value for every project.
     const selectFields = isListing
-      ? 'id, owner_id, name, description, share_token, created_at, updated_at, coverImage:project_data->>coverImage'
+      ? 'id, owner_id, name, description, share_token, created_at, updated_at, cover_image, cover_position'
       : '*';
 
     // Check for required environment variable
@@ -99,7 +100,8 @@ export async function GET(request: Request) {
           shareToken: row.share_token || undefined,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
-          coverImage: row.coverImage || undefined,
+          coverImage: row.cover_image || undefined,
+          coverPosition: row.cover_position || undefined,
           _listingOnly: true,
         };
       }
