@@ -10,9 +10,76 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.5.0',
+    date: 'October 11, 2026',
+    isLatest: true,
+    changes: [
+      {
+        category: 'feature',
+        description: 'Canvas Assistant (beta) — describe what you need and the assistant draws it as a real diagram: flows, loops, mind maps, spines, tables, quadrants and more. It can also rename, restyle, tag, group, connect and delete what is already on the board, turn notes into Plan tasks, and review your canvas with comments pinned where work is needed. You always see a preview before anything changes',
+      },
+      {
+        category: 'feature',
+        description: 'Pick the form before anything is drawn — the assistant proposes the diagram forms that fit your request, with a recommendation in front, and select-and-rework redraws a selection while keeping its content and tags. Tidy, connect and redraw tools for a selection use no credits',
+      },
+      {
+        category: 'feature',
+        description: 'Export the board or just a selection as PNG, JPEG or a vector PDF with sharp, selectable text, or copy it as an image ready to paste into an AI chat (Ctrl/Cmd + Shift + E)',
+      },
+      {
+        category: 'feature',
+        description: 'Gradient editor in every colour menu — linear and radial gradients with draggable stops, opacity, angle and centre, plus saved gradients you can reuse as swatches anywhere',
+      },
+      {
+        category: 'feature',
+        description: 'Premium shapes and one text editor — rich text inside shapes, 25 fonts, connectors that end on a shape\'s real outline, a quick colour fan after placing an element, and a 280-emoji picker for notes and documents',
+      },
+      {
+        category: 'feature',
+        description: 'Groups you can drill into (Ctrl/Cmd + G to group, click again to select inside), a compact selection toolbar, one Align menu with distribute, focus mode (Ctrl/Cmd + .) and a pinned inbox note',
+      },
+      {
+        category: 'feature',
+        description: 'Free plan now gates capacity instead of features — every Plan view and the Quickstart templates are unlocked on Free, with 1 canvas, 100 objects and 25 AI credits a month',
+      },
+      {
+        category: 'feature',
+        description: 'Teams of up to 5 collaborators per canvas on Pro and Lifetime (was 3), with smoother live cursors while following a teammate',
+      },
+      {
+        category: 'improvement',
+        description: 'Dashboard — your cover image now runs edge to edge behind the navigation bar, projects are larger in a two-column grid, and the right column always shows an overview of the selected project (your most recent canvas by default) with tasks, hypercube balance, roadmap and OKRs. Tutorials and the Changelog live in the navbar, and a project\'s cover can be repositioned from its overview',
+      },
+      {
+        category: 'improvement',
+        description: 'Hypercube Map — a larger cube, hover a face to preview it with an info card, face-coloured tag icons, and a smoother transition when you select a face. A tag badge on every canvas element replaces the toolbar tag button',
+      },
+      {
+        category: 'improvement',
+        description: 'Canvas comments glow violet and their thread panel sits above connector lines; toolbar menus stay clear of the element you are editing at any zoom; rename a board by double-clicking its breadcrumb',
+      },
+      {
+        category: 'improvement',
+        description: 'Faster, lighter projects — pasted images are stored as files instead of inside the project, so the dashboard and large canvases load quicker',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed edits being silently reverted on load and edits made mid-save being dropped, and the canvas now waits for the project to load before showing',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed reordering Experience Flow stages breaking the canvas, a crash when duplicating a multi-selection, duplicate connectors from a single drag, and shapes whose text could only be edited once',
+      },
+      {
+        category: 'bugfix',
+        description: 'Fixed containers stretching to fit far-away elements, text boxes jittering while typing, and display fonts not loading in production',
+      },
+    ],
+  },
+  {
     version: '1.4.0',
     date: 'July 22, 2026',
-    isLatest: true,
+    isLatest: false,
     changes: [
       {
         category: 'feature',
