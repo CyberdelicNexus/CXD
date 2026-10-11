@@ -10,6 +10,8 @@ export interface CanvasInventoryItem {
   id: string;
   type: string;
   title: string;
+  /** Text beyond the title (note body, further lines, table rows). */
+  text?: string;
   x: number;
   y: number;
   width: number;
@@ -24,6 +26,8 @@ export interface CanvasInventory {
   truncated: boolean;
   selectedIds: string[];
   elements: CanvasInventoryItem[];
+  /** Connectors between listed elements, by id. */
+  connections?: { from: string; to: string; label?: string }[];
 }
 
 // ─── Sanitized proposal (server → client) ──────────────────────────
@@ -49,6 +53,8 @@ export interface UpdatePatch {
   noteBody?: string;
   tintColor?: "violet" | "ocean" | "emerald" | "sunset" | "rose" | "glacier";
   shapeType?: string;
+  /** Containers: hide the title bar so the container is a bare outline frame. */
+  hideLabel?: boolean;
 }
 
 export type SemanticOp =

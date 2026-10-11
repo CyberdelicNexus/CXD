@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import type { CanvasElement, FreeformElement, HypercubeFaceTag } from '@/types/canvas-elements';
 import { FACE_DISPLAY_NAMES } from '@/lib/display-utils';
+import { TINT_GRADIENTS } from '@/lib/ai/element-generation';
 
 export interface NoteCreationOptions {
   chatMessageId: string;
@@ -84,7 +85,7 @@ export async function createNoteFromAI(
       hypercubeTags,
       inInbox: true, // Mark as inbox item - not yet placed on canvas
       style: {
-        bgColor: "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
+        bgColor: TINT_GRADIENTS.violet,
         textColor: "#ffffff",
       },
     };

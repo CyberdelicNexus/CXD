@@ -136,7 +136,11 @@ Each automatic handoff is a "no other tool does this" moment. Current state:
 - **Wizard → Canvas**: `framingToCanvas(project)` (`src/lib/framing-to-canvas.ts`) turns
   wizard answers into tagged containers + text, inserted on `completeWizard()` via
   `addCanvasElements`, guarded once per project by the `framingCanvasPopulated` meta flag.
-- **AI → Canvas**: `/api/ai/generate-elements` + "Draft on Canvas" in the AI chat action bar.
+- **AI → Canvas**: `/api/ai/generate-elements` + "Draft diagram" in the AI chat action bar, and
+  `/api/ai/canvas-operations` for typed instructions + "Apply to canvas". Both embed one
+  composition skill (`src/lib/ai/canvas-skill.ts`): diagrams built from shape nodes, floating
+  role-styled text and untitled outline frames, with note cards reserved for long-form writing.
+  Read `.claude/skills/cxd-canvas/SKILL.md` before changing what the assistant draws.
 - **AI-suggested tagging**: `/api/ai/suggest-tags` + "Suggest tags" in the Map view
   (propose-only review panel). Fills the Hypercube for hand-made canvas elements.
 - **Canvas ↔ Plan**: bidirectional task/element sync (kanban + Gantt). Known hardening

@@ -10,7 +10,7 @@
 import type { CanvasElement, CanvasEdge, HypercubeFaceTag } from '@/types/canvas-elements';
 import { useCXDStore } from '@/store/cxd-store';
 import { elementsBoundingBox } from '@/lib/framing-to-canvas';
-import { layoutDraftElements, findClearGroupOrigin, type BoundingBox } from '@/lib/ai/draft-layout';
+import { layoutDraftElements, findClearGroupOrigin, connectorsThroughNodes, type BoundingBox } from '@/lib/ai/draft-layout';
 import { FACE_DISPLAY_NAMES } from '@/lib/display-utils';
 
 export interface ElementGenerationOptions {
@@ -67,7 +67,7 @@ export async function generateElementsFromPrompt(
     }
 
     const elements = (data as { elements?: CanvasElement[] }).elements || [];
-    const edges = (data as { edges?: CanvasEdge[] }).edges || [];
+    const allEdges = (data as { edges?: CanvasEdge[] }).edges || [];
     if (elements.length === 0) {
       return { success: false, count: 0, error: 'No elements generated' };
     }
@@ -83,7 +83,14 @@ export async function generateElementsFromPrompt(
     // container + its children becomes a grouped column, loose elements
     // flow into a grid, all shelf-packed with generous gaps. When the model
     // emitted connectors, this becomes a radial mind map instead.
-    const laidOut = layoutDraftElements(elements, edges);
+    const laidOut = layoutDraftElements(elements, allEdges);
+    // A connector the canvas can only draw straight through the diagram is
+    // worse than no connector (see connectorsThroughNodes).
+    const unroutable = connectorsThroughNodes(laidOut, allEdges);
+    const edges = allEdges.filter((e) => !unroutable.has(e.id));
+    if (unroutable.size > 0) {
+      console.info(`[ElementGeneration] left out ${unroutable.size} connector(s) that would cut through the diagram`);
+    }
     const bbox = elementsBoundingBox(laidOut);
 
     // Then place that group in free space near the current viewport
@@ -113,7 +120,12 @@ export async function generateElementsFromPrompt(
       dy = clearOrigin.y - bbox.minY;
     }
 
-    const hypercubeTags: HypercubeFaceTag[] = (options.sourceFaces || [])
+    // sourceFaces from a face-specific chat is one face and worth carrying. From
+    // the general chat it is every face the answer happened to mention, which
+    // stamped all seven tags on every node of a diagram: that says nothing, so
+    // anything broader than two faces is dropped.
+    const faces = options.sourceFaces || [];
+    const hypercubeTags: HypercubeFaceTag[] = (faces.length <= 2 ? faces : [])
       .filter((face) => TAGGABLE_FACES.includes(face))
       .map((face) => FACE_DISPLAY_NAMES[face] as HypercubeFaceTag)
       .filter(Boolean);

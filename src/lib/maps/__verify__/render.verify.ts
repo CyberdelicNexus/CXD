@@ -137,10 +137,10 @@ check("the title renders larger and bolder than a heading, in bold",
 }
 const swatch = els.find((e): e is ShapeElement => e.id === legend[0]?.swatchId);
 // ShapeCard strokes in a 100-unit viewBox stretched to the element: borderWidth 2
-// on a 20px swatch is a 0.4px hairline. The disc is opaque in the tint's card
-// colour (card gradient midpoint = portal hex) and ringed in its accent.
-check("legend swatch is an opaque disc in the card colour with a visible accent ring",
-  swatch?.style?.bgColor === BOARD_HEX_COLORS.rose && TINT_GRADIENTS.rose.includes(BOARD_HEX_COLORS.rose)
+// on a 20px swatch is a 0.4px hairline. The disc is opaque in the tint's portal
+// hex colour and ringed in its accent.
+check("legend swatch is an opaque disc in the portal colour with a visible accent ring",
+  swatch?.style?.bgColor === BOARD_HEX_COLORS.rose
   && swatch?.style?.borderColor === TINT_ACCENTS.rose && (swatch?.style?.borderWidth ?? 0) * LEGEND.swatch / 100 >= 2);
 { // A canvas snapshot: TextCard auto-grows the label; readLegend still pairs it by position.
   const grown = els.map((e) => (e.type === "text" && legendIds.has(e.id) ? { ...e, height: 36 } : e));

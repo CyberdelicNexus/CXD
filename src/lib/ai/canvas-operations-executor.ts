@@ -8,7 +8,9 @@ import type { CanvasElement, CanvasEdge, ContainerElement, ElementStyle, Hypercu
 import type { SanitizedProposal, CanvasBatchMutation } from "@/types/ai-operations";
 import type { ExtractedTask } from "@/lib/ai/ai-response-classifier";
 import { buildConnectorEdge } from "./canvas-operations";
+import { TINT_GRADIENTS, TINT_RINGS, TINT_TEXT_GRADIENTS } from "./element-generation";
 import { realBounds, overlaps, GRID_PX, type Box } from "@/lib/canvas-layout-rules";
+import { findClearGroupOrigin } from "./draft-layout";
 
 export interface ApplyPlan {
   batch: CanvasBatchMutation;
@@ -75,7 +77,10 @@ function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): {
   // Only elements that land on the shared canvas can collide with live ones;
   // children of a container created in this same batch travel with it.
   const exposed = created.filter((e) => !e.containerId || !createdIds.has(e.containerId));
-  const liveRoot = live.filter((e) => !e.containerId);
+  // EVERY live element is an obstacle, not only top-level ones. A child that
+  // was dragged out of its frame keeps its containerId, so skipping children
+  // made whole diagrams invisible here and new builds landed on top of them.
+  const liveRoot = live;
 
   const hit = exposed.some((a) => {
     const ab = realBounds(a);
@@ -100,7 +105,14 @@ function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): {
   const dx = snap(liveRight + ZONE_GUTTER - batchLeft);
   const dy = snap(liveTop - batchTop);
 
-  for (const el of created) {
+  shiftElements(created, dx, dy);
+  return { dx, dy };
+}
+
+/** Translate a batch in place, carrying a line's own world-space points with it. */
+function shiftElements(elements: CanvasElement[], dx: number, dy: number): void {
+  if (dx === 0 && dy === 0) return;
+  for (const el of elements) {
     el.x += dx;
     el.y += dy;
     if (el.type === 'line') {
@@ -111,7 +123,75 @@ function relocateIfColliding(created: CanvasElement[], live: CanvasElement[]): {
       if (bent.bend) bent.bend = { x: bent.bend.x + dx, y: bent.bend.y + dy };
     }
   }
-  return { dx, dy };
+}
+
+const boundsOf = (elements: CanvasElement[]): Box | null => {
+  const boxes = elements.map(realBounds).filter((b): b is Box => !!b);
+  if (boxes.length === 0) return null;
+  const x = Math.min(...boxes.map((b) => b.x));
+  const y = Math.min(...boxes.map((b) => b.y));
+  return { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y };
+};
+
+/** A whole diagram, not an addition to existing work. */
+const STANDALONE_MIN_ELEMENTS = 4;
+
+export interface ApplyOptions {
+  /** World-space centre of what the user is looking at. A standalone diagram
+   *  is built there (or in the nearest clear spot) instead of wherever the
+   *  model guessed empty space was. */
+  viewportCenter?: { x: number; y: number };
+  /** The board the user has open (null = root canvas). When given, only what
+   *  is on that board counts as "in the way": elements of other boards, the
+   *  inbox and the hypercube surface share coordinates but not the screen. */
+  boardId?: string | null;
+}
+
+/**
+ * Decide where a freshly generated batch lands. Mutates `created`.
+ * - Replacing something (the same proposal deletes elements): the new batch
+ *   takes the place of what it replaces, so "redo this vertically" does not
+ *   send the diagram across the canvas.
+ * - A standalone diagram with a known viewport: built where the user is looking.
+ * - Otherwise (an addition wired to existing elements, or no viewport): the
+ *   model's position, moved only if it collides.
+ */
+function placeBatch(
+  created: CanvasElement[],
+  edges: CanvasEdge[],
+  live: CanvasElement[],
+  replaced: CanvasElement[],
+  opts: ApplyOptions,
+): { dx: number; dy: number } {
+  const createdIds = new Set(created.map((e) => e.id));
+  const standalone =
+    created.length >= STANDALONE_MIN_ELEMENTS &&
+    edges.every((e) => createdIds.has(e.fromNodeId) && createdIds.has(e.toNodeId));
+  const box = boundsOf(created);
+  const snap = (n: number) => Math.round(n / GRID_PX) * GRID_PX;
+  let dx = 0;
+  let dy = 0;
+
+  if (standalone && box) {
+    const old = boundsOf(replaced);
+    if (old) {
+      dx = snap(old.x - box.x);
+      dy = snap(old.y - box.y);
+    } else if (opts.viewportCenter) {
+      const obstacles = live
+        .map(realBounds)
+        .filter((b): b is Box => !!b)
+        // Padded by the zone gutter so the diagram never lands flush against existing work.
+        .map((b) => ({ minX: b.x - ZONE_GUTTER / 2, minY: b.y - ZONE_GUTTER / 2, maxX: b.x + b.w + ZONE_GUTTER / 2, maxY: b.y + b.h + ZONE_GUTTER / 2 }));
+      const origin = findClearGroupOrigin({ width: box.w, height: box.h }, opts.viewportCenter, obstacles);
+      dx = snap(origin.x - box.x);
+      dy = snap(origin.y - box.y);
+    }
+    shiftElements(created, dx, dy);
+  }
+
+  const bump = relocateIfColliding(created, live);
+  return { dx: dx + bump.dx, dy: dy + bump.dy };
 }
 
 export function translateForApply(
@@ -119,6 +199,7 @@ export function translateForApply(
   selectedRowIds: Set<string>,
   liveElements: CanvasElement[],
   liveEdges: CanvasEdge[],
+  opts: ApplyOptions = {},
 ): ApplyPlan {
   const liveById = new Map(liveElements.map((el) => [el.id, el]));
   const batch: CanvasBatchMutation = {
@@ -146,7 +227,18 @@ export function translateForApply(
     // Clone before relocating: the proposal is React state and must not be
     // mutated by previewing an apply.
     const created = proposal.creates.elements.map((e) => ({ ...e }) as CanvasElement);
-    const shift = relocateIfColliding(created, liveElements);
+    // Elements this same proposal deletes are leaving: they are what the new
+    // batch replaces, not something for it to avoid.
+    const leaving = new Set<string>();
+    for (const op of proposal.ops) {
+      if (op.kind === "delete" && selectedRowIds.has(op.rowId)) op.ids.forEach((id) => leaving.add(id));
+    }
+    const onScreen = opts.boardId === undefined
+      ? liveElements
+      : liveElements.filter((e) => (e.boardId ?? null) === opts.boardId && !e.inInbox && e.surface !== "hypercube");
+    const staying = onScreen.filter((e) => !leaving.has(e.id) && !(e.containerId && leaving.has(e.containerId)));
+    const replaced = liveElements.filter((e) => leaving.has(e.id));
+    const shift = placeBatch(created, proposal.creates.edges, staying, replaced, opts);
     const createdIds = new Set(created.map((e) => e.id));
     batch.addElements.push(...created);
     // Bends are world-space: edges wholly inside the moved batch move with it.
@@ -178,7 +270,15 @@ export function translateForApply(
         if (op.patch.emoji !== undefined && el.type === "freeform") updates.emoji = op.patch.emoji;
         if (op.patch.noteTitle !== undefined && el.type === "freeform") updates.noteTitle = op.patch.noteTitle;
         if (op.patch.noteBody !== undefined && el.type === "freeform") updates.noteBody = op.patch.noteBody;
-        if (op.patch.tintColor !== undefined && el.type === "container") updates.tintColor = op.patch.tintColor;
+        if (op.patch.tintColor !== undefined) {
+          // One colour family, expressed on whichever surface the element has.
+          const style = (el as unknown as { style?: ElementStyle }).style;
+          if (el.type === "container") updates.tintColor = op.patch.tintColor;
+          else if (el.type === "freeform") updates.style = { ...style, bgColor: TINT_GRADIENTS[op.patch.tintColor] };
+          else if (el.type === "shape") updates.style = { ...style, borderColor: TINT_RINGS[op.patch.tintColor], borderWidth: style?.borderWidth ?? 2 };
+          else if (el.type === "text") updates.style = { ...style, bgColor: TINT_TEXT_GRADIENTS[op.patch.tintColor] };
+        }
+        if (op.patch.hideLabel !== undefined && el.type === "container") updates.hideLabel = op.patch.hideLabel;
         if (op.patch.shapeType !== undefined && el.type === "shape") updates.shapeType = op.patch.shapeType;
         // A note card's visible title lives in noteTitle, not label — let a
         // plain "rename this card" instruction land where the user can see it.

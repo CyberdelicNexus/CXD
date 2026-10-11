@@ -55,10 +55,10 @@ export function shapeTintStyle(tint: Tint): ElementStyle {
 }
 
 /**
- * Legend swatch: an opaque disc in the tint's card colour (the midpoint of its
- * card gradient, which is also the portal hex fill) ringed in its accent (the
- * outline of tinted shapes and tables), so it reads as the same colour as
- * every element that uses the tint. ShapeCard strokes in a 100-unit viewBox
+ * Legend swatch: an opaque disc in the tint's portal hex fill ringed in its
+ * accent (the outline of tinted shapes and tables). Note cards are now much
+ * darker than this (TINT_GRADIENTS is near-black by design), so the swatch
+ * matches a tint's portals and rings rather than its card fill. ShapeCard strokes in a 100-unit viewBox
  * stretched to the element, so on a 20px swatch borderWidth 12 is a 2.4px ring.
  */
 export function swatchStyle(tint: Tint): ElementStyle {

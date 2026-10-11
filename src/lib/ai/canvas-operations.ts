@@ -1,4 +1,4 @@
-﻿// Canvas Assistant operation pipeline: zod schema for generateObject, the
+// Canvas Assistant operation pipeline: zod schema for generateObject, the
 // server-side sanitizer that converts raw model rows into a SanitizedProposal
 // (the client never applies raw model output), the prompt guide, and the
 // client-side routing heuristic.
@@ -15,10 +15,14 @@ import {
   type GeneratedElement,
   type GeneratedEdge,
 } from "./element-generation";
+import { CANVAS_COMPOSITION_SKILL } from "./canvas-skill";
+import { connectorsThroughNodes } from "./draft-layout";
 
 const HYPERCUBE_TAG_VALUES = HYPERCUBE_FACE_TAGS as [HypercubeFaceTag, ...HypercubeFaceTag[]];
 
 const MAX_OPS = 40;
+const MAX_NODES = 70;
+const MAX_LINKS = 90;
 const MAX_SUMMARY = 160;
 const MAX_TEXT = 2000;
 const COORD_LIMIT = 50000;
@@ -44,26 +48,57 @@ const COORD_LIMIT = 50000;
 // whereas an absent JSON key is unambiguous. Creates use the typed numbers,
 // where an explicit position is always wanted anyway.
 export const canvasOpRowSchema = z.object({
+  // "create" and "connect" stay valid so recorded proposals still parse, but
+  // the guide sends new elements and connectors to the compact lists instead.
   op: z.enum(["create", "update", "delete", "tag", "group", "connect", "task", "note", "comment"]),
   summary: z.string().describe('Short human-readable description of this change, e.g. "Delete 2 empty cards"'),
   kind: z.enum([
     "container", "text", "shape", "freeform", "image", "line",
     "table", "link", "board", "experienceBlock", "none",
   ])
-    .describe("Element type for op=create ('none' for every other op). Prefer 'freeform' for editable cards."),
-  ref: z.string().describe('op=create: unique short ref, e.g. "c1", "n2". "" otherwise.'),
-  parentRef: z.string().describe('op=create: ref of the container this element sits inside. "" otherwise.'),
+    .describe('Always "none": new elements are written in the nodes list, not here.'),
+  ref: z.string().describe('Always "".'),
+  parentRef: z.string().describe('Always "".'),
   targetIds: z.array(z.string()).describe("Existing element ids from the inventory ONLY. [] when unused."),
-  label: z.string().describe('Container label / note title / group name / edge label / task title, per op. "" when unused.'),
-  content: z.string().describe('Text body, note body, or task description, per op. "" when unused.'),
-  x: z.number().describe("op=create only (0 otherwise)."),
-  y: z.number().describe("op=create only (0 otherwise)."),
-  width: z.number().describe("op=create only (0 otherwise)."),
-  height: z.number().describe("op=create only (0 otherwise)."),
-  fromRef: z.string().describe('op=connect: source element id or ref. "" otherwise.'),
-  toRef: z.string().describe('op=connect: target element id or ref. "" otherwise.'),
+  label: z.string().describe('Frame name / note title / group name / edge label / task title, per op. "" when unused.'),
+  content: z.string().describe('Node text, floating text, note body, or task description, per op. "" when unused.'),
+  x: z.number().describe("Always 0 (move an element through props)."),
+  y: z.number().describe("Always 0."),
+  width: z.number().describe("Always 0."),
+  height: z.number().describe("Always 0."),
+  fromRef: z.string().describe('Always "": connectors are written in the links list.'),
+  toRef: z.string().describe('Always "".'),
   props: z.string()
-    .describe('JSON object string of extras — "{}" when none. e.g. {"emoji":"💡","tint":"violet","addTags":["Sensory Domains"],"priority":"high","x":100}'),
+    .describe('JSON object string of extras — "{}" when none. e.g. {"shapeType":"pill","tint":"emerald","look":"outline"} or {"role":"heading","align":"center"} or {"addTags":["Sensory Domains"],"priority":"high","x":100}'),
+});
+
+// New elements and connectors get their own COMPACT rows. Written as
+// op=create / op=connect rows they carried every one of the 15 fields above,
+// about 80 output tokens each, nearly all of it empty sentinels: a 16-stage
+// flow came to ~5,200 output tokens, 50 seconds on Claude, and on Gemini it
+// overran the output limit and failed outright. Output length is what a build's
+// latency is made of, so these rows hold only what a node or a connector
+// needs (about 45 and 18 tokens). The sanitizer expands them back into the
+// same create/connect rows, so everything downstream is unchanged.
+export const canvasNodeRowSchema = z.object({
+  ref: z.string().describe('Unique short ref for this new element, e.g. "n1", "t2", "f1".'),
+  kind: z.enum(["shape", "text", "container", "freeform", "table", "image", "link", "board", "experienceBlock", "line"]),
+  shape: z.enum([...SHAPE_TYPES, "none"]).describe('Shape type when kind is "shape"; "none" otherwise.'),
+  tint: z.enum([...TINT_COLORS, "none"]).describe('Colour family; "none" to inherit the default.'),
+  parent: z.string().describe('ref of the frame this element sits inside; "" for top level.'),
+  text: z.string().describe("The element's visible text: node label, floating text, frame name, note title, link or portal title."),
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+  props: z.string().describe('JSON object string of extras; "{}" when none.'),
+});
+
+export const canvasLinkRowSchema = z.object({
+  from: z.string().describe("Source: a node ref from this answer, or an existing element id from the inventory."),
+  to: z.string().describe("Target: a node ref from this answer, or an existing element id from the inventory."),
+  label: z.string().describe('1-3 words, only when the relationship is not obvious; "" otherwise.'),
+  props: z.string().describe('JSON object string of styling; "{}" for the default.'),
 });
 
 // NOTE: no .min()/.max() on any array in a generateObject schema. Anthropic's
@@ -72,11 +107,18 @@ export const canvasOpRowSchema = z.object({
 // Claude users. Bounds are enforced in sanitizeCanvasOperations instead.
 export const canvasOperationsSchema = z.object({
   reply: z.string().describe("1-3 sentence explanation of the proposed changes, shown to the user"),
-  operations: z.array(canvasOpRowSchema).describe(`At most ${MAX_OPS} operations.`),
+  nodes: z.array(canvasNodeRowSchema).describe(`Every NEW element. At most ${MAX_NODES}. [] when none.`),
+  links: z.array(canvasLinkRowSchema).describe(`Every NEW connector. At most ${MAX_LINKS}. [] when none.`),
+  operations: z.array(canvasOpRowSchema).describe(`Changes to EXISTING elements, tasks, notes, comments. At most ${MAX_OPS}. [] when none.`),
 });
 
 export type CanvasOpRow = z.infer<typeof canvasOpRowSchema>;
-export type CanvasOperationsRaw = z.infer<typeof canvasOperationsSchema>;
+export type CanvasNodeRow = z.infer<typeof canvasNodeRowSchema>;
+export type CanvasLinkRow = z.infer<typeof canvasLinkRowSchema>;
+type CanvasOperationsFull = z.infer<typeof canvasOperationsSchema>;
+/** `nodes` and `links` are optional on input so proposals recorded before the
+ *  compact rows existed (and hand-written fixtures) still sanitize. */
+export type CanvasOperationsRaw = Pick<CanvasOperationsFull, "reply" | "operations"> & Partial<Pick<CanvasOperationsFull, "nodes" | "links">>;
 
 const clampNum = (v: number | null | undefined, min: number, max: number, fallback: number) =>
   v == null || !Number.isFinite(v) ? fallback : Math.min(Math.max(v, min), max);
@@ -123,7 +165,7 @@ export function sanitizeCanvasOperations(
 
   const createRows: CanvasOpRow[] = [];
   const refConnects: GeneratedEdge[] = [];
-  const mixedConnects: { ref: string; existingId: string; refIsSource: boolean; label: string | null }[] = [];
+  const mixedConnects: { ref: string; existingId: string; refIsSource: boolean; label: string | null; props: string | null }[] = [];
   // Connect rows that produce no row of their own because their edge rides
   // along with the creates batch — kept, not dropped.
   let absorbedConnects = 0;
@@ -131,7 +173,37 @@ export function sanitizeCanvasOperations(
   const nextRowId = () => `row-${++rowSeq}`;
 
   // Telemetry: attempted vs. kept at raw-row granularity (see droppedCount below).
-  const attemptedRows = (raw.operations || []).slice(0, MAX_OPS);
+  // Compact node and link rows expand into the create/connect rows the rest of
+  // this function already understands.
+  const blankRow = { summary: "", targetIds: [], label: "", content: "", x: 0, y: 0, width: 0, height: 0, fromRef: "", toRef: "", ref: "", parentRef: "", props: "{}" };
+  const nodeRows = (raw.nodes || []).slice(0, MAX_NODES);
+  const tintByRef = new Map<string, string>();
+  const expandedNodes: CanvasOpRow[] = nodeRows.map((n) => {
+    const extras = parseProps(n.props);
+    if (n.shape && n.shape !== "none" && extras.shapeType === undefined) extras.shapeType = n.shape;
+    if (n.tint && n.tint !== "none" && extras.tint === undefined) extras.tint = n.tint;
+    if (typeof extras.tint === "string") tintByRef.set(n.ref, extras.tint);
+    const text = n.text || "";
+    return {
+      ...blankRow,
+      op: "create" as const,
+      kind: n.kind,
+      ref: n.ref,
+      parentRef: n.parent || "",
+      label: text,
+      // A note's text is its title; its body, if any, arrives in props.noteBody.
+      content: n.kind === "freeform" ? "" : text,
+      x: n.x, y: n.y, width: n.w, height: n.h,
+      props: JSON.stringify(extras),
+    };
+  });
+  const expandedLinks: CanvasOpRow[] = (raw.links || []).slice(0, MAX_LINKS).map((l) => {
+    const extras = parseProps(l.props);
+    // A connector belongs to the chain it leaves: it takes its source's family.
+    if (extras.gradientName === undefined && tintByRef.has(l.from)) extras.gradientName = tintByRef.get(l.from);
+    return { ...blankRow, op: "connect" as const, kind: "none" as const, fromRef: l.from, toRef: l.to, label: l.label || "", props: JSON.stringify(extras) };
+  });
+  const attemptedRows = [...expandedNodes, ...expandedLinks, ...(raw.operations || []).slice(0, MAX_OPS)];
   let keptNonCreate = 0;
   const DUE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -170,6 +242,7 @@ export function sanitizeCanvasOperations(
         if (tint) patch.tintColor = tint;
         const shapeType = propOneOf(p.shapeType, SHAPE_TYPES);
         if (shapeType) patch.shapeType = shapeType;
+        if (typeof p.titled === "boolean") patch.hideLabel = !p.titled;
         if (Object.keys(patch).length === 0) break;
         // One row covers ALL surviving target ids — the approval checkbox
         // must not silently narrow to just the first id.
@@ -239,6 +312,7 @@ export function sanitizeCanvasOperations(
             existingId: fromExisting ? r.fromRef : r.toRef,
             refIsSource: !fromExisting,
             label: (r.label || "").trim().slice(0, 40) || null,
+            props: r.props ?? null,
           });
           absorbedConnects++;
         }
@@ -330,8 +404,12 @@ export function sanitizeCanvasOperations(
         const newId = converted.idByRef.get(mc.ref);
         if (!newId) continue;
         const [fromId, toId] = mc.refIsSource ? [newId, mc.existingId] : [mc.existingId, newId];
-        converted.edges.push(buildConnectorEdge(fromId, toId, mc.label ?? undefined));
+        converted.edges.push(buildConnectorEdge(fromId, toId, mc.label ?? undefined, mc.props));
       }
+      /* The model is told not to draw connectors across the diagram; when it
+         does anyway, a line scored through every node is worse than none. */
+      const unroutable = connectorsThroughNodes(converted.elements, converted.edges);
+      if (unroutable.size > 0) converted.edges = converted.edges.filter((e) => !unroutable.has(e.id));
       const rowId = nextRowId();
       creates = { rowId, elements: converted.elements, edges: converted.edges };
       rows.push({
@@ -377,44 +455,48 @@ export function isActionableMessage(text: string): boolean {
 export const CANVAS_OPERATIONS_GUIDE = `
 You translate a designer's instruction into a small batch of canvas operations.
 Rules:
-- Emit only operations the instruction asks for. Fewer, precise ops beat many speculative ones. Never exceed ${MAX_OPS}.
+- Do what the instruction asks and nothing it does not: no speculative edits to existing elements. A diagram takes one 'nodes' row per element and one 'links' row per connector (at most ${MAX_NODES} and ${MAX_LINKS}); 'operations' holds at most ${MAX_OPS} rows.
 - 'targetIds', and 'fromRef'/'toRef' when referring to existing elements, must be ids copied EXACTLY from the provided inventory. Never invent ids.
 
-EVERY field must be present on every row. When a field does not apply to the op, send the empty value: "" for strings, [] for targetIds, 0 for x/y/width/height, "none" for kind, "{}" for props.
+YOUR ANSWER HAS THREE LISTS, each [] when unused:
+- 'nodes': every NEW element. 'ref' (unique, like n1, t1, f1), 'kind', 'shape', 'tint', 'parent', 'text' (what it says), 'x', 'y', 'w', 'h', 'props'.
+- 'links': every NEW connector. 'from' and 'to' are node refs from this answer or existing inventory ids (mixing the two is fine), plus 'label' and 'props'.
+- 'operations': changes to EXISTING elements, and tasks, notes and comments.
+EVERY field must be present on every row. When a field does not apply, send the empty value: "" for strings, [] for targetIds, 0 for numbers, "none" for kind/shape/tint, "{}" for props.
 
 FIELD MAPPING (the same few fields mean different things per op):
-- op=create: 'kind' + unique 'ref' (c1, t1, n1...), 'x'/'y'/'width'/'height', optional 'parentRef', 'label', 'content', plus 'props'.
-- op=update: 'targetIds' + 'label'/'content' when those should change. Cannot move an element into or out of a container — use op=group for that. Everything else that should change goes in 'props': {"x":100,"y":200,"width":300,"height":140,"emoji":"🔥","noteTitle":"...","noteBody":"...","tint":"ocean","shapeType":"circle"}. Include ONLY the keys you want changed — omitted keys are left alone. Leave the top-level x/y/width/height at 0 for updates.
+- op=update, delete, tag, group, task, note, comment are the only ops you write in 'operations'. New elements and connectors NEVER go there: they go in 'nodes' and 'links' (below), which are far shorter to write.
+- op=update: 'targetIds' + 'label'/'content' when those should change. Cannot move an element into or out of a container — use op=group for that. Everything else that should change goes in 'props': {"x":100,"y":200,"width":300,"height":140,"emoji":"🔥","noteTitle":"...","noteBody":"...","tint":"ocean","shapeType":"pill","titled":false}. 'tint' recolours a frame, a node's ring or a note's fill; 'titled' shows or hides a container's title bar. Include ONLY the keys you want changed — omitted keys are left alone. Leave the top-level x/y/width/height at 0 for updates.
 - op=group: 'targetIds' + 'label' (the new container's title). This is the ONLY way to put EXISTING elements inside a container — it creates the container, sizes it around them, and reparents them in one step. Do NOT instead emit op=create for a container plus op=update rows: update cannot change an element's parent, so that leaves the elements sitting loose on top of an empty box.
-- op=connect: 'fromRef'/'toRef' + optional 'label' (edge label). Either side may be an existing inventory id OR a ref you create in this same proposal — mixing the two is fine (e.g. connect a zone you just created to an existing card).
+- For every operations row leave 'kind' as "none", 'ref', 'parentRef', 'fromRef', 'toRef' as "" and x/y/width/height as 0.
 - op=task: 'label' is the task title, 'content' the description, props {"priority":"high","dueDate":"2026-09-30"}.
 - op=note: 'content' is the note body.
 - op=comment: 'content' is the review note, 'targetIds' the single element it is about (omit to pin in open space). Use this ONLY when the user asks you to review, critique or leave notes on their canvas — never volunteer comments on a normal change request, and keep them to the few points that genuinely matter.
 - op=tag: 'targetIds' + props {"addTags":[...],"removeTags":[...]}.
 - op=delete: 'targetIds' only.
 
-ELEMENT KINDS for op=create (props is a JSON OBJECT STRING):
-- 'freeform' — the primary editable card. PREFER THIS for any idea, note, or item the designer will work on. ~300x300. props: {"emoji":"💡","noteTitle":"Names the move","noteBody":"Concrete starter content","cardType":"note"}.
-- 'container' — a tinted zone that groups things. 340-480px wide, short 'label'. props: {"tint":"violet"}. Children reference it via parentRef and must sit fully inside with >=24px padding; the top 56px is the header.
-- 'text' — a caption or guidance line, not a card. props: {} .
-- 'shape' — small accent/waypoint, 40-80px. props: {"shapeType":"circle"} (rectangle, circle, diamond, triangle, hexagon, star).
-- 'image' — storyboard frame seed (empty upload slot + caption), ~320x260. props: {"storyboard":true,"description":"caption"}.
-- 'line' — a DIVIDER only, spanning (x,y) to (x+width,y). props: {"gradientName":"violet","widthPx":2}. Never use a line to connect elements — use op=connect.
-- 'table' — a real editable data grid. USE THIS whenever the user asks for a table, matrix, comparison or grid. props: {"cells":[["Header A","Header B"],["row 1a","row 1b"]],"headerRow":true}. Size roughly 160px per column and 48px per row. Never fake a table out of containers and cards.
-- 'link' — a URL bookmark card. props: {"url":"https://...","linkMode":"bookmark"}; 'label' is the title. ~320x120.
-- 'board' — a hexagon portal opening into a nested canvas, for anything deep (research, moodboards, personas). 'label' is its title. props: {"icon":"grid","hexColor":"#4B1B6B"}. Needs ~170x230.
-- 'experienceBlock' — anchors the layout to live framing data. props: {"componentKey":"intentionCore"} — one of intentionCore, desiredChange, humanContext, contextAndMeaning, realityPlanes, sensoryDomains, presenceTypes, stateMapping, traitMapping. Place one at the origin of a flow when the content maps to a framing section.
+WHAT TO BUILD AND HOW IT LOOKS (applies to everything in 'nodes' and 'links'):
+${CANVAS_COMPOSITION_SKILL}
 
-FLOW DIAGRAMS AND MIND MAPS:
-- Nodes are 'freeform' cards (or small 'shape' waypoints: rectangle, circle, diamond, triangle, hexagon, star). Connect them with op=connect, never with 'line'.
-- Style each connector through props: {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end"}. Rotate gradientName per branch so parallel paths read apart.
-- Mind map: one central hub node with branches radiating out. Flow: left-to-right lanes with a diamond shape at each decision point.
+HOW TO EXPRESS IT IN THIS SCHEMA
+- «tint» is the node's 'tint' field and the shape type its 'shape' field (send "none" when not applicable). Everything else type-specific goes in the node's 'props': {"look":"filled"} or {"role":"heading","align":"center"} or {"titled":false}. Send "{}" when there is nothing to add; the outline look is the default and needs no props.
+- A connector is one 'links' row. It takes the colour family of the node it starts from, as a solid arrow, so send props "{}" unless it must differ: {"lineStyle":"dashed"}, {"arrowStyle":"none"}, {"gradientName":"rose"}.
+- A frame's children name it in 'parent'.
 
-HOUSE STYLE (this canvas has a design system):
-- Tints rotate violet -> ocean -> emerald -> sunset -> rose -> glacier; adjacent zones never share a tint.
-- Never leave a new container empty — seed it with at least one freeform note card the designer can edit.
-- Keep new layouts within x 0..2400, y 0..1600, on a 20px grid, and clear of the existing elements in the inventory.
-- Hypercube tags must come from this exact list: ${HYPERCUBE_FACE_TAGS.join(", ")}, set via props {"hypercubeTags":[...]} on containers and top-level elements only, never on children inside a container.
+GEOMETRY (you place every element; px on a 20px grid, measured from an origin you choose in clear space: right of or below everything in the inventory, at least 140px away from it)
+- Sizes are real. A node occupies exactly its width x height. A note card always paints at least 300px tall. Text height follows its content at about 1.3 x fontSize per line.
+- Gaps: at least 120px between connected nodes along the direction of flow (the connector needs room), 60px between stacked nodes, 140px between frames. Nothing may overlap.
+- LOOP of four: pills 260x100 at (0,0) (400,0) (400,240) (0,240), connected 1->2->3->4->1. The loop's name is a heading text at (130,130) width 400 with align center, its caption at (130,166) width 400 with align center.
+- FLOW: pills 260x100 at x = 0, 380, 760 ... on one y, at most 6 per row. For a snake, row 2 is 300px lower (more if row 1 has branches below it) and runs right to left from the same x as the last node of row 1; row 3 runs left to right again. A decision diamond 160x160 sits 30px higher than the pills so the centres line up; its outcomes go to the next column, 160px above and below.
+- SPINE: stage rectangles 160x80 at (0,0) (0,180) (0,360) ...; detail rectangles 320x120 at (280,-20) (280,160) (280,340) ...; connect each stage to the next stage and to its own detail.
+- MIND MAP: hub 240x110 in the centre; branches 220x90 placed 420px to the left/right and 240px above/below; sub-branches a further 320px out.
+- FRAME: children sit fully inside with 32px padding. Put the heading text first at (frame.x+32, frame.y+28); other content starts at frame.y+84. Size the frame to its content plus padding, and never leave one empty.
+- QUADRANTS: four frames 520x360 at (0,0) (560,0) (0,400) (560,400).
+- TITLE BLOCK: title text at the top-left of the layout, its caption 44px below, and the structure starting 120px below the title.
+
+HOUSE RULES
+- Hypercube tags must come from this exact list: ${HYPERCUBE_FACE_TAGS.join(", ")}, set via props {"hypercubeTags":[...]} on frames and top-level elements only, never on children inside a frame.
+- Each inventory item has a 'title' (what it visibly says) and sometimes 'text' (the rest of its content); existing connectors are listed separately. When asked to redraw, rearrange, improve or restyle EXISTING elements, the result must carry their exact titles, their content and their relationships. Never replace them with invented or generic content, and never guess what an element says: if the inventory does not tell you, say so in 'reply' and change nothing.
 - op=delete is destructive: only propose it when the instruction clearly asks for removal, and target exactly what was asked.
 - op=task adds a task to the Plan tab; op=note adds a note card to the canvas Inbox.
 - Every row needs a concise human-readable 'summary' (it becomes a review checkbox the designer approves).

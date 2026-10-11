@@ -105,6 +105,10 @@ const CORPUS: Case[] = [
   { name: "board", instruction: "add a hexagon board portal called Research for deeper material", expectKinds: ["create"] },
   { name: "experience-block", instruction: "anchor an intention core block at the start of the flow", expectKinds: ["create"] },
   { name: "flow-diagram", instruction: "draw a flow diagram: intake, then a decision diamond branching to approve and reject, connected with arrows", expectKinds: ["create"] },
+  // Diagram forms: these used to come back as rows of note cards.
+  { name: "loop", instruction: "draw our capacity building loop: experience, reflect, practise, embody, back to experience", expectKinds: ["create"] },
+  { name: "spine", instruction: "map how a patient discovers the program: discover, understand, assess, enquire, each with the question they are asking", expectKinds: ["create"] },
+  { name: "quadrants", instruction: "position us against retreats, meditation apps and festivals on depth of change versus continuity in daily life", expectKinds: ["create"] },
   { name: "review-comments", instruction: "review my canvas and leave comments on what needs work", expectKinds: ["comment"] },
 ];
 
@@ -122,7 +126,7 @@ async function main() {
   const repeats = Number(process.argv[4] || 1);
 
   const { generateObject } = await import("ai");
-  const { getModelInstance, getModelConfig } = await import("../provider-registry");
+  const { getModelInstance, getModelConfig, structuredCanvasSettings } = await import("../provider-registry");
   const { canvasOperationsSchema, sanitizeCanvasOperations, CANVAS_OPERATIONS_GUIDE } = await import("../canvas-operations");
   const { translateForApply } = await import("../canvas-operations-executor");
   const { checkLayout, tallyByRule } = await import("@/lib/canvas-layout-rules");
@@ -171,7 +175,7 @@ async function main() {
         const result = await generateObject({
           model, system: systemPrompt, prompt: userPrompt,
           schema: canvasOperationsSchema,
-          maxOutputTokens: modelConfig.maxTokens,
+          ...structuredCanvasSettings(provider, modelConfig.maxTokens),
           ...(modelConfig.isReasoning ? {} : { temperature: 0.3 }),
         });
         proposal = sanitizeCanvasOperations(result.object, inventory);

@@ -142,7 +142,9 @@ export function checkLayout(
         el.id,
       );
     }
-    if (opts.includeDesignSystemRules && rb.y < parent.y + CONTAINER_HEADER_PX) {
+    // An untitled frame has no header bar, so nothing is reserved at its top.
+    const untitled = (parent as unknown as { hideLabel?: boolean }).hideLabel === true;
+    if (opts.includeDesignSystemRules && !untitled && rb.y < parent.y + CONTAINER_HEADER_PX) {
       add('container-header', 'warn', `${el.id} sits in ${parent.id}'s reserved ${CONTAINER_HEADER_PX}px header band`, el.id);
     }
   }
@@ -188,8 +190,6 @@ export function checkLayout(
     const children = elements.filter((el) => el.containerId === c.id);
     if (children.length === 0) {
       add('empty-zone', 'warn', `container ${c.id} has no seeded content`, c.id);
-    } else if (!children.some((el) => el.type === 'freeform')) {
-      add('note-seed', 'warn', `container ${c.id} has no editable note card to build on`, c.id);
     }
   }
 

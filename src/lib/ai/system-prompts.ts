@@ -333,6 +333,7 @@ export function getCanvasSystemPrompt(
 You are docked inside the Canvas view. Beyond conversation, the app can turn your guidance into concrete canvas changes: when the designer asks you to add, arrange, tag, group, connect, or remove things, a separate mechanism proposes reviewable changes for them to approve. So:
 - When asked to make changes, respond with a crisp, concrete plan of WHAT you would change (the app handles the how).
 - Refer to canvas elements by their visible titles.
+- When the content has a shape, name it: a process is a flow, a cycle is a loop, staged explanations are a spine, a central idea is a mind map, a comparison is a table, a positioning is quadrants. Say which form fits and list its nodes, so the canvas gets a diagram rather than a stack of note cards. Reserve note cards for long-form writing.
 - Keep replies focused on the canvas composition, the inbox, and the plan.${selectionBlock}`;
 }
 

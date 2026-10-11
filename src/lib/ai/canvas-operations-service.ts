@@ -30,7 +30,11 @@ export async function proposeCanvasOperations(
     const elements = project.canvasLayout?.elements || [];
     const edges = project.canvasLayout?.edges || [];
     const projectContext = getFullProjectContext(project, elements, edges);
-    const inventory = buildCanvasInventory(elements, options.selectedElementIds || []);
+    // The assistant works on the board the user has open: other boards' elements
+    // are not on screen and must not be offered as targets.
+    const activeBoardId = state.activeBoardId ?? null;
+    const visible = elements.filter((el) => (el.boardId ?? null) === activeBoardId && !el.inInbox && el.surface !== "hypercube");
+    const inventory = buildCanvasInventory(visible, options.selectedElementIds || [], edges);
 
     const fullInstruction = options.groundingText
       ? `${instruction.trim()}\n\nGround the changes on this assistant answer:\n${options.groundingText.slice(0, 6000)}`

@@ -24,9 +24,20 @@ import type {
 } from '@/types/canvas-elements';
 import { HYPERCUBE_FACE_TAGS } from '@/types/canvas-elements';
 import { RENDER_FLOORS, realBounds, overlaps, GRID_PX, CONTAINER_HEADER_PX } from '@/lib/canvas-layout-rules';
+import { CANVAS_COMPOSITION_SKILL } from './canvas-skill';
 
 export const TINT_COLORS = ['violet', 'ocean', 'emerald', 'sunset', 'rose', 'glacier'] as const;
-export const SHAPE_TYPES = ['rectangle', 'circle', 'diamond', 'triangle', 'hexagon', 'star'] as const;
+export const SHAPE_TYPES = [
+  'rectangle', 'circle', 'diamond', 'triangle', 'hexagon', 'star',
+  'pill', 'parallelogram', 'cylinder', 'document', 'callout',
+] as const;
+
+type Tint = (typeof TINT_COLORS)[number];
+
+/** How a diagram node is painted (props.look on a shape). */
+export const SHAPE_LOOKS = ['outline', 'filled', 'ghost'] as const;
+/** What a floating text element is for (props.role on a text). */
+export const TEXT_ROLES = ['title', 'heading', 'label', 'caption', 'body'] as const;
 
 // Non-empty tuple form of the canonical face-tag list for z.enum.
 const HYPERCUBE_TAG_VALUES = HYPERCUBE_FACE_TAGS as [HypercubeFaceTag, ...HypercubeFaceTag[]];
@@ -46,7 +57,10 @@ export const generatedElementSchema = z.object({
     .string()
     .nullable()
     .describe('Text content for text elements; short label or emoji for shapes'),
-  tint: z.enum(TINT_COLORS).nullable().describe('Container tint color'),
+  tint: z
+    .enum(TINT_COLORS)
+    .nullable()
+    .describe('Colour family for this element: frame outline, node ring, heading gradient, note fill, portal hex'),
   shapeType: z.enum(SHAPE_TYPES).nullable(),
   hypercubeTags: z
     .array(z.enum(HYPERCUBE_TAG_VALUES))
@@ -67,7 +81,7 @@ export const generatedElementSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'JSON object of extra properties for this kind. freeform: {"emoji":"💡","noteTitle":"...","noteBody":"...","cardType":"note"}. image: {"storyboard":true,"description":"caption"}. line: {"gradientName":"violet","widthPx":2,"kind":"solid"}. Omit or null when not needed.',
+      'JSON object of extra properties for this kind. shape: {"look":"outline","fontSize":16}. text: {"role":"heading","align":"center"}. container: {"titled":false}. freeform: {"emoji":"💡","noteTitle":"...","noteBody":"...","cardType":"note"}. image: {"storyboard":true,"description":"caption"}. line: {"gradientName":"violet","widthPx":2,"kind":"solid"}. Omit or null when not needed.',
     ),
 });
 
@@ -132,11 +146,6 @@ const textStyle: ElementStyle = {
   textColor: 'rgba(255,255,255,0.85)',
 };
 
-const shapeStyle: ElementStyle = {
-  bgColor: 'rgba(139,92,246,0.25)',
-  textColor: '#c084fc',
-};
-
 const clamp = (v: number, min: number, max: number) =>
   Number.isFinite(v) ? Math.min(Math.max(v, min), max) : min;
 
@@ -156,15 +165,97 @@ export const INSPECTOR_SECTION_IDS = [
   'realityPlanes', 'sensoryDomains', 'presenceTypes', 'stateMapping', 'traitMapping',
 ] as const satisfies readonly InspectorSectionId[];
 
-/** Card fill gradients per tint family (templates.design.md §3). */
-export const TINT_GRADIENTS: Record<(typeof TINT_COLORS)[number], string> = {
-  violet: 'linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)',
-  ocean: 'linear-gradient(135deg, #06243D 0%, #0B3D63 50%, #0A2540 100%)',
-  emerald: 'linear-gradient(135deg, #052E22 0%, #0B5138 50%, #052E2E 100%)',
-  sunset: 'linear-gradient(135deg, #3D1405 0%, #6B2E0B 50%, #45150B 100%)',
-  rose: 'linear-gradient(135deg, #3D0A22 0%, #6B1B3E 50%, #3D0B2C 100%)',
-  glacier: 'linear-gradient(135deg, #0A2A3D 0%, #17506B 50%, #10333F 100%)',
+/**
+ * Card fill gradients per tint family (templates.design.md §3). Deliberately
+ * near-black with only a hint of the family hue: a note is a surface to read
+ * text on, and on this canvas the colour belongs to rings, headings and
+ * connectors. The earlier mid-saturation fills glared against the background.
+ */
+export const TINT_GRADIENTS: Record<Tint, string> = {
+  violet: 'linear-gradient(135deg, #140A20 0%, #22113A 55%, #0C162E 100%)',
+  ocean: 'linear-gradient(135deg, #071523 0%, #0C263F 55%, #08172A 100%)',
+  emerald: 'linear-gradient(135deg, #05160F 0%, #0A2B20 55%, #061E1D 100%)',
+  sunset: 'linear-gradient(135deg, #1C0C05 0%, #36190A 55%, #220F0A 100%)',
+  rose: 'linear-gradient(135deg, #1D0813 0%, #371124 55%, #1E0A1A 100%)',
+  glacier: 'linear-gradient(135deg, #0A151E 0%, #122C3A 55%, #0C1B24 100%)',
 };
+
+/** Two-hue outline per tint family: the ring of a diagram node. */
+export const TINT_RINGS: Record<Tint, string> = {
+  violet: 'linear-gradient(135deg, #A855F7, #22D3EE)',
+  ocean: 'linear-gradient(135deg, #60A5FA, #34D399)',
+  emerald: 'linear-gradient(135deg, #34D399, #22D3EE)',
+  sunset: 'linear-gradient(135deg, #F59E0B, #EF4444)',
+  rose: 'linear-gradient(135deg, #F472B6, #A78BFA)',
+  glacier: 'linear-gradient(135deg, #94A3B8, #E2E8F0)',
+};
+
+/** Gradient text per tint family: floating titles and headings. */
+export const TINT_TEXT_GRADIENTS: Record<Tint, string> = {
+  violet: 'linear-gradient(90deg, #A78BFA, #22D3EE)',
+  ocean: 'linear-gradient(90deg, #60A5FA, #34D399)',
+  emerald: 'linear-gradient(90deg, #34D399, #22D3EE)',
+  sunset: 'linear-gradient(90deg, #F97316, #C084FC)',
+  rose: 'linear-gradient(90deg, #C084FC, #F472B6)',
+  glacier: 'linear-gradient(90deg, #E2E8F0, #94A3B8)',
+};
+
+/** Dark node fills per tint family, for look "filled". */
+const TINT_NODE_FILLS: Record<Tint, string> = {
+  violet: 'linear-gradient(135deg, #1B0E2E, #0E1A36)',
+  ocean: 'linear-gradient(135deg, #0A1C30, #0A2A2E)',
+  emerald: 'linear-gradient(135deg, #07201A, #082630)',
+  sunset: 'linear-gradient(135deg, #2A1206, #2A0C10)',
+  rose: 'linear-gradient(135deg, #2A0C1C, #1C1030)',
+  glacier: 'linear-gradient(135deg, #101C26, #18242E)',
+};
+
+/**
+ * Diagram-node styling. `outline` is the house look: a near-black body with a
+ * two-hue ring and bold white text, so a flow reads by its rings and
+ * connectors instead of by slabs of colour. Weights are CSS keywords because
+ * ShapeCard and TextCard pass fontWeight straight to inline CSS, where
+ * "semibold" and "medium" are silently dropped.
+ */
+function nodeStyle(tint: Tint, look: (typeof SHAPE_LOOKS)[number], fontSize: number): ElementStyle {
+  const text = { textColor: '#ffffff', fontSize, fontWeight: 'bold' as const };
+  if (look === 'filled') {
+    return { bgColor: TINT_NODE_FILLS[tint], fillOpacity: 95, borderColor: TINT_RINGS[tint], borderWidth: 2, ...text };
+  }
+  if (look === 'ghost') {
+    return { bgColor: 'transparent', fillOpacity: 0, borderColor: TINT_RINGS[tint], borderWidth: 2, ...text };
+  }
+  return { bgColor: '#0B0E17', fillOpacity: 90, borderColor: TINT_RINGS[tint], borderWidth: 2, ...text };
+}
+
+const TEXT_ROLE_STYLE: Record<
+  (typeof TEXT_ROLES)[number],
+  { fontSize: number; fontWeight: 'normal' | 'bold'; color: string | null }
+> = {
+  title: { fontSize: 30, fontWeight: 'bold', color: null },
+  heading: { fontSize: 20, fontWeight: 'bold', color: null },
+  label: { fontSize: 12, fontWeight: 'bold', color: 'rgba(255,255,255,0.72)' },
+  caption: { fontSize: 13, fontWeight: 'normal', color: 'rgba(255,255,255,0.55)' },
+  body: { fontSize: 14, fontWeight: 'normal', color: 'rgba(255,255,255,0.85)' },
+};
+
+/** Mirrors TextCard: 4px padding and a 1.3 line height (canvas-element.tsx). */
+const TEXT_PAD_PX = 4;
+const TEXT_LINE_HEIGHT = 1.3;
+
+/**
+ * Height a text element paints at for its width. TextCard always grows to its
+ * content, but only writes that height back while the element is selected, so
+ * a model-guessed height leaves every layout calculation disagreeing with the
+ * screen until the user touches it.
+ */
+export function estimateTextHeight(content: string, width: number, fontSize: number, bold = false): number {
+  const charW = fontSize * (bold ? 0.62 : 0.55);
+  const perLine = Math.max(4, Math.floor((width - TEXT_PAD_PX * 2) / charW));
+  let lines = 0;
+  for (const line of (content || '').split('\n')) lines += Math.max(1, Math.ceil(line.length / perLine));
+  return Math.ceil(Math.max(1, lines) * fontSize * TEXT_LINE_HEIGHT) + TEXT_PAD_PX * 2;
+}
 
 /** Parse the model's `props` JSON bag. Malformed input yields an empty bag —
  *  a bad extras blob must never cost us the element itself. */
@@ -301,7 +392,9 @@ export function repairLayout(elements: CanvasElement[]): void {
 
     if (escapes || collide) {
       // Re-stack in one column below the reserved header band.
-      let cursor = c.y + CONTAINER_HEADER_PX + CHILD_GUTTER;
+      // An untitled frame has no header bar to clear.
+      const headerPx = (c as ContainerElement).hideLabel ? 0 : CONTAINER_HEADER_PX;
+      let cursor = c.y + headerPx + CHILD_GUTTER;
       for (const child of children) {
         const b = boxOf(child);
         child.x = snap(c.x + SIDE_PADDING);
@@ -374,12 +467,28 @@ export function generatedToCanvas(
     if (g.kind === 'container') containerRefs.add(g.ref);
   }
 
+  // Frames whose name is already carried by a floating heading inside them.
+  const headedContainerRefs = new Set<string>();
+  for (const g of items) {
+    if (g.kind !== 'text' || !g.parentRef) continue;
+    const role = oneOf(parseProps(g.props).role, TEXT_ROLES);
+    if (role === 'title' || role === 'heading') headedContainerRefs.add(g.parentRef);
+  }
+  // One family for every untinted node in the batch: a flow whose nodes each
+  // took the next colour in the rotation would read as a legend that isn't there.
+  const batchNodeTint: Tint = items.find((g) => g.kind === 'shape' && g.tint)?.tint ?? 'violet';
+
   const elements: CanvasElement[] = [];
   const elementIds = new Set<string>();
+  const tintByContainerRef = new Map<string, Tint>();
   let tintIdx = 0;
 
   for (const g of items) {
     const isChild = !!(g.parentRef && containerRefs.has(g.parentRef) && g.parentRef !== g.ref);
+    const parentTint = isChild ? tintByContainerRef.get(g.parentRef!) : undefined;
+    // The typed field wins; props.tint is accepted too, since that is where the
+    // operations schema carries it and models reuse the habit here.
+    const ownTint: Tint | null = g.tint ?? oneOf(parseProps(g.props).tint, TINT_COLORS) ?? null;
     // Strip tags from children — only containers and top-level elements carry them.
     const tags = isChild ? undefined : sanitizeTags(g.hypercubeTags);
     const base = {
@@ -396,13 +505,23 @@ export function generatedToCanvas(
     };
 
     if (g.kind === 'container') {
+      // A container is an outline frame: its header bar stays hidden and a
+      // floating text heading names it. The header only comes back when the
+      // model asks for it, or when nothing inside would otherwise say what the
+      // frame is ("titled": false is the explicit "just an outline").
+      const p = parseProps(g.props);
+      const tint = ownTint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
+      tintByContainerRef.set(g.ref, tint);
+      const label = (g.label || g.content || '').trim().slice(0, MAX_LABEL_LEN);
+      const titled = bool(p.titled) ?? (!!label && !headedContainerRefs.has(g.ref));
       const container: ContainerElement = {
         ...base,
         type: 'container',
         zIndex: 0,
         containerId: undefined, // no nested containers in v1
-        label: (g.label || g.content || 'Section').slice(0, MAX_LABEL_LEN),
-        tintColor: g.tint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length],
+        label: label || 'Section',
+        hideLabel: !titled,
+        tintColor: tint,
         collapsed: false,
         style: containerStyle,
       };
@@ -410,23 +529,47 @@ export function generatedToCanvas(
     } else if (g.kind === 'text') {
       const content = (g.content || g.label || '').slice(0, MAX_TEXT_LEN);
       if (!content.trim()) continue;
-      const text: TextElement = {
-        ...base,
-        type: 'text',
-        zIndex: 1,
-        content,
-        style: textStyle,
-        textAlign: 'left',
-      };
-      elements.push(text);
+      const p = parseProps(g.props);
+      const role = oneOf(p.role, TEXT_ROLES);
+      const textAlign = oneOf(p.align, ['left', 'center', 'right'] as const) ?? 'left';
+      if (!role) {
+        elements.push({ ...base, type: 'text', zIndex: 1, content, style: textStyle, textAlign } as TextElement);
+      } else {
+        // Floating typography. Titles and headings take the family's gradient
+        // (TextCard paints style.bgColor as background-clip text); the quieter
+        // roles stay neutral so they recede behind the diagram.
+        const rs = TEXT_ROLE_STYLE[role];
+        const gradient = rs.color === null && bool(p.plain) !== true
+          ? TINT_TEXT_GRADIENTS[ownTint ?? parentTint ?? batchNodeTint]
+          : undefined;
+        const text: TextElement = {
+          ...base,
+          height: estimateTextHeight(content, base.width, rs.fontSize, rs.fontWeight === 'bold'),
+          type: 'text',
+          zIndex: 1,
+          content,
+          style: {
+            fontSize: rs.fontSize,
+            fontWeight: rs.fontWeight,
+            textColor: rs.color ?? '#ffffff',
+            ...(gradient ? { bgColor: gradient } : {}),
+          },
+          textAlign,
+        };
+        elements.push(text);
+      }
     } else if (g.kind === 'shape') {
+      const p = parseProps(g.props);
+      const fontSize = typeof p.fontSize === 'number'
+        ? clamp(p.fontSize, 10, 40)
+        : Math.min(base.width, base.height) < 70 ? 12 : base.width >= 200 ? 16 : 14;
       const shape: ShapeElement = {
         ...base,
         type: 'shape',
         zIndex: 1,
-        shapeType: g.shapeType ?? 'rectangle',
+        shapeType: g.shapeType ?? oneOf(p.shapeType, SHAPE_TYPES) ?? 'rectangle',
         content: g.content ? g.content.slice(0, 80) : undefined,
-        style: shapeStyle,
+        style: nodeStyle(ownTint ?? parentTint ?? batchNodeTint, oneOf(p.look, SHAPE_LOOKS) ?? 'outline', fontSize),
       };
       elements.push(shape);
     } else if (g.kind === 'freeform') {
@@ -434,7 +577,7 @@ export function generatedToCanvas(
       // the shape note-creation-service produces so AI notes and user notes are
       // indistinguishable once placed.
       const p = parseProps(g.props);
-      const tint = g.tint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
+      const tint = ownTint ?? parentTint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
       const noteTitle = str(p.noteTitle, MAX_LABEL_LEN) ?? str(g.label, MAX_LABEL_LEN) ?? 'Note';
       const noteBody = str(p.noteBody, MAX_TEXT_LEN) ?? str(g.content, MAX_TEXT_LEN) ?? '';
       const cardType = oneOf(p.cardType, ['note', 'task'] as const) ?? 'note';
@@ -522,7 +665,7 @@ export function generatedToCanvas(
       // minted here; the client registers the matching board record when the
       // batch is applied, so the hexagon always opens into something real.
       const p = parseProps(g.props);
-      const tint = g.tint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
+      const tint = ownTint ?? TINT_COLORS[tintIdx++ % TINT_COLORS.length];
       const board: BoardElement = {
         ...base,
         type: 'board',
@@ -605,21 +748,15 @@ export function generatedToCanvasElements(generated: GeneratedElement[]): Canvas
 
 /** Canvas conventions the model must follow, appended to the system prompt. */
 export const CANVAS_GENERATION_GUIDE = `
-You generate elements for a spatial design canvas. Rules:
-- Coordinates are absolute pixels; (0,0) is the top-left of the area you lay out. Keep everything within x 0..2400, y 0..1600 unless more room is genuinely needed.
-- Containers are tinted section boxes: typically 340-480px wide, 260-600px tall, with a short 'label'. Never overlap two containers; leave at least 60px between them.
-- Child elements (text, shapes) reference their container via parentRef and must sit fully inside the parent's bounds with at least 24px padding on every side. The first 56px below a container's top edge is reserved for its header.
-- Text elements hold the actual content (questions, prompts, notes): usually 280-440px wide, 40-120px tall, fontSize is fixed at 14 so about 60 characters fit per line.
-- Shapes (circle, diamond, hexagon...) are small accents 40-80px, content is a single emoji or 1-3 words.
-- PREFER 'freeform' note cards over bare 'text' for anything the designer will edit and build on — they are the primary card type on this canvas. Size ~300x300. Give every zone at least one seeded note card rather than leaving it empty. Use props: {"emoji":"💡","noteTitle":"Names the move","noteBody":"Concrete starter content","cardType":"note"}. Pick an emoji that fits the idea (🔆 🔥 💡 🎯 🧭 🌊 …).
-- 'image' seeds a storyboard frame (empty upload slot + caption): ~320x260, props {"storyboard":true,"description":"caption placeholder"}.
-- 'line' is a divider/underline only — never a connection between elements (use edges for that). It spans from (x,y) to (x+width, y); props {"gradientName":"violet","widthPx":2}. A thin divider under a container title is the house style.
-- 'table' is a real editable grid — use it for any table, matrix or comparison instead of faking one from cards. props {"cells":[["Header A","Header B"],["1a","1b"]],"headerRow":true}; size ~160px per column, ~48px per row.
-- 'link' is a URL bookmark card (~320x120): props {"url":"https://...","linkMode":"bookmark"}, label is the title.
-- 'board' is a hexagon portal into a nested canvas for anything deep (research, moodboard, personas) — needs ~170x230; label is the title, props {"icon":"grid"}.
-- 'experienceBlock' anchors the layout to live framing data: props {"componentKey":"intentionCore"} (or desiredChange, humanContext, contextAndMeaning, realityPlanes, sensoryDomains, presenceTypes, stateMapping, traitMapping). Place one at a flow's origin when the content maps to a framing section.
-- Connectors carry their own styling: edge props {"gradientName":"ocean","lineStyle":"dashed","thickness":3,"arrowStyle":"end"}. Rotate the gradient family per branch so parallel paths read apart.
-- Prefer a clear structure: a grid or left-to-right flow of containers, each seeded with 2-5 text elements of concrete, useful starter content (never generic filler like "Add text here").
-- Use each ref exactly once, like c1, c2, t1, t2, s1.
-- Hypercube face tags: set 'hypercubeTags' ONLY on containers and top-level elements, and only from this exact list: ${HYPERCUBE_FACE_TAGS.join(', ')}. Tag a CONTAINER with the union of the faces its children relate to — do NOT tag the child text/shape elements individually (children inherit their container's tags automatically). Most elements need no tags; add them only when the semantic fit is clear.
-- Mind maps: when the content is conceptual (a central idea that branches into sub-ideas), build a mind map instead of containers — one central hub element (a short text node) with each branch as its own top-level text/shape element, and add 'edges' connecting hub→branch (and branch→sub-branch for deeper trees). Give edges a short 'label' only when it clarifies the relationship. Coordinates are recomputed server-side, so focus on expressing the hub-and-branch structure via edges, not on exact positions.`;
+You turn content into a diagram on a spatial design canvas.
+${CANVAS_COMPOSITION_SKILL}
+
+HOW TO EXPRESS IT IN THIS SCHEMA
+- «tint» is the 'tint' field. 'shapeType' is its own field. Everything else type-specific goes in 'props' as a JSON object string.
+- Positions are recomputed for you, so do not spend effort on x/y (send 0). What you control is STRUCTURE and SIZE:
+  - 'width' and 'height' are kept for nodes, tables and text, so use the sizes listed above.
+  - 'edges' decide the arrangement. A closed ring of edges is laid out as a loop; one node with many edges becomes the hub of a mind map; anything else becomes a left-to-right flow in the direction of the edges. Chain stages with edges from each stage to the next, and hang each detail node off its stage with one more edge.
+  - Elements with a 'parentRef' are stacked inside that frame in the order you list them, so put the heading first.
+  - Text with no edges and no parent floats above the structure in list order (title, then caption) — or in the middle of a loop.
+- Use each ref exactly once, like n1, n2, t1, f1.
+- Hypercube face tags: set 'hypercubeTags' ONLY on frames and top-level elements, and only from this exact list: ${HYPERCUBE_FACE_TAGS.join(', ')}. Children inherit their frame's tags. Most elements need no tags; add them only when the semantic fit is clear.`;
