@@ -1035,6 +1035,7 @@ export function CXDNavbar() {
                       return (
                         <button
                           key={c.id}
+                          data-follow-bubble
                           onClick={(e) => {
                             e.stopPropagation();
                             setFollowingCollaboratorId(isFollowing ? null : c.id);

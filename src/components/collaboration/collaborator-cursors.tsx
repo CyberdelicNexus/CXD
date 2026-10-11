@@ -9,6 +9,8 @@ interface CollaboratorCursorsProps {
   canvasOffset: { x: number; y: number };
   zoom: number;
   currentBoardId?: string | null;
+  /** CSS transition of the canvas camera transform, so cursors pan in step with it. */
+  cameraTransition?: string;
 }
 
 // Cursor SVG component
@@ -35,11 +37,9 @@ function CursorIcon({ color }: { color: string }) {
 // Single cursor component
 const CollaboratorCursor = memo(function CollaboratorCursor({
   collaborator,
-  canvasOffset,
   zoom,
 }: {
   collaborator: CollaboratorPresence;
-  canvasOffset: { x: number; y: number };
   zoom: number;
 }) {
   const { cursor, name, color, avatarUrl } = collaborator;
@@ -51,19 +51,19 @@ const CollaboratorCursor = memo(function CollaboratorCursor({
     return null;
   }
 
-  // Calculate screen position (world coords * zoom + canvas offset)
-  const screenX = cursor.x * zoom + canvasOffset.x;
-  const screenY = cursor.y * zoom + canvasOffset.y;
-
+  // Positioned in WORLD coords inside the camera layer (see CollaboratorCursors).
+  // Only the peer's own movement is eased here; the inner wrapper undoes the
+  // layer's zoom so the cursor and label keep a constant on-screen size.
   return (
     <div
       className="pointer-events-none absolute"
       style={{
-        transform: `translate(${screenX}px, ${screenY}px)`,
+        transform: `translate(${cursor.x}px, ${cursor.y}px)`,
         transition: 'transform 80ms linear',
         zIndex: 9999,
       }}
     >
+      <div style={{ transform: `scale(${1 / zoom})`, transformOrigin: '0 0' }}>
       <CursorIcon color={color} />
       <div
         className="absolute left-5 top-5 flex w-max max-w-none items-center gap-1.5 whitespace-nowrap rounded-full pl-1 pr-3 py-1 text-xs font-medium text-white shadow-lg"
@@ -81,6 +81,7 @@ const CollaboratorCursor = memo(function CollaboratorCursor({
         ) : null}
         <span className="leading-none">{name}</span>
       </div>
+      </div>
     </div>
   );
 });
@@ -91,6 +92,7 @@ export const CollaboratorCursors = memo(function CollaboratorCursors({
   canvasOffset,
   zoom,
   currentBoardId,
+  cameraTransition,
 }: CollaboratorCursorsProps) {
   const activeCursors = collaborators.filter((c) => {
     if (!c.cursor) return false;
@@ -110,14 +112,26 @@ export const CollaboratorCursors = memo(function CollaboratorCursors({
     // overflow-hidden, allowing cursor name labels to render at canvas edges
     // without being clipped. top-16 matches the canvas container's top offset.
     <div className="pointer-events-none fixed inset-0 top-16 overflow-visible" style={{ zIndex: 9998 }}>
-      {activeCursors.map((collaborator) => (
-        <CollaboratorCursor
-          key={collaborator.id}
-          collaborator={collaborator}
-          canvasOffset={canvasOffset}
-          zoom={zoom}
-        />
-      ))}
+      {/* Camera layer: the SAME transform + transition as the canvas content, so
+          a camera move (live-follow, glide) carries every cursor with the canvas.
+          Folding the camera into each cursor's own transform instead made the two
+          update streams restart each other's easing — cursors jittered while following. */}
+      <div
+        className="absolute left-0 top-0"
+        style={{
+          transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${zoom})`,
+          transformOrigin: '0 0',
+          transition: cameraTransition ?? 'none',
+        }}
+      >
+        {activeCursors.map((collaborator) => (
+          <CollaboratorCursor
+            key={collaborator.id}
+            collaborator={collaborator}
+            zoom={zoom}
+          />
+        ))}
+      </div>
     </div>
   );
 });
