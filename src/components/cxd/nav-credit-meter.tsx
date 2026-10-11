@@ -7,7 +7,18 @@ import { useAICredits } from "@/hooks/use-ai-credits";
 import { useSubscription } from "@/hooks/use-subscription";
 import { CreditTopUpModal } from "@/components/cxd/credit-topup-modal";
 import { AIProviderIcon } from "@/components/cxd/ai-provider-icons";
-import { AI_MODELS, type ModelId, getAllowedModels, getModelCreditWeight } from "@/lib/ai-credit-config";
+import { AI_MODELS, BUILDS_WITH_SELECTED, RECOMMENDED_MODEL_ID, type ModelId, creditCostFor, getAllowedModels } from "@/lib/ai-credit-config";
+
+// What a model really costs to use. Credits are charged per action and per
+// provider family (CREDIT_COSTS), not per model, so every Claude model costs
+// the same per message and the same per canvas build. The earlier label read
+// a per-model "weight" that nothing is billed by.
+const costsOf = (modelId: ModelId) => ({
+  chat: creditCostFor("chat", modelId),
+  build: creditCostFor("canvasOperations", modelId),
+});
+/** The model that draws canvas builds for a family, whichever of its models is selected. */
+const BUILDS_WITH: Record<string, string> = { anthropic: "Claude Sonnet 5.5", google: "Gemini 2.5 Pro" };
 
 // Helper to get short model label for display
 function getShortModelLabel(modelId: ModelId): string {
@@ -99,7 +110,7 @@ export function NavCreditMeter() {
 
       {/* Popover */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-72 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-[fadeIn_150ms_ease-out]">
+        <div className="absolute right-0 top-full mt-2 w-80 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-[fadeIn_150ms_ease-out]">
           {/* Credit summary */}
           <div className="px-4 pt-4 pb-3">
             <div className="flex items-center justify-between mb-2">
@@ -146,7 +157,7 @@ export function NavCreditMeter() {
             </span>
           </div>
           <div
-            className="max-h-64 overflow-y-auto"
+            className="max-h-80 overflow-y-auto"
             style={{
               scrollbarWidth: "thin",
               scrollbarColor: "rgba(255,255,255,0.08) transparent",
@@ -156,8 +167,9 @@ export function NavCreditMeter() {
               const model = AI_MODELS[modelId];
               if (!model) return null;
 
-              const creditWeight = getModelCreditWeight(modelId);
+              const costs = costsOf(modelId);
               const isSelected = selectedModel === modelId;
+              const isRecommended = modelId === RECOMMENDED_MODEL_ID;
 
               return (
                 <button
@@ -170,7 +182,7 @@ export function NavCreditMeter() {
                       : "hover:bg-white/[0.04]",
                   )}
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex min-w-0 items-start gap-2.5">
                     <div className={cn(
                       "flex items-center justify-center w-6 h-6 rounded-md border",
                       isSelected
@@ -182,15 +194,21 @@ export function NavCreditMeter() {
                         isSelected ? "text-violet-300" : "text-white/40",
                       )} />
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex min-w-0 flex-col gap-0.5">
                       <span className={cn(
-                        "text-[13px] leading-tight",
+                        "flex items-center gap-1.5 text-[13px] leading-tight",
                         isSelected ? "text-white font-medium" : "text-white/80",
                       )}>
                         {model.name}
+                        {isRecommended && (
+                          <span className="rounded-full border border-violet-400/40 bg-violet-500/15 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-violet-200">
+                            Recommended
+                          </span>
+                        )}
                       </span>
-                      <span className="text-[10px] text-white/25 leading-tight">
-                        {creditWeight} credit{creditWeight !== 1 ? "s" : ""} per message
+                      <span className="text-[11px] leading-snug text-white/45">{model.summary}</span>
+                      <span className="text-[10px] leading-tight text-white/30">
+                        {costs.chat} credit{costs.chat !== 1 ? "s" : ""} per message · {costs.build} per canvas build
                       </span>
                     </div>
                   </div>
@@ -201,6 +219,14 @@ export function NavCreditMeter() {
               );
             })}
           </div>
+
+          {/* What the choice does and does not change, stated plainly. */}
+          <p className="px-4 pb-3 pt-2 text-[10px] leading-relaxed text-white/35">
+            Your choice is the model that answers in chat. Canvas builds are drawn by{" "}
+            {BUILDS_WITH_SELECTED.includes(selectedModel)
+              ? `${AI_MODELS[selectedModel].name} too`
+              : `${BUILDS_WITH[AI_MODELS[selectedModel]?.provider] ?? "the family build model"}, the one tested for diagrams in this family`}.
+          </p>
 
           {/* Divider */}
           <div className="border-t border-white/[0.06]" />

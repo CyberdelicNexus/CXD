@@ -5,7 +5,11 @@
  * - 1 credit = baseline cost unit (Gemini 2.0 Flash)
  * - Weights calculated based on actual API pricing per 1K conversation
  * - Average conversation: 1,000 input tokens + 500 output tokens
- * - Pricing researched February 2026
+ * - Pricing researched February 2026; Claude rows updated October 2026 for
+ *   the 5.5 generation (credit weights deliberately left as they were).
+ * - The Claude ids below keep their original spelling because they are stored
+ *   in user preferences; each now runs the current model of its tier (see
+ *   MODEL_ID_MAP in ai/provider-registry.ts).
  *
  * Sources:
  * - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
@@ -13,11 +17,15 @@
  * - Moonshot: https://platform.moonshot.ai/docs/pricing/chat
  */
 
+import { CREDIT_COSTS, type AIProviderKey, type CreditAction } from "@/types/ai-types";
+
 export const AI_MODELS = {
   // Google Gemini (Cheapest - Baseline)
   'gemini-2.0-flash': {
     id: 'gemini-2.0-flash',
-    name: 'Gemini 2.0 Flash',
+    // Runs Google's rolling Flash alias (see MODEL_ID_MAP), so the name carries no version.
+    name: 'Gemini Flash',
+    summary: 'Fastest and lightest. Good for quick questions.',
     provider: 'google',
     creditWeight: 1,
     pricing: {
@@ -31,6 +39,7 @@ export const AI_MODELS = {
   'kimi': {
     id: 'kimi',
     name: 'Kimi K2.6',
+    summary: 'Retired from the picker.',
     provider: 'moonshot',
     creditWeight: 6,
     pricing: {
@@ -43,20 +52,22 @@ export const AI_MODELS = {
   },
   'claude-haiku-4.5': {
     id: 'claude-haiku-4.5',
-    name: 'Claude Haiku 4.5',
+    name: 'Claude Haiku 5.5',
+    summary: 'Quick, capable chat.',
     provider: 'anthropic',
     creditWeight: 12,
     pricing: {
-      input: 1.00,
-      output: 5.00,
+      input: 0.10,
+      output: 0.50,
     },
-    contextWindow: 200_000,
+    contextWindow: 1_000_000,
     features: ['fast', 'efficient', 'smart'],
     tier: 'standard',
   },
   'gemini-2.5-pro': {
     id: 'gemini-2.5-pro',
     name: 'Gemini 2.5 Pro',
+    summary: 'Deeper reasoning in chat.',
     provider: 'google',
     creditWeight: 33,
     pricing: {
@@ -69,27 +80,29 @@ export const AI_MODELS = {
   },
   'claude-sonnet-4.5': {
     id: 'claude-sonnet-4.5',
-    name: 'Claude Sonnet 4.5',
+    name: 'Claude Sonnet 5.5',
+    summary: 'Best all-round, and the fastest canvas builds.',
     provider: 'anthropic',
     creditWeight: 35,
     pricing: {
-      input: 3.00,
-      output: 15.00,
+      input: 2.00,
+      output: 10.00,
     },
-    contextWindow: 200_000,
+    contextWindow: 1_000_000,
     features: ['balanced', 'smart', 'creative'],
     tier: 'premium',
   },
   'claude-opus-4.6': {
     id: 'claude-opus-4.6',
-    name: 'Claude Opus 4.6',
+    name: 'Claude Opus 5.5',
+    summary: 'Most capable, in chat and for canvas builds. Costs double.',
     provider: 'anthropic',
     creditWeight: 58,
     pricing: {
-      input: 5.00,
-      output: 25.00,
+      input: 4.00,
+      output: 20.00,
     },
-    contextWindow: 200_000,
+    contextWindow: 1_000_000,
     features: ['most-capable', 'reasoning', 'creative'],
     tier: 'flagship',
   },
@@ -103,14 +116,56 @@ export type ModelId = keyof typeof AI_MODELS;
  * underlying model — keeping the IDs registered prevents type churn elsewhere
  * but the UI shouldn't offer them.
  *
- * Currently hiding Claude Haiku 4.5 and Opus 4.6 — Anthropic account only
- * exposes Sonnet 4 right now. Re-enable by removing from this list when the
- * tier is upgraded.
+ * Kimi is retired (2026-10): its key stopped authenticating, it was never
+ * tested against the Canvas Assistant's structured builds, and every extra
+ * model is one more to re-verify on each change. Haiku and Opus used to be
+ * listed here because the Anthropic account exposed only Sonnet; the 5.5
+ * generation of both answers with the current key, so they are offered again.
  */
 export const HIDDEN_MODEL_IDS: readonly ModelId[] = [
-  'claude-haiku-4.5',
-  'claude-opus-4.6',
+  'kimi',
 ];
+
+const PROVIDER_KEY_OF: Record<string, AIProviderKey> = { anthropic: "claude", google: "gemini", moonshot: "kimi" };
+
+/**
+ * Models that cost more to run than their family's standard model, as a
+ * multiplier on that family's credit prices. Opus 5.5 is twice Sonnet 5.5's
+ * API price ($4/$20 against $2/$10 per million tokens), so it is charged twice
+ * the credits for the two things it actually runs: chat and canvas builds.
+ */
+export const MODEL_COST_MULTIPLIER: Partial<Record<ModelId, number>> = {
+  'claude-opus-4.6': 2,
+};
+
+/** Models that draw canvas builds themselves when selected. Every other
+ *  selection builds with its family's tested build model (Sonnet / Gemini Pro):
+ *  Haiku, for one, took longer on a large diagram than Sonnet did. */
+export const BUILDS_WITH_SELECTED: readonly ModelId[] = ['claude-opus-4.6'];
+
+/**
+ * Credits charged for an action with a given selection. `model` is whatever
+ * the client sent: one of our model ids, or a bare provider key.
+ */
+export function creditCostFor(action: CreditAction, model: string): number {
+  const known = model in AI_MODELS ? (model as ModelId) : null;
+  const key = (known ? PROVIDER_KEY_OF[AI_MODELS[known].provider] : (model as AIProviderKey)) ?? "gemini";
+  const base = CREDIT_COSTS[action][key] ?? CREDIT_COSTS[action].gemini;
+  return base * (known ? MODEL_COST_MULTIPLIER[known] ?? 1 : 1);
+}
+
+/** The model shown as recommended in pickers. */
+export const RECOMMENDED_MODEL_ID: ModelId = 'claude-sonnet-4.5';
+
+/**
+ * The model to actually use for a stored selection. A user whose saved choice
+ * has since been hidden must not be left on a model that no longer works, so
+ * a hidden selection falls back to the default.
+ */
+export function resolveSelectedModel(id: string | null | undefined): ModelId {
+  const known = id && id in AI_MODELS ? (id as ModelId) : null;
+  return known && isModelVisible(known) ? known : 'gemini-2.0-flash';
+}
 
 export function isModelVisible(id: ModelId): boolean {
   return !HIDDEN_MODEL_IDS.includes(id);
@@ -133,14 +188,13 @@ export const TIER_CREDIT_ALLOWANCES = {
   free: {
     monthlyCredits: 25,  // Monthly drip — keep in sync with PLANS.FREE.limits.monthlyAICredits
     signupBonusCredits: 50,  // One-time 50 credit signup bonus
-    allowedModels: ['gemini-2.0-flash', 'kimi'] as ModelId[],  // Standard models only
+    allowedModels: ['gemini-2.0-flash'] as ModelId[],  // Standard model only
     canBYOK: false,
   },
   pro: {
     monthlyCredits: 500,  // ~500 Gemini Flash or ~83 Kimi or ~14 Sonnet conversations or ~8 Opus conversations
     allowedModels: [
       'gemini-2.0-flash',
-      'kimi',
       'claude-haiku-4.5',
       'gemini-2.5-pro',
       'claude-sonnet-4.5',
@@ -153,7 +207,6 @@ export const TIER_CREDIT_ALLOWANCES = {
     lifetimeCredits: 1000,  // One-time 1000 credits on signup/upgrade
     allowedModels: [
       'gemini-2.0-flash',
-      'kimi',
       'claude-haiku-4.5',
       'gemini-2.5-pro',
       'claude-sonnet-4.5',
@@ -165,7 +218,6 @@ export const TIER_CREDIT_ALLOWANCES = {
     monthlyCredits: 500,  // Same as Pro
     allowedModels: [
       'gemini-2.0-flash',
-      'kimi',
       'claude-haiku-4.5',
       'gemini-2.5-pro',
       'claude-sonnet-4.5',
@@ -187,7 +239,7 @@ export function getModelCreditWeight(modelId: ModelId): number {
  * Get allowed models for a tier
  */
 export function getAllowedModels(tierId: TierId): ModelId[] {
-  return TIER_CREDIT_ALLOWANCES[tierId]?.allowedModels ?? ['gemini-2.0-flash'];
+  return (TIER_CREDIT_ALLOWANCES[tierId]?.allowedModels ?? ['gemini-2.0-flash']).filter(isModelVisible);
 }
 
 /**

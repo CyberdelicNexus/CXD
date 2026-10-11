@@ -5,7 +5,7 @@ import { createClient } from "@/supabase/server";
 import { getModelConfig, getModelInstance, getModelInstanceByModelId, MODEL_ID_MAP } from "@/lib/ai/provider-registry";
 import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt, getCanvasSystemPrompt } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
-import { canBringOwnKeys, type ModelId } from "@/lib/ai-credit-config";
+import { canBringOwnKeys, creditCostFor, resolveSelectedModel, type ModelId } from "@/lib/ai-credit-config";
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
 import { decryptAPIKey } from "@/lib/encryption";
 import type { AIProviderKey, AIProjectContext, FaceContext } from "@/types/ai-types";
@@ -63,7 +63,8 @@ export async function POST(request: Request) {
       .eq('user_id', user.id)
       .single();
 
-    const selectedModel = credits?.selected_model || 'gemini-2.0-flash';
+    // A stored choice that has since been retired (Kimi) falls back to the default.
+    const selectedModel = resolveSelectedModel(credits?.selected_model);
 
     // Map model ID to provider
     const modelToProvider: Record<string, AIProviderKey> = {
@@ -142,7 +143,7 @@ export async function POST(request: Request) {
 
     // 5. Credit check and deduction (skip if using BYOK)
     if (!userApiKey) {
-      const creditCost = CREDIT_COSTS.chat[resolvedProvider] || 1;
+      const creditCost = creditCostFor("chat", selectedModel) || 1;
       const dailyCap = getDailyCreditCap(subscription?.plan_id || 'free');
 
       const { data: creditResult, error: creditError } = await supabase.rpc(
