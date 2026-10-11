@@ -112,7 +112,9 @@ interface CXDState {
    * viewport onto it — so the user never has to manually pan/zoom to find
    * newly generated content. Cleared back to null after being consumed.
    */
-  pendingCanvasFitBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
+  /** `animate` glides the camera there instead of cutting (assistant builds);
+   *  `insetRight` keeps the framed area clear of a docked panel on that side. */
+  pendingCanvasFitBounds: { minX: number; minY: number; maxX: number; maxY: number; animate?: boolean; insetRight?: number } | null;
 
   // Per-canvas viewport persistence (keyed by canvasId: "root" or boardId)
   viewportByCanvasId: Record<string, Viewport>;
@@ -167,7 +169,7 @@ interface CXDState {
   // Actions - Canvas
   setCanvasPosition: (position: { x: number; y: number }) => void;
   setCanvasZoom: (zoom: number) => void;
-  setPendingCanvasFitBounds: (bounds: { minX: number; minY: number; maxX: number; maxY: number } | null) => void;
+  setPendingCanvasFitBounds: (bounds: { minX: number; minY: number; maxX: number; maxY: number; animate?: boolean; insetRight?: number } | null) => void;
 
   // Actions - Viewport persistence
   saveCurrentViewport: () => void;

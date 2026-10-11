@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip, Focus, Download } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip, Focus, Download, Tags } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface NavigationToolkitProps {
@@ -17,6 +17,9 @@ export interface NavigationToolkitProps {
   gridVisible?: boolean;
   gridMajorDots?: boolean;
   onCycleGrid?: () => void;
+  /** Tag badges pinned on every tagged element (off = shown on hover only). */
+  showTags?: boolean;
+  onToggleTags?: () => void;
   onEnterFocusMode?: () => void;
   onExport?: () => void;
 }
@@ -36,6 +39,8 @@ export function NavigationToolkit({
   gridVisible,
   gridMajorDots,
   onCycleGrid,
+  showTags,
+  onToggleTags,
   onEnterFocusMode,
   onExport,
 }: NavigationToolkitProps) {
@@ -82,6 +87,21 @@ export function NavigationToolkit({
             title={showAlignmentGuides ? "Alignment Guides (On)" : "Alignment Guides (Off)"}
           >
             <AlignVerticalJustifyCenter className="w-4 h-4" />
+          </Button>
+        )}
+        {onToggleTags && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleTags}
+            aria-pressed={!!showTags}
+            className={cn(
+              "transition-colors",
+              showTags && "bg-primary/20 text-primary ring-1 ring-primary/50"
+            )}
+            title={showTags ? "Tags: always shown — click to show on hover only" : "Tags: shown on hover — click to always show"}
+          >
+            <Tags className="w-4 h-4" />
           </Button>
         )}
       </div>

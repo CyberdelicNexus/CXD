@@ -981,6 +981,22 @@
     }
   }
 
+  /* Canvas Assistant build: each new element waits out its animation-delay
+     invisible (fill-mode both), then resolves out of a soft bright blur. Opacity
+     and filter only, never transform: elements carry their own inline transforms. */
+  .assistant-reveal {
+    animation: assistant-reveal 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes assistant-reveal {
+    from { opacity: 0; filter: blur(8px) brightness(1.8); }
+    to { opacity: 1; filter: blur(0) brightness(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .assistant-reveal { animation: none; }
+  }
+
   /* Custom scrollbar for Versions view - matches UI colors */
   .custom-scrollbar {
     scrollbar-width: thin;

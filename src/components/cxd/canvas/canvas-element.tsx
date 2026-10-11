@@ -39,6 +39,8 @@ import {
   DEFAULT_SHAPE_STYLE,
   type ShapeStylePreset,
 } from "@/lib/style-presets";
+import { useTagVisibility } from "@/lib/tag-visibility";
+import { useRevealDelay } from "@/lib/ai/assistant-build";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -366,6 +368,8 @@ export function CanvasElementRenderer({
   // cube faces) can be tagged.
   const isTaggable = element.type !== "line" && element.type !== "connector" && element.type !== "experienceBlock";
   const hasTags = !!element.hypercubeTags && element.hypercubeTags.length > 0;
+  const tagsPinned = useTagVisibility();
+  const revealDelay = useRevealDelay(element.id);
   const menuContainerRef = useRef<HTMLDivElement>(null);
   const subtaskRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
   const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
@@ -924,6 +928,8 @@ export function CanvasElementRenderer({
       draggable={false}
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
+        // Assistant build: hidden until this element's turn, then fades in.
+        revealDelay !== null && "assistant-reveal",
         isDragging && !((element as FreeformElement).isDocument) && "opacity-80 shadow-2xl cursor-grabbing",
         isDragging && (element as FreeformElement).isDocument && "cursor-grabbing",
         // Locked state indicator
@@ -987,6 +993,7 @@ export function CanvasElementRenderer({
         "cursor-text h-full",
       )}
       style={{
+        ...(revealDelay !== null ? { animationDelay: `${revealDelay}ms` } : {}),
         left: element.x,
         top: element.y,
         width:
@@ -1862,9 +1869,11 @@ export function CanvasElementRenderer({
 
         return toolbar;
       })()}
-      {/* Hypercube tag badge: sits on top of every taggable element. Tagged
-          elements always show their tag emoji; untagged ones only reveal the
-          tag icon while hovered/selected. Click opens the tag menu. */}
+      {/* Hypercube tag badge: sits on top of every taggable element, revealed
+          while the element is hovered or selected. Tagged elements keep it
+          pinned only when the user turns "Show tags" on in the left toolbar:
+          always-on badges bury the nodes of a dense diagram. Click opens the
+          tag menu. */}
       {isTaggable && !isDragging && !isCroppingImage && (hasTags || (!isReadOnly && !(isEditing && element.type === "shape"))) && (
         <div
           className="absolute inset-0 pointer-events-none z-[60]"
@@ -1891,7 +1900,7 @@ export function CanvasElementRenderer({
                 hasTags
                   ? "bg-card/90 border-white/15 text-xs hover:border-white/30"
                   : "bg-zinc-900/90 border-white/20 text-white/60 hover:text-white",
-                !hasTags && !isSelected && !showTagMenu && "opacity-0 group-hover:opacity-100",
+                !(hasTags && tagsPinned) && !isSelected && !showTagMenu && "opacity-0 group-hover:opacity-100",
               )}
             >
               {hasTags ? (

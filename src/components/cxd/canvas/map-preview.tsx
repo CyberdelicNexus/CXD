@@ -26,6 +26,9 @@ import type {
 import { connectorHull, connectorPath, linePath, resolveEdgePoints, LABEL_PILL, type Pt } from "@/lib/maps/connector-geometry";
 import { realBounds, type Box } from "@/lib/canvas-layout-rules";
 import { getGradient, type GradientName } from "@/components/cxd/canvas/connector-gradients";
+import { SvgGradientDef } from "@/components/cxd/canvas/gradient-editor";
+import { isGradientCss } from "@/lib/gradient";
+import { shapePath, shapeTextInsets } from "@/lib/shape-geometry";
 
 /** Canvas default background (cxd-canvas canvasBackground), ending on zinc-950 rather than pure black. */
 const CANVAS_BG = "radial-gradient(circle at center, #1a0b2e 0%, #09090b 100%)";
@@ -134,43 +137,38 @@ function Shape({ el }: { el: ShapeElement }) {
   const b = boxOf(el);
   const fill = el.style?.bgColor || "hsl(var(--primary) / 0.3)";
   const stroke = el.style?.borderColor || "hsl(var(--primary))";
-  // ShapeCard draws in a 0..100 viewBox stretched to the box (preserveAspectRatio
-  // none), so a borderWidth set in that space scales with the box rather than
-  // painting at its raw pixel value -- otherwise a legend swatch's borderWidth
-  // 12 (a 2.4px ring on a 20px swatch, element-style.ts swatchStyle) would
-  // paint as a 12px ring nearly filling the swatch.
-  const sx = (v: number) => b.x + (v / 100) * b.w;
-  const sy = (v: number) => b.y + (v / 100) * b.h;
-  const sw = (el.style?.borderWidth || 2) * ((b.w / 100 + b.h / 100) / 2);
-  const poly = (pts: [number, number][]) => pts.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
-  let body: React.ReactNode;
-  switch (el.shapeType) {
-    case "circle":
-      body = <ellipse cx={sx(50)} cy={sy(50)} rx={(48 / 100) * b.w} ry={(48 / 100) * b.h} fill={fill} stroke={stroke} strokeWidth={sw} />;
-      break;
-    case "diamond":
-      body = <polygon points={poly([[50, 5], [95, 50], [50, 95], [5, 50]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
-      break;
-    case "triangle":
-      body = <polygon points={poly([[50, 5], [95, 95], [5, 95]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
-      break;
-    case "hexagon":
-      body = <polygon points={poly([[50, 5], [93.3, 25], [93.3, 75], [50, 95], [6.7, 75], [6.7, 25]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
-      break;
-    case "star":
-      body = <polygon points={poly([[50, 10], [61, 40], [92, 40], [68, 60], [78, 90], [50, 70], [22, 90], [32, 60], [8, 40], [39, 40]])} fill={fill} stroke={stroke} strokeWidth={sw} />;
-      break;
-    default:
-      body = <rect x={sx(2)} y={sy(2)} width={(96 / 100) * b.w} height={(96 / 100) * b.h} rx={8} fill={fill} stroke={stroke} strokeWidth={sw} />;
-  }
-  return (
+  // ShapeCard: the outline comes from shapePath at the element's real size
+  // (so pills, cylinders and the rest match the canvas), and a gradient fill or
+  // ring needs an SVG gradient def because SVG paint cannot take CSS gradients.
+  // Stroke width: legend swatches store a width meant for a stretched 0..100
+  // viewBox (borderWidth 12 on a 20px swatch is a 2.4px ring), diagram nodes a
+  // literal pixel width; the smaller of the two readings is right for both.
+  const borderWidth = el.style?.borderWidth ?? 2;
+  const sw = Math.min(borderWidth, borderWidth * ((b.w / 100 + b.h / 100) / 2));
+  const { d, detail } = shapePath(el.shapeType, b.w, b.h, Math.max(1, sw / 2));
+  const fillId = `lab-fill-${el.id}`;
+  const strokeId = `lab-stroke-${el.id}`;
+  const fillPaint = isGradientCss(fill) ? `url(#${fillId})` : fill;
+  const strokePaint = isGradientCss(stroke) ? `url(#${strokeId})` : stroke;
+  const fillOpacity = el.style?.fillOpacity !== undefined ? el.style.fillOpacity / 100 : 1;
+  const insets = shapeTextInsets(el.shapeType);
+  const body = (
+    <g transform={`translate(${b.x} ${b.y})`}>
+      <defs>
+        {isGradientCss(fill) && <SvgGradientDef id={fillId} css={fill} />}
+        {isGradientCss(stroke) && <SvgGradientDef id={strokeId} css={stroke} />}
+      </defs>
+      <path d={d} fill={fillPaint} fillOpacity={fillOpacity} stroke={strokePaint} strokeWidth={sw} strokeLinejoin="round" />
+      {detail && <path d={detail} fill="none" stroke={strokePaint} strokeWidth={sw} strokeLinecap="round" />}
+    </g>
+  );  return (
     <g>
       {body}
       <Html
         box={b}
         className="flex items-center justify-center"
         style={{
-          padding: "8%",
+          padding: `${insets[0] * 100}% ${insets[1] * 100}% ${insets[2] * 100}% ${insets[3] * 100}%`,
           textAlign: el.style?.textAlign || "center",
           color: el.style?.textColor || "inherit",
           fontSize: el.style?.fontSize || 14,
@@ -311,6 +309,7 @@ function Link({ el }: { el: LinkElement }) {
 }
 
 function Text({ el }: { el: TextElement }) {
+  const gradient = el.style?.bgColor;
   return (
     <Html
       box={boxOf(el)}
@@ -321,9 +320,17 @@ function Text({ el }: { el: TextElement }) {
         textAlign: el.textAlign || el.style?.textAlign || "left",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
+        // TextCard: 4px padding, 1.3 line height.
+        padding: 4,
+        lineHeight: 1.3,
       }}
     >
-      {el.content}
+      {/* TextCard paints a gradient stored in style.bgColor as the text itself. */}
+      {isGradientCss(gradient) ? (
+        <span style={{ background: gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text", display: "inline-block" }}>
+          {el.content}
+        </span>
+      ) : el.content}
     </Html>
   );
 }

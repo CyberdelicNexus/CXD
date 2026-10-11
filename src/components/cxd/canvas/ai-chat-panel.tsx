@@ -31,6 +31,33 @@ import type { ModelId } from "@/lib/ai-credit-config";
 import { formatCompletion, clampToUnit } from "@/lib/display-utils";
 import { classifyResponse } from "@/lib/ai/ai-response-classifier";
 import { AIActionBar } from "./ai-action-bar";
+import { AssistantFormChooser } from "./assistant-form-chooser";
+import { AssistantHome, type QuickActionMode } from "./assistant-home";
+import { logAssistantEvent, sendAssistantEvent, snapshotBuild } from "@/lib/ai/assistant-feedback";
+import { getFullProjectContext } from "@/utils/ai-context-aggregator";
+import { creditCostFor } from "@/lib/ai-credit-config";
+import { tidyLayout, connectInOrder } from "@/lib/ai/canvas-tools";
+import { setAssistantThinking } from "@/lib/ai/assistant-build";
+import {
+  allDiagramForms, describeStyle, explicitForm, fetchFormOptions, isDrawRequest, needsFormChoice,
+  projectStarters, readAssistantPrefs, reworksSelection, suggestForms, writeAssistantPrefs,
+  type AssistantPrefs, type FormId, type FormOption,
+} from "@/lib/ai/assistant-forms";
+import type { ProposalEntry, ProposeOptions } from "@/hooks/use-canvas-operations";
+
+/** A draw request waiting for the user to pick a form. */
+interface PendingDraw {
+  subject: string;
+  instruction: string;
+  options: FormOption[];
+  propose: ProposeOptions;
+  /** Send the text to the chat instead when the model reads it as conversation. */
+  fallbackToChat: boolean;
+}
+
+const APPLY_ANSWER_INSTRUCTION =
+  "Put this answer on the canvas. If it describes concrete changes to existing elements, apply those. Otherwise draw its content as ONE diagram in the form that fits it.";
+
 
 // Expanded pool of prompt suggestions for each hypercube face (9 per face for dynamic rotation)
 function getAllPromptSuggestions(faceKey: string): string[] {
@@ -248,7 +275,8 @@ export function AIChatPanel({
     const titles = canvasOps.selectedElementIds
       .map((id) => els.find((e) => e.id === id))
       .filter((el): el is NonNullable<typeof el> => !!el)
-      .map((el) => getElementTitle(el));
+      // Tags ride along: "read the tags" must not come back as "I can't see them".
+      .map((el) => `${getElementTitle(el)}${el.hypercubeTags?.length ? ` [tags: ${el.hypercubeTags.join(", ")}]` : ""}`);
     return { count: titles.length, titles };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIdsKey]);
@@ -272,10 +300,242 @@ export function AIChatPanel({
   } = useAIChat({ faceKey, projectId, provider, enabled: true, faceLabel: faceName, faceHue: accentHue, extraContext });
 
   const [actMode, setActMode] = useState(false);
+  // Per-project assistant preferences (this browser): ask the form first, saved style.
+  const [prefs, setPrefs] = useState<AssistantPrefs>(() => readAssistantPrefs(projectId));
+  useEffect(() => setPrefs(readAssistantPrefs(projectId)), [projectId]);
+  const updatePrefs = useCallback((next: AssistantPrefs) => {
+    setPrefs(next);
+    writeAssistantPrefs(projectId, next);
+  }, [projectId]);
+
   const ops = useCanvasOperations({
     provider: typeof provider === "string" ? provider : undefined,
     selectedElementIds: canvasOps?.selectedElementIds ?? [],
+    styleNote: prefs.style,
+    projectId,
   });
+  const [pendingDraw, setPendingDraw] = useState<PendingDraw | null>(null);
+  // Read through refs by the routing callbacks, which are created before the
+  // selection helpers further down.
+  const selectionIdsRef = useRef<string[]>([]);
+  selectionIdsRef.current = canvasOps?.selectedElementIds ?? [];
+  const liveCanvasRef = useRef(() => {
+    const layout = useCXDStore.getState().getCurrentProject()?.canvasLayout;
+    return { elements: layout?.elements || [], edges: layout?.edges || [] };
+  });
+
+  // Let the launcher icon animate while the canvas assistant is working.
+  const assistantWorking = !!canvasOps && (isStreaming || ops.isProposing);
+  useEffect(() => {
+    if (!canvasOps) return;
+    setAssistantThinking(assistantWorking);
+    return () => setAssistantThinking(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantWorking]);
+
+  // What a canvas change costs with the model in use, shown before the click.
+  const drawCost = useMemo(() => creditCostFor("canvasOperations", String(provider)), [provider]);
+  const chatCost = useMemo(() => creditCostFor("chat", String(provider)), [provider]);
+
+  /** Below this, a form picked without asking is left to the drawing model instead. */
+  const AUTO_PICK_CONFIDENCE = 0.6;
+  const [choosingForm, setChoosingForm] = useState(false);
+
+  /**
+   * Run a canvas request. When the form is left open, the options come from
+   * the server (Jev when configured, local rules otherwise): shown as a
+   * chooser if the user wants to be asked, applied directly if they do not.
+   */
+  const requestDraw = useCallback(
+    (instruction: string, opts: { subject?: string; formSource?: string; propose?: ProposeOptions; fallbackToChat?: boolean } = {}) => {
+      const subject = opts.subject ?? instruction;
+      const fallbackToChat = opts.fallbackToChat ?? false;
+      const propose: ProposeOptions = { ...opts.propose, label: opts.propose?.label ?? subject };
+      const formSource = opts.formSource ?? instruction;
+      const run = (extra: ProposeOptions = {}) =>
+        void ops.propose(instruction, { ...propose, ...extra }).then((outcome) => {
+          if (outcome !== "proposed" && fallbackToChat) sendMessage(subject);
+        });
+
+      // A form named in the request is the answer; nothing to ask or suggest.
+      const named = explicitForm(instruction);
+      if (named) return run({ form: named });
+      if (opts.formSource === undefined && !needsFormChoice(instruction)) return run();
+
+      setChoosingForm(true);
+      void fetchFormOptions(formSource).then((suggestion) => {
+        setChoosingForm(false);
+        if (prefs.askForm) {
+          setPendingDraw({ subject, instruction, options: suggestion.options, propose, fallbackToChat });
+          return;
+        }
+        // Not asking: use Jev's pick when it is confident, else let the drawing model choose.
+        const top = suggestion.options[0]?.id;
+        run(suggestion.source === "jev" && top && (suggestion.confidence ?? 0) >= AUTO_PICK_CONFIDENCE ? { form: top, suggestedForm: top } : {});
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [prefs.askForm, ops.propose],
+  );
+
+  /**
+   * Route a canvas request that may be about the current selection. "Rearrange
+   * these into a better diagram" is built FROM the selected elements and
+   * replaces them (shown as a red, switch-off-able row on the preview);
+   * anything else is a fresh request.
+   */
+  const routeCanvasText = useCallback(
+    (text: string) => {
+      setPendingDraw(null);
+      if (reworksSelection(text, selectionIdsRef.current.length)) {
+        const ids = selectionIdsRef.current;
+        const { elements } = liveCanvasRef.current();
+        const picked = elements.filter((el) => ids.includes(el.id));
+        const described = picked.map((el) => `- ${getElementTitle(el)}${el.hypercubeTags?.length ? ` [tags: ${el.hypercubeTags.join(", ")}]` : ""}`).join("\n");
+        requestDraw(
+          `${text}\n\nThis request is about the ${ids.length} selected elements. Rebuild them as the requested diagram: keep every element's exact title, content and tags, and keep their relationships. Do not invent new content.`,
+          { subject: text, formSource: `${text}\n${described}`, propose: { replaceIds: ids }, fallbackToChat: true },
+        );
+        return;
+      }
+      requestDraw(text, { fallbackToChat: true });
+    },
+    [requestDraw],
+  );
+  const pickForm = useCallback(
+    (form: FormId | null) => {
+      const draw = pendingDraw;
+      if (!draw) return;
+      setPendingDraw(null);
+      // The first option is the recommendation; logging it beside the pick
+      // shows where the suggestions are wrong.
+      const suggestedForm = draw.options[0]?.id;
+      void ops.propose(draw.instruction, { ...draw.propose, ...(form ? { form } : {}), ...(suggestedForm ? { suggestedForm } : {}) }).then((outcome) => {
+        if (outcome !== "proposed" && draw.fallbackToChat) sendMessage(draw.subject);
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pendingDraw, ops.propose],
+  );
+
+  /** Ids from a build that are still on the canvas. */
+  const stillThere = useCallback((ids: string[] | undefined) => {
+    const live = new Set((useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || []).map((el) => el.id));
+    return (ids ?? []).filter((id) => live.has(id));
+  }, []);
+
+  const refineBuild = useCallback(
+    (entry: ProposalEntry, label: string, instruction: string) => {
+      const ids = stillThere(entry.builtIds);
+      if (ids.length === 0) return;
+      // Which refinement people reach for says what the first draft got wrong.
+      void logAssistantEvent({
+        entryId: entry.id, event: "refined", reason: label, projectId, model: String(provider), instruction: entry.instruction,
+        payload: { form: entry.form ?? null },
+      });
+      ops.markSuperseded(entry.id);
+      void ops.propose(`Revise the diagram made of the selected elements. ${instruction}`, {
+        targetIds: ids,
+        replaceIds: ids,
+        label: `${label}: ${entry.instruction}`,
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ops.propose, stillThere],
+  );
+
+  const changeBuildForm = useCallback(
+    (entry: ProposalEntry) => {
+      const ids = stillThere(entry.builtIds);
+      if (ids.length === 0) return;
+      ops.markSuperseded(entry.id);
+      setPendingDraw({
+        subject: `Redraw: ${entry.instruction}`,
+        instruction: "Redraw the diagram made of the selected elements in the form named below, keeping its content.",
+        options: suggestForms(entry.instruction),
+        propose: { targetIds: ids, replaceIds: ids, label: `Redraw: ${entry.instruction}` },
+        fallbackToChat: false,
+      });
+    },
+    [stillThere],
+  );
+
+  /**
+   * Thumbs on a built result: the beta's training signal. Stored with a
+   * snapshot of what is on the canvas now (so later hand edits are captured
+   * too). In development a thumbs-down also becomes a Structure Lab input, so
+   * the request can be re-run and judged there.
+   */
+  const rateResult = useCallback(async (entry: ProposalEntry, rating: 1 | -1, reason?: string): Promise<{ credited: boolean }> => {
+    const ids = new Set(stillThere(entry.builtIds));
+    const layout = useCXDStore.getState().getCurrentProject()?.canvasLayout;
+    const elements = (layout?.elements || []).filter((el) => ids.has(el.id));
+    const result = await sendAssistantEvent({
+      entryId: entry.id, event: "rated", rating, reason, projectId, model: String(provider), instruction: entry.instruction,
+      payload: {
+        form: entry.form ?? null,
+        built: entry.builtIds?.length ?? 0,
+        stillOnCanvas: elements.length,
+        ...(elements.length > 0 ? { snapshot: snapshotBuild(elements, layout?.edges || []) } : {}),
+      },
+    });
+    if (rating === -1 && process.env.NODE_ENV !== "production") {
+      void fetch("/api/lab/inputs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: `Rated down${reason ? ` (${reason})` : ""}: ${entry.instruction}`.slice(0, 120), type: "topic", text: entry.instruction.slice(0, 8000) }),
+      }).catch(() => {});
+    }
+    return { credited: result.credited };
+  }, [provider, projectId, stillThere]);
+
+  /** Start a quick action from the new-chat menu. */
+  const inputRef = useRef<HTMLInputElement>(null);
+  const runQuickAction = useCallback(
+    (mode: QuickActionMode, text: string) => {
+      if (mode === "compose") {
+        setInput(text);
+        requestAnimationFrame(() => {
+          const el = inputRef.current;
+          if (!el) return;
+          el.focus();
+          el.setSelectionRange(text.length, text.length);
+        });
+        return;
+      }
+      if (isStreaming || ops.isProposing) return;
+      ops.clearProposeError();
+      if (mode === "canvas") {
+        routeCanvasText(text);
+      } else {
+        sendMessage(text);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isStreaming, ops.isProposing, requestDraw, sendMessage, setInput],
+  );
+  // Selection tools. Both free ones run locally with no model call.
+  const selectionIds = canvasOps?.selectedElementIds ?? [];
+  const liveCanvas = useCallback(() => {
+    const layout = useCXDStore.getState().getCurrentProject()?.canvasLayout;
+    return { elements: layout?.elements || [], edges: layout?.edges || [] };
+  }, []);
+  const selectionStyle = useMemo(() => {
+    if (selectionIds.length < 2) return null;
+    const { elements, edges } = liveCanvas();
+    return describeStyle(elements, edges, selectionIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIdsKey]);
+
+  // Starting points built from this project's own framing and canvas.
+  const projectStarterPrompts = useMemo(() => {
+    if (!canvasOps) return [];
+    const project = useCXDStore.getState().getCurrentProject();
+    if (!project) return projectStarters(null, selectionIds.length);
+    const { elements, edges } = liveCanvas();
+    return projectStarters(getFullProjectContext(project, elements, edges), selectionIds.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, selectedIdsKey, !!canvasOps]);
 
   // Auto-scroll when new messages arrive or streaming
   // The first pass (opening the panel with existing history) jumps straight to
@@ -346,16 +606,28 @@ export function AIChatPanel({
       // Canvas assistant only: route change requests to the operations path.
       // "empty" (model read it as conversation) and "failed" both fall through
       // to the chat stream, so a message is never silently swallowed.
-      if (canvasOps && (actMode || isActionableMessage(text))) {
+      if (canvasOps && (actMode || isActionableMessage(text) || isDrawRequest(text))) {
         setInput("");
-        void ops.propose(text).then((outcome) => {
-          if (outcome !== "proposed") sendMessage(text);
-        });
+        routeCanvasText(text);
         return;
       }
       handleSubmit(e);
     },
-    [handleSubmit, isStreaming, input, canvasOps, actMode, ops, sendMessage, setInput],
+    [handleSubmit, isStreaming, input, canvasOps, actMode, ops, requestDraw, setInput],
+  );
+
+  /** Submit a prompt chip through the same routing as typed text. */
+  const submitPrompt = useCallback(
+    (text: string) => {
+      if (isStreaming || ops.isProposing) return;
+      ops.clearProposeError();
+      if (canvasOps && (actMode || isActionableMessage(text) || isDrawRequest(text))) {
+        routeCanvasText(text);
+        return;
+      }
+      sendMessage(text);
+    },
+    [isStreaming, ops, canvasOps, actMode, requestDraw, sendMessage],
   );
 
   const handleNewSession = useCallback(async () => {
@@ -408,7 +680,16 @@ export function AIChatPanel({
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-1.5 truncate">
               {faceName}
-              <MessageSquare className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+              {canvasOps ? (
+                <span
+                  className="flex-shrink-0 rounded-full border border-violet-400/40 bg-violet-500/15 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-violet-200"
+                  title="The Canvas Assistant is in beta. Rate its results with the thumbs on each card: that is what trains it."
+                >
+                  Beta
+                </span>
+              ) : (
+                <MessageSquare className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+              )}
             </h2>
             <p className="text-[10px] text-muted-foreground truncate">
               {semanticRole}
@@ -555,7 +836,16 @@ export function AIChatPanel({
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/50" />
               </div>
-            ) : messages.length === 0 && ops.proposals.length === 0 && !ops.isProposing ? (
+            ) : canvasOps && messages.length === 0 && ops.proposals.length === 0 && !ops.isProposing && !pendingDraw && !choosingForm ? (
+              <AssistantHome
+                starters={projectStarterPrompts}
+                canvasCost={drawCost}
+                chatCost={chatCost}
+                selectionCount={selectionIds.length}
+                disabled={isStreaming}
+                onRun={runQuickAction}
+              />
+            ) : messages.length === 0 && ops.proposals.length === 0 && !ops.isProposing && !pendingDraw && !choosingForm ? (
               <div className="flex flex-col items-center justify-center h-full text-center py-6">
                 <MessageSquare
                   className="w-10 h-10 mb-3"
@@ -646,7 +936,7 @@ export function AIChatPanel({
                       {/* AI Action Bar for assistant messages with actionable content */}
                       {msg.role === "assistant" && actionableContent && (actionableContent.tasks.length > 0 || actionableContent.noteContent.length > 0 || msg.content.trim().length > 120) && (
                         <div className="flex justify-start">
-                          <div className="max-w-[80%]">
+                          <div className="w-full min-w-0">
                             <AIActionBar
                               tasks={actionableContent.tasks}
                               noteContent={actionableContent.noteContent}
@@ -665,8 +955,13 @@ export function AIChatPanel({
                                 // Phase 2: Note creation
                                 console.log('[AIChatPanel] Note added to Canvas Inbox');
                               }}
+                              proposeCost={drawCost}
                               onProposeChanges={canvasOps ? (content) => {
-                                void ops.propose("Apply the concrete changes described in this answer.", content);
+                                requestDraw(APPLY_ANSWER_INSTRUCTION, {
+                                  subject: "Put this answer on the canvas",
+                                  formSource: content,
+                                  propose: { groundingText: content },
+                                });
                               } : undefined}
                             />
                           </div>
@@ -693,13 +988,42 @@ export function AIChatPanel({
                     entry={entry}
                     onApply={ops.apply}
                     onDiscard={ops.discard}
+                    onRefine={ops.isProposing ? undefined : refineBuild}
+                    onChangeForm={ops.isProposing ? undefined : changeBuildForm}
+                    onRate={rateResult}
                   />
                 ))}
+                {canvasOps && pendingDraw && !ops.isProposing && (
+                  <AssistantFormChooser
+                    subject={pendingDraw.subject}
+                    options={pendingDraw.options}
+                    more={allDiagramForms()}
+                    cost={drawCost}
+                    onPick={pickForm}
+                    onCancel={() => setPendingDraw(null)}
+                    onStopAsking={() => {
+                      updatePrefs({ ...prefs, askForm: false });
+                      pickForm(pendingDraw.options[0]?.id ?? null);
+                    }}
+                  />
+                )}
+                {canvasOps && choosingForm && !ops.isProposing && (
+                  <div className="flex justify-start">
+                    <div className="bg-white/5 border border-border/40 rounded-xl px-4 py-2.5 flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-300" />
+                      <span className="text-xs text-muted-foreground">Looking at which form fits…</span>
+                    </div>
+                  </div>
+                )}
                 {canvasOps && ops.isProposing && (
                   <div className="flex justify-start">
                     <div className="bg-white/5 border border-border/40 rounded-xl px-4 py-2.5 flex items-center gap-2">
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-300" />
-                      <span className="text-xs text-muted-foreground">Drafting changes…</span>
+                      {/* One model call with no stages to report, so the honest signal is the clock. */}
+                      <span className="text-xs text-muted-foreground">
+                        Designing it for your canvas · {ops.elapsedSeconds}s
+                        {ops.elapsedSeconds >= 8 && <span className="text-muted-foreground/60"> (usually 15 to 40)</span>}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -720,13 +1044,20 @@ export function AIChatPanel({
           )}
 
           {/* Prompt Suggestions - Dynamic (shows 3 unused questions) */}
-          {messages.length === 0 && (
+          {/* The canvas assistant's new-chat menu already holds its starting points. */}
+          {messages.length === 0 && !canvasOps && (
             <div className="px-4 py-2 border-t border-border/50 flex-shrink-0">
               <div className="flex flex-wrap gap-1.5 justify-center">
-                {availableQuestions.map((suggestion, index) => (
+                {(canvasOps ? projectStarterPrompts : availableQuestions).map((suggestion, index) => (
                   <button
                     key={suggestion}
                     onClick={() => {
+                      // The canvas assistant's starters come from the project
+                      // itself and go through the same routing as typed text.
+                      if (canvasOps) {
+                        submitPrompt(suggestion);
+                        return;
+                      }
                       // Mark this question as used
                       markQuestionAsUsed(suggestion);
                       setInput(suggestion);
@@ -751,10 +1082,90 @@ export function AIChatPanel({
             </div>
           )}
 
+          {/* Selection tools: act on exactly what is selected. The first two
+              are computed locally (instant, no credits); the others ask the model. */}
+          {canvasOps && selectionIds.length >= 2 && !ops.isProposing && (
+            <div className="px-4 pt-2 flex-shrink-0 border-t border-border/50">
+              <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/50">
+                {selectionIds.length} selected
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  {
+                    label: "Tidy layout", free: true,
+                    run: () => { const c = liveCanvas(); ops.applyLocal("Tidy layout", tidyLayout(c.elements, c.edges, selectionIds), "Already tidy."); },
+                  },
+                  {
+                    label: "Connect in order", free: true,
+                    run: () => { const c = liveCanvas(); ops.applyLocal("Connect in order", connectInOrder(c.elements, c.edges, selectionIds), "Already connected."); },
+                  },
+                  {
+                    label: "Turn into a diagram", free: false,
+                    run: () => requestDraw("Turn the selected elements into one connected diagram that keeps all of their content.", {
+                      subject: `Turn ${selectionIds.length} selected elements into a diagram`,
+                      formSource: canvasSelection?.titles.join("\n") ?? "",
+                      propose: { replaceIds: selectionIds },
+                    }),
+                  },
+                  {
+                    label: "Summarise as table", free: false,
+                    run: () => void ops.propose("Summarise the selected elements as one table placed beside them. Leave the selected elements as they are.", {
+                      form: "table", label: `Summarise ${selectionIds.length} selected elements as a table`,
+                    }),
+                  },
+                ].map((tool) => (
+                  <button
+                    key={tool.label}
+                    type="button"
+                    onClick={tool.run}
+                    title={tool.free ? "Instant, no credits" : `Uses ${drawCost} credits`}
+                    className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border border-white/10 bg-white/[0.04] px-2.5 text-[11px] text-foreground/75 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-foreground"
+                  >
+                    {tool.label}
+                    {tool.free && <span className="text-emerald-300/70">free</span>}
+                  </button>
+                ))}
+                {selectionStyle && (
+                  <button
+                    type="button"
+                    onClick={() => updatePrefs({ ...prefs, style: selectionStyle })}
+                    title={`Draw future diagrams in this project like the selection. ${selectionStyle}`}
+                    className="inline-flex h-7 items-center whitespace-nowrap rounded-full border border-white/10 bg-white/[0.04] px-2.5 text-[11px] text-foreground/75 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-foreground"
+                  >
+                    {prefs.style === selectionStyle ? "Style saved" : "Draw like this from now on"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Standing preferences for this project, each one click to change. */}
+          {canvasOps && (prefs.style || !prefs.askForm) && (
+            <div className="px-4 pt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/60 flex-shrink-0">
+              {prefs.style && (
+                <span title={prefs.style}>
+                  Using your saved style ·{" "}
+                  <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => updatePrefs({ askForm: prefs.askForm })}>
+                    clear
+                  </button>
+                </span>
+              )}
+              {!prefs.askForm && (
+                <span>
+                  Picking the form for you ·{" "}
+                  <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => updatePrefs({ ...prefs, askForm: true })}>
+                    ask me again
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Chat Input */}
           <div className="px-4 py-2.5 border-t border-border flex-shrink-0">
             <form onSubmit={onSubmit} className="flex items-center gap-2">
               <input
+                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}

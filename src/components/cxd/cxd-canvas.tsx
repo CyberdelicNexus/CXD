@@ -18,6 +18,8 @@ import { SHAPE_DEFAULT_SIZES } from "@/lib/shape-geometry";
 import { uploadCanvasImage } from "@/lib/canvas-image-upload";
 import { DEFAULT_SHAPE_STYLE } from "@/lib/style-presets";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
+import { useTagVisibility, toggleTagVisibility } from "@/lib/tag-visibility";
+import { useBuildReveal, useBuildSelection, skipBuild, CAMERA_GLIDE_MS } from "@/lib/ai/assistant-build";
 import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
 import { CanvasAssistant } from "./canvas/canvas-assistant";
@@ -785,6 +787,19 @@ export function CXDCanvas() {
   );
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
+  // Canvas Assistant build: the running reveal (for connectors + Skip), the
+  // camera glide flag, and the "select what was just built" request.
+  const buildReveal = useBuildReveal();
+  const buildSelection = useBuildSelection();
+  const [cameraGlide, setCameraGlide] = useState(false);
+  const lastBuildSelectionNonce = useRef(buildSelection?.nonce ?? 0);
+  useEffect(() => {
+    if (!buildSelection || buildSelection.nonce === lastBuildSelectionNonce.current) return;
+    lastBuildSelectionNonce.current = buildSelection.nonce;
+    setSelectedElementIds(new Set(buildSelection.ids));
+    setSelectedEdgeId(null);
+  }, [buildSelection]);
+
   // Bend handle dragging state
   const [draggingBendHandle, setDraggingBendHandle] = useState<string | null>(
     null,
@@ -921,6 +936,7 @@ export function CXDCanvas() {
   const [exportDialog, setExportDialog] = useState<null | { scope: 'selection' | 'board' }>(null);
 
   const [showAlignmentGuides, setShowAlignmentGuides] = useState(true);
+  const tagsPinned = useTagVisibility();
   // Guide segments: a horizontal guide runs at `at` from `from` to `to` along x,
   // a vertical one along y. Only spans the aligned elements, not the board.
   type GuideSegment = { at: number; from: number; to: number };
@@ -4407,12 +4423,16 @@ export function CXDCanvas() {
     const cx = (bMinX + bMaxX) / 2;
     const cy = (bMinY + bMaxY) / 2;
 
-    const UI_TOP = 80, UI_BOTTOM = 50, UI_LEFT = 70, UI_RIGHT = 70;
+    const animate = !!pendingCanvasFitBounds.animate;
+    const UI_TOP = 80, UI_BOTTOM = 50, UI_LEFT = 70;
+    const UI_RIGHT = Math.max(70, pendingCanvasFitBounds.insetRight ?? 0);
     const vw = rect.width - UI_LEFT - UI_RIGHT;
     const vh = rect.height - UI_TOP - UI_BOTTOM;
     if (vw <= 0 || vh <= 0) return;
 
-    const zoom = Math.max(MIN_ZOOM, Math.min(vw / contentW, vh / contentH, MAX_ZOOM));
+    // A glide never zooms in past 100%: framing a four-node loop at 300% would
+    // feel like being thrown at it.
+    const zoom = Math.max(MIN_ZOOM, Math.min(vw / contentW, vh / contentH, animate ? 1 : MAX_ZOOM));
     if (!isFinite(zoom)) {
       setPendingCanvasFitBounds(null);
       return;
@@ -4427,6 +4447,12 @@ export function CXDCanvas() {
       return;
     }
 
+    if (animate) {
+      // Same commit as the new transform, so the browser interpolates from the
+      // old one; the flag drops once the glide is over so user pans stay instant.
+      setCameraGlide(true);
+      window.setTimeout(() => setCameraGlide(false), CAMERA_GLIDE_MS + 80);
+    }
     setCanvasZoom(zoom);
     setCanvasPosition({ x: posX, y: posY });
     setPendingCanvasFitBounds(null);
@@ -4486,23 +4512,27 @@ export function CXDCanvas() {
   // which the browser compositor interpolates on the GPU at 60fps between our
   // ~30fps discrete targets. This avoids running a 60fps state-update loop that
   // would otherwise cause full React re-renders and drop frames on rich canvases.
+  // Keyed on the followed cursor's own coordinates, NOT on `collaborators`: that
+  // array changes on every peer's cursor broadcast, so depending on it re-panned
+  // (and re-saved the viewport) once per message from anyone in the room.
+  const followX = followedCollaborator?.cursor?.x;
+  const followY = followedCollaborator?.cursor?.y;
+  const followZoom = followedCollaborator?.cursor?.zoom;
   useEffect(() => {
-    if (!followingCollaboratorId) return;
-    const followed = collaborators.find((c) => c.id === followingCollaboratorId);
-    if (!followed?.cursor) return;
+    if (!followingCollaboratorId || followX === undefined || followY === undefined) return;
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     // Mirror the followed user's zoom if available
-    const targetZoom = followed.cursor.zoom ?? canvasZoom;
-    if (followed.cursor.zoom !== undefined && followed.cursor.zoom !== canvasZoom) {
-      setCanvasZoom(followed.cursor.zoom);
+    const targetZoom = followZoom ?? canvasZoom;
+    if (followZoom !== undefined && followZoom !== canvasZoom) {
+      setCanvasZoom(followZoom);
     }
     setCanvasPosition({
-      x: rect.width / 2 - followed.cursor.x * targetZoom,
-      y: rect.height / 2 - followed.cursor.y * targetZoom,
+      x: rect.width / 2 - followX * targetZoom,
+      y: rect.height / 2 - followY * targetZoom,
     });
-  }, [followingCollaboratorId, collaborators, canvasZoom, setCanvasPosition, setCanvasZoom]);
+  }, [followingCollaboratorId, followX, followY, followZoom, canvasZoom, setCanvasPosition, setCanvasZoom]);
 
   // Apply the smoothing transition only while following. Stays off during user
   // pans/zooms so their own interactions feel instant. Duration/timing match
@@ -4510,12 +4540,19 @@ export function CXDCanvas() {
   // cursor stays visually glued to the canvas underneath.
   const canvasTransformTransition = followingCollaboratorId
     ? 'transform 80ms linear'
-    : 'none';
+    : cameraGlide
+      ? `transform ${CAMERA_GLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
+      : 'none';
 
   // Stop following when the viewer clicks anywhere
   useEffect(() => {
     if (!followingCollaboratorId) return;
-    const stop = () => setFollowingCollaboratorId(null);
+    const stop = (e: MouseEvent) => {
+      // The navbar follow bubbles toggle follow themselves on click; stopping
+      // here first would make that click read "not following" and re-follow.
+      if ((e.target as Element | null)?.closest?.('[data-follow-bubble]')) return;
+      setFollowingCollaboratorId(null);
+    };
     document.addEventListener('mousedown', stop, { capture: true });
     return () => document.removeEventListener('mousedown', stop, { capture: true });
   }, [followingCollaboratorId, setFollowingCollaboratorId]);
@@ -5168,7 +5205,9 @@ export function CXDCanvas() {
           <div
             className="dot-grid pointer-events-none absolute inset-0"
             style={{
-              transition: canvasTransformTransition,
+              // The grid pans via background-position, not transform — it needs
+              // the same easing on that property or it steps while content glides.
+              transition: canvasTransformTransition.replace('transform', 'background-position'),
               backgroundImage: settings.gridMajorDots ? `${thick}, ${fine}` : fine,
               backgroundSize: settings.gridMajorDots
                 ? `${major}px ${major}px, ${spacing}px ${spacing}px`
@@ -5186,6 +5225,7 @@ export function CXDCanvas() {
           canvasOffset={{ x: canvasPosition.x, y: canvasPosition.y }}
           zoom={canvasZoom}
           currentBoardId={activeBoardId ?? null}
+          cameraTransition={canvasTransformTransition}
         />
       )}
 
@@ -5715,8 +5755,9 @@ export function CXDCanvas() {
         return (
           <div
             key={edge.id}
-            className="absolute pointer-events-none"
+            className={`absolute pointer-events-none${buildReveal?.delays.has(edge.id) ? " assistant-reveal" : ""}`}
             style={{
+              ...(buildReveal?.delays.has(edge.id) ? { animationDelay: `${buildReveal.delays.get(edge.id)}ms` } : {}),
               transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
               transformOrigin: "0 0",
               transition: canvasTransformTransition,
@@ -6338,6 +6379,8 @@ export function CXDCanvas() {
         canRedo={canRedo()}
         showAlignmentGuides={showAlignmentGuides}
         onToggleAlignmentGuides={() => setShowAlignmentGuides(!showAlignmentGuides)}
+        showTags={tagsPinned}
+        onToggleTags={toggleTagVisibility}
         gridVisible={settings.gridVisible}
         gridMajorDots={settings.gridMajorDots}
         onCycleGrid={() => {
@@ -6392,6 +6435,15 @@ export function CXDCanvas() {
       {/* Inbox note pinned open for writing — stays up in focus mode too */}
       {canEdit && <PinnedInboxNote />}
       {/* Canvas AI Assistant — canvas view only, edit mode only */}
+      {buildReveal && (
+        <button
+          type="button"
+          onClick={skipBuild}
+          className="absolute bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full border border-white/15 bg-card/90 px-3.5 py-1.5 text-xs text-foreground/80 shadow-lg backdrop-blur transition-colors hover:border-white/30 hover:text-foreground"
+        >
+          Building on canvas… <span className="ml-1 font-medium text-violet-300">Skip</span>
+        </button>
+      )}
       {canEdit && !canvasFocusMode && (
         <CanvasAssistant selectedElementIds={Array.from(selectedElementIds)} />
       )}
