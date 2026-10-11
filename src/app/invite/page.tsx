@@ -34,7 +34,13 @@ function InvitePageContent() {
       try {
         const response = await fetch(`/api/canvas/invite/accept?token=${token}`);
         if (!response.ok) {
-          setState({ status: 'error', message: 'Failed to process invitation. Please try again.' });
+          const errorData = await response.json().catch(() => null);
+          setState({
+            status: 'error',
+            message: errorData?.error || 'Failed to process invitation. Please try again.',
+            invitedEmail: errorData?.invitedEmail,
+            currentEmail: errorData?.currentEmail,
+          });
           return;
         }
         const data = await response.json();
