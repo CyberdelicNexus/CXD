@@ -19,7 +19,8 @@ import type { ExperienceInsights } from "@/lib/ai/experience-insights";
 
 interface ProjectDetailPanelProps {
   projectId: string;
-  onClose: () => void;
+  /** Omit when the panel is always shown; the close buttons are hidden. */
+  onClose?: () => void;
   onEnterProject: (projectId: string) => void;
   /** Owner-gated actions, wired from the dashboard so the moved square buttons work here. */
   isOwner?: boolean;
@@ -56,8 +57,8 @@ function relDay(iso?: string | null): string {
 const insightsCacheKey = (id: string) => `cxd-exp-insights:${id}`;
 
 /**
- * Overview snapshot for a selected project card — lives INSIDE the same grid
- * as the project tiles (col-span-2 row-span-2). Fetched via fetchProjectById
+ * Overview snapshot for the selected project card. Fills its parent, which sets
+ * the size (the dashboard's preview column). Fetched via fetchProjectById
  * (single project, RLS-respecting), NOT the full canvas renderer.
  *
  * Surfaces: core concept, task status breakdown, roadmap + OKR progress, an
@@ -276,7 +277,7 @@ export function ProjectDetailPanel({
 
   if (loading) {
     return (
-      <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl bg-black/20 border border-white/10 flex items-center justify-center">
+      <div className="h-full rounded-xl bg-black/20 border border-white/10 flex items-center justify-center">
         <Loader2 className="w-6 h-6 text-white/40 animate-spin" />
       </div>
     );
@@ -284,11 +285,13 @@ export function ProjectDetailPanel({
 
   if (notFound || !project) {
     return (
-      <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl bg-black/20 border border-white/10 flex flex-col items-center justify-center gap-3 text-white/50 text-sm">
+      <div className="h-full rounded-xl bg-black/20 border border-white/10 flex flex-col items-center justify-center gap-3 text-white/50 text-sm">
         Couldn&apos;t load this project.
-        <button onClick={onClose} className="text-violet-400 hover:text-violet-300 transition-colors">
-          Close
-        </button>
+        {onClose && (
+          <button onClick={onClose} className="text-violet-400 hover:text-violet-300 transition-colors">
+            Close
+          </button>
+        )}
       </div>
     );
   }
@@ -397,9 +400,8 @@ export function ProjectDetailPanel({
   };
 
   return (
-    // aspect-square + self-start gives the panel a definite height equal to its
-    // width (the 2x2 tile area) so long content scrolls instead of stretching the grid.
-    <div className="col-span-2 row-span-2 self-start aspect-square rounded-xl overflow-hidden bg-[#0a0712] border border-violet-500/30 flex flex-col">
+    // The parent gives the panel a definite height, so long content scrolls inside it.
+    <div className="h-full rounded-xl overflow-hidden bg-[#0a0712] border border-violet-500/30 flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto">
         {/* Cover */}
         <div
@@ -422,13 +424,15 @@ export function ProjectDetailPanel({
           <div className={`absolute inset-0 bg-gradient-to-t from-[#0a0712] via-[#0a0712]/30 to-transparent ${repositioning ? "opacity-40" : ""} pointer-events-none`} />
           {!repositioning && (
             <>
-              <button
-                onClick={onClose}
-                className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full bg-black/55 hover:bg-black/75 text-white/75 hover:text-white transition-colors z-10"
-                title="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full bg-black/55 hover:bg-black/75 text-white/75 hover:text-white transition-colors z-10"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
               {coverImage && coverImage.startsWith("http") && onSaveCoverPosition && (
                 <button
                   onClick={startReposition}

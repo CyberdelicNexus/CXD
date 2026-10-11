@@ -36,7 +36,6 @@ import {
   Send,
   X,
   LayoutGrid,
-  Play,
   PlayCircle,
   BookOpen,
   Target,
@@ -50,7 +49,9 @@ import {
   UserPlus,
   Loader2,
   ClipboardList,
-  Lock
+  Lock,
+  Newspaper,
+  type LucideIcon
 } from 'lucide-react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useNotifications } from '@/hooks/use-notifications'
@@ -67,6 +68,24 @@ const notificationIcons: Record<NotificationType, React.ReactNode> = {
   project: <FolderOpen className="w-4 h-4 text-orange-400" />,
 };
 
+const pillClass = (isActive: boolean) =>
+  `relative flex items-center px-3 xl:px-4 py-2 group rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 overflow-hidden cursor-pointer ${
+    isActive
+      ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+      : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+  }`;
+
+const pillContent = (Icon: LucideIcon, label: string, isActive: boolean) => (
+  <>
+    <Icon className={`w-4 h-4 xl:mr-2 transition-colors ${isActive ? 'text-violet-200' : 'text-white/60 group-hover:text-violet-200'}`} />
+    <span className="hidden xl:inline text-xs font-medium whitespace-nowrap">{label}</span>
+    {/* Subtle inner top highlight */}
+    <span className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+    {/* Subtle bottom glow */}
+    <span className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+  </>
+);
+
 function formatTimeAgo(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -79,7 +98,9 @@ function formatTimeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-export default function DashboardNavbar() {
+// `overCover`: the dashboard's cover image runs behind the navbar, so the bar goes
+// lighter and blurrier there instead of hiding the image.
+export default function DashboardNavbar({ overCover = false }: { overCover?: boolean }) {
   const supabase = createClient()
   const router = useRouter()
   const pathname = usePathname()
@@ -219,7 +240,7 @@ export default function DashboardNavbar() {
 
   return (
     <>
-      <nav className="w-full border-b border-white/10 bg-black/60 backdrop-blur-sm sticky top-0 z-50 overflow-visible">
+      <nav className={`w-full border-b border-white/10 sticky top-0 z-50 overflow-visible ${overCover ? 'bg-black/35 backdrop-blur-md' : 'bg-black/60 backdrop-blur-sm'}`}>
         {/* Glass Reflection Effects */}
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-30" />
         <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-20" />
@@ -240,83 +261,53 @@ export default function DashboardNavbar() {
               </span>
             </Link>
 
-            {/* Navigation Links */}
+            {/* Navigation Links. Labels collapse to icons below xl. */}
             <div className="hidden md:flex items-center gap-2">
               {[
                 { id: 'dashboard', href: '/dashboard', icon: LayoutGrid, label: 'Dashboard' },
                 { id: 'docs', href: '/dashboard/docs', icon: BookOpen, label: 'Documentation' },
-              ].map((item) => {
-                const isActive = pathname === item.href;
-                return (
-                  <Link key={item.id} href={item.href}>
-                    <div className={`relative flex items-center px-4 py-2 group rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 overflow-hidden cursor-pointer
-                      ${isActive
-                        ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
-                        : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
-                      }`}
-                    >
-                      <item.icon className={`w-4 h-4 mr-2 transition-colors ${isActive ? 'text-violet-200' : 'text-white/60 group-hover:text-violet-200'}`} />
-                      <span className="text-xs font-medium">{item.label}</span>
-                      {/* Subtle inner top highlight */}
-                      <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                      {/* Subtle bottom glow */}
-                      <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    </div>
-                  </Link>
-                );
-              })}
+              ].map((item) => (
+                <Link key={item.id} href={item.href} title={item.label} className={pillClass(pathname === item.href)}>
+                  {pillContent(item.icon, item.label, pathname === item.href)}
+                </Link>
+              ))}
 
               {/* Templates nav link — hidden until templates are production-ready */}
 
               {/* Master Plan — Pro feature, clickable for everyone but blocked
                   behind an upgrade modal (not a permanent "coming soon") */}
-              {(() => {
-                const isActive = pathname === '/dashboard/master-plan';
-                return (
-                  <div
-                    onClick={() => {
-                      if (!hasMasterPlan) {
-                        setShowMasterPlanUpgrade(true);
-                        return;
-                      }
-                      router.push('/dashboard/master-plan');
-                    }}
-                    className={`relative flex items-center px-4 py-2 group rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 overflow-visible cursor-pointer
-                      ${isActive
-                        ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
-                        : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
-                      }
-                      ${!hasMasterPlan ? 'opacity-70' : ''}`}
-                  >
-                    {!hasMasterPlan && (
-                      <Lock className="w-3 h-3 absolute -top-1 -right-1 text-orange-400 z-10" />
-                    )}
-                    <ClipboardList className={`w-4 h-4 mr-2 transition-colors ${isActive ? 'text-violet-200' : 'text-white/60 group-hover:text-violet-200'}`} />
-                    <span className="text-xs font-medium">Master Plan</span>
-                    <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </div>
-                );
-              })()}
+              <button
+                type="button"
+                title="Master Plan"
+                onClick={() => {
+                  if (!hasMasterPlan) {
+                    setShowMasterPlanUpgrade(true);
+                    return;
+                  }
+                  router.push('/dashboard/master-plan');
+                }}
+                className={`${pillClass(pathname === '/dashboard/master-plan')} !overflow-visible ${!hasMasterPlan ? 'opacity-70' : ''}`}
+              >
+                {!hasMasterPlan && (
+                  <Lock className="w-3 h-3 absolute -top-1 -right-1 text-orange-400 z-10" />
+                )}
+                {pillContent(ClipboardList, 'Master Plan', pathname === '/dashboard/master-plan')}
+              </button>
 
-              {/* Locked Links */}
-              {[
-                { id: 'tutorials', icon: Play, label: 'Tutorials' },
-              ].map((item) => (
-                <div key={item.id} className="relative group">
-                  <div className="flex items-center px-4 py-2 rounded-full text-white/40 bg-white/[0.02] border border-white/[0.05] transition-all duration-300 cursor-not-allowed">
-                    <item.icon className="w-4 h-4 mr-2 opacity-50" />
-                    <span className="text-xs font-medium">{item.label}</span>
-                  </div>
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-3 py-1 bg-zinc-900 text-white text-[10px] rounded-md border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[60]">
-                    Coming soon
-                  </div>
-                </div>
-              ))}
+              <Link href="/dashboard/tutorials" title="Tutorials" className={pillClass(pathname === '/dashboard/tutorials')}>
+                {pillContent(PlayCircle, 'Tutorials', pathname === '/dashboard/tutorials')}
+              </Link>
             </div>
           </div>
 
           <div className="flex gap-2 items-center">
+            {/* Changelog */}
+            <Link href="/changelog" title="Changelog" aria-label="Changelog" className="group active:scale-95 transition-all">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
+                <Newspaper className="h-5 w-5 text-white/60 group-hover:text-violet-200" />
+              </div>
+            </Link>
+
             {/* Notifications */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
