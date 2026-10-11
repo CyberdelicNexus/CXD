@@ -16,7 +16,11 @@
 // scaled to roughly the same dollar amount per credit). 0.03 cents per
 // credit is good enough for budget alerting — not a billing source of truth.
 
-const CENTS_PER_CREDIT_DEFAULT = 0.03; // $0.0003 per credit
+// Measured 2026-10 from real requests: a Claude canvas build costs about
+// $0.075 for 8 credits and a chat about $0.02 for 2, so one credit is roughly
+// one cent of API cost. The earlier 0.03 (a figure derived from the unused
+// per-model credit weights) made the org spend alert under-report by ~30x.
+const CENTS_PER_CREDIT_DEFAULT = 1; // $0.01 per credit
 export const CENTS_PER_CREDIT = (() => {
   const raw = process.env.AI_CENTS_PER_CREDIT;
   const n = raw ? Number(raw) : NaN;
@@ -41,9 +45,13 @@ function intFromEnv(name: string, fallback: number): number {
  */
 export function getDailyCreditCap(planId: string): number {
   switch (planId) {
-    case 'pro':         return intFromEnv('AI_DAILY_CAP_PRO', 100);
-    case 'lifetime':    return intFromEnv('AI_DAILY_CAP_LIFETIME', 100);
-    case 'beta_tester': return intFromEnv('AI_DAILY_CAP_BETA', 100);
+    // 250: half a Pro month in one day. The old 100 stopped a normal working
+    // session with the Canvas Assistant (12 builds on Claude, and every refine
+    // is a build) while still being far above anything a runaway loop needs
+    // to be caught at. Worst case is about $2.50 of API cost per user per day.
+    case 'pro':         return intFromEnv('AI_DAILY_CAP_PRO', 250);
+    case 'lifetime':    return intFromEnv('AI_DAILY_CAP_LIFETIME', 250);
+    case 'beta_tester': return intFromEnv('AI_DAILY_CAP_BETA', 250);
     case 'free':
     default:            return intFromEnv('AI_DAILY_CAP_FREE', 50);
   }

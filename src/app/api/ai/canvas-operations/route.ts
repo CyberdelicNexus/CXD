@@ -1,8 +1,10 @@
 import { generateObject } from "ai";
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
+import { refundAICredits } from "@/lib/ai/credit-refund";
 import { createClient } from "@/supabase/server";
-import { getModelInstance, getModelConfig } from "@/lib/ai/provider-registry";
+import { getModelConfig, getCanvasBuildModel, structuredCanvasSettings } from "@/lib/ai/provider-registry";
+import { canUseModel, creditCostFor, type TierId } from "@/lib/ai-credit-config";
 import { getGeneralSystemPrompt } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
@@ -35,6 +37,9 @@ function isMissing(error: { code?: string; message?: string } | null): boolean {
 
 export async function POST(request: Request) {
   let concurrencyHeldFor: string | null = null;
+  // Set once credits are actually deducted, so a failure after that point can
+  // hand them back: the user should not pay for a build they did not get.
+  let charged: { userId: string; cost: number } | null = null;
   const releaseConcurrency = async () => {
     if (concurrencyHeldFor) {
       const userId = concurrencyHeldFor;
@@ -100,7 +105,11 @@ export async function POST(request: Request) {
     concurrencyHeldFor = user.id;
 
     // 4. Credit deduction — gracefully skip if tables/RPC not deployed yet
-    const creditCost = CREDIT_COSTS.canvasOperations[resolvedProvider] || 4;
+    // Opus draws its own builds at its own price, for plans that include it;
+    // any other selection uses (and pays for) its family's build model.
+    const buildSelection =
+      (provider as string) === "claude-opus-4.6" && canUseModel(callerPlan as TierId, "claude-opus-4.6") ? "claude-opus-4.6" : resolvedProvider;
+    const creditCost = creditCostFor("canvasOperations", buildSelection) || 4;
     const dailyCap = getDailyCreditCap(callerPlan);
     const { data: creditResult, error: creditError } = await supabase.rpc(
       "deduct_ai_credits",
@@ -139,6 +148,9 @@ export async function POST(request: Request) {
         console.warn("[AI CanvasOps] no record for user; allowing request and relying on /api/ai/credits to provision");
       }
     }
+    if (creditResult && (creditResult as { success?: boolean }).success === true) {
+      charged = { userId: user.id, cost: creditCost };
+    }
 
     // 5. Prompts: project context + ops guide as system; inventory + instruction as user prompt
     const systemPrompt =
@@ -147,12 +159,16 @@ export async function POST(request: Request) {
     const userPrompt =
       `Canvas inventory (${inventory.totalCount} elements total${inventory.truncated ? ", truncated to the most relevant" : ""}):\n` +
       JSON.stringify(inventory.elements) +
+      (Array.isArray(inventory.connections) && inventory.connections.length > 0
+        ? `\n\nExisting connectors between them (from id -> to id):\n${JSON.stringify(inventory.connections.slice(0, 200))}`
+        : "") +
       `\n\nSelected element ids: ${JSON.stringify(inventory.selectedIds)}` +
       `\n\nInstruction:\n${instruction.trim()}`;
 
     // 6. Model + record
-    const modelConfig = getModelConfig(resolvedProvider, "analysis");
-    const model = getModelInstance(resolvedProvider, "analysis");
+    const build = getCanvasBuildModel(buildSelection, resolvedProvider);
+    const modelConfig = { maxTokens: build.maxTokens, isReasoning: getModelConfig(resolvedProvider, "analysis").isReasoning };
+    const model = build.model;
     recordRequest(user.id, "analysis");
 
     // 7. Generate structured operations (90s timeout, abort on client disconnect)
@@ -171,7 +187,7 @@ export async function POST(request: Request) {
         system: systemPrompt,
         prompt: userPrompt,
         schema: canvasOperationsSchema,
-        maxOutputTokens: modelConfig.maxTokens,
+        ...structuredCanvasSettings(resolvedProvider, modelConfig.maxTokens),
         ...(modelConfig.isReasoning ? {} : { temperature: 0.3 }),
         abortSignal: abortController.signal,
       });
@@ -192,9 +208,16 @@ export async function POST(request: Request) {
       );
     }
 
+    // Nothing to approve (the model read this as conversation, or every row
+    // was unusable): the user gets no change set, so they do not pay for one.
+    if (proposal.rows.length === 0 && charged) {
+      await refundAICredits(charged.userId, charged.cost, "ai/canvas-operations");
+    }
+
     return NextResponse.json({ proposal, usage: result.usage });
   } catch (error) {
     await releaseConcurrency();
+    if (charged) await refundAICredits(charged.userId, charged.cost, "ai/canvas-operations");
     console.error("[AI CanvasOps Error]", error);
 
     Sentry.captureException(error, { tags: { route: "ai/canvas-operations" } });
