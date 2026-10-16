@@ -30,6 +30,31 @@ async function getUserInfo(userId: string): Promise<{ email: string; name: strin
   };
 }
 
+// subscriptions.plan_source arrives with migration 20261016000001_nexus_bridge.
+// Until it is applied, writes and reads retry without it so checkout and
+// cancellation keep working exactly as before.
+function isMissingPlanSourceColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === '42703' ||
+    error.code === 'PGRST204' ||
+    String(error.message ?? '').includes('plan_source')
+  );
+}
+
+async function updateSubscriptionWithPlanSource(
+  supabase: any,
+  userId: string,
+  fields: Record<string, unknown>,
+): Promise<{ error: any }> {
+  const first = await supabase
+    .from('subscriptions')
+    .update({ ...fields, plan_source: 'stripe' })
+    .eq('user_id', userId);
+  if (!isMissingPlanSourceColumn(first.error)) return first;
+  return await supabase.from('subscriptions').update(fields).eq('user_id', userId);
+}
+
 export async function POST(req: Request) {
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -120,15 +145,12 @@ export async function POST(req: Request) {
           const nextFoundingNumber = (lifetimeCount?.founding_member_number || 0) + 1;
 
           if (nextFoundingNumber <= 250) {
-            const { error: lifetimeUpdateError } = await supabase
-              .from('subscriptions')
-              .update({
-                plan_id: 'lifetime',
-                stripe_customer_id: customerId,
-                founding_member_number: nextFoundingNumber,
-                status: 'active',
-              })
-              .eq('user_id', userId);
+            const { error: lifetimeUpdateError } = await updateSubscriptionWithPlanSource(supabase, userId, {
+              plan_id: 'lifetime',
+              stripe_customer_id: customerId,
+              founding_member_number: nextFoundingNumber,
+              status: 'active',
+            });
 
             if (lifetimeUpdateError) {
               console.error('Failed to update subscription to lifetime:', lifetimeUpdateError);
@@ -164,9 +186,7 @@ export async function POST(req: Request) {
           // Pro subscription - get trial dates from Stripe
           const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-          const { error: proUpdateError } = await supabase
-            .from('subscriptions')
-            .update({
+          const { error: proUpdateError } = await updateSubscriptionWithPlanSource(supabase, userId, {
               plan_id: 'pro',
               stripe_customer_id: customerId,
               stripe_subscription_id: subscriptionId,
@@ -179,8 +199,7 @@ export async function POST(req: Request) {
               trial_end: stripeSubscription.trial_end
                 ? new Date(stripeSubscription.trial_end * 1000).toISOString()
                 : null,
-            })
-            .eq('user_id', userId);
+            });
 
           if (proUpdateError) {
             console.error('Failed to update subscription to pro:', proUpdateError);
@@ -449,18 +468,37 @@ export async function POST(req: Request) {
 
       case 'customer.subscription.deleted': {
         const subscription = event.data.object as Stripe.Subscription;
-        const { data: subscriptionRecord, error: subRecordError } = await supabase
+        let { data: subscriptionRecord, error: subRecordError } = await supabase
           .from('subscriptions')
-          .select('user_id')
+          .select('user_id, plan_source')
           .eq('stripe_customer_id', subscription.customer as string)
           .single();
+        if (isMissingPlanSourceColumn(subRecordError)) {
+          ({ data: subscriptionRecord, error: subRecordError } = await supabase
+            .from('subscriptions')
+            .select('user_id')
+            .eq('stripe_customer_id', subscription.customer as string)
+            .single());
+        }
 
         if (subRecordError) {
           console.error('Failed to find subscription record:', subRecordError);
           return NextResponse.json({ error: 'Database error' }, { status: 500 });
         }
 
-        if (subscriptionRecord) {
+        if (subscriptionRecord && (subscriptionRecord as any).plan_source === 'nexus') {
+          // The plan comes from the member's Nexus tier (D182 §5), not from
+          // this Stripe subscription: forget the subscription, keep the plan,
+          // and leave the credit allowance to the Nexus tier sync.
+          const { error: detachError } = await supabase
+            .from('subscriptions')
+            .update({ stripe_subscription_id: null, canceled_at: new Date().toISOString() })
+            .eq('user_id', subscriptionRecord.user_id);
+          if (detachError) {
+            console.error('Failed to detach Stripe subscription from Nexus plan:', detachError);
+            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+          }
+        } else if (subscriptionRecord) {
           const { error: cancelUpdateError } = await supabase
             .from('subscriptions')
             .update({

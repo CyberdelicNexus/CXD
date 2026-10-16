@@ -11,12 +11,27 @@ import Image from "next/image";
 export const metadata = { title: 'Sign In' };
 
 interface LoginProps {
-  searchParams: Promise<Message & { redirectTo?: string }>;
+  searchParams: Promise<Message & { redirectTo?: string; nexus?: string }>;
 }
 
+// Short error codes from POST /auth/nexus-callback (D182 §3).
+const NEXUS_ERRORS: Record<string, string> = {
+  unavailable: "Signing in from Cyberdelic Nexus isn't available right now. Sign in with your Canvas login instead.",
+  invalid: "That sign-in from Cyberdelic Nexus couldn't be checked. Go back to Nexus and open the Canvas again.",
+  expired: "That sign-in from Cyberdelic Nexus expired. Go back to Nexus and open the Canvas again.",
+  replayed: "That sign-in from Cyberdelic Nexus was already used. Go back to Nexus and open the Canvas again.",
+  link_conflict: "This Canvas account is already connected to a different Cyberdelic Nexus account.",
+  failed: "Something went wrong signing you in from Cyberdelic Nexus. Please try again.",
+};
+
 export default async function SignInPage({ searchParams }: LoginProps) {
-  const message = await searchParams;
-  const redirectTo = (message as any).redirectTo as string | undefined;
+  const params = await searchParams;
+  const redirectTo = (params as any).redirectTo as string | undefined;
+  const nexusLink = (params as any).nexus === "link";
+  const message: Message =
+    "error" in params && typeof params.error === "string" && NEXUS_ERRORS[params.error]
+      ? { error: NEXUS_ERRORS[params.error] }
+      : params;
 
   if ("message" in message) {
     return (
@@ -64,6 +79,11 @@ export default async function SignInPage({ searchParams }: LoginProps) {
               <h1 className="text-3xl font-bold">
                 <span className="text-gradient-purple">Welcome Back</span>
               </h1>
+              {nexusLink && (
+                <p className="text-sm text-violet-200/90 border border-violet-500/30 bg-violet-500/10 rounded-lg px-3 py-2">
+                  Sign in once with your Canvas login to connect it to your Cyberdelic Nexus account.
+                </p>
+              )}
               <p className="text-sm text-white/50">
                 Don't have an account?{" "}
                 <Link

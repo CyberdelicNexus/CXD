@@ -177,6 +177,18 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
     }
   };
 
+  // /dashboard?upgrade=canvas — sent here by the Nexus handoff when a new
+  // canvas would go over the plan's limit (D182 §3). Open the upgrade modal
+  // once and drop the parameter.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('upgrade') !== 'canvas') return;
+    setShowUpgradeModal(true);
+    params.delete('upgrade');
+    const rest = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+  }, []);
+
   // If Zustand already has cached projects, show them immediately without waiting
   // for the network fetch. The effect below will refresh them in the background.
   useEffect(() => {
