@@ -2,6 +2,7 @@ import { streamText, convertToModelMessages } from "ai";
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { createClient } from "@/supabase/server";
+import { getSupabaseAdmin } from "@/supabase/admin";
 import { getModelConfig, getModelInstance, getModelInstanceByModelId, MODEL_ID_MAP } from "@/lib/ai/provider-registry";
 import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
@@ -143,7 +144,7 @@ export async function POST(request: Request) {
       const creditCost = CREDIT_COSTS.chat[resolvedProvider] || 1;
       const dailyCap = getDailyCreditCap(subscription?.plan_id || 'free');
 
-      const { data: creditResult, error: creditError } = await supabase.rpc(
+      const { data: creditResult, error: creditError } = await getSupabaseAdmin().rpc(
         "deduct_ai_credits",
         { p_user_id: user.id, p_cost: creditCost, p_daily_cap: dailyCap },
       );
