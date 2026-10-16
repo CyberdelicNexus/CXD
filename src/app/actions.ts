@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, createSessionClient } from "../../supabase/server";
 import { getSupabaseAdmin } from "@/supabase/admin";
 import { checkRateLimit } from "@/lib/rate-limiter";
+import { completePendingNexusLink } from "@/lib/nexus/pending-link";
 
 export const signUpAction = async (formData: FormData) => {
   const headersList = headers();
@@ -85,7 +86,7 @@ export const signInAction = async (formData: FormData) => {
   const rememberMe = formData.get("rememberMe") === "on";
   const supabase = rememberMe ? await createClient() : await createSessionClient();
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data: signInData, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   });
@@ -93,6 +94,13 @@ export const signInAction = async (formData: FormData) => {
   if (error) {
     const params = redirectTo ? `?redirectTo=${encodeURIComponent(redirectTo)}` : "";
     return encodedRedirect("error", `/sign-in${params}`, error.message);
+  }
+
+  // A pending Nexus link (cookie cxd_nexus_link) completes only when the
+  // signed-in user is the Canvas user it was created for (D182 §3).
+  const nexusDestination = await completePendingNexusLink(signInData?.user?.id);
+  if (nexusDestination) {
+    return redirect(nexusDestination);
   }
 
   return redirect(redirectTo || "/dashboard");
