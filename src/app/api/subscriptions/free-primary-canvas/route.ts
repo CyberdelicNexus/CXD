@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
+import { getSupabaseAdmin } from '@/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,10 +67,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const { error: updateErr } = await supabase
+  // Members can't write `subscriptions`; service role, scoped to this user,
+  // and re-checking the free/unpicked state so the write stays one-shot.
+  const { error: updateErr } = await getSupabaseAdmin()
     .from('subscriptions')
     .update({ free_primary_canvas_id: canvasId })
-    .eq('user_id', user.id);
+    .eq('user_id', user.id)
+    .eq('plan_id', 'free')
+    .is('free_primary_canvas_id', null);
 
   if (updateErr) {
     console.error('[free-primary-canvas] update failed:', updateErr);

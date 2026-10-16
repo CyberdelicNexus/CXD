@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { createClient } from "@/supabase/server";
+import { getSupabaseAdmin } from "@/supabase/admin";
 import { getModelInstance, getModelConfig } from "@/lib/ai/provider-registry";
 import {
   getAnalysisPrompt,
@@ -113,7 +114,7 @@ export async function POST(request: Request) {
     // Reuse plan from rate-limit fetch above.
     const dailyCap = getDailyCreditCap(callerPlan);
 
-    const { data: creditResult, error: creditError } = await supabase.rpc(
+    const { data: creditResult, error: creditError } = await getSupabaseAdmin().rpc(
       "deduct_ai_credits",
       { p_user_id: user.id, p_cost: creditCost, p_daily_cap: dailyCap },
     );

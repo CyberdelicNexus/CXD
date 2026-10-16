@@ -296,8 +296,9 @@ export const cancelSubscriptionAction = async () => {
     return redirect("/sign-in");
   }
 
-  // Update subscription to 'free'
-  const { error } = await supabase
+  // Update subscription to 'free'. Members can't write `subscriptions`
+  // (RLS + grants), so the write runs as service role, scoped to this user.
+  const { error } = await getSupabaseAdmin()
     .from('subscriptions')
     .update({
       plan_id: 'free',

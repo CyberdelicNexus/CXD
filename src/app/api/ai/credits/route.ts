@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/supabase/server";
+import { getSupabaseAdmin } from "@/supabase/admin";
 import type { AIProviderKey } from "@/types/ai-types";
 import { AI_MODELS, type ModelId, getAllowedModels, type TierId } from "@/lib/ai-credit-config";
 import { getPlan } from "@/lib/plans";
@@ -78,7 +79,7 @@ export async function GET() {
       const plan = getPlan(subscription?.plan_id || 'free');
       const allowance = plan.limits.monthlyAICredits;
 
-      const { data: newCredits, error: insertError } = await supabase
+      const { data: newCredits, error: insertError } = await getSupabaseAdmin()
         .from("ai_credits")
         .insert({
           user_id: user.id,
@@ -119,7 +120,7 @@ export async function GET() {
         .single();
       const currentAllowance = getPlan(subscription?.plan_id || 'free').limits.monthlyAICredits;
 
-      const { data: updated, error: updateError } = await supabase
+      const { data: updated, error: updateError } = await getSupabaseAdmin()
         .from("ai_credits")
         .update({
           used_this_period: 0,
@@ -149,7 +150,7 @@ export async function GET() {
       const currentAllowance = getPlan(subscription?.plan_id || 'free').limits.monthlyAICredits;
 
       if (currentAllowance !== credits.monthly_allowance) {
-        const { data: updated, error: updateError } = await supabase
+        const { data: updated, error: updateError } = await getSupabaseAdmin()
           .from("ai_credits")
           .update({ monthly_allowance: currentAllowance })
           .eq("user_id", user.id)
@@ -214,7 +215,7 @@ export async function PUT(request: Request) {
       );
     }
 
-    const { data: credits, error } = await supabase
+    const { data: credits, error } = await getSupabaseAdmin()
       .from("ai_credits")
       .update({ selected_model: selectedModel })
       .eq("user_id", user.id)
