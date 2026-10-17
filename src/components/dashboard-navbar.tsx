@@ -51,12 +51,14 @@ import {
   ClipboardList,
   Lock,
   Newspaper,
+  ArrowLeft,
   type LucideIcon
 } from 'lucide-react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useNotifications } from '@/hooks/use-notifications'
 import { NotificationType, Notification } from '@/lib/notifications'
 import { useSubscription } from '@/hooks/use-subscription'
+import { useNexusReturnLink } from '@/hooks/use-nexus-return-link'
 import { UpgradeModal } from '@/components/modals/upgrade-modal'
 
 const notificationIcons: Record<NotificationType, React.ReactNode> = {
@@ -106,6 +108,7 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
   const pathname = usePathname()
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead, clearAll, refresh } = useNotifications()
   const { hasMasterPlan } = useSubscription()
+  const nexusReturnUrl = useNexusReturnLink()
   const [acceptingInvite, setAcceptingInvite] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
   const [showMasterPlanUpgrade, setShowMasterPlanUpgrade] = useState(false)
@@ -301,6 +304,16 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
           </div>
 
           <div className="flex gap-2 items-center">
+            {/* Back to the member's dashboard on Cyberdelic Nexus (only for members who came from there) */}
+            {nexusReturnUrl && (
+              <a href={nexusReturnUrl} title="Cyberdelic Nexus" aria-label="Cyberdelic Nexus" className={pillClass(false)}>
+                <ArrowLeft className="w-4 h-4 sm:mr-2 transition-colors text-white/60 group-hover:text-violet-200" />
+                <span className="hidden sm:inline text-xs font-medium whitespace-nowrap">Cyberdelic Nexus</span>
+                <span className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <span className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              </a>
+            )}
+
             {/* Changelog */}
             <Link href="/changelog" title="Changelog" aria-label="Changelog" className="group active:scale-95 transition-all">
               <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
