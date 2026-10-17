@@ -5,19 +5,14 @@
 // refund function is granted to the service role alone (a refund a signed-in
 // user could call on themselves would be free credits).
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/supabase/admin";
 
 /** Best-effort: a refund that cannot be made is logged, never thrown. */
 export async function refundAICredits(userId: string, cost: number, route: string): Promise<void> {
   if (!userId || !(cost > 0)) return;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    console.warn(`[${route}] credit refund skipped: service role key not configured`);
-    return;
-  }
   try {
-    const admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    // Throws when the service role key is missing; caught below like any other failure.
+    const admin = getSupabaseAdmin();
     const { error } = await admin.rpc("refund_ai_credits", { p_user_id: userId, p_cost: cost });
     if (error) console.warn(`[${route}] credit refund failed: ${error.message}`);
   } catch (e) {

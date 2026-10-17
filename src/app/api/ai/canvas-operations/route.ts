@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { refundAICredits } from "@/lib/ai/credit-refund";
 import { createClient } from "@/supabase/server";
+import { getSupabaseAdmin } from "@/supabase/admin";
 import { getModelConfig, getCanvasBuildModel, structuredCanvasSettings } from "@/lib/ai/provider-registry";
 import { canUseModel, creditCostFor, type TierId } from "@/lib/ai-credit-config";
 import { getGeneralSystemPrompt } from "@/lib/ai/system-prompts";
@@ -111,7 +112,7 @@ export async function POST(request: Request) {
       (provider as string) === "claude-opus-4.6" && canUseModel(callerPlan as TierId, "claude-opus-4.6") ? "claude-opus-4.6" : resolvedProvider;
     const creditCost = creditCostFor("canvasOperations", buildSelection) || 4;
     const dailyCap = getDailyCreditCap(callerPlan);
-    const { data: creditResult, error: creditError } = await supabase.rpc(
+    const { data: creditResult, error: creditError } = await getSupabaseAdmin().rpc(
       "deduct_ai_credits",
       { p_user_id: user.id, p_cost: creditCost, p_daily_cap: dailyCap },
     );
