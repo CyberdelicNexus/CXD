@@ -24,8 +24,8 @@ export const tagSuggestionSchema = z.object({
       z.object({
         id: z.string().describe('The element id, copied verbatim from the input'),
         tags: z
+          // No .max(): Anthropic structured output rejects maxItems. sanitizeSuggestions caps it.
           .array(z.enum(HYPERCUBE_FACE_TAGS as unknown as [string, ...string[]]))
-          .max(2)
           .describe('0-2 hypercube faces this element belongs to; omit weak matches'),
         reason: z.string().nullable().describe('Short justification (a few words)'),
       })
@@ -48,7 +48,7 @@ export function sanitizeSuggestions(
     if (!validIds.has(s.id) || seen.has(s.id)) continue;
     const tags = Array.from(new Set(s.tags)).filter((t): t is HypercubeFaceTag =>
       FACE_TAG_SET.has(t)
-    );
+    ).slice(0, 2);
     if (tags.length === 0) continue;
     seen.add(s.id);
     out.push({ id: s.id, tags, reason: s.reason });

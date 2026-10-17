@@ -16,9 +16,8 @@ export const experienceInsightsSchema = z.object({
       "A 2-4 sentence, plain-language summary of what this experience is about and its current state of progress. No preamble, no markdown headings.",
     ),
   recommendations: z
+    // No .min()/.max(): Anthropic structured output rejects them. The sanitizer keeps at most 6.
     .array(z.string())
-    .min(1)
-    .max(6)
     .describe(
       "Prioritized, concrete, actionable next steps — the areas or tasks the maker should focus on now, most important first. Each item one short sentence, no numbering (the UI numbers them).",
     ),

@@ -404,7 +404,7 @@ export function CollaborationPanel({
             {canInvite
               ? 'Collaborators can edit the canvas but cannot manage team members.'
               : isOwner
-              ? 'Upgrade to Pro to invite up to 3 collaborators.'
+              ? 'Upgrade to Pro to invite up to 5 collaborators.'
               : 'You are a collaborator on this canvas.'}
           </p>
         </div>

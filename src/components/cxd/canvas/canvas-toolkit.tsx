@@ -1,5 +1,7 @@
 "use client";
 
+import { SHAPE_DEFS } from "@/lib/shape-geometry";
+import { ShapeGlyph } from "./shape-glyph";
 import { useState, useCallback, useRef, useEffect } from "react";
 import * as LucideIcons from "lucide-react";
 import {
@@ -109,34 +111,7 @@ const CARD_TYPE_OPTIONS = [
   },
 ];
 
-const SHAPE_PALETTE = [
-  {
-    type: "rectangle" as ShapeType,
-    label: "Rectangle",
-    IconComponent: LucideIcons.Square,
-  },
-  {
-    type: "circle" as ShapeType,
-    label: "Circle",
-    IconComponent: LucideIcons.Circle,
-  },
-  {
-    type: "diamond" as ShapeType,
-    label: "Diamond",
-    IconComponent: LucideIcons.Diamond,
-  },
-  {
-    type: "triangle" as ShapeType,
-    label: "Triangle",
-    IconComponent: LucideIcons.Triangle,
-  },
-  {
-    type: "hexagon" as ShapeType,
-    label: "Hexagon",
-    IconComponent: LucideIcons.Hexagon,
-  },
-  { type: "star" as ShapeType, label: "Star", IconComponent: LucideIcons.Star },
-];
+const SHAPE_PALETTE = SHAPE_DEFS;
 
 const IMAGE_MODE_OPTIONS = [
   {
@@ -650,9 +625,8 @@ export function CanvasToolkit({
                 </button>
                 {/* Shape palette popover */}
                 {tool.type === "shape" && showShapePalette && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-2xl z-50 grid grid-cols-3 gap-1 w-[140px] mt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 p-2 rounded-xl bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-2xl z-50 grid grid-cols-4 gap-1 w-[184px] mt-4 animate-in fade-in zoom-in-95 duration-200">
                     {SHAPE_PALETTE.map((shape) => {
-                      const ShapeIcon = shape.IconComponent;
                       return (
                         <button
                           key={shape.type}
@@ -671,7 +645,7 @@ export function CanvasToolkit({
                             "bg-violet-600/40 border-violet-500/50 shadow-[0_0_10px_rgba(139,92,246,0.2)]",
                           )}
                         >
-                          <ShapeIcon className={cn("w-5 h-5 transition-colors", selectedShapeType === shape.type ? "text-white" : "text-white/60 group-hover:text-white")} />
+                          <ShapeGlyph type={shape.type} className={cn("w-6 h-6 transition-colors", selectedShapeType === shape.type ? "text-white" : "text-white/60 group-hover:text-white")} />
                         </button>
                       );
                     })}

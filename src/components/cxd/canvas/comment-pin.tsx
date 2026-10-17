@@ -105,7 +105,7 @@ export function CommentPin({
         top: thread.root.position.y,
         transform: `scale(${pinScale})`,
         transformOrigin: "0 0",
-        zIndex: isActive ? 9990 : 9980,
+        zIndex: isActive ? 2147482900 : 2147482800,
       }}
       data-comment-pin={thread.root.id}
     >
@@ -120,8 +120,9 @@ export function CommentPin({
           isResolved
             ? "bg-gray-500/60 text-white/60 border border-gray-400/30"
             : "bg-purple-600 text-white border border-purple-400/50 hover:bg-purple-500 hover:scale-110",
-          isActive && !isResolved && "ring-2 ring-purple-300 ring-offset-2 ring-offset-transparent scale-110",
-          isActive && isResolved && "ring-2 ring-gray-400 ring-offset-2 ring-offset-transparent scale-110"
+          // Active = a soft violet glow, not a hard white ring.
+          isActive && !isResolved && "scale-110 border-purple-300/60 shadow-[0_0_0_3px_rgba(168,85,247,0.28),0_0_18px_4px_rgba(168,85,247,0.55),0_0_42px_10px_rgba(139,92,246,0.28)]",
+          isActive && isResolved && "scale-110 shadow-[0_0_0_3px_rgba(156,163,175,0.2),0_0_16px_3px_rgba(156,163,175,0.35)]"
         )}
         title={isResolved ? "Resolved comment" : `Comment #${index + 1}`}
       >
@@ -145,7 +146,7 @@ export function CommentPin({
               "absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold",
               isResolved
                 ? "bg-gray-400/80 text-white/80"
-                : "bg-white text-purple-700"
+                : "bg-purple-100/90 text-purple-800 shadow-[0_0_8px_rgba(168,85,247,0.6)]"
             )}
           >
             {replyCount}

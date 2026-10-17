@@ -8,13 +8,14 @@
  * Sets up the YjsZustandBridge to keep Zustand in sync with Y.Doc state.
  */
 
+import { YJS_FINGERPRINT_FIELD } from '@/lib/yjs/state-fingerprint';
 import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from 'react';
 import { createSnapshot } from '@/lib/yjs/snapshot-service';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { useCXDStore } from '@/store/cxd-store';
 import * as Sentry from '@sentry/nextjs';
-import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2, seedProjectExtrasIntoYDoc, reconcileCanvasIntoYDoc } from '@/lib/yjs/y-doc-factory';
+import { createProjectYDoc, initializeYDoc, deduplicateRealityPlanesV2, seedProjectExtrasIntoYDoc, reconcileCanvasIntoYDoc, dedupeEdgesInYDoc } from '@/lib/yjs/y-doc-factory';
 import { YjsZustandBridge, BridgeCallbacks } from '@/lib/yjs/y-zustand-bridge';
 import { LocalPersistence } from '@/lib/yjs/indexeddb-persistence';
 import { SupabasePersistence } from '@/lib/yjs/supabase-persistence';
@@ -76,6 +77,25 @@ interface YjsProjectProviderProps {
   children: ReactNode;
 }
 
+// The bridge rebuilds an element from its Y.Map, which has no entry for a key
+// that was deleted there (yjsUngroup, removeNodeFromContainer, ...). The patch
+// merges onto the existing Zustand element to keep local-only props, so a
+// deleted key would otherwise survive in the UI: ungrouping looked like a no-op
+// and elements stayed "inside" containers they had left. These structural keys
+// are always persisted in the doc, so absence in the rebuilt element means
+// deleted.
+const DELETABLE_ELEMENT_KEYS = ['groupId', 'containerId', 'bend'] as const;
+function withoutDeletedKeys(existing: CanvasElement, rebuilt: CanvasElement): CanvasElement {
+  let out: CanvasElement = existing;
+  for (const key of DELETABLE_ELEMENT_KEYS) {
+    if (key in existing && !(key in rebuilt)) {
+      if (out === existing) out = { ...existing };
+      delete (out as any)[key];
+    }
+  }
+  return out;
+}
+
 export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
   const [doc, setDoc] = useState<Y.Doc | null>(null);
   const [awareness, setAwareness] = useState<Awareness | null>(null);
@@ -90,6 +110,12 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
 
   const currentProjectId = useCXDStore((s) => s.currentProjectId);
   const getCurrentProject = useCXDStore((s) => s.getCurrentProject);
+  // On a page reload currentProjectId rehydrates from localStorage before the
+  // project itself is fetched, so the init effect below would bail on "no
+  // project" and never re-run. Depending on this flag re-runs it on arrival.
+  const currentProjectLoaded = useCXDStore((s) =>
+    s.projects.some((p) => p.id === s.currentProjectId && !(p as any)._listingOnly),
+  );
   const setYDoc = useCXDStore((s) => s.setYDoc);
 
   const createAutoSnapshot = useCallback(async (label: string, minIntervalMs = 300000) => {
@@ -120,7 +146,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
     cleanup();
 
     const project = getCurrentProject();
-    if (!project) return;
+    if (!project || (project as any)._listingOnly) return;
 
 
     // Create new Y.Doc
@@ -219,10 +245,23 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
           // elements that exist in project_data (July 2026 data-loss root cause —
           // trusted-doc load dropped project_data-only elements, then the first
           // post-ready save persisted the loss to both columns).
-          const { seededElements, seededEdges } = reconcileCanvasIntoYDoc(newDoc, currentProject);
-          if (seededElements > 0 || seededEdges > 0) {
+          // Passing the DB state also restores project_data-only MODIFICATIONS
+          // that a doc-wins-for-known-ids merge would silently revert.
+          // Only when project_data provably descends from this yjs_state (same
+          // fingerprint), or predates fingerprints: a project_data rewritten
+          // from an older copy (stale tab) must not override the doc.
+          const pdFingerprint = (currentProject as unknown as Record<string, unknown>)[YJS_FINGERPRINT_FIELD];
+          const canRepairModifications =
+            pdFingerprint === undefined || pdFingerprint === supabasePersist.getLoadedFingerprint();
+          const { seededElements, seededEdges, repairedElements, repairedEdges } =
+            reconcileCanvasIntoYDoc(
+              newDoc,
+              currentProject,
+              canRepairModifications ? supabasePersist.getLoadedState() : null,
+            );
+          if (seededElements > 0 || seededEdges > 0 || repairedElements > 0 || repairedEdges > 0) {
             console.warn(
-              `[YjsProject] Divergence repaired: seeded ${seededElements} element(s) and ${seededEdges} edge(s) present in project_data but missing from yjs_state`
+              `[YjsProject] Divergence repaired: seeded ${seededElements} element(s) / ${seededEdges} edge(s) missing from yjs_state; restored ${repairedElements} element(s) / ${repairedEdges} edge(s) edited only in project_data`
             );
             // Preserve the pre-repair yjs_state before the debounced save
             // overwrites it, and make the divergence visible in Sentry —
@@ -231,11 +270,16 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
             Sentry.captureMessage('cxd-yjs-divergence-repaired', {
               level: 'warning',
               tags: { projectId: currentProjectId },
-              extra: { seededElements, seededEdges },
+              extra: { seededElements, seededEdges, repairedElements, repairedEdges },
             });
           }
         }
       }
+
+      // One-time repair: collapse duplicate connectors from the old
+      // double-completed connection bug (same from→to pair, board and surface).
+      const removedEdges = dedupeEdgesInYDoc(newDoc);
+      if (removedEdges > 0) console.warn(`[YjsProject] Removed ${removedEdges} duplicate connector(s)`);
 
       // One-time repair: remove duplicate reality planes that may have accumulated
       // in IndexedDB from a previous bug where initializeYDoc lacked an idempotency guard.
@@ -295,7 +339,7 @@ export function YjsProjectProvider({ children }: YjsProjectProviderProps) {
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProjectId]);
+  }, [currentProjectId, currentProjectLoaded]);
 
   function cleanup() {
     // Clear auto-snapshot timer
@@ -396,7 +440,7 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
           // MERGE with existing element to preserve all properties
           newElements = [...elements];
           newElements[idx] = {
-            ...existing,
+            ...withoutDeletedKeys(existing, element),
             ...element,
             // Prevent NaN values
             x: isNaN(element.x) ? existing.x : element.x,
@@ -424,7 +468,7 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
           if (idx >= 0) {
             const existing = elements[idx];
             elements[idx] = {
-              ...existing,
+              ...withoutDeletedKeys(existing, element),
               ...element,
               x: isNaN(element.x) ? existing.x : element.x,
               y: isNaN(element.y) ? existing.y : element.y,

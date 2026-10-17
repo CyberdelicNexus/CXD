@@ -144,7 +144,7 @@ const docSections: DocSection[] = [
           <ol className="space-y-3 text-white/60">
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0 text-xs text-cyan-300">1</div>
-              <span><strong className="text-white">Create a new project</strong> from your Dashboard by clicking "Create New Map"</span>
+              <span><strong className="text-white">Create a new project</strong> from your Dashboard by clicking "Create New Canvas"</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0 text-xs text-cyan-300">2</div>
@@ -176,20 +176,24 @@ const docSections: DocSection[] = [
         <div>
           <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Dashboard</h1>
           <p className="text-white/60 mb-4 leading-relaxed">
-            The Dashboard is your home base in CXD Canvas. Here you can view all your experience design projects,
-            create new ones, manage your profile, and access learning resources.
+            The Dashboard is your home base in CXD Canvas. Here you can see every experience map you own or collaborate on,
+            create new ones, personalise your profile, and reach the docs, tutorials, changelog and support.
           </p>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3 text-white">Your Profile Header</h2>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Your Cover and Profile</h2>
           <p className="text-white/60 mb-4 leading-relaxed">
-            At the top of your dashboard, you'll see your profile section with:
+            Your cover image runs edge to edge across the top of the page, behind the navigation bar. Your profile sits along its bottom edge:
           </p>
           <ul className="space-y-2 text-white/60">
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Cover Image</strong> — Click the camera icon to upload a custom cover image. You can drag to reposition it.</span>
+              <span><strong className="text-white">Cover</strong> — Click the Cover button (top right of the image, just under the navigation bar) to upload a new cover image.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Reposition</strong> — Click Reposition, drag the image up or down, then click Done to save or Cancel to go back.</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
@@ -197,7 +201,11 @@ const docSections: DocSection[] = [
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Plan Badge</strong> — Shows your current subscription (Free, Pro, Lifetime, or Beta Tester).</span>
+              <span><strong className="text-white">Plan Badge</strong> — Shows your current plan (Free, Pro, Lifetime, or Beta Tester) next to your name.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Create New Canvas</strong> — The button on the right of the cover starts a new project.</span>
             </li>
           </ul>
         </div>
@@ -205,16 +213,16 @@ const docSections: DocSection[] = [
         <div>
           <h2 className="text-2xl font-semibold mb-3 text-white">Your Experience Maps</h2>
           <p className="text-white/60 mb-4 leading-relaxed">
-            All your projects are displayed as visual cards in a grid. Each card shows:
+            Your projects are displayed as large visual cards in a two-column grid that scrolls with the page. Each card shows:
           </p>
           <div className="space-y-4">
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
               <h3 className="font-semibold text-white mb-2">Project Card Information</h3>
               <ul className="space-y-2 text-sm text-white/60">
-                <li>• <strong className="text-white">Cover image</strong> — Visual thumbnail (or gradient if none set)</li>
-                <li>• <strong className="text-white">Project name</strong> — Click the card to open the project</li>
-                <li>• <strong className="text-white">Last modified date</strong> — Shows when the project was last updated</li>
+                <li>• <strong className="text-white">Cover image</strong> — Visual thumbnail (or the CXD logo on a gradient if none is set)</li>
+                <li>• <strong className="text-white">Project name and last modified date</strong></li>
                 <li>• <strong className="text-white">Role badge</strong> — "Owner" (amber crown) or "Collaborator" (cyan users icon)</li>
+                <li>• <strong className="text-white">Plan badge</strong> — On the Free plan, "Your canvas" marks the canvas you can edit; others are read-only</li>
               </ul>
             </div>
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
@@ -222,6 +230,7 @@ const docSections: DocSection[] = [
               <ul className="space-y-2 text-sm text-white/60">
                 <li>• <strong className="text-white">Image icon</strong> — Add or change the cover image (upload file or paste URL)</li>
                 <li>• <strong className="text-white">User+ icon</strong> — Invite collaborators (Pro feature, owner only)</li>
+                <li>• <strong className="text-white">Chart icon</strong> — Open the full Project Overview page</li>
                 <li>• <strong className="text-white">Pencil icon</strong> — Rename the project</li>
                 <li>• <strong className="text-white">Trash icon</strong> — Delete the project (owner only, cannot be undone)</li>
               </ul>
@@ -230,11 +239,44 @@ const docSections: DocSection[] = [
         </div>
 
         <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Project Overview Panel</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The column on the right of the grid always shows an overview of one project. It opens on your most recently edited canvas; click any project card to switch to it. The panel stays in view while you scroll the grid.
+          </p>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Open canvas</strong> — Enters the project.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">At a glance</strong> — Element count, open tasks and the current version.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Tasks</strong> — A progress ring by status, plus the tasks due next.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Hypercube balance</strong> — A radar of how your tagged elements spread across the faces, with the most and least developed face named.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Roadmap</strong> — Your versions as steps, with the next deadline.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Reposition</strong> — Drag the project's cover image inside the panel and save; the card uses the same framing.</span>
+            </li>
+          </ul>
+        </div>
+
+        <div>
           <h2 className="text-2xl font-semibold mb-3 text-white">Creating a New Project</h2>
           <ol className="space-y-3 text-white/60">
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0 text-xs text-cyan-300">1</div>
-              <span>Click the <strong className="text-white">"Create New Map"</strong> button at the top of your project grid</span>
+              <span>Click the <strong className="text-white">"Create New Canvas"</strong> button on the right of your cover</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0 text-xs text-cyan-300">2</div>
@@ -242,7 +284,7 @@ const docSections: DocSection[] = [
             </li>
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0 text-xs text-cyan-300">3</div>
-              <span>Click <strong className="text-white">"Create"</strong> or press Enter</span>
+              <span>Click <strong className="text-white">"Create Map"</strong> or press Enter</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0 text-xs text-cyan-300">4</div>
@@ -251,65 +293,16 @@ const docSections: DocSection[] = [
           </ol>
           <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 mt-4">
             <p className="text-sm text-white/70">
-              <strong className="text-amber-300">Free Plan Limit:</strong> Free accounts can create 1 project. Upgrade to Pro for unlimited projects.
+              <strong className="text-amber-300">Free Plan:</strong> 1 canvas with up to 100 objects, every Plan view, the Quickstart templates and 25 AI credits a month.
+              Upgrade to Pro for unlimited canvases and objects, the full template catalog, collaboration and the Master Plan.
             </p>
           </div>
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3 text-white">Statistics Sidebar</h2>
-          <p className="text-white/60 mb-4 leading-relaxed">
-            The right sidebar displays four statistics about your projects:
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
-              <h3 className="font-semibold text-sm text-white">Total Maps</h3>
-              <p className="text-xs text-white/50">Number of projects you own or collaborate on</p>
-            </div>
-            <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
-              <h3 className="font-semibold text-sm text-white">Active</h3>
-              <p className="text-xs text-white/50">Projects modified in the last 7 days</p>
-            </div>
-            <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-              <h3 className="font-semibold text-sm text-white">This Month</h3>
-              <p className="text-xs text-white/50">Projects created in the current month</p>
-            </div>
-            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-              <h3 className="font-semibold text-sm text-white">Analytics</h3>
-              <p className="text-xs text-white/50">Coming soon</p>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <h2 className="text-2xl font-semibold mb-3 text-white">Quick Actions</h2>
-          <p className="text-white/60 mb-4 leading-relaxed">
-            Below the statistics, you'll find quick action buttons:
-          </p>
-          <ul className="space-y-2 text-white/60">
-            <li className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Support</strong> — Contact the team for help</span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Bug Report</strong> — Report any issues you encounter</span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Docs</strong> — Access this documentation</span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Tutorials</strong> — Watch video tutorials on using CXD Canvas</span>
-            </li>
-          </ul>
-        </div>
-
-        <div>
           <h2 className="text-2xl font-semibold mb-3 text-white">Navigation Bar</h2>
           <p className="text-white/60 mb-4 leading-relaxed">
-            The top navigation bar provides access to:
+            The top navigation bar stays in view as you scroll and provides access to:
           </p>
           <ul className="space-y-2 text-white/60">
             <li className="flex items-start gap-3">
@@ -318,11 +311,19 @@ const docSections: DocSection[] = [
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Tutorials</strong> — Access video learning content</span>
+              <span><strong className="text-white">Documentation</strong> — Read the full documentation</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Documentation</strong> — Read the full documentation</span>
+              <span><strong className="text-white">Master Plan</strong> — Every task across every canvas in one place (Pro)</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Tutorials</strong> — Video walkthroughs of CXD Canvas</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Changelog icon</strong> — What is new in each release</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
@@ -330,13 +331,14 @@ const docSections: DocSection[] = [
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Help menu</strong> — Access support and bug reporting</span>
+              <span><strong className="text-white">Help menu</strong> — Contact support or report a bug</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">User menu</strong> — Profile settings and sign out</span>
+              <span><strong className="text-white">User menu</strong> — Profile, settings and sign out</span>
             </li>
           </ul>
+          <p className="text-sm text-white/50 mt-3">On narrower windows the navigation labels collapse to icons; hover one to see its name.</p>
         </div>
       </div>
     )
@@ -625,6 +627,9 @@ const docSections: DocSection[] = [
                 <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Ctrl+V</kbd> Paste</div>
                 <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Ctrl+D</kbd> Duplicate</div>
                 <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Delete</kbd> Delete</div>
+                <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Ctrl+G</kbd> Group</div>
+                <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Ctrl+Shift+G</kbd> Ungroup</div>
+                <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Ctrl+Shift+E</kbd> Export</div>
               </div>
             </div>
             <div>
@@ -633,6 +638,9 @@ const docSections: DocSection[] = [
                 <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Arrow keys</kbd> Move 1px</div>
                 <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Shift+Arrows</kbd> Move 10px</div>
                 <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Esc</kbd> Deselect</div>
+                <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Space+Drag</kbd> Pan</div>
+                <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Ctrl+.</kbd> Focus mode</div>
+                <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">Ctrl+L</kbd> Connect selected</div>
               </div>
             </div>
             <div>
@@ -711,6 +719,51 @@ const docSections: DocSection[] = [
             <div className="p-2 rounded bg-indigo-500/10 border border-indigo-500/20 text-white/70">Meaning Architecture</div>
           </div>
           <p className="text-sm text-white/50 mt-3">Tagged elements appear in the Hypercube Map view for visualization and analysis.</p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Canvas Assistant <span className="text-xs bg-violet-500/30 px-2 py-0.5 rounded ml-2 align-middle">Beta</span></h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Open the Canvas Assistant from its launcher on the canvas and describe what you need. It works on the board you have open
+            and always shows a preview before anything changes.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+              <h3 className="font-semibold text-white mb-2">It can</h3>
+              <ul className="text-sm text-white/60 space-y-2">
+                <li>• Draw flows, loops, mind maps, spines, tables and quadrants, and revise them in place</li>
+                <li>• Edit what is on the board: rename, restyle, tag, group, connect, delete</li>
+                <li>• Add tasks to your Plan and notes to your Inbox</li>
+                <li>• Review your canvas and pin comments where something needs work</li>
+              </ul>
+            </div>
+            <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <h3 className="font-semibold text-white mb-2">Not yet</h3>
+              <ul className="text-sm text-white/60 space-y-2">
+                <li>• See inside images or files, or edit images</li>
+                <li>• Work on boards other than the one you have open</li>
+                <li>• Route a connector around other elements (connectors are straight)</li>
+              </ul>
+            </div>
+          </div>
+          <ul className="space-y-2 text-white/60 mt-4">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Quick starts</strong> — A new chat opens on one-click actions such as Draw from my project, Review my canvas, Tag my elements and Notes into tasks. Each shows its credit cost.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Pick a form</strong> — When your request leaves the diagram type open, the assistant proposes forms with a recommendation in front; one click carries on.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Rework a selection</strong> — Select elements and ask for a redraw; their content and tags are kept. Tidy, connect and redraw tools for two or more selected elements use no credits.</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Rate the result</strong> — The thumbs on each result are what improve the assistant during the beta.</span>
+            </li>
+          </ul>
         </div>
 
         <div>
@@ -910,7 +963,7 @@ const docSections: DocSection[] = [
           </p>
           <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
             <p className="text-sm text-white/70">
-              <strong className="text-violet-300">Pro Feature:</strong> Plan View is available to Pro subscribers.
+              <strong className="text-violet-300">All plans:</strong> Plan View is included on every plan, including Free. The cross-project Master Plan is a Pro feature.
             </p>
           </div>
         </div>
@@ -1086,7 +1139,7 @@ const docSections: DocSection[] = [
           </p>
           <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
             <p className="text-sm text-white/70">
-              <strong className="text-violet-300">Pro Feature:</strong> Collaboration requires a Pro subscription. You can invite up to 3 collaborators per project.
+              <strong className="text-violet-300">Pro Feature:</strong> Collaboration requires a Pro subscription. You can invite up to 5 collaborators per project.
             </p>
           </div>
         </div>
@@ -1235,7 +1288,7 @@ const docSections: DocSection[] = [
           <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Sharing & Export</h1>
           <p className="text-white/60 mb-4 leading-relaxed">
             Share your experience design with stakeholders, clients, and team members.
-            Export your project for documentation, backup, or integration with other tools.
+            Export boards, briefs and production documents straight from your live project.
           </p>
         </div>
 
@@ -1247,7 +1300,7 @@ const docSections: DocSection[] = [
           <ol className="space-y-3 text-white/60">
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">1</div>
-              <span>Open your project and click <strong className="text-white">Share</strong> in the navbar dropdown menu</span>
+              <span>Open your project and click <strong className="text-white">Share</strong> in the canvas navbar</span>
             </li>
             <li className="flex items-start gap-3">
               <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">2</div>
@@ -1314,38 +1367,34 @@ const docSections: DocSection[] = [
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3 text-white">Export Options</h2>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Export & Deliverables</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Open the <strong className="text-white">Export & Deliverables</strong> hub from the canvas navbar. Everything is generated from your live project:
+          </p>
           <div className="space-y-4">
             <div className="p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-              <h3 className="font-semibold text-white mb-2">JSON Export ✓ Available</h3>
-              <p className="text-sm text-white/60 mb-3">
-                Export your complete project as a JSON file. This includes all CXD framework data, canvas elements, edges, and metadata.
-              </p>
-              <div className="text-sm text-white/50">
-                <strong className="text-white/70">How to export:</strong> Click the menu in the navbar → Download → Export JSON
-              </div>
-              <div className="text-sm text-white/50 mt-2">
-                <strong className="text-white/70">Use cases:</strong>
-                <ul className="list-disc list-inside mt-1 space-y-1">
-                  <li>Backup your project</li>
-                  <li>Version control (commit to git)</li>
-                  <li>Import into other tools</li>
-                  <li>Data analysis</li>
-                </ul>
-              </div>
+              <h3 className="font-semibold text-white mb-2">Board Image or PDF</h3>
+              <p className="text-sm text-white/60">Your whole board, or just a selection, as one PNG, JPEG or vector PDF with sharp, selectable text. You can also copy it as a PNG, ready to paste into an AI chat. Shortcut: <kbd className="bg-white/10 px-1.5 py-0.5 rounded text-xs">Ctrl/Cmd+Shift+E</kbd>.</p>
+            </div>
+            <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold text-white mb-2">Pitch One-Pager</h3>
+              <p className="text-sm text-white/60">An AI-built pitch tuned to what you want to emphasize: theme, sections, project images and length. Preview it, download it, or save it as a PDF.</p>
+            </div>
+            <div className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+              <h3 className="font-semibold text-white mb-2">Experience Requirement Document</h3>
+              <p className="text-sm text-white/60">The full spec across all six dimensions, for whoever builds the experience.</p>
+            </div>
+            <div className="p-4 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+              <h3 className="font-semibold text-white mb-2">Production Pack and Role-Scoped Briefs</h3>
+              <p className="text-sm text-white/60">Every task as a spreadsheet with a versions and milestones summary, plus per-discipline briefs filtered by hypercube face so each collaborator gets only what they own.</p>
+            </div>
+            <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+              <h3 className="font-semibold text-white mb-2">Experience Flow Timeline and Facilitation Sheet</h3>
+              <p className="text-sm text-white/60">A visual timeline of the flow stages with timing, engagement and notes, and a state-care sheet with consent and integration notes for the facilitator.</p>
             </div>
             <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
-              <h3 className="font-semibold text-white mb-2">PDF Export <span className="text-xs bg-amber-500/30 px-2 py-0.5 rounded ml-2">Coming Soon</span></h3>
-              <p className="text-sm text-white/60">
-                Export a formatted PDF document with all sections, descriptions, and visualizations.
-                Ideal for presentations, documentation, and offline reference.
-              </p>
-            </div>
-            <div className="p-4 rounded-lg bg-gray-500/10 border border-gray-500/20">
-              <h3 className="font-semibold text-white mb-2">Image Export <span className="text-xs bg-gray-500/30 px-2 py-0.5 rounded ml-2">Coming Soon</span></h3>
-              <p className="text-sm text-white/60">
-                Export your canvas as a high-resolution PNG image for sharing on social media or embedding in documents.
-              </p>
+              <h3 className="font-semibold text-white mb-2">Share Link and Calendar Feed</h3>
+              <p className="text-sm text-white/60">A read-only live view of the canvas, and an ICS feed of task due dates and milestones for your calendar.</p>
             </div>
           </div>
         </div>

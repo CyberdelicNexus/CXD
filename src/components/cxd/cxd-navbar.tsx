@@ -36,6 +36,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Package,
+  ArrowLeft,
 } from "lucide-react";
 import { Link } from "lucide-react";
 import NextLink from "next/link";
@@ -59,6 +60,7 @@ import { CollaborationPanel } from "@/components/collaboration";
 import { NavCreditMeter } from "./nav-credit-meter";
 import { AccountMenu } from "./account-menu";
 import { useSubscription } from "@/hooks/use-subscription";
+import { useNexusReturnLink } from "@/hooks/use-nexus-return-link";
 import { useAICredits } from "@/hooks/use-ai-credits";
 import { UpgradeModal } from "@/components/modals/upgrade-modal";
 import { SettingsModal } from "@/components/modals/settings-modal";
@@ -262,10 +264,47 @@ export function CXDNavbar() {
     updateCanvasBackground,
     boardPath,
     navigateToBoardPath,
+    renameBoard,
   } = useCXDStore();
+  const [renamingBoardId, setRenamingBoardId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const yDoc = useCXDStore((s) => s.yDoc);
   const { toast } = useToast();
   const project = getCurrentProject();
+
+  // Breadcrumb entry: click navigates, double-click renames in place.
+  const renderCrumb = (board: { id: string; title: string }, index: number, className: string) =>
+    renamingBoardId === board.id ? (
+      <input
+        autoFocus
+        value={renameDraft}
+        onChange={(e) => setRenameDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={() => {
+          renameBoard(board.id, renameDraft);
+          setRenamingBoardId(null);
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") setRenamingBoardId(null);
+        }}
+        className="w-[140px] rounded bg-white/10 border border-primary/50 px-1.5 py-0.5 text-sm text-white outline-none"
+        maxLength={80}
+      />
+    ) : (
+      <button
+        onClick={() => navigateToBoardPath(index)}
+        onDoubleClick={() => {
+          setRenameDraft(board.title);
+          setRenamingBoardId(board.id);
+        }}
+        className={className}
+        title={`${board.title} (double-click to rename)`}
+      >
+        {board.title}
+      </button>
+    );
 
   // Deduplicate boardPath to prevent duplicate breadcrumb entries
   const dedupedBoardPath = useMemo(() => {
@@ -302,6 +341,7 @@ export function CXDNavbar() {
 
   // Subscription and credits
   const { hasPlanView, plan, isTrialing, trialDaysRemaining } = useSubscription();
+  const nexusReturnUrl = useNexusReturnLink();
   const { credits } = useAICredits();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -444,7 +484,7 @@ export function CXDNavbar() {
 
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-50 h-20 backdrop-blur-md border-b border-white/10 transition-colors duration-500 overflow-visible"
+      className="fixed top-0 left-0 right-0 z-[125] h-20 backdrop-blur-md border-b border-white/10 transition-colors duration-500 overflow-visible"
       style={{ backgroundColor: navBgColor }}
     >
       {/* Glass Reflection Effects */}
@@ -602,27 +642,44 @@ export function CXDNavbar() {
 
           {project && viewMode !== "home" && (
             <div className="flex items-center gap-2">
-              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 shadow-lg group">
-                {isRenaming ? (
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onBlur={handleRenameSubmit}
-                    onKeyDown={(e) => e.key === "Enter" && handleRenameSubmit()}
-                    className="bg-transparent border-none text-sm text-white focus:outline-none min-w-[120px]"
-                  />
-                ) : (
-                  <span
-                    className="text-sm font-medium text-white/70 cursor-pointer hover:text-white transition-colors"
-                    onClick={() => {
-                      setRenameValue(project.name);
-                      setIsRenaming(true);
-                    }}
-                  >
-                    {project.name}
-                  </span>
-                )}
+              {/* Experience name: a circle with an icon that expands on hover (and
+                  stays open while renaming) so the name doesn't eat the navbar. */}
+              <div
+                className="hidden md:flex items-center h-9 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 shadow-lg group/name overflow-hidden transition-colors hover:bg-white/[0.08] focus-within:bg-white/[0.08]"
+                title={isRenaming ? undefined : project.name}
+              >
+                <span className="w-9 h-9 flex items-center justify-center flex-shrink-0 text-violet-300">
+                  <Box className="w-4 h-4" />
+                </span>
+                <div
+                  className={cn(
+                    "overflow-hidden whitespace-nowrap transition-[max-width,opacity,padding] duration-300 ease-out",
+                    isRenaming
+                      ? "max-w-[320px] opacity-100 pr-4"
+                      : "max-w-0 opacity-0 group-hover/name:max-w-[320px] group-hover/name:opacity-100 group-hover/name:pr-4 group-focus-within/name:max-w-[320px] group-focus-within/name:opacity-100 group-focus-within/name:pr-4",
+                  )}
+                >
+                  {isRenaming ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={handleRenameSubmit}
+                      onKeyDown={(e) => e.key === "Enter" && handleRenameSubmit()}
+                      className="bg-transparent border-none text-sm text-white focus:outline-none min-w-[120px]"
+                    />
+                  ) : (
+                    <span
+                      className="text-sm font-medium text-white/70 cursor-pointer hover:text-white transition-colors"
+                      onClick={() => {
+                        setRenameValue(project.name);
+                        setIsRenaming(true);
+                      }}
+                    >
+                      {project.name}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Breadcrumbs - shown when inside a board */}
@@ -649,17 +706,15 @@ export function CXDNavbar() {
                     dedupedBoardPath.map((board, index) => (
                       <div key={board.id} className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
-                        <button
-                          onClick={() => navigateToBoardPath(index)}
-                          className={`text-sm transition-colors truncate max-w-[100px] lg:max-w-[120px] xl:max-w-[150px] ${
+                        {renderCrumb(
+                          board,
+                          index,
+                          `text-sm transition-colors truncate max-w-[100px] lg:max-w-[120px] xl:max-w-[150px] ${
                             index === dedupedBoardPath.length - 1
                               ? "text-primary font-medium"
                               : "text-white/60 hover:text-white"
-                          }`}
-                          title={board.title}
-                        >
-                          {board.title}
-                        </button>
+                          }`,
+                        )}
                       </div>
                     ))
                   ) : (
@@ -667,13 +722,7 @@ export function CXDNavbar() {
                     <>
                       <div className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
-                        <button
-                          onClick={() => navigateToBoardPath(0)}
-                          className="text-sm text-white/60 hover:text-white transition-colors truncate max-w-[80px]"
-                          title={dedupedBoardPath[0].title}
-                        >
-                          {dedupedBoardPath[0].title}
-                        </button>
+                        {renderCrumb(dedupedBoardPath[0], 0, "text-sm text-white/60 hover:text-white transition-colors truncate max-w-[80px]")}
                       </div>
                       <div className="flex items-center flex-shrink-0">
                         <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
@@ -684,17 +733,15 @@ export function CXDNavbar() {
                         return (
                           <div key={board.id} className="flex items-center flex-shrink-0">
                             <ChevronRight className="w-3.5 h-3.5 text-white/40 mx-0.5" />
-                            <button
-                              onClick={() => navigateToBoardPath(index)}
-                              className={`text-sm transition-colors truncate max-w-[100px] ${
+                            {renderCrumb(
+                              board,
+                              index,
+                              `text-sm transition-colors truncate max-w-[100px] ${
                                 index === dedupedBoardPath.length - 1
                                   ? "text-primary font-medium"
                                   : "text-white/60 hover:text-white"
-                              }`}
-                              title={board.title}
-                            >
-                              {board.title}
-                            </button>
+                              }`,
+                            )}
                           </div>
                         );
                       })}
@@ -963,6 +1010,19 @@ export function CXDNavbar() {
             </DropdownMenu>
           </div>
 
+          {/* Back to the member's dashboard on Cyberdelic Nexus (only for members who came from there) */}
+          {nexusReturnUrl && (
+            <a
+              href={nexusReturnUrl}
+              title="Cyberdelic Nexus"
+              aria-label="Cyberdelic Nexus"
+              className="flex-shrink-0 h-10 px-3 flex items-center gap-2 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all group"
+            >
+              <ArrowLeft className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
+              <span className="hidden lg:inline text-xs font-medium whitespace-nowrap text-white/70 group-hover:text-white transition-colors">Cyberdelic Nexus</span>
+            </a>
+          )}
+
           {/* Always visible: Collaborate and Account */}
           {project && viewMode !== "home" && (
             <>
@@ -991,6 +1051,7 @@ export function CXDNavbar() {
                       return (
                         <button
                           key={c.id}
+                          data-follow-bubble
                           onClick={(e) => {
                             e.stopPropagation();
                             setFollowingCollaboratorId(isFollowing ? null : c.id);

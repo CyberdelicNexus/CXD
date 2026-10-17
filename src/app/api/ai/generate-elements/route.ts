@@ -1,9 +1,11 @@
 import { generateObject } from "ai";
 import { NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
+import { refundAICredits } from "@/lib/ai/credit-refund";
 import { createClient } from "@/supabase/server";
 import { getSupabaseAdmin } from "@/supabase/admin";
-import { getModelInstance, getModelConfig } from "@/lib/ai/provider-registry";
+import { getModelConfig, getCanvasBuildModel, structuredCanvasSettings } from "@/lib/ai/provider-registry";
+import { canUseModel, creditCostFor, type TierId } from "@/lib/ai-credit-config";
 import { getGeneralSystemPrompt } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
@@ -43,6 +45,9 @@ const BASE_SYSTEM_PROMPT =
 
 export async function POST(request: Request) {
   let concurrencyHeldFor: string | null = null;
+  // Set once credits are actually deducted, so a failure after that point can
+  // hand them back: the user should not pay for a build they did not get.
+  let charged: { userId: string; cost: number } | null = null;
   const releaseConcurrency = async () => {
     if (concurrencyHeldFor) {
       const userId = concurrencyHeldFor;
@@ -105,7 +110,11 @@ export async function POST(request: Request) {
     concurrencyHeldFor = user.id;
 
     // 4. Credit deduction — gracefully skip if tables/RPC not deployed yet
-    const creditCost = CREDIT_COSTS.generateElements[resolvedProvider] || 8;
+    // Opus draws its own builds at its own price, for plans that include it;
+    // any other selection uses (and pays for) its family's build model.
+    const buildSelection =
+      (provider as string) === "claude-opus-4.6" && canUseModel(callerPlan as TierId, "claude-opus-4.6") ? "claude-opus-4.6" : resolvedProvider;
+    const creditCost = creditCostFor("generateElements", buildSelection) || 8;
     const dailyCap = getDailyCreditCap(callerPlan);
 
     const { data: creditResult, error: creditError } = await getSupabaseAdmin().rpc(
@@ -145,6 +154,9 @@ export async function POST(request: Request) {
         console.warn("[AI GenerateElements] no record for user; allowing request and relying on /api/ai/credits to provision");
       }
     }
+    if (creditResult && (creditResult as { success?: boolean }).success === true) {
+      charged = { userId: user.id, cost: creditCost };
+    }
 
     // 5. Build prompt
     const systemPrompt =
@@ -152,8 +164,9 @@ export async function POST(request: Request) {
       "\n" + CANVAS_GENERATION_GUIDE;
 
     // 6. Model + record
-    const modelConfig = getModelConfig(resolvedProvider, "analysis");
-    const model = getModelInstance(resolvedProvider, "analysis");
+    const build = getCanvasBuildModel(buildSelection, resolvedProvider);
+    const modelConfig = { maxTokens: build.maxTokens, isReasoning: getModelConfig(resolvedProvider, "analysis").isReasoning };
+    const model = build.model;
     recordRequest(user.id, "analysis");
 
     // 7. Generate structured elements (120s timeout, abort on client disconnect)
@@ -172,7 +185,7 @@ export async function POST(request: Request) {
         system: systemPrompt,
         prompt: prompt.trim(),
         schema: generateElementsSchema,
-        maxOutputTokens: modelConfig.maxTokens,
+        ...structuredCanvasSettings(resolvedProvider, modelConfig.maxTokens),
         ...(modelConfig.isReasoning ? {} : { temperature: 0.4 }),
         abortSignal: abortController.signal,
       });
@@ -184,6 +197,7 @@ export async function POST(request: Request) {
     // 8. Server-side validation + conversion to real CanvasElement[] + edges
     const { elements, edges } = generatedToCanvas(result.object.elements, result.object.edges);
     if (elements.length === 0) {
+      if (charged) await refundAICredits(charged.userId, charged.cost, "ai/generate-elements");
       return NextResponse.json(
         { error: "The model produced no usable elements. Try rephrasing the request." },
         { status: 422 },
@@ -198,6 +212,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     await releaseConcurrency();
+    if (charged) await refundAICredits(charged.userId, charged.cost, "ai/generate-elements");
     console.error("[AI GenerateElements Error]", error);
 
     Sentry.captureException(error, {

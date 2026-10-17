@@ -61,3 +61,10 @@ export function verifyNexusBridgeToken(authorization: string | null | undefined)
   if (previous && timingSafeStringEqual(token, previous)) return { ok: true, token };
   return { ok: false, reason: 'invalid' };
 }
+
+/** The member's Canvas page on the platform (`${NEXUS_ISSUER}/me/create`); null when unset. */
+export function getNexusReturnUrl(): string | null {
+  const issuer = readUrl('NEXUS_ISSUER');
+  if (!issuer) return null;
+  return `${issuer.replace(/\/+$/, '')}/me/create`;
+}

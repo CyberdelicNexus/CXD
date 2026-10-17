@@ -30,7 +30,7 @@ const featureMessages: Record<string, { title: string; description: string }> = 
   },
   collaboration: {
     title: 'Team Collaboration',
-    description: 'Work together with up to 3 team members on the same canvas in real-time.',
+    description: 'Work together with up to 5 team members on the same canvas in real-time.',
   },
   objects: {
     title: 'Your canvas is full',

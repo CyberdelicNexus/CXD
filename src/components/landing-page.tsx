@@ -1034,7 +1034,7 @@ export function LandingPage() {
                 <span>Included in your Reality Weaver · Cyberdelic Nexus Membership</span>
               </a>
               <ul className="space-y-3 mb-8">
-                {['Unlimited canvases & objects', 'All 22 templates + AI Composer', 'Premium AI models · 500 credits/mo', 'Calendar sync', 'Team collaboration (3)', 'Priority support'].map((f, i) => (
+                {['Unlimited canvases & objects', 'All 22 templates + AI Composer', 'Premium AI models · 500 credits/mo', 'Calendar sync', 'Team collaboration (5)', 'Priority support'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
                     <Check className="w-4 h-4 text-violet-400" />
                     <span className="text-white/70">{f}</span>

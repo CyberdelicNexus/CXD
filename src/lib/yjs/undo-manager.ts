@@ -23,6 +23,12 @@ const LOCAL_ORIGIN = 'local';
 // containers". The bridge still skips its own 'drag-commit' echo; the UndoManager's later
 // undo runs under its own origin, so the revert flushes back to Zustand normally.
 const DRAG_COMMIT_ORIGIN = 'drag-commit';
+// Canvas Assistant batch applies (store.applyCanvasBatch) commit one confirmed AI
+// change set as a single transaction. Tracked for the same reason as 'drag-commit':
+// the whole batch must revert with one Ctrl+Z. Note this is deliberately NOT
+// 'template-batch' — that origin is untracked here, so reusing it would make AI
+// applies silently non-undoable.
+const AI_APPLY_ORIGIN = 'ai-apply';
 
 /**
  * Creates an UndoManager that tracks canvas elements and edges.
@@ -34,7 +40,7 @@ export function createCanvasUndoManager(doc: Y.Doc): Y.UndoManager {
 
   return new Y.UndoManager([yElements, yEdges], {
     captureTimeout: CAPTURE_TIMEOUT_MS,
-    trackedOrigins: new Set([LOCAL_ORIGIN, DRAG_COMMIT_ORIGIN]),
+    trackedOrigins: new Set([LOCAL_ORIGIN, DRAG_COMMIT_ORIGIN, AI_APPLY_ORIGIN]),
   });
 }
 

@@ -1,13 +1,16 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { CANVAS_OVERLAY_LAYER_ID } from "./canvas-overlay";
+import { GradientToolButton, SavedGradients } from "./gradient-editor";
 import { CanvasElement, ImageElement, ShapeElement, PRESET_COLORS } from "@/types/canvas-elements";
 import { cn } from "@/lib/utils";
 import { ShapeColorPicker, StoryboardColorPicker } from "./canvas-element";
 import {
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
+  AlignStartHorizontal,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
   AlignStartVertical,
   AlignCenterVertical,
   AlignEndVertical,
@@ -22,6 +25,9 @@ import {
   ArrowUp,
   ArrowDown,
   Palette,
+  ChevronsLeft,
+  Download,
+  MoreHorizontal,
 } from "lucide-react";
 
 // Container tint definitions (mirrored from canvas-element.tsx)
@@ -48,6 +54,7 @@ interface MultiSelectionBoxProps {
   onUpdateElements: (updates: Map<string, Partial<CanvasElement>>) => void;
   onDeleteElements: () => void;
   onDuplicateElements: () => void;
+  onExport?: () => void;
   onCreateGroup: () => void;
   onUngroup: () => void;
   onBringForward: () => void;
@@ -71,6 +78,7 @@ export function MultiSelectionBox({
   onUpdateElements,
   onDeleteElements,
   onDuplicateElements,
+  onExport,
   onCreateGroup,
   onUngroup,
   onBringForward,
@@ -91,8 +99,37 @@ export function MultiSelectionBox({
   }, [snapToGrid]);
   const [showColorPicker, setShowColorPicker] = useState(false);
   // Cycling alignment modes: each click cycles to the next mode
-  const [hAlignMode, setHAlignMode] = useState<0 | 1 | 2>(0); // 0=left, 1=center, 2=right
-  const [vAlignMode, setVAlignMode] = useState<0 | 1 | 2>(0); // 0=top, 1=middle, 2=bottom
+  const [showAlignMenu, setShowAlignMenu] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  // Toolbar popovers must not sit on top of the selection they edit: while one is
+  // open, every frame slide any overlapping panel clear of the selection box
+  // (up, else left, else right; only to a fully visible spot).
+  useEffect(() => {
+    if (!showColorPicker && !showAlignMenu) return;
+    let raf = 0;
+    const tick = () => {
+      const tb = toolbarRef.current;
+      const box = document.querySelector("[data-multi-selection-box]");
+      if (tb && box) {
+        const target = box.getBoundingClientRect();
+        const vw = window.innerWidth;
+        tb.querySelectorAll<HTMLElement>("[data-submenu]").forEach((p) => {
+          p.style.translate = "";
+          const pr = p.getBoundingClientRect();
+          if (!(pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top)) return;
+          const dy = target.top - 10 - pr.bottom;
+          if (pr.top + dy >= 8) { p.style.translate = `0 ${dy}px`; return; }
+          const dxL = target.left - 10 - pr.right;
+          if (pr.left + dxL >= 8) { p.style.translate = `${dxL}px 0`; return; }
+          const dxR = target.right + 10 - pr.left;
+          if (pr.right + dxR <= vw - 8) p.style.translate = `${dxR}px 0`;
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [showColorPicker, showAlignMenu]);
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState<{
@@ -119,17 +156,44 @@ export function MultiSelectionBox({
     };
   }, []);
 
+  // Compact toolbar by default (colour, group, duplicate, delete); the rest
+  // (align, distribute, layers, lock) behind an expand toggle. Remembered.
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("cxd:selection-toolbar-expanded") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleExpanded = useCallback(() => {
+    setExpanded((prev) => {
+      try {
+        localStorage.setItem("cxd:selection-toolbar-expanded", prev ? "0" : "1");
+      } catch {}
+      return !prev;
+    });
+  }, []);
+
   // Calculate bounding box with padding to separate group handles from element connector anchors
   const GROUP_PADDING = 30; // px of padding between elements and group outline
+  // `bounds` is null while the selection ids point at elements not yet in the
+  // store (e.g. a multi-duplicate that lands a frame later). Don't return early
+  // here: every hook below must still run, or React throws error #300.
   const bounds = calculateBounds(selectedElements);
-  if (!bounds) return null;
 
-  const minX = bounds.minX - GROUP_PADDING;
-  const minY = bounds.minY - GROUP_PADDING;
-  const maxX = bounds.maxX + GROUP_PADDING;
-  const maxY = bounds.maxY + GROUP_PADDING;
+  const minX = (bounds?.minX ?? 0) - GROUP_PADDING;
+  const minY = (bounds?.minY ?? 0) - GROUP_PADDING;
+  const maxX = (bounds?.maxX ?? 0) + GROUP_PADDING;
+  const maxY = (bounds?.maxY ?? 0) + GROUP_PADDING;
   const width = maxX - minX;
   const height = maxY - minY;
+
+  // Alignment targets the ELEMENTS' own bounds, not the padded selection box
+  // (using the padded edges shifted everything by GROUP_PADDING on every align).
+  const aMinX = minX + GROUP_PADDING;
+  const aMinY = minY + GROUP_PADDING;
+  const aMaxX = maxX - GROUP_PADDING;
+  const aMaxY = maxY - GROUP_PADDING;
 
   // Check if all elements are locked
   const allLocked = selectedElements.every((el) => el.locked);
@@ -139,52 +203,52 @@ export function MultiSelectionBox({
   const alignLeft = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { x: minX });
+      updates.set(el.id, { x: aMinX });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minX, onUpdateElements]);
+  }, [selectedElements, aMinX, onUpdateElements]);
 
   const alignCenterH = useCallback(() => {
-    const centerX = minX + width / 2;
+    const centerX = (aMinX + aMaxX) / 2;
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
       updates.set(el.id, { x: centerX - el.width / 2 });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minX, width, onUpdateElements]);
+  }, [selectedElements, aMinX, aMaxX, onUpdateElements]);
 
   const alignRight = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { x: maxX - el.width });
+      updates.set(el.id, { x: aMaxX - el.width });
     });
     onUpdateElements(updates);
-  }, [selectedElements, maxX, onUpdateElements]);
+  }, [selectedElements, aMaxX, onUpdateElements]);
 
   const alignTop = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { y: minY });
+      updates.set(el.id, { y: aMinY });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minY, onUpdateElements]);
+  }, [selectedElements, aMinY, onUpdateElements]);
 
   const alignMiddle = useCallback(() => {
-    const centerY = minY + height / 2;
+    const centerY = (aMinY + aMaxY) / 2;
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
       updates.set(el.id, { y: centerY - el.height / 2 });
     });
     onUpdateElements(updates);
-  }, [selectedElements, minY, height, onUpdateElements]);
+  }, [selectedElements, aMinY, aMaxY, onUpdateElements]);
 
   const alignBottom = useCallback(() => {
     const updates = new Map<string, Partial<CanvasElement>>();
     selectedElements.forEach((el) => {
-      updates.set(el.id, { y: maxY - el.height });
+      updates.set(el.id, { y: aMaxY - el.height });
     });
     onUpdateElements(updates);
-  }, [selectedElements, maxY, onUpdateElements]);
+  }, [selectedElements, aMaxY, onUpdateElements]);
 
   // Distribute evenly: place elements sequentially with a fixed 20px gap
   const DISTRIBUTE_GAP = 20;
@@ -214,21 +278,6 @@ export function MultiSelectionBox({
   }, [selectedElements, onUpdateElements]);
 
   // Cycling alignment handlers
-  const cycleHAlign = useCallback(() => {
-    const mode = hAlignMode;
-    if (mode === 0) alignLeft();
-    else if (mode === 1) alignCenterH();
-    else alignRight();
-    setHAlignMode(((mode + 1) % 3) as 0 | 1 | 2);
-  }, [hAlignMode, alignLeft, alignCenterH, alignRight]);
-
-  const cycleVAlign = useCallback(() => {
-    const mode = vAlignMode;
-    if (mode === 0) alignTop();
-    else if (mode === 1) alignMiddle();
-    else alignBottom();
-    setVAlignMode(((mode + 1) % 3) as 0 | 1 | 2);
-  }, [vAlignMode, alignTop, alignMiddle, alignBottom]);
 
   // Handle resize start
   const handleResizeStart = useCallback(
@@ -366,12 +415,13 @@ export function MultiSelectionBox({
     };
   }, [isResizing, resizeStart, resizeHandle, canvasZoom, shiftKey, onUpdateElements, snapToGrid, snapValue]);
 
-  if (isReadOnly) return null;
+  if (!bounds || isReadOnly) return null;
 
   return (
     <>
       {/* Bounding box - allows clicking anywhere inside to drag */}
       <div
+        data-multi-selection-box="true"
         className="absolute cursor-move"
         style={{
           left: minX,
@@ -406,8 +456,12 @@ export function MultiSelectionBox({
         )}
       </div>
 
-      {/* Floating toolbar */}
+      {/* Floating toolbar — portaled into the canvas overlay layer so it paints
+          above the selected elements (which are lifted to z 2e9) */}
+      {portalToOverlay(
       <div
+        ref={toolbarRef}
+        data-avoid-selector="[data-multi-selection-box]"
         className="absolute z-[1000] flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-lg pointer-events-auto"
         style={{
           left: minX + width / 2,
@@ -419,37 +473,49 @@ export function MultiSelectionBox({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Alignment & Distribution tools */}
+        {expanded && (
         <div className="flex items-center gap-0.5 pr-2 border-r border-border/50">
-          {/* Horizontal align — cycles: Left → Center → Right */}
-          <ToolButton
-            icon={hAlignMode === 0 ? <AlignLeft className="w-4 h-4" /> : hAlignMode === 1 ? <AlignCenter className="w-4 h-4" /> : <AlignRight className="w-4 h-4" />}
-            title={hAlignMode === 0 ? "Align Left (click to cycle)" : hAlignMode === 1 ? "Align Center (click to cycle)" : "Align Right (click to cycle)"}
-            onClick={cycleHAlign}
-          />
-          {/* Vertical align — cycles: Top → Middle → Bottom */}
-          <ToolButton
-            icon={vAlignMode === 0 ? <AlignStartVertical className="w-4 h-4" /> : vAlignMode === 1 ? <AlignCenterVertical className="w-4 h-4" /> : <AlignEndVertical className="w-4 h-4" />}
-            title={vAlignMode === 0 ? "Align Top (click to cycle)" : vAlignMode === 1 ? "Align Middle (click to cycle)" : "Align Bottom (click to cycle)"}
-            onClick={cycleVAlign}
-          />
-          {selectedElements.length >= 2 && (
-            <>
-              <div className="w-px h-4 bg-border/30 mx-0.5" />
-              {/* Distribute horizontal spacing evenly */}
-              <ToolButton
-                icon={<AlignHorizontalSpaceAround className="w-4 h-4" />}
-                title="Distribute Horizontal Spacing"
-                onClick={distributeH}
-              />
-              {/* Distribute vertical spacing evenly */}
-              <ToolButton
-                icon={<AlignVerticalSpaceAround className="w-4 h-4" />}
-                title="Distribute Vertical Spacing"
-                onClick={distributeV}
-              />
-            </>
-          )}
+          {/* One Align button; the popover shows every option at once. Icons are
+              bar-and-blocks glyphs: the bar is the edge everything snaps to. */}
+          <div className="relative">
+            <ToolButton
+              icon={<AlignStartVertical className="w-4 h-4" />}
+              title="Align"
+              onClick={() => setShowAlignMenu((v) => !v)}
+              className={showAlignMenu ? "bg-primary/20 text-primary" : undefined}
+            />
+            {showAlignMenu && (
+              <div
+                data-submenu="true"
+                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-10 p-2 rounded-lg bg-zinc-900 border border-white/10 shadow-xl whitespace-nowrap"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <p className="px-1 pb-1 text-[9px] uppercase tracking-wide text-white/40">Align horizontally</p>
+                <div className="flex gap-0.5">
+                  <ToolButton icon={<AlignStartVertical className="w-4 h-4" />} title="Align left edges" onClick={alignLeft} />
+                  <ToolButton icon={<AlignCenterVertical className="w-4 h-4" />} title="Align centers (horizontal)" onClick={alignCenterH} />
+                  <ToolButton icon={<AlignEndVertical className="w-4 h-4" />} title="Align right edges" onClick={alignRight} />
+                </div>
+                <p className="px-1 pt-2 pb-1 text-[9px] uppercase tracking-wide text-white/40">Align vertically</p>
+                <div className="flex gap-0.5">
+                  <ToolButton icon={<AlignStartHorizontal className="w-4 h-4" />} title="Align top edges" onClick={alignTop} />
+                  <ToolButton icon={<AlignCenterHorizontal className="w-4 h-4" />} title="Align middles (vertical)" onClick={alignMiddle} />
+                  <ToolButton icon={<AlignEndHorizontal className="w-4 h-4" />} title="Align bottom edges" onClick={alignBottom} />
+                </div>
+                {selectedElements.length >= 2 && (
+                  <>
+                    <p className="px-1 pt-2 pb-1 text-[9px] uppercase tracking-wide text-white/40">Distribute evenly</p>
+                    <div className="flex gap-0.5">
+                      <ToolButton icon={<AlignHorizontalSpaceAround className="w-4 h-4" />} title="Distribute horizontally (even gaps)" onClick={distributeH} />
+                      <ToolButton icon={<AlignVerticalSpaceAround className="w-4 h-4" />} title="Distribute vertically (even gaps)" onClick={distributeV} />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
+        )}
 
         {/* Color picker — shown when all selected elements share the same type */}
         {(() => {
@@ -535,6 +601,7 @@ export function MultiSelectionBox({
               )}
               {showColorPicker && firstType !== 'shape' && !allStoryboards && (
                 <div
+                  data-submenu="true"
                   className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 p-3 rounded-lg bg-card/95 backdrop-blur-xl border border-border/50 shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-[1001] pointer-events-auto"
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
@@ -571,6 +638,13 @@ export function MultiSelectionBox({
                           style={{ background: color }}
                         />
                       ))}
+                      <GradientToolButton
+                        onChange={(css) => applyColor(css)}
+                        tileClassName="h-10 w-full"
+                        className="rounded-md"
+                        title="Custom gradient"
+                      />
+                      <SavedGradients onPick={(css) => applyColor(css)} className="col-span-3" swatchClassName="w-10 h-10" />
                     </div>
                   )}
                 </div>
@@ -585,25 +659,25 @@ export function MultiSelectionBox({
             <button
               onClick={(e) => { e.stopPropagation(); onUngroup(); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/20 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-all"
-              title="Ungroup"
+              title="Ungroup (Ctrl/Cmd + Shift + G)"
             >
               <Ungroup className="w-3.5 h-3.5" />
-              Ungroup
+              {expanded && "Ungroup"}
             </button>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onCreateGroup(); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white shadow-[0_0_10px_rgba(139,92,246,0.3)] hover:shadow-[0_0_15px_rgba(139,92,246,0.4)] transition-all"
-              title="Create Group"
+              title="Group (Ctrl/Cmd + G)"
             >
               <Group className="w-3.5 h-3.5" />
-              Group
+              {expanded && "Group"}
             </button>
           )}
         </div>
 
         {/* Z-index controls — hidden when only containers are selected (containers always stay at back) */}
-        {selectedElements.some((el) => el.type !== 'container') && (
+        {expanded && selectedElements.some((el) => el.type !== 'container') && (
           <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
             <ToolButton icon={<ArrowUp className="w-4 h-4" />} title="Bring Forward" onClick={onBringForward} />
             <ToolButton icon={<ArrowDown className="w-4 h-4" />} title="Send Backward" onClick={onSendBackward} />
@@ -611,6 +685,7 @@ export function MultiSelectionBox({
         )}
 
         {/* Lock/Unlock */}
+        {expanded && (
         <div className="flex items-center gap-0.5 px-2 border-r border-border/50">
           {allLocked ? (
             <ToolButton icon={<Unlock className="w-4 h-4" />} title="Unlock All" onClick={onUnlockElements} />
@@ -618,10 +693,14 @@ export function MultiSelectionBox({
             <ToolButton icon={<Lock className="w-4 h-4" />} title="Lock All" onClick={onLockElements} />
           )}
         </div>
+        )}
 
         {/* Duplicate & Delete */}
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 pl-1">
           <ToolButton icon={<Copy className="w-4 h-4" />} title="Duplicate" onClick={onDuplicateElements} />
+          {onExport && (
+            <ToolButton icon={<Download className="w-4 h-4" />} title="Export selection (Ctrl/Cmd + Shift + E)" onClick={onExport} />
+          )}
           <ToolButton
             icon={<Trash2 className="w-4 h-4" />}
             title="Delete"
@@ -630,13 +709,24 @@ export function MultiSelectionBox({
           />
         </div>
 
-        {/* Selection count badge */}
-        <div className="ml-2 px-2 py-0.5 text-[10px] bg-primary/20 text-primary rounded-full">
-          {selectedElements.length} selected
+        {/* Expand / compact */}
+        <div className="flex items-center pl-1 ml-0.5 border-l border-border/50">
+          <ToolButton
+            icon={expanded ? <ChevronsLeft className="w-4 h-4" /> : <MoreHorizontal className="w-4 h-4" />}
+            title={expanded ? "Compact toolbar" : "More options (align, layers, lock)"}
+            onClick={toggleExpanded}
+          />
         </div>
       </div>
+      )}
     </>
   );
+}
+
+function portalToOverlay(node: React.ReactNode): React.ReactNode {
+  if (typeof document === "undefined") return node;
+  const layer = document.getElementById(CANVAS_OVERLAY_LAYER_ID);
+  return layer ? createPortal(node, layer) : node;
 }
 
 // Calculate bounding box for multiple elements

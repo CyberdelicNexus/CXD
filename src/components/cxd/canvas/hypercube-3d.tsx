@@ -58,6 +58,7 @@ import { ERDGenerator } from "./erd-generator";
 import { generateDiagnostics, calculateFaceIntensities } from "@/utils/diagnostic-engine";
 import { ShimmerGrid } from "@/components/ui/shimmer-grid";
 import type { EnrichedDiagnostic } from "@/types/diagnostics";
+import { AnimatePresence, motion } from "framer-motion";
 import { TagSuggestionPanel } from "./tag-suggestion-panel";
 import {
   requestTagSuggestions,
@@ -589,6 +590,37 @@ function getRotationForFace(faceIndex: number): { x: number; y: number } {
   }
 }
 
+// Short "what is this face, and how does it shape the whole" copy, shown beside
+// the cube while a face button is hovered.
+const FACE_BLURBS: Record<string, { essence: string; impact: string }> = {
+  realityPlanes: {
+    essence: "Where the experience lives: the technical layers from physical to virtual (PR, AR, VR, MR and beyond).",
+    impact: "Sets the medium and its limits. Every other face has to work inside the reality you choose.",
+  },
+  sensoryDomains: {
+    essence: "What people see, hear, smell, taste and feel while they are inside it.",
+    impact: "The raw material of presence. It decides how real, and how intense, everything else lands.",
+  },
+  presence: {
+    essence: "How people are there: mentally, emotionally, socially, physically, in the environment, in action.",
+    impact: "Shapes the kind of attention and involvement your sensory design has to support.",
+  },
+  stateMapping: {
+    essence: "The momentary states participants move through, from arrival to peak to release.",
+    impact: "Gives the experience its arc: pacing, intensity and recovery across the journey.",
+  },
+  traitMapping: {
+    essence: "The lasting qualities the experience cultivates once it is over.",
+    impact: "The durable change that justifies the states and senses you designed.",
+  },
+  contextAndMeaning: {
+    essence: "The world, story and magic that make the experience matter to the people in it.",
+    impact: "Ties every other face together into one coherent reason to care.",
+  },
+};
+
+// Cube glides to its top-right dock this slowly; the chat waits for it.
+const DOCK_DURATION_MS = 1300;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const DEFAULT_ZOOM = 1;
@@ -711,6 +743,10 @@ export function Hypercube3D({
   const [cubeRotation, setCubeRotation] = useState({ x: -25, y: -35 });
   const [targetRotation, setTargetRotation] = useState({ x: -25, y: -35 });
   const [isAnimating, setIsAnimating] = useState(false);
+  // Hovering a face button (default view) turns the cube to show that face.
+  const [previewFace, setPreviewFace] = useState<number | null>(null);
+  const cubeRotationRef = useRef({ x: -25, y: -35 });
+  cubeRotationRef.current = cubeRotation;
   const [focusedFaceIndex, setFocusedFaceIndex] = useState<number | null>(null);
   const [isCoreSelected, setIsCoreSelected] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -835,6 +871,7 @@ export function Hypercube3D({
       focusedFaceIndex === null &&
       !isCoreSelected &&
       !isGeneralChatActive &&
+      previewFace === null &&
       !isAnimating;
 
     if (!shouldAutoRotate) {
@@ -872,7 +909,7 @@ export function Hypercube3D({
       }
       lastTimeRef.current = 0;
     };
-  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected, isGeneralChatActive]);
+  }, [interactionMode, isAnimating, focusedFaceIndex, isCoreSelected, isGeneralChatActive, previewFace]);
 
   // Layer 2: Generate real-time diagnostics with cooldown/deduplication
   const diagnostics = useMemo(() => {
@@ -977,7 +1014,7 @@ export function Hypercube3D({
     startRotationRef.current = cubeRotation;
     const startTime =
       typeof performance !== "undefined" ? performance.now() : 0;
-    const duration = 720;
+    const duration = 1100;
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime;
@@ -1020,9 +1057,27 @@ export function Hypercube3D({
     };
   }, [isAnimating, targetRotation]);
 
+  // Shortest way round from `cur` to an equivalent angle of `target` (the
+  // auto-rotation accumulates far past 360, so a plain tween would spin back).
+  const nearestAngle = (cur: number, target: number) =>
+    cur + ((((target - cur) % 360) + 540) % 360) - 180;
+
+  // Hover a face button: turn the cube to that face. Leave: ease back to the
+  // resting tilt and let the slow auto-rotation resume. Ignored once a chat
+  // or Explore is open (selectFace owns the rotation then).
+  const previewFaceHover = useCallback((index: number | null) => {
+    if (!isDefaultViewRef.current) return;
+    setPreviewFace(index);
+    const cur = cubeRotationRef.current;
+    const base = index === null ? { x: -25, y: -35 } : getRotationForFace(index);
+    setTargetRotation({ x: base.x, y: nearestAngle(cur.y, base.y) });
+    setIsAnimating(true);
+  }, []);
+
   const selectFace = useCallback((index: number) => {
     const face = CUBE_FACES[index];
     if (!face) return;
+    setPreviewFace(null);
 
     // Set focused face and clear core/general chat
     setFocusedFaceIndex(index);
@@ -1032,7 +1087,7 @@ export function Hypercube3D({
     // Rotate cube to bring selected face to FRONT
     const targetRot = getRotationForFace(index);
 
-    setTargetRotation(targetRot);
+    setTargetRotation({ x: targetRot.x, y: nearestAngle(cubeRotationRef.current.y, targetRot.y) });
     setIsAnimating(true);
   }, []);
 
@@ -1804,7 +1859,7 @@ export function Hypercube3D({
   // camera (same normal-z convention as getFrontFaceFromRotation). Memoized per
   // frame here rather than inline so the six transforms are computed once.
   const perspectiveFaceLabels = useMemo(() => {
-    if (interactionMode !== "explore") return [];
+    if (interactionMode !== "explore" && previewFace === null) return [];
     const rx = (cubeRotation.x * Math.PI) / 180;
     const ry = (cubeRotation.y * Math.PI) / 180;
     const sinRx = Math.sin(rx), cosRx = Math.cos(rx);
@@ -1867,8 +1922,11 @@ export function Hypercube3D({
         transform,
         lines: splitLabelTwoLines(face.label),
       };
-    }).filter((l) => l.opacity > 0.02);
-  }, [interactionMode, outerCorners, cubeRotation.x, cubeRotation.y]);
+    })
+      .filter((l) => l.opacity > 0.02)
+      // Hover preview labels only the face being previewed.
+      .filter((l) => interactionMode === "explore" || l.faceIndex === previewFace);
+  }, [interactionMode, previewFace, outerCorners, cubeRotation.x, cubeRotation.y]);
 
 
   const focusedFace =
@@ -1914,6 +1972,37 @@ export function Hypercube3D({
   // Cube positioning based on selection state
   // When a face is selected: cube shrinks and moves to top-right as NAVIGATION MAP
   // Otherwise: cube is centered and visually prominent
+  const isDefaultView =
+    interactionMode === "default" && focusedFaceIndex === null && !isCoreSelected && !isGeneralChatActive;
+  const isDefaultViewRef = useRef(isDefaultView);
+  isDefaultViewRef.current = isDefaultView;
+
+  // The chat window (and System Insights drawer) wait for the cube to finish
+  // flying to its top-right dock before appearing, so the transition reads as
+  // two calm steps instead of everything at once. Closing is immediate; moving
+  // between faces while open does not re-trigger the wait.
+  const hasSelection = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
+  const [selectionReady, setSelectionReady] = useState(false);
+  useEffect(() => {
+    if (!hasSelection) {
+      setSelectionReady(false);
+      return;
+    }
+    const t = window.setTimeout(() => setSelectionReady(true), DOCK_DURATION_MS - 100);
+    return () => window.clearTimeout(t);
+  }, [hasSelection]);
+
+  // The chat then fades in a beat after the drawer has settled.
+  const [chatFaded, setChatFaded] = useState(false);
+  useEffect(() => {
+    if (!selectionReady) {
+      setChatFaded(false);
+      return;
+    }
+    const t = window.setTimeout(() => setChatFaded(true), 350);
+    return () => window.clearTimeout(t);
+  }, [selectionReady]);
+
   const cubePosition = useMemo(() => {
     const hasFaceSelected = focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive;
 
@@ -1923,11 +2012,12 @@ export function Hypercube3D({
     }
     // Center position for default (no selection) and explore mode
     // In explore mode, apply zoom level
-    const baseScale = 0.85;
+    // Default view gets a bigger cube: it is the hero of the page.
+    const baseScale = interactionMode === "explore" || !isDefaultView ? 0.85 : 1.6;
     const scale =
       interactionMode === "explore" ? baseScale * exploreZoom : baseScale;
     return { scale, x: "50%", y: "50%" };
-  }, [interactionMode, focusedFaceIndex, isCoreSelected, isGeneralChatActive, exploreZoom]);
+  }, [interactionMode, focusedFaceIndex, isCoreSelected, isGeneralChatActive, exploreZoom, isDefaultView]);
 
   // Keep directional arrows aligned with the projected minimap cube center.
   const minimapVisualCenterOffset = useMemo(() => {
@@ -1957,6 +2047,90 @@ export function Hypercube3D({
     cubePosition.scale,
   ]);
 
+  // Default view = nothing selected and not exploring: the cube is large and
+  // centred, the face rail hugs it, and the two primary actions sit above it.
+  // Opening any chat (or Explore) docks them back into the rail.
+  const renderGeneralButton = (pill: boolean) => (
+    <button
+            data-tour-id="map-cyberdelic-tab"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasDragged) return;
+              openGeneralChat();
+            }}
+            className={cn(
+              "group relative flex items-center h-12 rounded-full border transition-all duration-300",
+              isGeneralChatActive && "z-10",
+              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-50",
+              "hover:opacity-100 hover:z-10",
+            )}
+            style={{
+              background: "linear-gradient(135deg, hsl(220 30% 12%) 0%, hsl(220 25% 8%) 50%, hsl(220 20% 5%) 100%)",
+              borderColor: isGeneralChatActive
+                ? "hsl(220 60% 60%)"
+                : "hsl(220 20% 25%)",
+              boxShadow: isGeneralChatActive
+                ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
+                : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
+            }}
+            title="Hypercube"
+          >
+            <span className="w-12 h-12 shrink-0 flex items-center justify-center">
+              <NextImage
+                src="/images/CXD Logo 2.png"
+                alt="AI"
+                width={28}
+                height={28}
+                className={cn(
+                  "w-7 h-7 object-contain transition-all duration-300",
+                  isGeneralChatActive ? "opacity-100" : "opacity-85",
+                )}
+              />
+            </span>
+            <span
+              className={cn(
+                "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
+                isGeneralChatActive || pill
+                  ? "max-w-[240px] pr-4 opacity-100"
+                  : "max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100",
+              )}
+              style={{ color: "hsl(220 60% 72%)" }}
+            >
+              {pill ? "Hypercube Intelligence" : "Hypercube"}
+            </span>
+          </button>
+  );
+  const renderExploreButton = (pill: boolean) => (
+    <button
+              onClick={enterExploreMode}
+              className="group relative flex items-center h-12 rounded-full border transition-all duration-300 hover:z-10"
+              style={{
+                background:
+                  "linear-gradient(135deg, hsl(35 40% 12%) 0%, hsl(35 35% 8%) 50%, hsl(35 30% 5%) 100%)",
+                borderColor: "hsl(35 40% 25%)",
+                boxShadow: "inset 0 1px 1px hsl(35 40% 20% / 0.3)",
+              }}
+              title="Enter Edge Resonance to rotate the cube and explore face relationships"
+            >
+              <span className="w-12 h-12 shrink-0 flex items-center justify-center">
+                <Compass className="w-5 h-5 text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 group-hover:scale-110" />
+              </span>
+              <span
+                className={cn(
+                  "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
+                  pill
+                    ? "max-w-[220px] pr-4 opacity-100 text-amber-300"
+                    : "max-w-0 opacity-0 group-hover:max-w-[220px] group-hover:pr-4 group-hover:opacity-100 text-amber-400/70 group-hover:text-amber-300",
+                )}
+                style={{
+                  textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
+                }}
+              >
+                {pill ? "Explore" : "Edge Resonance"}
+              </span>
+            </button>
+  );
+
   // Dynamic background based on canvas background preference
   const canvasBackground = project?.canvasBackground || 'radial-gradient(circle at center, #1a0b2e 0%, #000000 100%)';
   const centerColor = extractCenterColor(canvasBackground);
@@ -1980,7 +2154,7 @@ export function Hypercube3D({
         onGenerateQuestions={handleGenerateQuestions}
         onGeneratedQuestionClick={handleGeneratedQuestionClick}
         onRefresh={handleRefreshDiagnostics}
-        isOpen={isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)}
+        isOpen={isPanelOpen && hasSelection && selectionReady}
         onToggle={() => setIsPanelOpen(!isPanelOpen)}
       />
       {/* 3D Scene Container */}
@@ -2012,7 +2186,7 @@ export function Hypercube3D({
             transform: `translate(-50%, -50%) scale(${cubePosition.scale})`,
             // Premium easeOutQuint dock — fast to settle, no jarring stop
             transition:
-              "left 0.62s cubic-bezier(0.22,1,0.36,1), top 0.62s cubic-bezier(0.22,1,0.36,1), transform 0.62s cubic-bezier(0.22,1,0.36,1)",
+              `left ${DOCK_DURATION_MS}ms cubic-bezier(0.55,0,0.2,1), top ${DOCK_DURATION_MS}ms cubic-bezier(0.55,0,0.2,1), transform ${DOCK_DURATION_MS}ms cubic-bezier(0.55,0,0.2,1)`,
             width: "800px",
             height: "800px",
             // Filter halos (edge glow, vertex sparks) extend past the 800×800
@@ -2366,14 +2540,16 @@ export function Hypercube3D({
                 (EDGE_ADJACENT_FACES[selectedEdgeIndex][0] === faceIndex ||
                   EDGE_ADJACENT_FACES[selectedEdgeIndex][1] === faceIndex);
               // Dim non-front faces when we have a focused face
+              const isPreview = previewFace === faceIndex;
               const isDimmed =
-                focusedFaceIndex !== null && !isFocused && !isFrontFace;
+                (focusedFaceIndex !== null && !isFocused && !isFrontFace) ||
+                (previewFace !== null && !isPreview && !isFrontFace);
               // In default mode with selection, only highlight the front-facing face
               // When Core is selected, no faces should be active/highlighted
               const isActive =
                 !isCoreSelected && focusedFaceIndex !== null
                   ? isFrontFace
-                  : false;
+                  : isPreview && isFrontFace;
 
               // Corner indices for this face (shared with the depth sort above)
               const faceCorners = FACE_CORNER_INDICES[faceIndex].map((i) => outerCorners[i]);
@@ -2466,8 +2642,12 @@ export function Hypercube3D({
                   that otherwise wash out against the bright near-face center
                 • all 8 inner→outer connecting struts, so the hypercube reads
                   as one nested figure while the perspective labels are shown. */}
-          {interactionMode === "explore" && (
+          {(interactionMode === "explore" || previewFace !== null) && (
             <g style={{ pointerEvents: "none" }}>
+              {/* One filter on the group, not per line: a perfectly horizontal or
+                  vertical line (a face turned straight on) has a zero-size bounding
+                  box, which makes a per-line SVG filter drop it entirely. */}
+              <g filter="url(#glow-stable)">
               {cubeEdges.map(([i, j], idx) => (
                 <line
                   key={`inner-explore-${idx}`}
@@ -2479,9 +2659,9 @@ export function Hypercube3D({
                   strokeWidth={1.75}
                   strokeLinecap="round"
                   opacity={0.75}
-                  filter="url(#glow-stable)"
                 />
               ))}
+              </g>
               {outerCorners.map((outer, i) => (
                 <line
                   key={`strut-explore-${i}`}
@@ -2530,71 +2710,107 @@ export function Hypercube3D({
           })}
         </svg>
 
+        {/* Hover preview: a reminder of what the hovered face is about, in the
+            free space to the right of the cube. */}
+        <AnimatePresence mode="wait">
+          {isDefaultView && previewFace !== null && CUBE_FACES[previewFace] && (() => {
+            const face = CUBE_FACES[previewFace];
+            const blurb = FACE_BLURBS[face.id];
+            const hue = face.id === "realityPlanes" ? 286 : face.tint.hue;
+            const Icon = FACE_ICONS[face.id] || Box;
+            const count = calculateFaceIntensity(face).elementCount;
+            return (
+              // Static wrapper centres vertically; framer owns only the inner slide/fade
+              // (its transform would otherwise override a centring translate).
+              <div
+                key={face.id}
+                className="absolute z-20 top-1/2 -translate-y-1/2 pointer-events-none"
+                // Just right of the cube: same breathing room as the face rail on its left.
+                style={{ left: `calc(50% + ${Math.round(cubePosition.scale * 122 + 120)}px)`, width: "clamp(210px, calc(50% - 340px), 300px)" }}
+              >
+              <motion.div
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 12 }}
+                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div
+                  className="rounded-2xl border p-5 backdrop-blur-md"
+                  style={{
+                    background: `linear-gradient(160deg, hsl(${hue} 35% 12% / 0.85), hsl(${hue} 30% 5% / 0.85))`,
+                    borderColor: `hsl(${hue} 55% 55% / 0.45)`,
+                    boxShadow: `0 0 40px hsl(${hue} 70% 55% / 0.18), inset 0 1px 1px hsl(${hue} 70% 70% / 0.15)`,
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="w-12 h-12 rounded-full flex items-center justify-center border"
+                      style={{ borderColor: `hsl(${hue} 55% 55% / 0.6)`, background: `hsl(${hue} 40% 10%)`, boxShadow: `0 0 20px hsl(${hue} 70% 55% / 0.35)` }}
+                    >
+                      <Icon className="w-5 h-5" style={{ color: `hsl(${hue} 80% 75%)` } as React.CSSProperties} />
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="text-base font-semibold leading-tight" style={{ color: `hsl(${hue} 70% 88%)` }}>{face.label}</h3>
+                      <p className="text-[11px] uppercase tracking-[0.14em] mt-0.5" style={{ color: `hsl(${hue} 50% 65%)` }}>{face.semanticRole}</p>
+                    </div>
+                  </div>
+                  <p className="mt-4 text-sm leading-relaxed text-white/80">{blurb?.essence}</p>
+                  <div className="mt-4 pt-3 border-t" style={{ borderColor: `hsl(${hue} 40% 40% / 0.3)` }}>
+                    <p className="text-[10px] uppercase tracking-[0.16em] mb-1.5" style={{ color: `hsl(${hue} 50% 65%)` }}>How it shapes the whole</p>
+                    <p className="text-sm leading-relaxed text-white/65">{blurb?.impact}</p>
+                  </div>
+                  <p className="mt-4 text-[11px] text-white/45">
+                    {Number.isFinite(count) && count > 0 ? `${count} tagged element${count === 1 ? "" : "s"} on this face` : "Nothing tagged here yet"}
+                  </p>
+                </div>
+              </motion.div>
+              </div>
+            );
+          })()}
+        </AnimatePresence>
+
+        {/* Default view: Hypercube Intelligence + Explore, side by side above the cube */}
+        {isDefaultView && (
+          <div className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-3" style={{ top: "max(24px, calc(50% - 330px))" }}>
+            <motion.div layoutId="hc-general" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+              {renderGeneralButton(false)}
+            </motion.div>
+            <motion.div layoutId="hc-explore" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+              {renderExploreButton(false)}
+            </motion.div>
+          </div>
+        )}
+
         {/* Face selector — compact vertical rail of icon circles that expand
             on hover (or while selected) to reveal their label. */}
         <div
           // overflow must be fully visible: with overflow-y-auto the browser
           // forces overflow-x to auto too, clipping the Wizard button's glow.
-          className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30 items-start p-2 transition-[left] duration-300 ease-out overflow-visible"
+          className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30 items-start p-2 transition-[left] duration-[900ms] ease-[cubic-bezier(0.55,0,0.2,1)] overflow-visible"
           style={{
             // Always visible. Sits just right of the System Insights drawer when
             // it's open; keeps a small left margin (not flush) when it's hidden.
             left:
-              isPanelOpen && (focusedFaceIndex !== null || isCoreSelected || isGeneralChatActive)
+              // On selecting, the rail glides ONCE to where it will sit beside the
+              // System Insights drawer; the drawer then slides in to meet it.
+              isPanelOpen && hasSelection
                 ? 336
-                : 20,
+                : hasSelection
+                  ? 20
+                  : // Default view and Explore: hug the cube (its half-width grows
+                    // with the scale), leaving room for the hover labels.
+                    `max(20px, calc(50% - ${Math.round(cubePosition.scale * 150 + 210)}px))`,
           }}
           data-tour-id="map-face-selector"
         >
-          {/* General AI Chat button */}
-          <button
-            data-tour-id="map-cyberdelic-tab"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (hasDragged) return;
-              openGeneralChat();
-            }}
-            className={cn(
-              "group relative flex items-center h-12 rounded-full border transition-all duration-300",
-              isGeneralChatActive && "z-10",
-              !isGeneralChatActive && focusedFaceIndex !== null && "opacity-50",
-              "hover:opacity-100 hover:z-10",
-            )}
-            style={{
-              background: "linear-gradient(135deg, hsl(220 30% 12%) 0%, hsl(220 25% 8%) 50%, hsl(220 20% 5%) 100%)",
-              borderColor: isGeneralChatActive
-                ? "hsl(220 60% 60%)"
-                : "hsl(220 20% 25%)",
-              boxShadow: isGeneralChatActive
-                ? "0 0 25px hsl(220 60% 60% / 0.5), 0 0 50px hsl(220 60% 60% / 0.25), inset 0 1px 1px hsl(220 60% 60% / 0.2)"
-                : "inset 0 1px 1px hsl(220 20% 20% / 0.3)",
-            }}
-            title="Hypercube"
-          >
-            <span className="w-12 h-12 shrink-0 flex items-center justify-center">
-              <NextImage
-                src="/images/CXD Logo 2.png"
-                alt="AI"
-                width={28}
-                height={28}
-                className={cn(
-                  "w-7 h-7 object-contain transition-all duration-300",
-                  isGeneralChatActive ? "opacity-100" : "opacity-85",
-                )}
-              />
-            </span>
-            <span
-              className={cn(
-                "overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide transition-all duration-300 ease-out",
-                isGeneralChatActive
-                  ? "max-w-[160px] pr-4 opacity-100"
-                  : "max-w-0 opacity-0 group-hover:max-w-[160px] group-hover:pr-4 group-hover:opacity-100",
-              )}
-              style={{ color: "hsl(220 60% 72%)" }}
-            >
-              Hypercube
-            </span>
-          </button>
+          {/* General AI Chat button: in the rail only while a chat/explore view is
+              active; in the default view it lives in the top bar. layoutId lets
+              framer animate it between the two places. */}
+          {!isDefaultView && (
+            <motion.div layoutId="hc-general" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+              {renderGeneralButton(false)}
+            </motion.div>
+          )}
 
           {/* Face buttons */}
           {CUBE_FACES.map((face, index) => {
@@ -2623,6 +2839,8 @@ export function Hypercube3D({
             return (
               <button
                 key={face.id}
+                onMouseEnter={() => previewFaceHover(index)}
+                onMouseLeave={() => previewFaceHover(null)}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (hasDragged) return;
@@ -2744,29 +2962,11 @@ export function Hypercube3D({
 
           {/* Explore mode toggle - moved to end */}
           {interactionMode !== "explore" ? (
-            <button
-              onClick={enterExploreMode}
-              className="group relative flex items-center h-12 rounded-full border transition-all duration-300 hover:z-10"
-              style={{
-                background:
-                  "linear-gradient(135deg, hsl(35 40% 12%) 0%, hsl(35 35% 8%) 50%, hsl(35 30% 5%) 100%)",
-                borderColor: "hsl(35 40% 25%)",
-                boxShadow: "inset 0 1px 1px hsl(35 40% 20% / 0.3)",
-              }}
-              title="Enter Edge Resonance to rotate the cube and explore face relationships"
-            >
-              <span className="w-12 h-12 shrink-0 flex items-center justify-center">
-                <Compass className="w-5 h-5 text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 group-hover:scale-110" />
-              </span>
-              <span
-                className="max-w-0 opacity-0 group-hover:max-w-[220px] group-hover:pr-4 group-hover:opacity-100 overflow-hidden whitespace-nowrap text-xs font-bold uppercase tracking-wide text-amber-400/70 group-hover:text-amber-300 transition-all duration-300 ease-out"
-                style={{
-                  textShadow: "0 0 10px hsl(35 60% 50% / 0.5)",
-                }}
-              >
-                Edge Resonance
-              </span>
-            </button>
+            isDefaultView ? null : (
+              <motion.div layoutId="hc-explore" layout="position" transition={{ type: "spring", stiffness: 260, damping: 30 }}>
+                {renderExploreButton(false)}
+              </motion.div>
+            )
           ) : (
             <div className="flex items-center gap-1.5">
               <button
@@ -3426,8 +3626,11 @@ export function Hypercube3D({
           })()}
 
         {/* CENTER PANEL - AI Chatbot + Tagged Elements (bottom-right dock) */}
-        {interactionMode === "default" && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
-          <div className="absolute inset-0 flex flex-col justify-center pt-[16px] pb-[16px] pointer-events-none z-20">
+        {interactionMode === "default" && selectionReady && (focusedFace || isGeneralChatActive || isCoreSelected) && currentChatKey && (
+          <div
+            className="absolute inset-0 flex flex-col justify-center pt-[16px] pb-[16px] pointer-events-none z-20 transition-[opacity,transform] duration-[800ms] ease-out"
+            style={{ opacity: chatFaded ? 1 : 0, transform: chatFaded ? "translateY(0)" : "translateY(14px)" }}
+          >
             {/* Main Chat Area. Left padding clears the compact icon rail (more
                 when the System Insights drawer is open). Right padding clears
                 the docked minimap cube + its directional arrows, which sit at

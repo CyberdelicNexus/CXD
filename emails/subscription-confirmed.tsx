@@ -20,7 +20,7 @@ const proFeatures = [
   '500 AI Credits/month',
   'Plan View with Kanban',
   'Smart Templates',
-  'Team collaboration (3)',
+  'Team collaboration (5)',
   'Priority support',
 ];
 

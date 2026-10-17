@@ -3,7 +3,8 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { CanvasElement, FreeformElement, Subtask } from "@/types/canvas-elements";
 import { cn, extractCenterColor, hexToRgba } from "@/lib/utils";
-import { Inbox, GripVertical, X, ArrowRight, CheckSquare, ChevronDown, Circle, CheckCircle2, Archive, Calendar, Tag, ListTodo, Clock, AlertCircle, FileText, Pencil } from "lucide-react";
+import { Inbox, GripVertical, X, ArrowRight, CheckSquare, ChevronDown, Circle, CheckCircle2, Archive, Calendar, Tag, ListTodo, Clock, AlertCircle, FileText, Pencil, PanelTopOpen, Plus } from "lucide-react";
+import { v4 as uuidv4 } from "uuid";
 import { useCXDStore } from "@/store/cxd-store";
 import { getFaceDisplayName } from "@/lib/display-utils";
 import { useSubscription } from "@/hooks/use-subscription";
@@ -285,6 +286,41 @@ export function TaskInbox({
             </button>
           </div>
 
+          {activeTab === 'notes' && (
+            <button
+              onClick={() => {
+                const { addCanvasElement, setPinnedInboxNoteId } = useCXDStore.getState();
+                const id = uuidv4();
+                addCanvasElement({
+                  id,
+                  type: 'freeform',
+                  cardType: 'note',
+                  noteTitle: '',
+                  noteBody: '',
+                  content: '',
+                  x: 0, // Position doesn't matter for inbox items
+                  y: 0,
+                  width: 300,
+                  height: 300,
+                  zIndex: 1,
+                  emoji: '📝',
+                  inInbox: true,
+                  style: {
+                    bgColor: "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)",
+                    textColor: "#ffffff",
+                  },
+                } as FreeformElement);
+                setPinnedInboxNoteId(id);
+                setIsOpen(false);
+              }}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20 transition-colors"
+              title="Start a note that stays open while you move around the canvas"
+            >
+              <Plus className="w-3 h-3" />
+              New note
+            </button>
+          )}
+
           {/* Status Filter Tags - Only for Tasks */}
           {activeTab === 'tasks' && (
             <div className="flex gap-1.5">
@@ -357,6 +393,10 @@ export function TaskInbox({
                     element={item}
                     onStartDrag={onStartDrag}
                     onRemove={() => onRemoveFromInbox(item.id)}
+                    onOpenPinned={() => {
+                      useCXDStore.getState().setPinnedInboxNoteId(item.id);
+                      setIsOpen(false);
+                    }}
                   />
                 );
               }
@@ -993,10 +1033,12 @@ function NoteInboxCard({
   element,
   onStartDrag,
   onRemove,
+  onOpenPinned,
 }: {
   element: CanvasElement;
   onStartDrag: (elementId: string, e: React.MouseEvent) => void;
   onRemove: () => void;
+  onOpenPinned: () => void;
 }) {
   const { updateCanvasElement } = useCXDStore();
   const freeformElement = element as FreeformElement;
@@ -1041,6 +1083,19 @@ function NoteInboxCard({
 
               {/* Action buttons */}
               <div className="flex items-start gap-1 flex-shrink-0" style={{ pointerEvents: 'auto' }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenPinned();
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-cyan-500/20 text-muted-foreground hover:text-cyan-300 transition-all min-h-[24px] min-w-[24px]"
+                  title="Keep open while you move around the canvas"
+                >
+                  <PanelTopOpen className="w-3 h-3" />
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

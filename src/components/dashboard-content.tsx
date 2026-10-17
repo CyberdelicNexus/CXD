@@ -15,16 +15,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Plus,
   Trash2,
   Clock,
   FolderOpen,
   User,
-  HelpCircle,
-  FileText,
-  PlayCircle,
   BarChart3,
   Layers,
   TrendingUp,
@@ -38,12 +34,9 @@ import {
   Crown,
   ImagePlus,
   Link2,
-  MessageCircle,
-  Send,
   Check,
   Loader2,
   LayoutTemplate,
-  Newspaper,
 } from "lucide-react";
 import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, type TemplateDefinition, type TemplateCategory } from "@/lib/templates";
 import { HypercubeLogo } from "@/components/icons/hypercube-logo";
@@ -79,11 +72,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [supportMessage, setSupportMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -132,50 +120,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
   // Check if user can create more canvases
   const canCreate = canCreateCanvas(projects.length);
-
-  // Support form submit handler
-  const handleSupportSubmit = async () => {
-    if (!supportMessage.trim()) return;
-    setIsSubmitting(true);
-    setFormError(null);
-
-    try {
-      // Get browser info
-      const browserInfo = `${navigator.userAgent} | Screen: ${window.screen.width}x${window.screen.height}`;
-
-      const response = await fetch('/api/support', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Support Request',
-          description: supportMessage,
-          browserInfo,
-        }),
-      });
-
-      if (!response.ok) {
-        setFormError('Failed to submit support request. Please try again or email contact@cyberdelic.design');
-        return;
-      }
-
-      const data = await response.json();
-
-      if (data.success) {
-        setSubmitSuccess(true);
-        // Close dialog after showing success - state reset handled by onOpenChange
-        setTimeout(() => {
-          setIsSupportOpen(false);
-        }, 1500);
-      } else {
-        throw new Error(data.error || 'Failed to submit support request');
-      }
-    } catch (error) {
-      console.error('Support submission error:', error);
-      setFormError('Failed to submit support request. Please try again or email contact@cyberdelic.design');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   // /dashboard?upgrade=canvas — sent here by the Nexus handoff when a new
   // canvas would go over the plan's limit (D182 §3). Open the upgrade modal
@@ -346,13 +290,12 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
   const totalProjects = projects.length;
 
-  // When a project is selected, pin it to the top-left of the grid — the
-  // rest keep their existing order.
-  const displayProjects = useMemo(() => {
-    if (!selectedProjectId) return projects;
-    const selected = projects.find((p) => p.id === selectedProjectId);
-    if (!selected) return projects;
-    return [selected, ...projects.filter((p) => p.id !== selectedProjectId)];
+  // The preview column always shows a project: the one the user picked, or
+  // else the most recently edited one.
+  const activeProjectId = useMemo(() => {
+    if (selectedProjectId && projects.some((p) => p.id === selectedProjectId)) return selectedProjectId;
+    if (projects.length === 0) return null;
+    return projects.reduce((a, b) => (new Date(b.updatedAt).getTime() > new Date(a.updatedAt).getTime() ? b : a)).id;
   }, [projects, selectedProjectId]);
 
   // Cover image handlers
@@ -467,11 +410,11 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       if (imageUrl) {
         const updatedProjects = projects.map(p =>
           p.id === projectId
-            ? { ...p, coverImage: imageUrl, updatedAt: new Date().toISOString() }
+            ? { ...p, coverImage: imageUrl, coverPosition: { x: 50, y: 50 }, updatedAt: new Date().toISOString() }
             : p
         );
         setProjects(updatedProjects);
-        await updateProjectMetadata(projectId, { coverImage: imageUrl });
+        await updateProjectMetadata(projectId, { coverImage: imageUrl, coverPosition: { x: 50, y: 50 } });
       }
     } catch (error) {
       console.error("Error uploading canvas cover:", error);
@@ -518,43 +461,43 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       <div className="glow-orb" style={{ top: '10%', right: '10%', opacity: 0.3 }} />
       <div className="glow-orb glow-orb-cyan" style={{ bottom: '20%', left: '5%', opacity: 0.2 }} />
 
-      <div className="relative z-10 container mx-auto px-4 py-6 max-w-7xl">
-        {/* Profile Header */}
-        <div
-          className="relative mb-8 rounded-2xl overflow-hidden glass-card-glow"
-        >
-          {/* Cover Image - Extends behind entire card */}
-          <div className="absolute inset-0 bg-gradient-to-br from-violet-900/30 via-purple-900/20 to-cyan-900/20">
-            {userProfile?.cover_image ? (
-              <div
-                className={`absolute inset-0 ${isRepositionMode ? (isDraggingCover ? "cursor-grabbing" : "cursor-grab") : ""}`}
-                onMouseDown={handleCoverMouseDown}
-              >
-                <Image
-                  src={userProfile.cover_image}
-                  alt="Cover"
-                  fill
-                  className={`object-cover select-none ${isRepositionMode ? "pointer-events-none" : ""}`}
-                  draggable={false}
-                  style={{ objectPosition: `50% ${50 + coverImagePosition.y / 4}%` }}
-                />
-                {isRepositionMode && (
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
-                    <p className="text-white font-medium">
-                      {isDraggingCover ? "Release to stop" : "Drag to reposition"}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center opacity-30">
-                <Camera className="w-10 h-10 text-white/20" />
+      {/* Cover: a full-bleed band pulled up under the sticky navbar (-mt-20 = the navbar's h-20). */}
+      <section className="relative z-10 -mt-20 w-full h-[clamp(220px,30vh,300px)] overflow-hidden bg-gradient-to-br from-violet-900/30 via-purple-900/20 to-cyan-900/20">
+        {userProfile?.cover_image ? (
+          <div
+            className={`absolute inset-0 ${isRepositionMode ? (isDraggingCover ? "cursor-grabbing" : "cursor-grab") : ""}`}
+            onMouseDown={handleCoverMouseDown}
+          >
+            <Image
+              src={userProfile.cover_image}
+              alt="Cover"
+              fill
+              priority
+              sizes="100vw"
+              className={`object-cover select-none ${isRepositionMode ? "pointer-events-none" : ""}`}
+              draggable={false}
+              style={{ objectPosition: `50% ${50 + coverImagePosition.y / 4}%` }}
+            />
+            {isRepositionMode && (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
+                <p className="text-white font-medium">
+                  {isDraggingCover ? "Release to stop" : "Drag to reposition"}
+                </p>
               </div>
             )}
           </div>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center opacity-30">
+            <Camera className="w-10 h-10 text-white/20" />
+          </div>
+        )}
 
-          {/* Cover section with actions */}
-          <div className={`relative h-48 ${isRepositionMode ? "pointer-events-none" : ""}`}>
+        {/* Fades the cover into the page so the profile row stays readable */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black pointer-events-none" />
+
+        {/* Everything clickable starts below the navbar (top-20), which would otherwise sit on top of it */}
+        <div className={`absolute inset-x-0 top-20 bottom-0 ${isRepositionMode ? "pointer-events-none" : ""}`}>
+          <div className="relative container mx-auto px-4 max-w-7xl h-full">
             {/* Cover Actions */}
             <div className="absolute top-4 right-4 flex gap-2 z-10 pointer-events-auto">
               <input type="file" id="cover-upload" accept="image/*" className="hidden" onChange={handleCoverImageUpload} disabled={isUploadingCover || isRepositionMode} />
@@ -578,27 +521,24 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                 </>
               )}
             </div>
-          </div>
 
-          {/* Profile Info - Semi-transparent to show cover behind */}
-          <div className="relative px-6 pb-6 bg-black/50 backdrop-blur-sm border-t border-white/10">
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-              {/* Profile Picture */}
-              <div className="relative -mt-14">
+            {/* Profile + Create, along the bottom edge of the cover */}
+            <div className={`absolute inset-x-4 bottom-5 flex items-end justify-between gap-4 transition-opacity ${isRepositionMode ? "opacity-0" : ""}`}>
+              <div className="flex items-center gap-4 min-w-0">
                 <input type="file" id="profile-upload" accept="image/*" className="hidden" onChange={handleProfilePictureUpload} disabled={isUploadingProfile} />
-                <label htmlFor="profile-upload" className="block cursor-pointer group">
+                <label htmlFor="profile-upload" className="block cursor-pointer group flex-shrink-0">
                   <div className="relative">
                     {userProfile?.profile_picture ? (
-                      <div className="relative w-28 h-28 rounded-full overflow-hidden border-4 border-black/80 shadow-2xl">
-                        <Image src={userProfile.profile_picture} alt="Profile" fill className="object-cover" />
+                      <div className="relative w-20 h-20 rounded-full overflow-hidden border-4 border-black/80 shadow-2xl">
+                        <Image src={userProfile.profile_picture} alt="Profile" fill sizes="80px" className="object-cover" />
                         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <Camera className="w-6 h-6 text-white" />
+                          <Camera className="w-5 h-5 text-white" />
                         </div>
                       </div>
                     ) : (
-                      <div className="w-28 h-28 rounded-full border-4 border-black/80 shadow-2xl bg-gradient-to-br from-violet-500/30 to-cyan-500/30 flex items-center justify-center group-hover:from-violet-500/50 group-hover:to-cyan-500/50 transition-all">
-                        <User className="w-12 h-12 text-white/40 group-hover:hidden" />
-                        <Camera className="w-8 h-8 text-white/70 hidden group-hover:block" />
+                      <div className="w-20 h-20 rounded-full border-4 border-black/80 shadow-2xl bg-gradient-to-br from-violet-500/30 to-cyan-500/30 flex items-center justify-center group-hover:from-violet-500/50 group-hover:to-cyan-500/50 transition-all">
+                        <User className="w-9 h-9 text-white/40 group-hover:hidden" />
+                        <Camera className="w-6 h-6 text-white/70 hidden group-hover:block" />
                       </div>
                     )}
                     {isUploadingProfile && (
@@ -608,76 +548,19 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                     )}
                   </div>
                 </label>
-                <div className="mt-3">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-white truncate max-w-[200px]">{userProfile?.full_name || userProfile?.name || userName}</h2>
-                    <Badge className={`text-xs ${planBadge.color}`}>
+                    <h2 className="text-xl font-bold text-white truncate max-w-[260px] drop-shadow-md">{userProfile?.full_name || userProfile?.name || userName}</h2>
+                    <Badge className={`text-xs backdrop-blur-sm ${planBadge.color}`}>
                       {planBadge.label}
                     </Badge>
                   </div>
-                  <p className="text-sm text-white/50">{userEmail}</p>
+                  <p className="text-sm text-white/60 truncate drop-shadow-md">{userEmail}</p>
                 </div>
-              </div>
-
-              {/* Stats & Quick Actions — small equal-size squares, inline in
-                  this same row (statistics are useful but not essential, so
-                  they stay compact rather than taking their own row/column) */}
-              <div className="hidden lg:flex items-center gap-2">
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Total Maps">
-                  <Layers className="w-3.5 h-3.5 text-violet-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">{totalProjects}</span>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-cyan-500/10 hover:border-cyan-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Active this week">
-                  <TrendingUp className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">
-                    {projects.filter((p) => new Date(p.updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
-                  </span>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Created this month">
-                  <Calendar className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">
-                    {projects.filter((p) => new Date(p.createdAt).getMonth() === new Date().getMonth()).length}
-                  </span>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 flex flex-col items-center justify-center gap-0.5 transition-all group" title="Analytics">
-                  <BarChart3 className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-bold text-white leading-none">—</span>
-                </div>
-
-                <div className="w-px h-8 bg-white/10 mx-1" />
-
-                <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-violet-500/10 hover:border-violet-500/30 hover:from-violet-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
-                  onClick={() => setIsSupportOpen(true)}
-                  title="Support"
-                >
-                  <HelpCircle className="w-3.5 h-3.5 text-violet-400 group-hover:scale-110 transition-transform" />
-                </button>
-                <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-purple-500/10 hover:border-purple-500/30 hover:from-purple-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
-                  onClick={() => router.push("/dashboard/docs")}
-                  title="Docs"
-                >
-                  <FileText className="w-3.5 h-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
-                </button>
-                <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-emerald-500/10 hover:border-emerald-500/30 hover:from-emerald-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
-                  onClick={() => router.push("/dashboard/tutorials")}
-                  title="Tutorials"
-                >
-                  <PlayCircle className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
-                </button>
-                <button
-                  className="w-12 h-12 rounded-lg bg-gradient-to-br from-black to-violet-950/50 border border-pink-500/10 hover:border-pink-500/30 hover:from-pink-950/20 flex flex-col items-center justify-center gap-0.5 transition-all group"
-                  onClick={() => router.push("/changelog")}
-                  title="Changelog"
-                >
-                  <Newspaper className="w-3.5 h-3.5 text-pink-400 group-hover:scale-110 transition-transform" />
-                </button>
               </div>
 
               {/* Create Button */}
-              <div className="flex items-center gap-2 mt-4 md:mt-0">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <Dialog open={isDialogOpen} onOpenChange={(open) => {
                   if (open && !canCreate) {
                     setShowUpgradeModal(true);
@@ -686,7 +569,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                   setIsDialogOpen(open);
                 }}>
                   <DialogTrigger asChild>
-                    <Button className="btn-primary-glow">
+                    <Button className="btn-primary-glow flex-shrink-0 whitespace-nowrap">
                       {canCreate ? (
                         <>
                           <Plus className="w-4 h-4 mr-2" />
@@ -738,12 +621,14 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             </div>
           </div>
         </div>
+      </section>
 
-        {/* Main Content — Experience Maps */}
-        <div>
+      <div className="relative z-10 container mx-auto px-4 pt-5 pb-6 max-w-7xl">
+        {/* Main Content: project tiles take 40% (two columns), the preview 60% */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
           {/* Experience Maps */}
-          <div className="rounded-xl overflow-hidden bg-black/20 border border-white/10 h-fit">
-            <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <div className="lg:col-span-2 rounded-xl overflow-hidden bg-black/20 border border-white/10 h-fit">
+            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
               <h3 className="font-semibold text-white">Your Experience Maps</h3>
               <Badge variant="outline" className="text-white/50 border-white/20">
                 {totalProjects} {isFree ? '/ 1' : ''} total
@@ -774,14 +659,14 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
               )}
 
               {!isLoading && projects.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {displayProjects.map((project, projectIndex) => {
+                <div className="grid grid-cols-2 gap-4">
+                  {projects.map((project) => {
                     const isOwner = project.ownerId === userId;
                     const tileIsFreePrimary = isFree && freePrimaryCanvasId === project.id;
                     const tileIsLocked = isFree && !tileIsFreePrimary;
                     const coverImage = (project as any).coverImage;
                     const isUploading = uploadingCoverFor === project.id;
-                    const isSelected = selectedProjectId === project.id;
+                    const isSelected = activeProjectId === project.id;
 
                     return (
                     <React.Fragment key={project.id}>
@@ -790,9 +675,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                           "relative aspect-square rounded-xl bg-gradient-to-br from-violet-900/60 via-purple-800/50 to-indigo-900/60 hover:from-violet-800/70 hover:via-purple-700/60 hover:to-indigo-800/70 transition-all cursor-pointer group border overflow-hidden shadow-lg hover:shadow-violet-500/20",
                           isSelected ? "border-violet-400 ring-2 ring-violet-400/50" : "border-violet-500/20 hover:border-violet-400/40"
                         )}
-                        onClick={() => {
-                          setSelectedProjectId((prev) => (prev === project.id ? null : project.id));
-                        }}
+                        onClick={() => setSelectedProjectId(project.id)}
                       >
                         {/* Cover Image */}
                         {coverImage && coverImage.startsWith('http') && (
@@ -802,6 +685,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                               alt={project.name}
                               fill
                               className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity"
+                              style={{ objectPosition: `${(project as any).coverPosition?.x ?? 50}% ${(project as any).coverPosition?.y ?? 50}%` }}
                               unoptimized
                               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
@@ -953,49 +837,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                           </div>
                         </div>
                       </div>
-
-                      {/* Detail panel — lives inside the same grid, right after
-                          the selected tile (pinned to index 0), spanning the
-                          area of a 2x2 block of tiles for real room to show
-                          stats/graphs rather than a cramped external sidebar. */}
-                      {projectIndex === 0 && selectedProjectId && (() => {
-                        const selProj = projects.find((p) => p.id === selectedProjectId);
-                        const selIsOwner = !!selProj && selProj.ownerId === userId;
-                        const selIsFreePrimary = isFree && freePrimaryCanvasId === selectedProjectId;
-                        return (
-                          <ProjectDetailPanel
-                            projectId={selectedProjectId}
-                            onClose={() => setSelectedProjectId(null)}
-                            onEnterProject={(projectId) => {
-                              const isProjectFreePrimary = isFree && freePrimaryCanvasId === projectId;
-                              const isProjectLocked = isFree && !isProjectFreePrimary;
-                              if (isProjectLocked) {
-                                router.push(`/cxd/overview/${projectId}`);
-                              } else {
-                                handleOpenProject(projectId);
-                              }
-                            }}
-                            isOwner={selIsOwner}
-                            canDelete={!selIsFreePrimary}
-                            onAddCover={selProj ? () => {
-                              setCoverImageProject({ id: selProj.id, name: selProj.name });
-                              setCoverImageUrl("");
-                            } : undefined}
-                            onInvite={selProj ? async () => {
-                              await saveProject(selProj);
-                              setInviteProject({ id: selProj.id, name: selProj.name });
-                            } : undefined}
-                            onRename={selProj ? () => {
-                              setRenameProject({ id: selProj.id, name: selProj.name });
-                              setNewRenameValue(selProj.name);
-                            } : undefined}
-                            onDelete={selProj ? () => {
-                              setProjectToDelete(selProj.id);
-                              setDeleteConfirmOpen(true);
-                            } : undefined}
-                          />
-                        );
-                      })()}
                     </React.Fragment>
                     );
                   })}
@@ -1003,6 +844,54 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
               )}
             </div>
           </div>
+
+          {/* Preview column. Sticks below the navbar while the tiles scroll with the page. */}
+          {!isLoading && activeProjectId && (() => {
+            const selProj = projects.find((p) => p.id === activeProjectId);
+            const selIsOwner = !!selProj && selProj.ownerId === userId;
+            const selIsFreePrimary = isFree && freePrimaryCanvasId === activeProjectId;
+            return (
+              <aside className="order-first lg:order-none lg:col-span-3 h-[560px] lg:h-[calc(100vh-7rem)] lg:sticky lg:top-24">
+                <ProjectDetailPanel
+                  projectId={activeProjectId}
+                  onEnterProject={(projectId) => {
+                    const isProjectFreePrimary = isFree && freePrimaryCanvasId === projectId;
+                    const isProjectLocked = isFree && !isProjectFreePrimary;
+                    if (isProjectLocked) {
+                      router.push(`/cxd/overview/${projectId}`);
+                    } else {
+                      handleOpenProject(projectId);
+                    }
+                  }}
+                  isOwner={selIsOwner}
+                  canDelete={!selIsFreePrimary}
+                  onAddCover={selProj ? () => {
+                    setCoverImageProject({ id: selProj.id, name: selProj.name });
+                    setCoverImageUrl("");
+                  } : undefined}
+                  onInvite={selProj ? async () => {
+                    await saveProject(selProj);
+                    setInviteProject({ id: selProj.id, name: selProj.name });
+                  } : undefined}
+                  onRename={selProj ? () => {
+                    setRenameProject({ id: selProj.id, name: selProj.name });
+                    setNewRenameValue(selProj.name);
+                  } : undefined}
+                  onDelete={selProj ? () => {
+                    setProjectToDelete(selProj.id);
+                    setDeleteConfirmOpen(true);
+                  } : undefined}
+                  onSaveCoverPosition={selProj && selIsOwner ? async (coverPosition) => {
+                    const ok = await updateProjectMetadata(selProj.id, { coverPosition });
+                    if (ok) {
+                      setProjects(projects.map((p) => (p.id === selProj.id ? ({ ...p, coverPosition } as typeof p) : p)));
+                    }
+                    return ok;
+                  } : undefined}
+                />
+              </aside>
+            );
+          })()}
         </div>
 
         {/* Template Gallery — hidden until templates are production-ready */}
@@ -1014,80 +903,6 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
         onClose={() => setShowUpgradeModal(false)}
         feature="unlimitedCanvases"
       />
-
-      {/* Support Dialog */}
-      <Dialog open={isSupportOpen} onOpenChange={(open) => {
-        setIsSupportOpen(open);
-        if (open) {
-          setFormError(null);
-        }
-        if (!open) {
-          // Reset form state when dialog closes
-          setTimeout(() => {
-            setSupportMessage('');
-            setSubmitSuccess(false);
-            setIsSubmitting(false);
-            setFormError(null);
-          }, 150);
-        }
-      }}>
-        <DialogContent className="bg-zinc-900/95 backdrop-blur-xl border-white/10 text-white max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-xl">
-              <MessageCircle className="w-5 h-5 text-violet-400" />
-              Contact Support
-            </DialogTitle>
-            <DialogDescription className="text-white/50">
-              Have a question or need help? We're here to assist you.
-            </DialogDescription>
-          </DialogHeader>
-
-          {submitSuccess ? (
-            <div className="py-8 text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                <Check className="w-8 h-8 text-emerald-400" />
-              </div>
-              <h3 className="text-lg font-semibold text-white mb-2">Message Sent!</h3>
-              <p className="text-white/50 text-sm">We'll get back to you as soon as possible.</p>
-            </div>
-          ) : (
-            <div className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="support-message" className="text-white/70">Your Message</Label>
-                <Textarea
-                  id="support-message"
-                  placeholder="Describe your question or issue..."
-                  value={supportMessage}
-                  onChange={(e) => setSupportMessage(e.target.value)}
-                  className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[120px] focus:border-violet-500/50"
-                  maxLength={10000}
-                />
-              </div>
-
-              <Button
-                onClick={handleSupportSubmit}
-                disabled={!supportMessage.trim() || isSubmitting}
-                className="w-full bg-violet-600 hover:bg-violet-500 text-white"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4 mr-2" />
-                    Send Message
-                  </>
-                )}
-              </Button>
-              {formError && (
-                <p className="text-sm text-red-400 mt-2">{formError}</p>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

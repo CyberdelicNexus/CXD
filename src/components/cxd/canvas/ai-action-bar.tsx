@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { CheckSquare, FileText, LayoutGrid, Loader2 } from "lucide-react";
+import { AlertCircle, Check, ListChecks, Loader2, StickyNote, Wand2, Workflow, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExtractedTask } from "@/lib/ai/ai-response-classifier";
 import { TaskPreviewPanel } from "./task-preview-panel";
@@ -16,13 +16,17 @@ export interface AIActionBarProps {
   sourceFaces: string[];
   chatMessageId: string;
   sourceInsightId?: string;
-  /** Full assistant message text — enables the "Draft on Canvas" action */
+  /** Full assistant message text — enables the "Draft diagram" action */
   messageContent?: string;
   /** AI provider/model key forwarded to element generation */
   provider?: string;
   onTasksAdded?: () => void;
   onNoteCreated?: () => void;
   onElementsPlaced?: (count: number) => void;
+  /** Canvas assistant: propose concrete canvas changes grounded on this reply */
+  onProposeChanges?: (content: string) => void;
+  /** Credits "Apply to canvas" will use, shown before the click. */
+  proposeCost?: number;
 }
 
 type ButtonState = 'idle' | 'loading' | 'success' | 'error';
@@ -37,7 +41,9 @@ export function AIActionBar({
   provider,
   onTasksAdded,
   onNoteCreated,
-  onElementsPlaced
+  onElementsPlaced,
+  onProposeChanges,
+  proposeCost,
 }: AIActionBarProps) {
   const { syncAddElement } = useCollaborationContext();
   const [taskButtonState, setTaskButtonState] = useState<ButtonState>('idle');
@@ -98,7 +104,7 @@ export function AIActionBar({
 
     try {
       const result = await generateElementsFromPrompt(
-        `Turn the following AI chat answer into a structured canvas layout the designer can work with:\n\n${messageContent}`,
+        `Turn the following AI chat answer into a diagram on the canvas. Pick the form its content calls for (flow, loop, spine, mind map, table, quadrants or frames) and keep its specifics:\n\n${messageContent}`,
         { provider, sourceFaces }
       );
 
@@ -119,118 +125,65 @@ export function AIActionBar({
     }
   };
 
-  const taskLabel = tasks.length === 1 ? 'Add 1 task to Plan' : `Add ${tasks.length} tasks to Plan`;
+  const taskLabel = tasks.length === 1 ? 'Add 1 task' : `Add ${tasks.length} tasks`;
 
   return (
     <>
+      {/* Chips wrap onto further rows instead of shrinking: the bar lives in a
+          narrow chat column, and four fixed-height buttons on one line is what
+          squeezed every label into a single-word stack. */}
       <div
-        className="mt-3 pt-3 border-t border-white/8 flex items-center gap-2 animate-in slide-in-from-bottom-2 duration-200"
+        className="mt-2.5 flex flex-wrap items-center gap-1.5 animate-in slide-in-from-bottom-2 duration-200"
         style={{ animationDelay: '100ms', animationFillMode: 'backwards' }}
       >
-        {/* Add Tasks Button */}
-        {hasTasks && (
-          <button
-            onClick={handleAddTasks}
-            disabled={taskButtonState === 'success'}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-              "min-h-[44px] min-w-[44px]",
-              taskButtonState === 'idle' && [
-                "bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30",
-                "text-violet-400 hover:text-violet-300 hover:scale-[1.02]",
-                "active:scale-95"
-              ],
-              taskButtonState === 'success' && [
-                "bg-emerald-500/10 border border-emerald-500/30",
-                "text-emerald-400"
-              ],
-              taskButtonState === 'error' && [
-                "bg-red-500/10 border border-red-500/30",
-                "text-red-400 hover:bg-red-500/20"
-              ]
-            )}
-          >
-            <CheckSquare className="w-4 h-4" />
-            <span>
-              {taskButtonState === 'idle' && taskLabel}
-              {taskButtonState === 'success' && '✓ Added to Plan'}
-              {taskButtonState === 'error' && '✗ Failed, try again'}
-            </span>
-          </button>
+        {onProposeChanges && messageContent && (
+          <ActionChip
+            primary
+            icon={Wand2}
+            label="Apply to canvas"
+            title={`Draw this answer on the canvas. You see a preview before anything is applied.${proposeCost ? ` Uses ${proposeCost} credits.` : ""}`}
+            suffix={proposeCost ? `${proposeCost} cr` : undefined}
+            onClick={() => onProposeChanges(messageContent)}
+          />
         )}
 
-        {/* Place Note Button */}
-        {hasNote && (
-          <button
-            onClick={handlePlaceNote}
-            disabled={noteButtonState === 'success'}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-              "min-h-[44px] min-w-[44px]",
-              noteButtonState === 'idle' && [
-                "bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30",
-                "text-cyan-400 hover:text-cyan-300 hover:scale-[1.02]",
-                "active:scale-95"
-              ],
-              noteButtonState === 'success' && [
-                "bg-emerald-500/10 border border-emerald-500/30",
-                "text-emerald-400"
-              ],
-              noteButtonState === 'error' && [
-                "bg-red-500/10 border border-red-500/30",
-                "text-red-400 hover:bg-red-500/20"
-              ]
-            )}
-          >
-            <FileText className="w-4 h-4" />
-            <span>
-              {noteButtonState === 'idle' && 'Place note on Canvas'}
-              {noteButtonState === 'success' && '✓ Saved to Inbox'}
-              {noteButtonState === 'error' && '✗ Failed, try again'}
-            </span>
-          </button>
-        )}
-
-        {/* Draft on Canvas Button (AI element generation) */}
-        {hasDraftable && (
-          <button
+        {/* One way to draw per surface. Where the review pipeline exists
+            ("Apply to canvas") it also draws diagrams, so offering the direct
+            draft beside it gave two buttons that produced different layouts
+            of the same answer. The direct draft remains for chats without it. */}
+        {hasDraftable && !onProposeChanges && (
+          <ActionChip
+            icon={Workflow}
+            state={draftButtonState}
+            label="Draft diagram"
+            labels={{ loading: 'Drafting…', success: 'On canvas', error: 'Failed, retry' }}
+            title="Lay this answer out as a diagram on the canvas"
             onClick={handleDraftOnCanvas}
-            disabled={draftButtonState === 'loading' || draftButtonState === 'success'}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-              "min-h-[44px] min-w-[44px]",
-              draftButtonState === 'idle' && [
-                "bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border border-fuchsia-500/30",
-                "text-fuchsia-400 hover:text-fuchsia-300 hover:scale-[1.02]",
-                "active:scale-95"
-              ],
-              draftButtonState === 'loading' && [
-                "bg-fuchsia-500/10 border border-fuchsia-500/30",
-                "text-fuchsia-400/70 cursor-wait"
-              ],
-              draftButtonState === 'success' && [
-                "bg-emerald-500/10 border border-emerald-500/30",
-                "text-emerald-400"
-              ],
-              draftButtonState === 'error' && [
-                "bg-red-500/10 border border-red-500/30",
-                "text-red-400 hover:bg-red-500/20"
-              ]
-            )}
-          >
-            {draftButtonState === 'loading'
-              ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <LayoutGrid className="w-4 h-4" />}
-            <span>
-              {draftButtonState === 'idle' && 'Draft on Canvas'}
-              {draftButtonState === 'loading' && 'Generating layout…'}
-              {draftButtonState === 'success' && '✓ Placed on Canvas'}
-              {draftButtonState === 'error' && '✗ Failed, try again'}
-            </span>
-          </button>
+          />
+        )}
+
+        {hasTasks && (
+          <ActionChip
+            icon={ListChecks}
+            state={taskButtonState}
+            label={taskLabel}
+            labels={{ success: 'Added to Plan', error: 'Failed, retry' }}
+            title="Review these tasks and add them to the Plan tab"
+            onClick={handleAddTasks}
+          />
+        )}
+
+        {hasNote && (
+          <ActionChip
+            icon={StickyNote}
+            state={noteButtonState}
+            label="Save as note"
+            labels={{ success: 'In Inbox', error: 'Failed, retry' }}
+            title="Save this answer as a note in your canvas Inbox"
+            onClick={handlePlaceNote}
+          />
         )}
       </div>
-
       {/* Task Preview Panel */}
       {showTaskPreview && (
         <TaskPreviewPanel
@@ -272,5 +225,53 @@ export function AIActionBar({
         />
       )}
     </>
+  );
+}
+
+interface ActionChipProps {
+  icon: LucideIcon;
+  label: string;
+  title: string;
+  onClick: () => void;
+  state?: ButtonState;
+  /** Label overrides per non-idle state. */
+  labels?: Partial<Record<Exclude<ButtonState, 'idle'>, string>>;
+  /** The one action that changes the canvas through review; visually leads. */
+  primary?: boolean;
+  /** Quiet trailing detail, e.g. what the action costs. */
+  suffix?: string;
+}
+
+function ActionChip({ icon: Icon, label, title, onClick, state = 'idle', labels, primary, suffix }: ActionChipProps) {
+  const StateIcon = state === 'loading' ? Loader2 : state === 'success' ? Check : state === 'error' ? AlertCircle : Icon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      disabled={state === 'loading' || state === 'success'}
+      className={cn(
+        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3",
+        "text-xs font-medium leading-none transition-colors duration-150",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50",
+        state === 'idle' && !primary &&
+          "border-white/10 bg-white/[0.04] text-foreground/75 hover:border-white/20 hover:bg-white/[0.08] hover:text-foreground",
+        state === 'idle' && primary &&
+          "border-violet-400/40 bg-violet-500/15 text-violet-100 hover:border-violet-300/60 hover:bg-violet-500/25",
+        state === 'loading' && "cursor-wait border-white/10 bg-white/[0.04] text-foreground/60",
+        state === 'success' && "border-emerald-400/30 bg-emerald-500/10 text-emerald-300",
+        state === 'error' && "border-red-400/30 bg-red-500/10 text-red-300 hover:bg-red-500/15",
+      )}
+    >
+      <StateIcon
+        className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          state === 'loading' && "animate-spin",
+          state === 'idle' && !primary && "text-violet-300/80",
+        )}
+      />
+      <span>{state === 'idle' ? label : labels?.[state] ?? label}</span>
+      {suffix && state === 'idle' && <span className="opacity-55">· {suffix}</span>}
+    </button>
   );
 }
