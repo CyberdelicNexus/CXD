@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
+import { getSupabaseAdmin } from '@/supabase/admin';
 
 export interface CreditTransaction {
   id: string;
@@ -128,12 +129,12 @@ export async function POST(request: Request) {
       );
     }
 
-    if (credits <= 0) {
-      return NextResponse.json({ error: 'Credits must be positive' }, { status: 400 });
+    if (!Number.isInteger(credits) || credits <= 0) {
+      return NextResponse.json({ error: 'Credits must be a positive integer' }, { status: 400 });
     }
 
     // Call the consume_credits database function
-    const { data: result, error } = await supabase.rpc('consume_credits', {
+    const { data: result, error } = await getSupabaseAdmin().rpc('consume_credits', {
       p_user_id: user.id,
       p_credits: credits,
       p_model: model,

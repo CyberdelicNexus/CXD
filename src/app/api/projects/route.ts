@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
+import { refreshNexusTierIfDue } from '@/lib/nexus/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +47,11 @@ export async function GET(request: Request) {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
+
+    // Nexus-linked users: refresh the tier when the last check is over an
+    // hour old (D182 §5). Runs alongside the reads below, bounded at 2 s,
+    // never fails the listing; skipped while the tier read is unconfigured.
+    const nexusTierRefresh = refreshNexusTierIfDue(supabaseAdmin, user.id);
 
     // Fetch owned projects and collaborator IDs in parallel
     const [
@@ -117,6 +123,8 @@ export async function GET(request: Request) {
         updatedAt: row.updated_at,
       };
     });
+
+    await nexusTierRefresh;
 
     return NextResponse.json({ projects });
   } catch (error) {

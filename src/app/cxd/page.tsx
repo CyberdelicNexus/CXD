@@ -6,7 +6,8 @@ import { useCXDStore, type ViewMode } from "@/store/cxd-store";
 import { CXDNavbar } from "@/components/cxd/cxd-navbar";
 import { useProjectSync, getLocalBackup, clearLocalBackup } from "@/hooks/use-project-sync";
 import { useCanvasPermissions } from "@/hooks/use-canvas-permissions";
-import { fetchUserProjects, fetchProjectById, saveProject } from "@/lib/supabase-projects";
+import { fetchProjectById, fetchUserProjects, saveProject } from "@/lib/supabase-projects";
+import { readProjectDeepLink } from "@/lib/project-deep-link";
 import { createClient } from "../../../supabase/client";
 import { useRouter } from "next/navigation";
 import { CollaborationProvider } from "@/contexts/collaboration-context";
@@ -56,7 +57,83 @@ const PlanView = dynamic(() => import("@/components/cxd/plan/plan-view").then(mo
   loading: () => <ViewSkeleton />,
 });
 
+function waitForStoreHydration(): Promise<void> {
+  if (useCXDStore.persist.hasHydrated()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsubscribe = useCXDStore.persist.onFinishHydration(() => {
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
+/**
+ * Deep link: /cxd?project=<id>[&view=wizard|canvas|focus] (alias ?id=).
+ *
+ * Resolved BEFORE the editor (and its Yjs/collaboration providers) mounts, so
+ * the previously open project is never loaded on the way: fetch the full
+ * project, put it in the store the way the dashboard does (setProjects +
+ * loadProject), set the view (loadProject forces canvas), strip the
+ * parameter from the URL, then mount the editor. Without the parameter the
+ * editor mounts on the next tick exactly as before.
+ */
 export default function CXDPage() {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const link = readProjectDeepLink(window.location.search);
+    if (!link) {
+      setReady(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      await waitForStoreHydration();
+      let fullProject = await fetchProjectById(link.projectId);
+      if (!fullProject) {
+        // Fallback via the API route (admin client, covers collaborators).
+        try {
+          const res = await fetch('/api/projects');
+          if (res.ok) {
+            const data = await res.json();
+            fullProject = data.projects?.find((p: any) => p.id === link.projectId) || null;
+          }
+        } catch {}
+      }
+      if (cancelled) return;
+      if (!fullProject) {
+        router.replace('/dashboard');
+        return;
+      }
+      const { projects, setProjects, loadProject, setViewMode } = useCXDStore.getState();
+      const known = projects.some((p) => p.id === link.projectId);
+      setProjects(
+        known
+          ? projects.map((p) => (p.id === link.projectId ? fullProject! : p))
+          : [...projects, fullProject],
+      );
+      loadProject(link.projectId);
+      if (link.view && link.view !== 'canvas') setViewMode(link.view);
+      window.history.replaceState({}, '', `${window.location.pathname}${link.remainingSearch}`);
+      setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  if (!ready) {
+    return (
+      <div className="min-h-screen bg-gradient-radial">
+        <ViewSkeleton />
+      </div>
+    );
+  }
+  return <CXDEditorPage />;
+}
+
+function CXDEditorPage() {
   const router = useRouter();
   const [showTopUpSuccess, setShowTopUpSuccess] = useState(false);
   const [topupPack, setTopupPack] = useState<string | null>(null);

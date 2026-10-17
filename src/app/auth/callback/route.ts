@@ -2,15 +2,23 @@ import { createClient } from "../../../../supabase/server";
 import { NextResponse } from "next/server";
 import { enqueueEmail } from "@/lib/email-queue";
 import WelcomeEmail from "../../../../emails/welcome";
+import { completePendingNexusLink } from "@/lib/nexus/pending-link";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
   const redirect_to = requestUrl.searchParams.get("redirect_to");
 
+  let nexusDestination: string | null = null;
+
   if (code) {
     const supabase = await createClient();
     const { data } = await supabase.auth.exchangeCodeForSession(code);
+
+    // A pending Nexus link completes only for the same Canvas user (D182 §3).
+    if (data?.session?.user) {
+      nexusDestination = await completePendingNexusLink(data.session.user.id);
+    }
 
     // Send welcome email for new users (created within last 5 minutes)
     if (data?.session?.user) {
@@ -45,7 +53,10 @@ export async function GET(request: Request) {
 
   // URL to redirect to after sign in process completes
   // Security: Only allow relative paths to prevent open redirect attacks
-  let redirectTo = redirect_to || "/dashboard";
+  // An explicit destination (e.g. the password-reset page) wins over a
+  // completed Nexus link's intent.
+  const explicit = redirect_to && redirect_to !== "/dashboard" ? redirect_to : null;
+  let redirectTo = explicit || nexusDestination || redirect_to || "/dashboard";
   if (redirectTo.startsWith("//") || redirectTo.startsWith("http:") || redirectTo.startsWith("https:") || !redirectTo.startsWith("/")) {
     redirectTo = "/dashboard";
   }

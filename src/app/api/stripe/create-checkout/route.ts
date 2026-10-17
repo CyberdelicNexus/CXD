@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { stripe, PLANS } from '@/lib/stripe';
 import { createClient } from '@/supabase/server';
+import { getSupabaseAdmin } from '@/supabase/admin';
 
 export async function POST(request: Request) {
   try {
@@ -46,8 +47,8 @@ export async function POST(request: Request) {
       );
       customerId = customer.id;
 
-      // Update subscription record with customer ID
-      await supabase
+      // Save customer ID to subscriptions table — requires service_role to bypass RLS.
+      await getSupabaseAdmin()
         .from('subscriptions')
         .update({ stripe_customer_id: customerId })
         .eq('user_id', user.id);

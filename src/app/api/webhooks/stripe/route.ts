@@ -1,7 +1,6 @@
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { createClient } from '@/supabase/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { enqueueEmail } from '@/lib/email-queue';
 import { getCreditPack } from '@/lib/credit-packs';
@@ -30,6 +29,55 @@ async function getUserInfo(userId: string): Promise<{ email: string; name: strin
   };
 }
 
+// subscriptions.plan_source arrives with migration 20261016000001_nexus_bridge.
+// Until it is applied, writes and reads retry without it so checkout and
+// cancellation keep working exactly as before.
+function isMissingPlanSourceColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === '42703' ||
+    error.code === 'PGRST204' ||
+    String(error.message ?? '').includes('plan_source')
+  );
+}
+
+async function updateSubscriptionWithPlanSource(
+  supabase: any,
+  userId: string,
+  fields: Record<string, unknown>,
+): Promise<{ error: any }> {
+  const first = await supabase
+    .from('subscriptions')
+    .update({ ...fields, plan_source: 'stripe' })
+    .eq('user_id', userId);
+  if (!isMissingPlanSourceColumn(first.error)) return first;
+  return await supabase.from('subscriptions').update(fields).eq('user_id', userId);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The checkout routes disagree on the key: /api/stripe/create-checkout and
+// /api/stripe/create-credit-checkout set `user_id`,
+// /api/stripe/create-checkout-session sets `supabase_user_id`, and older code
+// read `userId`. Accept any of them, but only as a uuid.
+function metadataUserId(metadata: Stripe.Metadata | null | undefined): string | null {
+  const raw = metadata?.user_id ?? metadata?.userId ?? metadata?.supabase_user_id;
+  return typeof raw === 'string' && UUID_RE.test(raw) ? raw : null;
+}
+
+function isLifetimeCheckout(metadata: Stripe.Metadata | null | undefined): boolean {
+  return metadata?.plan_type === 'lifetime' || metadata?.plan_id === 'lifetime';
+}
+
+// Thrown when a handler cannot finish. The outer catch removes this event's
+// stripe_events_processed marker and answers 500, so Stripe retries it.
+class WebhookHandlingError extends Error {}
+
+function fail(message: string, cause?: unknown): never {
+  console.error(`[Stripe Webhook] ${message}`, cause ?? '');
+  throw new WebhookHandlingError(message);
+}
+
 export async function POST(req: Request) {
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -52,13 +100,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
+  // A webhook has no user session: every read and write here runs as service
+  // role (members cannot write subscriptions / ai_credits, see migration
+  // 20261017000001_subscriptions_lock_writes).
+  const supabase = getSupabaseAdmin();
+
   // Event-level idempotency. Stripe retries on any 5xx (up to 72h, exponential
   // backoff). Without this, retries cause duplicate subscription updates and
   // double credit grants. We insert event.id; if the unique constraint fires,
-  // we've already processed this event — return 200 and bail.
+  // the event is done or in flight — return 200 and bail. If handling then
+  // fails, the marker is deleted again (below) so Stripe's retry is processed.
+  let claimedEvent = false;
   {
-    const admin = getSupabaseAdmin();
-    const { error: dedupeError } = await admin
+    const { error: dedupeError } = await supabase
       .from('stripe_events_processed')
       .insert({ event_id: event.id, event_type: event.type });
 
@@ -80,23 +134,122 @@ export async function POST(req: Request) {
         console.error('[Stripe Webhook] Idempotency insert failed:', dedupeError);
         // Don't block — better to risk a duplicate than to drop a real event.
       }
+    } else {
+      claimedEvent = true;
     }
   }
 
-  const supabase = await createClient();
   const eventId = event.id;
 
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        const userId = session.metadata?.userId;
-        if (!userId) break;
+        const userId = metadataUserId(session.metadata);
+        if (!userId) {
+          console.warn(`[Stripe Webhook] checkout.session.completed ${session.id}: no valid user id in metadata — skipping.`);
+          break;
+        }
 
         const customerId = session.customer as string;
         const subscriptionId = session.subscription as string;
 
+        if (session.mode === 'payment' && session.payment_status !== 'paid') {
+          console.warn(`[Stripe Webhook] checkout.session.completed ${session.id}: payment_status ${session.payment_status} — skipping.`);
+          break;
+        }
+
+        if (session.mode === 'payment' && session.metadata?.purchase_type === 'credit_topup') {
+          // AI credit top-up from /api/stripe/create-credit-checkout. Its
+          // metadata lives on the session (not the PaymentIntent), so this is
+          // where the credits are granted.
+          const packId = session.metadata?.pack_id;
+          const pack = packId ? getCreditPack(packId) : undefined;
+          const creditAmount = pack?.credits ?? parseInt(session.metadata?.credits_amount ?? '', 10);
+          if (!Number.isInteger(creditAmount) || creditAmount <= 0) {
+            fail(`credit top-up ${session.id}: unknown pack / credit amount`);
+          }
+
+          const { data: existingTx, error: existingTxError } = await supabase
+            .from('ai_credit_transactions')
+            .select('id')
+            .eq('stripe_event_id', eventId)
+            .maybeSingle();
+          if (existingTxError) fail('Failed to check credit transaction:', existingTxError);
+          if (existingTx) {
+            console.log('Credit event already processed:', eventId);
+            break;
+          }
+
+          const { data: credits, error: creditsSelectError } = await supabase
+            .from('ai_credits')
+            .select('addon_credits')
+            .eq('user_id', userId)
+            .single();
+          if (creditsSelectError || !credits) fail('Failed to fetch ai_credits for top-up:', creditsSelectError);
+
+          const newBalance = (credits.addon_credits || 0) + creditAmount;
+
+          // Ledger row first: it is the retry guard above. If the balance
+          // update then fails, the row is removed so the retry grants once.
+          const { data: tx, error: transactionError } = await supabase
+            .from('ai_credit_transactions')
+            .insert({
+              user_id: userId,
+              amount: creditAmount,
+              balance_after: newBalance,
+              reason: 'addon_purchase',
+              stripe_event_id: eventId,
+            })
+            .select('id')
+            .single();
+          if (transactionError || !tx) fail('Failed to log credit transaction:', transactionError);
+
+          const { error: addonUpdateError } = await supabase
+            .from('ai_credits')
+            .update({ addon_credits: newBalance })
+            .eq('user_id', userId);
+          if (addonUpdateError) {
+            await supabase.from('ai_credit_transactions').delete().eq('id', tx.id);
+            fail('Failed to update addon credits:', addonUpdateError);
+          }
+
+          try {
+            const userInfo = await getUserInfo(userId);
+            if (userInfo?.email) {
+              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
+              await enqueueEmail({
+                to: userInfo.email,
+                subject: `Receipt: ${creditAmount} AI credits added`,
+                template: CreditPurchaseReceipt({
+                  userName: userInfo.name || 'there',
+                  packName: pack?.name || 'Credit Pack',
+                  creditsAmount: creditAmount,
+                  priceFormatted: `$${((session.amount_total ?? 0) / 100).toFixed(2)}`,
+                  newBalance,
+                  purchaseDate: new Date().toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  }),
+                  dashboardUrl: `${baseUrl}/cxd`,
+                }),
+                userId,
+                emailKind: EMAIL_KINDS.CREDIT_PURCHASE_RECEIPT,
+                stripeEventId: event.id,
+              });
+            }
+          } catch (emailError) {
+            console.error('Failed to enqueue credit purchase receipt:', emailError);
+          }
+          break;
+        }
+
         if (!subscriptionId && session.mode === 'payment') {
+          if (!isLifetimeCheckout(session.metadata)) {
+            console.warn(`[Stripe Webhook] checkout.session.completed ${session.id}: payment checkout without a lifetime plan marker — skipping.`);
+            break;
+          }
           // Lifetime purchase - check if already processed (idempotency)
           const { data: existingSub } = await supabase
             .from('subscriptions')
@@ -120,19 +273,16 @@ export async function POST(req: Request) {
           const nextFoundingNumber = (lifetimeCount?.founding_member_number || 0) + 1;
 
           if (nextFoundingNumber <= 250) {
-            const { error: lifetimeUpdateError } = await supabase
-              .from('subscriptions')
-              .update({
-                plan_id: 'lifetime',
-                stripe_customer_id: customerId,
-                founding_member_number: nextFoundingNumber,
-                status: 'active',
-              })
-              .eq('user_id', userId);
+            const { error: lifetimeUpdateError } = await updateSubscriptionWithPlanSource(supabase, userId, {
+              plan_id: 'lifetime',
+              stripe_customer_id: customerId,
+              founding_member_number: nextFoundingNumber,
+              status: 'active',
+            });
 
             if (lifetimeUpdateError) {
               console.error('Failed to update subscription to lifetime:', lifetimeUpdateError);
-              return NextResponse.json({ error: 'Database error' }, { status: 500 });
+              fail('Database error');
             }
 
             // Send lifetime confirmation email
@@ -164,9 +314,7 @@ export async function POST(req: Request) {
           // Pro subscription - get trial dates from Stripe
           const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-          const { error: proUpdateError } = await supabase
-            .from('subscriptions')
-            .update({
+          const { error: proUpdateError } = await updateSubscriptionWithPlanSource(supabase, userId, {
               plan_id: 'pro',
               stripe_customer_id: customerId,
               stripe_subscription_id: subscriptionId,
@@ -179,12 +327,11 @@ export async function POST(req: Request) {
               trial_end: stripeSubscription.trial_end
                 ? new Date(stripeSubscription.trial_end * 1000).toISOString()
                 : null,
-            })
-            .eq('user_id', userId);
+            });
 
           if (proUpdateError) {
             console.error('Failed to update subscription to pro:', proUpdateError);
-            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            fail('Database error');
           }
 
           // Add pro monthly credits
@@ -197,7 +344,7 @@ export async function POST(req: Request) {
 
           if (proCreditsError) {
             console.error('Failed to update pro monthly credits:', proCreditsError);
-            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            fail('Database error');
           }
 
           // Send Pro confirmation email
@@ -244,10 +391,11 @@ export async function POST(req: Request) {
         if (!row) break;
 
         // Mark as past_due so our cron scan can find the user at day 5.
-        await supabase
+        const { error: pastDueError } = await supabase
           .from('subscriptions')
           .update({ status: 'past_due' })
           .eq('user_id', row.user_id);
+        if (pastDueError) fail('Failed to mark subscription past_due:', pastDueError);
 
         const userInfo = await getUserInfo(row.user_id);
         if (!userInfo?.email) break;
@@ -441,26 +589,43 @@ export async function POST(req: Request) {
           })
           .eq('user_id', row.user_id);
 
-        if (syncErr) {
-          console.error('[webhook] Failed to sync subscription:', syncErr);
-        }
+        if (syncErr) fail('Failed to sync subscription:', syncErr);
         break;
       }
 
       case 'customer.subscription.deleted': {
         const subscription = event.data.object as Stripe.Subscription;
-        const { data: subscriptionRecord, error: subRecordError } = await supabase
+        let { data: subscriptionRecord, error: subRecordError } = await supabase
           .from('subscriptions')
-          .select('user_id')
+          .select('user_id, plan_source')
           .eq('stripe_customer_id', subscription.customer as string)
-          .single();
+          .maybeSingle();
+        if (isMissingPlanSourceColumn(subRecordError)) {
+          ({ data: subscriptionRecord, error: subRecordError } = await supabase
+            .from('subscriptions')
+            .select('user_id')
+            .eq('stripe_customer_id', subscription.customer as string)
+            .maybeSingle());
+        }
 
         if (subRecordError) {
           console.error('Failed to find subscription record:', subRecordError);
-          return NextResponse.json({ error: 'Database error' }, { status: 500 });
+          fail('Database error');
         }
 
-        if (subscriptionRecord) {
+        if (subscriptionRecord && (subscriptionRecord as any).plan_source === 'nexus') {
+          // The plan comes from the member's Nexus tier (D182 §5), not from
+          // this Stripe subscription: forget the subscription, keep the plan,
+          // and leave the credit allowance to the Nexus tier sync.
+          const { error: detachError } = await supabase
+            .from('subscriptions')
+            .update({ stripe_subscription_id: null, canceled_at: new Date().toISOString() })
+            .eq('user_id', subscriptionRecord.user_id);
+          if (detachError) {
+            console.error('Failed to detach Stripe subscription from Nexus plan:', detachError);
+            fail('Database error');
+          }
+        } else if (subscriptionRecord) {
           const { error: cancelUpdateError } = await supabase
             .from('subscriptions')
             .update({
@@ -473,7 +638,7 @@ export async function POST(req: Request) {
 
           if (cancelUpdateError) {
             console.error('Failed to update subscription to canceled:', cancelUpdateError);
-            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            fail('Database error');
           }
 
           // Reset monthly allowance to free tier
@@ -486,7 +651,7 @@ export async function POST(req: Request) {
 
           if (resetCreditsError) {
             console.error('Failed to reset monthly credits:', resetCreditsError);
-            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            fail('Database error');
           }
 
           // Send cancellation email
@@ -517,8 +682,14 @@ export async function POST(req: Request) {
       }
 
       case 'payment_intent.succeeded': {
+        // Legacy path: no current checkout route puts userId / creditAmount on
+        // the PaymentIntent (top-ups are granted on checkout.session.completed
+        // above), so this only acts on PaymentIntents made elsewhere with
+        // those keys. Don't add them to create-credit-checkout: that would
+        // grant the credits twice.
         const paymentIntent = event.data.object as Stripe.PaymentIntent;
-        const userId = paymentIntent.metadata?.userId;
+        const rawUserId = paymentIntent.metadata?.userId;
+        const userId = rawUserId && UUID_RE.test(rawUserId) ? rawUserId : null;
         const creditAmount = paymentIntent.metadata?.creditAmount;
         const packId = paymentIntent.metadata?.packId;
 
@@ -544,7 +715,7 @@ export async function POST(req: Request) {
 
           if (creditsSelectError) {
             console.error('Failed to fetch ai_credits:', creditsSelectError);
-            return NextResponse.json({ error: 'Database error' }, { status: 500 });
+            fail('Database error');
           }
 
           if (credits) {
@@ -559,7 +730,7 @@ export async function POST(req: Request) {
 
             if (addonUpdateError) {
               console.error('Failed to update addon credits:', addonUpdateError);
-              return NextResponse.json({ error: 'Database error' }, { status: 500 });
+              fail('Database error');
             }
 
             // Log transaction (stripe_event_id enables idempotency - requires column in ai_credit_transactions table)
@@ -575,7 +746,7 @@ export async function POST(req: Request) {
 
             if (transactionError) {
               console.error('Failed to log credit transaction:', transactionError);
-              return NextResponse.json({ error: 'Database error' }, { status: 500 });
+              fail('Database error');
             }
 
             // Send credit purchase receipt email
@@ -617,7 +788,20 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error('Error processing webhook:', error);
+    if (!(error instanceof WebhookHandlingError)) {
+      console.error('Error processing webhook:', error);
+    }
+    // Release the idempotency marker so Stripe's retry of this event runs
+    // again instead of being acked as a duplicate.
+    if (claimedEvent) {
+      const { error: releaseError } = await supabase
+        .from('stripe_events_processed')
+        .delete()
+        .eq('event_id', event.id);
+      if (releaseError) {
+        console.error(`[Stripe Webhook] Could not release marker for ${event.id} (${event.type}); its retry will be skipped:`, releaseError);
+      }
+    }
     return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }
