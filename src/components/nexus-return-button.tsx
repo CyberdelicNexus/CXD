@@ -1,7 +1,8 @@
 /**
- * The way back to the member's dashboard on Cyberdelic Nexus: the Nexus mark as a round
- * button, the same size as the navbar's other round buttons. Shown only to members who came
- * from the platform (useNexusReturnLink gives null otherwise).
+ * The way back to the member's dashboard on Cyberdelic Nexus: JEMA's dashboard glyph (a grid
+ * in a ring, from "CN dashboard.svg") as a round button, the same size as the navbar's other
+ * round buttons. Drawn in currentColor so it reads like them and lights up on hover. Shown only
+ * to members who came from the platform (useNexusReturnLink gives null otherwise).
  */
 export function NexusReturnButton({ href }: { href: string }) {
   return (
@@ -9,10 +10,15 @@ export function NexusReturnButton({ href }: { href: string }) {
       href={href}
       title="Back to Cyberdelic Nexus"
       aria-label="Back to Cyberdelic Nexus"
-      className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full border border-white/10 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] active:scale-95 transition-all"
+      className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] text-white/60 hover:text-violet-200 hover:bg-violet-500/20 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] active:scale-95 transition-all"
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- a small static SVG */}
-      <img src="/brand/nexus-mark.svg" alt="" width={38} height={38} className="w-[38px] h-[38px] rounded-full" />
+      <svg viewBox="19.5 6.5 51 51" width={40} height={40} fill="none" aria-hidden="true">
+        <circle cx="45" cy="32" r="25" stroke="currentColor" strokeOpacity={0.6} />
+        <path
+          fill="currentColor"
+          d="M43.0261 23.2567C43.025 23.1073 42.9652 22.9644 42.8596 22.8587C42.7539 22.7531 42.6109 22.6933 42.4615 22.6922H36.2569C36.1075 22.6933 35.9645 22.7531 35.8588 22.8587C35.7532 22.9644 35.6934 23.1073 35.6923 23.2567V31.7177C35.6923 32.0278 35.9441 32.2809 36.2569 32.2809H42.4615C42.7729 32.2809 43.0261 32.0278 43.0261 31.7177V23.2567ZM44.7184 31.7177C44.7184 32.9646 43.7057 33.9731 42.4615 33.9731H36.2569C35.0113 33.9731 34 32.9646 34 31.7177V23.2567C34 22.0113 35.0113 21 36.2569 21H42.4615C43.7071 21 44.7184 22.0113 44.7184 23.2567V31.7177ZM54.3077 23.2567C54.3066 23.1073 54.2468 22.9644 54.1412 22.8587C54.0355 22.7531 53.8925 22.6933 53.7431 22.6922H47.5385C47.3891 22.6933 47.2461 22.7531 47.1404 22.8587C47.0348 22.9644 46.975 23.1073 46.9739 23.2567V27.2043C46.9739 27.5157 47.2271 27.7688 47.5385 27.7688H53.7431C54.0545 27.7688 54.3077 27.5157 54.3077 27.2043V23.2567ZM56 27.2043C56 28.4498 54.9887 29.461 53.7431 29.461H47.5385C46.2929 29.461 45.2816 28.4498 45.2816 27.2043V23.2567C45.2816 22.0113 46.2929 21 47.5385 21H53.7431C54.9887 21 56 22.0113 56 23.2567V27.2043ZM54.3077 32.2823C54.3073 32.1328 54.2477 31.9895 54.1419 31.884C54.036 31.7784 53.8926 31.7191 53.7431 31.7191H47.5385C47.389 31.7191 47.2456 31.7784 47.1397 31.884C47.0339 31.9895 46.9743 32.1328 46.9739 32.2823V40.7433C46.9739 41.0546 47.2271 41.3078 47.5385 41.3078H53.7431C54.0545 41.3078 54.3077 41.0546 54.3077 40.7433V32.2823ZM56 40.7433C56 41.9887 54.9887 43 53.7431 43H47.5385C46.2929 43 45.2816 41.9887 45.2816 40.7433V32.2823C45.2816 31.0354 46.2943 30.0269 47.5385 30.0269H53.7431C54.9887 30.0269 56 31.0354 56 32.2823V40.7433ZM43.0261 36.7944C43.025 36.645 42.9652 36.502 42.8596 36.3964C42.7539 36.2907 42.6109 36.2309 42.4615 36.2298H36.2569C36.1075 36.2309 35.9645 36.2907 35.8588 36.3964C35.7532 36.502 35.6934 36.645 35.6923 36.7944V40.7419C35.6923 41.0533 35.9455 41.3064 36.2569 41.3064H42.4615C42.7729 41.3064 43.0261 41.0533 43.0261 40.7419V36.7944ZM44.7184 40.7419C44.7184 41.9874 43.7071 42.9986 42.4615 42.9986H36.2569C35.0113 42.9986 34 41.9874 34 40.7419V36.7944C34 35.5489 35.0113 34.5376 36.2569 34.5376H42.4615C43.7071 34.5376 44.7184 35.5489 44.7184 36.7944V40.7419Z"
+        />
+      </svg>
     </a>
   );
 }
