@@ -520,6 +520,21 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
   const getCurrentProject = useCXDStore((s) => s.getCurrentProject);
   const project = getCurrentProject();
 
+  // The export dialog lives on the canvas: make sure it is showing, then ask it to open.
+  const handleBoardImageExport = useCallback(() => {
+    const st = useCXDStore.getState();
+    const needsSwitch = st.viewMode !== "canvas" || st.canvasViewMode !== "canvas";
+    if (needsSwitch) {
+      st.setViewMode("canvas");
+      st.setCanvasViewMode("canvas");
+    }
+    onClose();
+    window.setTimeout(
+      () => window.dispatchEvent(new CustomEvent("cxd:export-canvas", { detail: { scope: "board" } })),
+      needsSwitch ? 900 : 150,
+    );
+  }, [onClose]);
+
   const [erdOpen, setErdOpen] = useState(false);
   const [calSyncOpen, setCalSyncOpen] = useState(false);
   const [calSyncUpgradeOpen, setCalSyncUpgradeOpen] = useState(false);
@@ -682,6 +697,13 @@ export function ExportHub({ isOpen, onClose, onOpenShare }: ExportHubProps) {
             <section className="mb-6">
               <GroupHeader group="Build" />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ArtifactCard
+                  icon={ImagePlus}
+                  title="Board Image or PDF"
+                  description="Your whole canvas, or just a selection, as one PNG, JPEG or PDF. Built for handing a flow chart to an AI or a teammate without stitching screenshots."
+                  accent="text-cyan-300"
+                  actions={[{ label: "Export board…", icon: Download, onClick: handleBoardImageExport }]}
+                />
                 <ArtifactCard
                   icon={FileText}
                   title="Experience Requirement Document"

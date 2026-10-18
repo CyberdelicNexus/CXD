@@ -61,6 +61,8 @@ interface UseAIChatOptions {
   enabled?: boolean;
   faceLabel?: string;
   faceHue?: number;
+  /** Extra fields merged into the transport body (e.g. canvasSelection) */
+  extraContext?: Record<string, unknown>;
 }
 
 interface UseAIChatReturn {
@@ -84,6 +86,7 @@ export function useAIChat({
   enabled = true,
   faceLabel,
   faceHue,
+  extraContext,
 }: UseAIChatOptions): UseAIChatReturn {
   const [input, setInput] = useState("");
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -101,7 +104,7 @@ export function useAIChat({
 
   // Build extra body for the transport
   const extraBody = useMemo(() => {
-    if (!project) return { faceKey, provider };
+    if (!project) return { faceKey, provider, ...(extraContext || {}) };
 
     const elements = project.canvasLayout?.elements || [];
     const edges = project.canvasLayout?.edges || [];
@@ -117,8 +120,8 @@ export function useAIChat({
       body.faceContext = getFaceContext(project, elements, faceKey);
     }
 
-    return body;
-  }, [project, faceKey, provider]);
+    return { ...body, ...(extraContext || {}) };
+  }, [project, faceKey, provider, extraContext]);
 
   // `useChat` does not recreate internal chat state when only transport changes.
   // Keep one transport instance and resolve request body dynamically per send.

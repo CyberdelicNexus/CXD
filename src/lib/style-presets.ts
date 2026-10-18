@@ -27,6 +27,19 @@ export interface ShapeStylePreset {
 // plus a couple of tasteful defaults.
 export const BUILT_IN_PRESETS: ShapeStylePreset[] = [
   {
+    id: 'builtin-aurora',
+    name: 'Aurora',
+    builtIn: true,
+    style: {
+      bgColor: 'linear-gradient(135deg, #3b1466, #0c2d5c)',
+      fillOpacity: 90,
+      borderColor: 'linear-gradient(135deg, #c084fc, #22d3ee)',
+      borderWidth: 2,
+      borderStyle: 'solid',
+      textColor: '#ffffff',
+    },
+  },
+  {
     id: 'builtin-gradient-ring',
     name: 'Gradient Ring',
     builtIn: true,
@@ -58,6 +71,9 @@ export const BUILT_IN_PRESETS: ShapeStylePreset[] = [
     },
   },
 ];
+
+/** Style every new shape gets: the Aurora preset (gradient fill + gradient ring). */
+export const DEFAULT_SHAPE_STYLE = BUILT_IN_PRESETS[0].style;
 
 const LS_KEY = 'cxd:shape-style-presets';
 const listeners = new Set<() => void>();

@@ -6,13 +6,15 @@
     "build": "next build",
     "start": "next start",
     "clean": "node -e \"['.next','.next-dev','node_modules/.cache'].forEach(p=>require('fs').rmSync(p,{recursive:true,force:true}))\"",
-    "email": "email dev --dir emails --port 3001"
+    "email": "email dev --dir emails --port 3001",
+    "lab:e2e": "node scripts/lab-e2e.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.41",
     "@ai-sdk/google": "^3.0.23",
     "@ai-sdk/openai": "^3.0.26",
     "@ai-sdk/react": "^3.0.80",
+    "@anthropic-ai/sdk": "^0.128.0",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",

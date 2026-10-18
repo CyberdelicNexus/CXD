@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import { X, Check, RotateCcw, Trash2, SmilePlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCXDStore } from "@/store/cxd-store";
@@ -96,7 +97,28 @@ export function CommentThreadPanel({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isResolved = thread.root.resolvedAt !== null;
-  const pinScale = 1 / canvasZoom;
+  // The panel lives in <body>, not in the zoomed canvas: connector lines are
+  // separate canvas-level layers whose z-index outranks anything inside the
+  // content layer, so a panel left in there always had lines drawn over it. An
+  // invisible anchor stays at the pin's canvas position; the panel follows it.
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const follow = () => {
+      const a = anchorRef.current, p = panelRef.current;
+      if (a && p) {
+        const r = a.getBoundingClientRect();
+        const left = `${Math.round(r.left + 40)}px`, top = `${Math.round(r.top)}px`;
+        if (p.style.left !== left) p.style.left = left;
+        if (p.style.top !== top) p.style.top = top;
+        p.style.visibility = "visible";
+      }
+      raf = requestAnimationFrame(follow);
+    };
+    raf = requestAnimationFrame(follow);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   // Auto-focus the input when panel opens
   useEffect(() => {
@@ -123,20 +145,30 @@ export function CommentThreadPanel({
     [handleSubmitReply]
   );
 
-  return (
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const panel = (
     <div
-      className="absolute pointer-events-auto"
-      style={{
-        left: thread.root.position.x,
-        top: thread.root.position.y,
-        transform: `scale(${pinScale}) translateX(40px)`,
-        transformOrigin: "0 0",
-        zIndex: 9991,
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
+      ref={panelRef}
+      className="fixed pointer-events-auto"
+      style={{ left: 0, top: 0, visibility: "hidden", zIndex: 10030 }}
+      onMouseDown={stop}
+      onClick={stop}
+      onDoubleClick={stop}
+      onPointerDown={stop}
+      onContextMenu={stop}
+      onWheel={stop}
     >
-      <div className="w-72 rounded-xl border border-white/10 bg-[rgba(12,10,22,0.97)] backdrop-blur-xl shadow-2xl overflow-visible">
+      <div
+        className="w-72 rounded-xl border border-violet-300/15 backdrop-blur-xl overflow-visible"
+        style={{
+          // Depth instead of a flat slab: violet-tinted top fading to near black,
+          // a faint inner highlight along the top edge, and a soft violet halo.
+          background:
+            "radial-gradient(120% 70% at 15% 0%, rgba(124,58,237,0.22) 0%, rgba(124,58,237,0) 60%), linear-gradient(165deg, rgba(34,20,58,0.98) 0%, rgba(14,10,26,0.985) 52%, rgba(5,4,12,0.995) 100%)",
+          boxShadow:
+            "0 18px 50px rgba(0,0,0,0.65), 0 0 40px rgba(124,58,237,0.14), inset 0 1px 0 rgba(255,255,255,0.07)",
+        }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
           <span className="text-xs font-medium text-white/50">
@@ -278,5 +310,12 @@ export function CommentThreadPanel({
         )}
       </div>
     </div>
+  );
+
+  return (
+    <>
+      <div ref={anchorRef} className="absolute pointer-events-none" style={{ left: thread.root.position.x, top: thread.root.position.y, width: 0, height: 0 }} />
+      {typeof document !== "undefined" ? createPortal(panel, document.body) : null}
+    </>
   );
 }

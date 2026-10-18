@@ -1,6 +1,9 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { FontDropdown } from "./font-dropdown";
+import { GradientToolButton, SavedGradients, SvgGradientDef } from "./gradient-editor";
+import { isGradientCss } from "@/lib/gradient";
+import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import NextImage from "next/image";
 import { createPortal } from "react-dom";
 import {
@@ -27,13 +30,17 @@ import {
   HYPERCUBE_FACE_TAGS,
   ElementStyle,
 } from "@/types/canvas-elements";
+import * as LucideIcons from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useShapeStylePresets,
   addStylePreset,
   removeStylePreset,
+  DEFAULT_SHAPE_STYLE,
   type ShapeStylePreset,
 } from "@/lib/style-presets";
+import { useTagVisibility } from "@/lib/tag-visibility";
+import { useRevealDelay } from "@/lib/ai/assistant-build";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -47,6 +54,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCXDStore } from "@/store/cxd-store";
+import { shapePath, shapeTextInsets, SHAPE_DEFS } from "@/lib/shape-geometry";
+import { shapeOutlinePoint } from "@/lib/shape-outline";
+import { ShapeRichTextEditor, plainTextToHtml } from "./shape-rich-text";
+import { ShapeGlyph } from "./shape-glyph";
+import { CANVAS_OVERLAY_LAYER_ID } from "./canvas-overlay";
 import {
   CXDProject,
   REALITY_PLANES,
@@ -115,6 +127,10 @@ import {
   Zap,
   Eye,
   EyeOff,
+  Heading,
+  Layers,
+  Radio,
+  Target,
   Brain,
   Users,
   Inbox,
@@ -130,6 +146,7 @@ import {
   AlignCenter,
   AlignRight,
   MousePointerClick,
+  PanelTopOpen,
 } from "lucide-react";
 import { createClient } from "../../../../supabase/client";
 import { AssigneeMultiSelect } from "@/components/cxd/plan/assignee-multi-select";
@@ -143,15 +160,28 @@ import {
 import { FloatingPort } from "./floating-port";
 import DOMPurify from "dompurify";
 
-// Hypercube tag icons mapping (defined at top for use in JSX)
-const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, string> = {
-  "Reality Planes": "🌐",
-  "Sensory Domains": "👁️",
-  "Presence Types": "🧘",
-  "State Mapping": "🎭",
-  "Trait Mapping": "💫",
-  "Meaning Architecture": "🏛️",
-  "Core": "🎯",
+// Hypercube tag icons: the same lucide icons the right-hand face panel uses,
+// so a tag on an element reads the same as the face it belongs to.
+const HYPERCUBE_TAG_ICONS: Record<HypercubeFaceTag, React.ComponentType<{ className?: string }>> = {
+  "Reality Planes": Layers,
+  "Sensory Domains": Eye,
+  "Presence Types": Radio,
+  "State Mapping": Brain,
+  "Trait Mapping": Heart,
+  "Meaning Architecture": Globe,
+  "Core": Target,
+};
+
+// Each tag takes its face's colour (the hue of that face on the hypercube and
+// its button in the Map view). Icons stay grey until hovered.
+const HYPERCUBE_TAG_COLORS: Record<HypercubeFaceTag, string> = {
+  "Reality Planes": "hsl(286 70% 70%)",
+  "Sensory Domains": "hsl(45 85% 65%)",
+  "Presence Types": "hsl(195 80% 68%)",
+  "State Mapping": "hsl(160 65% 62%)",
+  "Trait Mapping": "hsl(260 75% 72%)",
+  "Meaning Architecture": "hsl(320 75% 70%)",
+  "Core": "hsl(270 80% 74%)",
 };
 
 const SENSORY_METADATA: Record<string, { icon: React.ReactNode; color: string; colorRaw: string }> = {
@@ -252,6 +282,20 @@ interface CanvasElementRendererProps {
   /** True when a line-family tool is active — presses belong to the line-draw
    * pipeline (LineLayer), so this element must not select/drag on press. */
   lineToolActive?: boolean;
+  /** Selected as part of a whole group: the group outline stands in for the per-element ring. */
+  hideSelectionRing?: boolean;
+}
+
+// "Open this element for typing as soon as it exists" (a freshly placed text).
+// The element may not be mounted yet when this is called (in CRDT mode it appears
+// a frame later), so remember the id and let the renderer claim it on mount; if it
+// is already mounted, the event reaches it immediately.
+let pendingEditElementId: string | null = null;
+export function requestStartEditing(elementId: string) {
+  pendingEditElementId = elementId;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("cxd:start-editing", { detail: { elementId } }));
+  }
 }
 
 export function CanvasElementRenderer({
@@ -284,6 +328,7 @@ export function CanvasElementRenderer({
   tourId,
   showGroupHover,
   lineToolActive = false,
+  hideSelectionRing = false,
 }: CanvasElementRendererProps) {
   // Stabilize onUpdate via ref so that effects and sub-component callbacks
   // that depend on onUpdate don't re-fire just because the parent re-rendered
@@ -304,6 +349,7 @@ export function CanvasElementRenderer({
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showLinkViewMenu, setShowLinkViewMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showFontMenu, setShowFontMenu] = useState(false);
   const [showBoardIconPicker, setShowBoardIconPicker] = useState(false);
   const [showBoardColorPicker, setShowBoardColorPicker] = useState(false);
   const [showExperienceViewMenu, setShowExperienceViewMenu] = useState(false);
@@ -316,6 +362,14 @@ export function CanvasElementRenderer({
   const [isAddingTaskTag, setIsAddingTaskTag] = useState(false);
   const [newTaskTag, setNewTaskTag] = useState('');
   const elementRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const tagBadgeRef = useRef<HTMLDivElement>(null);
+  // Every element except lines, connectors and experience blocks (those ARE the
+  // cube faces) can be tagged.
+  const isTaggable = element.type !== "line" && element.type !== "connector" && element.type !== "experienceBlock";
+  const hasTags = !!element.hypercubeTags && element.hypercubeTags.length > 0;
+  const tagsPinned = useTagVisibility();
+  const revealDelay = useRevealDelay(element.id);
   const menuContainerRef = useRef<HTMLDivElement>(null);
   const subtaskRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
   const taskPriorityMenuRef = useRef<HTMLDivElement>(null);
@@ -375,6 +429,41 @@ export function CanvasElementRenderer({
     if (!isSelected) closeAllSubmenus();
   }, [isSelected, closeAllSubmenus]);
 
+  // Toolbar submenus must never sit on top of the element being edited. While a
+  // submenu is open, every frame any overlapping panel is slid clear of the
+  // element (see avoidElement). A per-frame pass, not a per-render one, because
+  // the toolbar settles and moves without React re-rendering (zoom, pan, drag).
+  const anySubmenuOpen =
+    showColorPicker || showLinkViewMenu || showEmojiPicker || showBoardIconPicker ||
+    showBoardColorPicker || showExperienceViewMenu || showTaskPriorityMenu;
+  useEffect(() => {
+    if (!anySubmenuOpen) return;
+    let raf = 0;
+    const tick = () => {
+      const tb = toolbarRef.current;
+      const el = elementRef.current;
+      if (tb && el) {
+        const panels = tb.querySelectorAll<HTMLElement>("[data-submenu]");
+        if (panels.length) avoidElement(panels, el.getBoundingClientRect());
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [anySubmenuOpen]);
+
+  // The tag menu closes on any press outside the badge/menu (including on the
+  // element itself, which the generic handler below deliberately ignores).
+  useEffect(() => {
+    if (!showTagMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.("[data-tag-badge]")) return;
+      setShowTagMenu(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, [showTagMenu]);
+
   // Close all submenus when clicking outside
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
@@ -390,6 +479,9 @@ export function CanvasElementRenderer({
         showTaskPriorityMenu;
 
       if (!anyMenuOpen) return;
+
+      // The gradient editor is portaled to <body>; clicks in it are "inside".
+      if ((e.target as HTMLElement | null)?.closest?.("[data-gradient-editor]")) return;
 
       // Check if click is outside the element
       if (
@@ -473,6 +565,28 @@ export function CanvasElementRenderer({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isEditing]);
 
+  // Character that started editing a selected shape by typing (see below).
+  const [shapeTypedChar, setShapeTypedChar] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isEditing) setShapeTypedChar(null);
+  }, [isEditing]);
+
+  // Claim a pending "start editing" request (see requestStartEditing).
+  useEffect(() => {
+    const claim = () => {
+      if (pendingEditElementId === element.id) {
+        pendingEditElementId = null;
+        setIsEditing(true);
+      }
+    };
+    claim();
+    const onRequest = (e: Event) => {
+      if ((e as CustomEvent<{ elementId: string }>).detail?.elementId === element.id) claim();
+    };
+    window.addEventListener("cxd:start-editing", onRequest);
+    return () => window.removeEventListener("cxd:start-editing", onRequest);
+  }, [element.id]);
+
   // Auto-typing for shapes: when selected and user types, start editing
   useEffect(() => {
     if (element.type !== "shape" || !isSelected || isEditing || isReadOnly) return;
@@ -489,12 +603,25 @@ export function CanvasElementRenderer({
       // intercepted here (they fall through to the canvas's delete handler).
       // Only while EDITING does Delete act on text, handled natively by the
       // textarea. Auto-typing starts only from printable characters.
-      if (e.key.length !== 1) return;
+      // Enter opens the editor with the caret at the end of the existing text.
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsEditing(true);
+        return;
+      }
+      // Space belongs to the canvas (hand tool); it must never start editing.
+      if (e.key.length !== 1 || e.key === " ") return;
 
-      // Start editing with the typed character
+      // Typing on a selected shape starts editing. An empty shape takes the
+      // character as its text; a shape that already has text keeps it and the
+      // character is appended (it used to REPLACE the text, which is how a
+      // stray key wiped a label). The character is handed to the editor
+      // directly: writing `content` here lost the key (richContent wins over
+      // content, and in CRDT mode the store update lands a frame later).
       e.preventDefault();
       e.stopPropagation();
-      onUpdate({ content: e.key });
+      setShapeTypedChar(e.key);
       setIsEditing(true);
     };
 
@@ -659,6 +786,7 @@ export function CanvasElementRenderer({
             isSelected={isSelected}
             isReadOnly={isReadOnly}
             onCropModeChange={setIsCroppingImage}
+            canvasZoom={canvasZoom}
           />
         );
       case "shape":
@@ -667,6 +795,7 @@ export function CanvasElementRenderer({
             element={element}
             onUpdate={onUpdate}
             isEditing={isEditing}
+            typedChar={shapeTypedChar}
             onBlur={handleBlur}
             isSelected={isSelected}
             onCreateConnectedShape={onCreateConnectedShape}
@@ -689,6 +818,7 @@ export function CanvasElementRenderer({
             element={element}
             onUpdate={onUpdate}
             isEditing={isEditing}
+            isSelected={isSelected}
             onBlur={handleBlur}
           />
         );
@@ -752,9 +882,10 @@ export function CanvasElementRenderer({
 
   // Any freeform card rendered with height:auto needs its element.height synced
   // from the DOM so connectors and selection math target the real rendered bounds.
-  const isAutoHeightFreeform =
-    element.type === "freeform" &&
-    !(element as FreeformElement).isDocument;
+  // Documents included: their height is the icon + title, measured, so a
+  // document inside a container doesn't leave a band of empty space below.
+  const isAutoHeightFreeform = element.type === "freeform";
+  const isDocumentCard = element.type === "freeform" && !!(element as FreeformElement).isDocument;
 
   // Observe actual DOM size via ResizeObserver and sync element.width/height so
   // connectors, group reflow, and alignment guides target the real rendered bounds.
@@ -764,7 +895,7 @@ export function CanvasElementRenderer({
     if (!isAutoHeightFreeform) return;
     const el = elementRef.current;
     if (!el) return;
-    const minHeight = freeformCardType === "task" ? 0 : 300;
+    const minHeight = freeformCardType === "task" || isDocumentCard ? 0 : 300;
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
@@ -784,7 +915,7 @@ export function CanvasElementRenderer({
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [isAutoHeightFreeform, freeformCardType]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAutoHeightFreeform, freeformCardType, isDocumentCard]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Don't render connectors as regular elements
   if (element.type === "connector") return null;
@@ -797,6 +928,8 @@ export function CanvasElementRenderer({
       draggable={false}
       className={cn(
         "absolute group transition-shadow duration-200 pointer-events-auto",
+        // Assistant build: hidden until this element's turn, then fades in.
+        revealDelay !== null && "assistant-reveal",
         isDragging && !((element as FreeformElement).isDocument) && "opacity-80 shadow-2xl cursor-grabbing",
         isDragging && (element as FreeformElement).isDocument && "cursor-grabbing",
         // Locked state indicator
@@ -808,6 +941,7 @@ export function CanvasElementRenderer({
         "ring-2 ring-purple-400/70 shadow-[0_0_24px_rgba(167,139,250,0.35)] animate-[highlightGlow_4s_cubic-bezier(0.4,0,0.2,1)_1s_forwards]",
         // Selection ring for non-text elements (excluding lines which handle their own visualization)
         isSelected &&
+        !hideSelectionRing &&
         !isHighlighted &&
         element.type !== "board" &&
         element.type !== "text" &&
@@ -816,10 +950,16 @@ export function CanvasElementRenderer({
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)]",
         // Selection ring for freeform cards - rounded (except documents)
         isSelected &&
+        !hideSelectionRing &&
         !isHighlighted &&
         element.type === "freeform" &&
         !(element as FreeformElement).isDocument &&
         "ring-2 ring-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] rounded-lg",
+        // Text: a hairline box that hugs the glyphs (handles do the rest)
+        isSelected &&
+        !hideSelectionRing &&
+        element.type === "text" &&
+        "outline outline-1 outline-primary/70",
         // Documents: no selection ring or outline
         element.type === "freeform" &&
         (element as FreeformElement).isDocument &&
@@ -853,6 +993,7 @@ export function CanvasElementRenderer({
         "cursor-text h-full",
       )}
       style={{
+        ...(revealDelay !== null ? { animationDelay: `${revealDelay}ms` } : {}),
         left: element.x,
         top: element.y,
         width:
@@ -884,7 +1025,7 @@ export function CanvasElementRenderer({
         minHeight:
           element.type === "freeform"
             ? (element as FreeformElement).isDocument
-              ? "100px"
+              ? undefined
               : "300px"
             : undefined,
         zIndex:
@@ -939,12 +1080,17 @@ export function CanvasElementRenderer({
             isFreeform={element.type === 'freeform'}
             isImage={element.type === 'image'}
             isBoard={element.type === 'board'}
+            outlineAt={
+              element.type === 'shape' && (element as ShapeElement).shapeType !== 'rectangle'
+                ? (side, offset) => shapeOutlinePoint((element as ShapeElement).shapeType, element.width, element.height, side, offset)
+                : undefined
+            }
             onStartConnector={onStartConnector}
             onEndConnector={onEndConnector ?? (() => {})}
           />
         )}
       {/* Unified context menu (hidden for line elements, multi-selection uses MultiSelectionBox) */}
-      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && (() => {
+      {isSelected && !isDragging && !isCroppingImage && element.type !== "line" && !isReadOnly && !isMultiSelected && !(isEditing && element.type === "shape") && (() => {
         /* Counter-rotation wrapper: un-rotates around element center so menu stays fixed above */
         const toolbar = (
         <div
@@ -954,6 +1100,8 @@ export function CanvasElementRenderer({
           }}
         >
         <div
+          ref={toolbarRef}
+          data-avoid-selector={`[data-element-id="${element.id}"]`}
           className={cn(
             "absolute left-1/2 flex items-center gap-1 px-2 py-1.5 rounded-xl pointer-events-auto",
             "bg-zinc-950/95 backdrop-blur-2xl border border-violet-500/25 shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
@@ -1031,8 +1179,6 @@ export function CanvasElementRenderer({
                     strokeColor={(element as ShapeElement).style?.borderColor}
                     strokeWidth={(element as ShapeElement).style?.borderWidth}
                     fillOpacity={(element as ShapeElement).style?.fillOpacity}
-                    textColor={(element as ShapeElement).style?.textColor}
-                    fontSize={(element as ShapeElement).style?.fontSize}
                     currentStyle={(element as ShapeElement).style}
                     onApplyStyle={(partial) =>
                       onUpdate({ style: { ...element.style, ...partial } })
@@ -1055,51 +1201,8 @@ export function CanvasElementRenderer({
                         style: { ...element.style, fillOpacity: opacity },
                       })
                     }
-                    onTextColorChange={(color) =>
-                      onUpdate({ style: { ...element.style, textColor: color } })
-                    }
-                    onFontSizeChange={(size) =>
-                      onUpdate({ style: { ...element.style, fontSize: size } })
-                    }
                     onClose={() => setShowColorPicker(false)}
                     defaultMode={colorPickerDefaultMode}
-                  />
-                )}
-              </div>
-
-              {/* Text Formatting Dropdown */}
-              <div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    if (showTextStyleMenu) {
-                      closeAllSubmenus();
-                    } else {
-                      closeAllSubmenus();
-                      setShowTextStyleMenu(true);
-                    }
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showTextStyleMenu && "bg-primary/20 text-primary",
-                  )}
-                  title="Text Formatting"
-                >
-                  <Type className="w-4 h-4" />
-                </button>
-                {showTextStyleMenu && (
-                  <ShapeTextStylePicker
-                    style={(element as ShapeElement).style}
-                    onStyleChange={(updates) =>
-                      onUpdate({ style: { ...element.style, ...updates } })
-                    }
-                    onOpenColorPicker={() => {
-                      setShowTextStyleMenu(false);
-                      setColorPickerDefaultMode("text");
-                      openColorPicker();
-                    }}
-                    onClose={() => setShowTextStyleMenu(false)}
                   />
                 )}
               </div>
@@ -1146,6 +1249,32 @@ export function CanvasElementRenderer({
           )}
           {element.type === "freeform" && (
             <>
+              {/* Documents: colour lives inside the opened document; the emoji is
+                  changed here because the icon itself is the drag/open handle. */}
+              {(element as FreeformElement).isDocument ? (
+                <div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      showEmojiPicker ? closeAllSubmenus() : openEmojiPicker();
+                    }}
+                    className={cn(
+                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                      showEmojiPicker && "bg-primary/20 text-primary",
+                    )}
+                    title="Change emoji"
+                  >
+                    <Smile className="w-4 h-4" />
+                  </button>
+                  {showEmojiPicker && (
+                    <EmojiPicker
+                      onEmojiSelect={(emoji) => onUpdate({ emoji } as Partial<FreeformElement>)}
+                      onClose={() => setShowEmojiPicker(false)}
+                    />
+                  )}
+                </div>
+              ) : (
               <div>
                 <button
                   onClick={(e) => {
@@ -1174,56 +1303,9 @@ export function CanvasElementRenderer({
                   />
                 )}
               </div>
-              <div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    showEmojiPicker ? closeAllSubmenus() : openEmojiPicker();
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showEmojiPicker && "bg-primary/20 text-primary",
-                  )}
-                  title="Emoji"
-                >
-                  <Smile className="w-4 h-4" />
-                </button>
-                {showEmojiPicker && element.type === "freeform" && (
-                  <EmojiPicker
-                    onEmojiSelect={(emoji) => {
-                      onUpdate({ emoji } as Partial<CanvasElement>);
-                      setShowEmojiPicker(false);
-                    }}
-                    onClose={() => setShowEmojiPicker(false)}
-                  />
-                )}
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const isBold =
-                    (element as FreeformElement).style?.fontWeight === "bold" ||
-                    (element as FreeformElement).style?.fontWeight ===
-                    "semibold";
-                  onUpdate({
-                    style: {
-                      ...element.style,
-                      fontWeight: isBold ? "normal" : "bold",
-                    },
-                  });
-                }}
-                className={cn(
-                  "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                  ((element as FreeformElement).style?.fontWeight === "bold" ||
-                    (element as FreeformElement).style?.fontWeight ===
-                    "semibold") &&
-                  "bg-primary/20 text-primary",
-                )}
-                title="Bold"
-              >
-                <Bold className="w-4 h-4" />
-              </button>
+              )}
+              {/* Emoji: click the emoji on the card itself. Bold and layer arrows
+                  were removed from card toolbars (selected cards already pop to the top). */}
               {/* Mark as Task button */}
               <button
                 onClick={(e) => {
@@ -1363,6 +1445,9 @@ export function CanvasElementRenderer({
                       } as Partial<CanvasElement>);
                       setShowBoardColorPicker(false);
                     }}
+                    onLiveChange={(gradient) =>
+                      onUpdate({ hexColor: gradient } as Partial<CanvasElement>)
+                    }
                     onClose={() => setShowBoardColorPicker(false)}
                   />
                 )}
@@ -1430,6 +1515,11 @@ export function CanvasElementRenderer({
                       });
                       setShowColorPicker(false);
                     }}
+                    onLiveChange={(gradient) =>
+                      onUpdate({
+                        style: { ...(element.style || {}), bgColor: gradient },
+                      })
+                    }
                     onClose={() => setShowColorPicker(false)}
                   />
                 )}
@@ -1507,25 +1597,66 @@ export function CanvasElementRenderer({
           )}
           {element.type === "text" && (
             <>
+              {/* Color/Gradient picker: first in the toolbar. Deliberately NOT
+                  position:relative, so its menu anchors to the toolbar's bottom-left
+                  rather than to the button. */}
+              <div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    showColorPicker ? closeAllSubmenus() : openColorPicker();
+                  }}
+                  className={cn(
+                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
+                    showColorPicker && "bg-primary/20 text-primary",
+                  )}
+                  title="Color"
+                >
+                  <Palette className="w-4 h-4" />
+                </button>
+                {showColorPicker && element.type === "text" && (
+                  <TextColorPicker
+                    currentColor={(element as TextElement).style?.textColor}
+                    currentGradient={(element as TextElement).style?.bgColor}
+                    onColorChange={(color) =>
+                      onUpdate({
+                        style: {
+                          ...element.style,
+                          textColor: color,
+                          // '' not undefined: the Yjs serializer skips undefined, so the
+                          // old gradient survived and "solid" never took effect.
+                          bgColor: "",
+                        },
+                      })
+                    }
+                    onGradientChange={(gradient) =>
+                      onUpdate({
+                        style: {
+                          ...element.style,
+                          bgColor: gradient,
+                          textColor: "",
+                        },
+                      })
+                    }
+                    onClose={() => setShowColorPicker(false)}
+                  />
+                )}
+              </div>
               {/* Font family dropdown */}
-              <select
-                value={(element as TextElement).style?.fontFamily || "inherit"}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  onUpdate({
-                    style: { ...element.style, fontFamily: e.target.value },
-                  });
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="text-xs bg-card/80 border border-border/50 rounded px-1.5 py-1 cursor-pointer max-w-[100px]"
+              <FontDropdown
+                value={(element as TextElement).style?.fontFamily}
+                onChange={(fontFamily) => onUpdate({ style: { ...element.style, fontFamily } })}
+                open={showFontMenu}
+                onOpenChange={setShowFontMenu}
+                className="max-w-[100px]"
                 title="Font Family"
-              >
-                {FONT_FAMILIES.map((f) => (
-                  <option key={f.value} value={f.value}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
+              />
+              {/* Font size: − / value / + (steps through a type scale) */}
+              <TextSizeControl
+                value={(element as TextElement).style?.fontSize || 16}
+                onChange={(fontSize) => onUpdate({ style: { ...element.style, fontSize } })}
+              />
               {/* Bold toggle */}
               <button
                 onClick={(e) => {
@@ -1568,100 +1699,11 @@ export function CanvasElementRenderer({
                 <option value="center">Center</option>
                 <option value="right">Right</option>
               </select>
-              {/* Color/Gradient picker */}
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    showColorPicker ? closeAllSubmenus() : openColorPicker();
-                  }}
-                  className={cn(
-                    "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                    showColorPicker && "bg-primary/20 text-primary",
-                  )}
-                  title="Color"
-                >
-                  <Palette className="w-4 h-4" />
-                </button>
-                {showColorPicker && element.type === "text" && (
-                  <TextColorPicker
-                    currentColor={(element as TextElement).style?.textColor}
-                    currentGradient={(element as TextElement).style?.bgColor}
-                    onColorChange={(color) =>
-                      onUpdate({
-                        style: {
-                          ...element.style,
-                          textColor: color,
-                          bgColor: undefined,
-                        },
-                      })
-                    }
-                    onGradientChange={(gradient) =>
-                      onUpdate({
-                        style: {
-                          ...element.style,
-                          bgColor: gradient,
-                          textColor: undefined,
-                        },
-                      })
-                    }
-                    onClose={() => setShowColorPicker(false)}
-                  />
-                )}
-              </div>
               <div className="w-px h-4 bg-border/50 mx-0.5" />
             </>
           )}
-          {/* Hypercube Tag - for taggable elements */}
-          {/* NOTE: experienceBlock is NOT taggable - they correspond to cube faces */}
-          {/* Cards (text, freeform), boards, containers, links, images ARE taggable */}
-          {(element.type === "board" ||
-            element.type === "container" ||
-            element.type === "text" ||
-            element.type === "freeform" ||
-            element.type === "link" ||
-            element.type === "image") && (
-              <>
-                <div className="relative">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      showTagMenu ? closeAllSubmenus() : openTagMenu();
-                    }}
-                    className={cn(
-                      "p-1.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors",
-                      showTagMenu && "bg-primary/20 text-primary",
-                      element.hypercubeTags &&
-                      element.hypercubeTags.length > 0 &&
-                      "text-cyan-400",
-                    )}
-                    title="Tag to Hypercube"
-                  >
-                    <Box className="w-4 h-4" />
-                  </button>
-                  {showTagMenu && (
-                    <HypercubeTagPicker
-                      currentTags={element.hypercubeTags || []}
-                      onTagToggle={(tag) => {
-                        const currentTags = element.hypercubeTags || [];
-                        const newTags = currentTags.includes(tag)
-                          ? currentTags.filter((t) => t !== tag)
-                          : [...currentTags, tag];
-                        onUpdate({
-                          hypercubeTags: newTags,
-                        } as Partial<CanvasElement>);
-                      }}
-                      onClose={() => setShowTagMenu(false)}
-                    />
-                  )}
-                </div>
-                <div className="w-px h-4 bg-border/50 mx-0.5" />
-              </>
-            )}
           {/* Universal actions — z-order controls hidden for containers (they always stay at back) */}
-          {element.type !== 'container' && (
+          {element.type !== 'container' && element.type !== 'freeform' && (
             <>
               <button
                 onClick={(e) => {
@@ -1709,6 +1751,20 @@ export function CanvasElementRenderer({
           >
             <Copy className="w-4 h-4" />
           </button>
+          {/* Keep open: pin this note in a floating editor that stays up while
+              moving around the canvas */}
+          {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle !== undefined) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                useCXDStore.getState().setPinnedInboxNoteId(element.id);
+              }}
+              className="p-1.5 rounded hover:bg-cyan-500/20 text-muted-foreground hover:text-cyan-300 transition-colors"
+              title="Keep open while you move around the canvas"
+            >
+              <PanelTopOpen className="w-4 h-4" />
+            </button>
+          )}
           {/* Send to Inbox button - only for note cards (not documents) */}
           {element.type === 'freeform' && ((element as any).cardType === 'note' || (element as any).noteTitle || (element as any).emoji === '🤖') && !element.inInbox && !(element as FreeformElement).isDocument && (
             <button
@@ -1781,8 +1837,13 @@ export function CanvasElementRenderer({
         // behind neighbouring elements (the in-place z 2e9 pop was not enough — the text
         // wrapper's own stacking context trapped the left-opening colour/font popovers).
         // Portaling is strictly safe: it can only raise the toolbar, never lower it.
-        if ((element.type === "container" || element.type === "text") && typeof document !== "undefined") {
-          const layer = elementRef.current?.parentElement;
+        //
+        // Now every element type does this, into the dedicated overlay layer
+        // (same pan/zoom transform, stacked above elements, connector lines and
+        // the side toolkits) so a toolbar can never render behind anything.
+        if (typeof document !== "undefined") {
+          const layer =
+            document.getElementById(CANVAS_OVERLAY_LAYER_ID) ?? elementRef.current?.parentElement;
           if (layer) {
             return createPortal(
               <div
@@ -1808,22 +1869,72 @@ export function CanvasElementRenderer({
 
         return toolbar;
       })()}
-      {/* Hypercube tag indicators */}
-      {element.hypercubeTags && element.hypercubeTags.length > 0 && (
+      {/* Hypercube tag badge: sits on top of every taggable element, revealed
+          while the element is hovered or selected. Tagged elements keep it
+          pinned only when the user turns "Show tags" on in the left toolbar:
+          always-on badges bury the nodes of a dense diagram. Click opens the
+          tag menu. */}
+      {isTaggable && !isDragging && !isCroppingImage && (hasTags || (!isReadOnly && !(isEditing && element.type === "shape"))) && (
         <div
-          className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 px-1.5 rounded-full bg-card/90 backdrop-blur border border-cyan-500/30 shadow-sm z-10 bottom-[-33px] h-[30px] py-[5px] top-[-62px] w-fit"
-          style={{ transform: "translate(-50%, 50%)" }}
+          className="absolute inset-0 pointer-events-none z-[60]"
+          style={{ transform: element.rotation ? `rotate(${-element.rotation}deg)` : undefined }}
         >
-          {element.hypercubeTags.slice(0, 3).map((tag) => (
-            <span key={tag} className="text-xs opacity-90" title={tag}>
-              {HYPERCUBE_TAG_ICONS[tag]}
-            </span>
-          ))}
-          {element.hypercubeTags.length > 3 && (
-            <span className="text-[10px] text-cyan-400/80 ml-0.5">
-              +{element.hypercubeTags.length - 3}
-            </span>
-          )}
+          <div
+            ref={tagBadgeRef}
+            data-tag-badge="true"
+            className="absolute left-1/2 pointer-events-auto"
+            style={{ top: isSelected ? -94 : -40, transform: `translateX(-50%) scale(${1 / canvasZoom})`, transformOrigin: "center bottom" }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              disabled={isReadOnly}
+              title={hasTags ? `Tags: ${element.hypercubeTags!.join(", ")}` : "Tag to Hypercube"}
+              onClick={(e) => {
+                e.stopPropagation();
+                showTagMenu ? setShowTagMenu(false) : openTagMenu();
+              }}
+              className={cn(
+                "group/tag flex items-center justify-center gap-0.5 h-6 min-w-6 px-1 rounded-full border shadow-sm backdrop-blur transition-opacity",
+                hasTags
+                  ? "bg-card/90 border-white/15 text-xs hover:border-white/30"
+                  : "bg-zinc-900/90 border-white/20 text-white/60 hover:text-white",
+                !(hasTags && tagsPinned) && !isSelected && !showTagMenu && "opacity-0 group-hover:opacity-100",
+              )}
+            >
+              {hasTags ? (
+                <>
+                  {element.hypercubeTags!.slice(0, 3).map((tag) => (
+                    <span
+                      key={tag}
+                      className="leading-none text-white/45 transition-colors group-hover/tag:[color:var(--tag-c)]"
+                      style={{ "--tag-c": HYPERCUBE_TAG_COLORS[tag] } as React.CSSProperties}
+                    >{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-3.5 h-3.5" />; })()}</span>
+                  ))}
+                  {element.hypercubeTags!.length > 3 && (
+                    <span className="text-[10px] text-white/45">+{element.hypercubeTags!.length - 3}</span>
+                  )}
+                </>
+              ) : (
+                <Tag className="w-3.5 h-3.5" />
+              )}
+            </button>
+            {showTagMenu && (
+              <HypercubeTagPicker
+                anchorRef={tagBadgeRef}
+                currentTags={element.hypercubeTags || []}
+                onTagToggle={(tag) => {
+                  const currentTags = element.hypercubeTags || [];
+                  const newTags = currentTags.includes(tag)
+                    ? currentTags.filter((t) => t !== tag)
+                    : [...currentTags, tag];
+                  onUpdate({ hypercubeTags: newTags } as Partial<CanvasElement>);
+                }}
+                onClose={() => setShowTagMenu(false)}
+              />
+            )}
+          </div>
         </div>
       )}
       {/* Element content */}
@@ -1889,6 +2000,21 @@ export function CanvasElementRenderer({
                   />
                 </>
               ) : null
+            ) : element.type === "text" ? (
+              !isReadOnly && !element.locked ? (
+                <>
+                  {(["nw", "ne", "sw", "se", "e", "w"] as const).map((pos) => (
+                    <TextResizeHandle
+                      key={pos}
+                      position={pos}
+                      element={element as TextElement}
+                      onUpdate={onUpdate}
+                      canvasZoom={canvasZoom}
+                      onResizeStart={pushCanvasHistory}
+                    />
+                  ))}
+                </>
+              ) : null
             ) : (
               <>
                 <ResizeHandle
@@ -1943,15 +2069,6 @@ export function CanvasElementRenderer({
             side={element.type === "image" ? "right" : "bottom"}
           />
         )}
-      {/* Text font-size resize handle - shown when text selected and not editing */}
-      {isSelected && !isEditing && element.type === "text" && !isReadOnly && (
-        <TextFontSizeHandle
-          element={element as TextElement}
-          onUpdate={onUpdate}
-          canvasZoom={canvasZoom}
-          onResizeStart={pushCanvasHistory}
-        />
-      )}
     </div>
   );
 }
@@ -2213,6 +2330,164 @@ function ResizeHandle({
   );
 }
 
+const TEXT_SIZE_STEPS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 64, 72, 96, 128, 160, 200];
+
+/** Compact font-size stepper for the text toolbar; the value is also typeable. */
+function TextSizeControl({ value, onChange }: { value: number; onChange: (size: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = (raw: string) => {
+    const n = Math.round(parseFloat(raw));
+    if (Number.isFinite(n)) onChange(Math.max(6, Math.min(400, n)));
+    else setDraft(String(value));
+  };
+  const step = (dir: 1 | -1) => {
+    const next =
+      dir > 0
+        ? TEXT_SIZE_STEPS.find((s) => s > value) ?? value + 8
+        : [...TEXT_SIZE_STEPS].reverse().find((s) => s < value) ?? Math.max(6, value - 2);
+    onChange(next);
+  };
+  return (
+    <div
+      className="flex items-center rounded border border-border/50 bg-card/80"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button className="px-1.5 py-1 text-muted-foreground hover:text-primary" onClick={() => step(-1)} title="Smaller">
+        <Minus className="w-3 h-3" />
+      </button>
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ""))}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+          if (e.key === "ArrowUp") { e.preventDefault(); step(1); }
+          if (e.key === "ArrowDown") { e.preventDefault(); step(-1); }
+        }}
+        className="w-8 bg-transparent text-center text-xs tabular-nums outline-none"
+        title="Font size"
+      />
+      <button className="px-1.5 py-1 text-muted-foreground hover:text-primary" onClick={() => step(1)} title="Larger">
+        <Plus className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
+// Text resize handles (Miro-style):
+// - corners SCALE the text: font size and box grow/shrink together;
+// - left/right sides set a WRAP WIDTH (text becomes fixed-width and wraps);
+//   double-clicking a side handle returns to auto width (box hugs the text).
+// Height is never set by hand; it always follows the content.
+function TextResizeHandle({
+  position,
+  element,
+  onUpdate,
+  canvasZoom,
+  onResizeStart,
+}: {
+  position: "nw" | "ne" | "sw" | "se" | "e" | "w";
+  element: TextElement;
+  onUpdate: (updates: Partial<CanvasElement>) => void;
+  canvasZoom: number;
+  onResizeStart?: () => void;
+}) {
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      onResizeStart?.();
+
+      const startX = e.clientX;
+      const startW = element.width;
+      const startH = element.height;
+      const startPosX = element.x;
+      const startPosY = element.y;
+      const startFont = element.style?.fontSize || 16;
+      const isCorner = position.length === 2;
+      const fromLeft = position.includes("w");
+      const fromTop = position.includes("n");
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const dx = (moveEvent.clientX - startX) / canvasZoom;
+        const signedDx = fromLeft ? -dx : dx;
+        if (isCorner) {
+          if (!(startW > 0)) return;
+          const scale = Math.max(0.1, (startW + signedDx) / startW);
+          const fontSize = Math.max(6, Math.min(400, Math.round(startFont * scale)));
+          const k = fontSize / startFont;
+          const newW = Math.max(12, startW * k);
+          const newH = Math.max(8, startH * k);
+          onUpdate({
+            style: { ...(element.style || {}), fontSize },
+            width: newW,
+            height: newH,
+            x: fromLeft ? startPosX + (startW - newW) : startPosX,
+            y: fromTop ? startPosY + (startH - newH) : startPosY,
+          } as Partial<CanvasElement>);
+        } else {
+          const minW = Math.max(24, startFont * 1.2);
+          const newW = Math.max(minW, startW + signedDx);
+          onUpdate({
+            width: newW,
+            x: fromLeft ? startPosX + (startW - newW) : startPosX,
+            autoWidth: false,
+          } as Partial<CanvasElement>);
+        }
+      };
+
+      const handleMouseUp = () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [element, onUpdate, position, canvasZoom, onResizeStart],
+  );
+
+  const s = 1 / canvasZoom;
+  const isSide = position === "e" || position === "w";
+  const style: React.CSSProperties = isSide
+    ? {
+        top: "50%",
+        [position === "e" ? "right" : "left"]: -3,
+        transform: `translateY(-50%) scale(${s})`,
+        transformOrigin: position === "e" ? "center right" : "center left",
+        cursor: "ew-resize",
+      }
+    : {
+        [position.includes("n") ? "top" : "bottom"]: -4,
+        [position.includes("w") ? "left" : "right"]: -4,
+        transform: `scale(${s})`,
+        transformOrigin: `${position.includes("n") ? "top" : "bottom"} ${position.includes("w") ? "left" : "right"}`,
+        cursor: position === "nw" || position === "se" ? "nwse-resize" : "nesw-resize",
+      };
+
+  return (
+    <div
+      className={cn(
+        "absolute z-10 bg-white border border-primary shadow-sm",
+        isSide ? "w-1.5 h-4 rounded-full" : "w-2 h-2 rounded-[2px]",
+      )}
+      style={style}
+      onMouseDown={handleMouseDown}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        if (isSide) {
+          onResizeStart?.();
+          onUpdate({ autoWidth: true } as Partial<CanvasElement>);
+        }
+      }}
+      title={isSide ? "Drag to set wrap width · double-click to fit text" : "Drag to scale text"}
+    />
+  );
+}
+
 // Rotation handle — line + dot extending from the element, drag to rotate
 function RotationHandle({
   element,
@@ -2331,94 +2606,36 @@ function RotationHandle({
   );
 }
 
-// Text font-size resize handle - drag to scale font size
-function TextFontSizeHandle({
-  element,
-  onUpdate,
-  canvasZoom,
-  onResizeStart,
-}: {
-  element: TextElement;
-  onUpdate: (updates: Partial<TextElement>) => void;
-  canvasZoom: number;
-  onResizeStart?: () => void;
-}) {
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-
-      // Capture history before starting resize for undo support
-      onResizeStart?.();
-
-      setIsDragging(true);
-
-      const startY = e.clientY;
-      const startFontSize = element.style?.fontSize || 16;
-
-      const handleMouseMove = (moveEvent: MouseEvent) => {
-        // Calculate delta - vertical only (down increases, up decreases)
-        const deltaY = (moveEvent.clientY - startY) / canvasZoom;
-        const delta = deltaY;
-
-        // Scale factor: each 10px of drag = 1px font size change
-        const fontSizeChange = Math.round(delta / 10);
-        let newFontSize = startFontSize + fontSizeChange;
-
-        // Clamp to reasonable bounds
-        newFontSize = Math.max(8, Math.min(180, newFontSize));
-
-        onUpdate({
-          style: {
-            ...element.style,
-            fontSize: newFontSize,
-          },
-        });
-      };
-
-      const handleMouseUp = () => {
-        setIsDragging(false);
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-    },
-    [element, onUpdate, canvasZoom, onResizeStart],
-  );
-
-  // Scale handle inversely with zoom to keep it visible at all zoom levels
-  const handleScale = 1 / canvasZoom;
-  const baseScale = isDragging ? 1.25 : 1;
-
-  // Offset the handle below the element
-  const handleOffset = 8;
-
-  return (
-    <div
-      className={cn(
-        "absolute w-5 h-5 bg-primary/90 border-2 border-background rounded-sm z-10 flex items-center justify-center cursor-ns-resize transition-all hover:scale-110",
-        isDragging && "shadow-lg",
-      )}
-      style={{
-        position: 'absolute',
-        left: '50%',
-        bottom: `-${handleOffset}px`,
-        transform: `translateX(-50%) scale(${handleScale * baseScale})`,
-      }}
-      onMouseDown={handleMouseDown}
-      title="Drag to resize text"
-    >
-      <ALargeSmall className="w-3.5 h-3.5 text-background" />
-    </div>
-  );
+// Color picker popover - always opens below the toolbar
+/**
+ * Slides each panel clear of `target` (screen rect): up first, then left, then
+ * right, but only to a spot that is fully on screen. When the element is so big
+ * (zoomed in) that no such spot exists, the panel stays where it opened rather
+ * than being pushed off screen. Toolbar and content layer scale cancel out
+ * (zoom * 1/zoom), so local translate px equal screen px.
+ */
+function avoidElement(panels: Iterable<HTMLElement>, target: DOMRect) {
+  const gap = 10;
+  const vw = window.innerWidth;
+  for (const p of Array.from(panels)) {
+    p.style.translate = "";
+    const pr = p.getBoundingClientRect();
+    const overlaps = pr.left < target.right && pr.right > target.left && pr.top < target.bottom && pr.bottom > target.top;
+    if (!overlaps) {
+      // Keep menus opened near a screen edge fully visible.
+      if (pr.left < 8) p.style.translate = `${8 - pr.left}px 0`;
+      else if (pr.right > vw - 8) p.style.translate = `${vw - 8 - pr.right}px 0`;
+      continue;
+    }
+    const dy = target.top - gap - pr.bottom;
+    if (pr.top + dy >= 8) { p.style.translate = `0 ${dy}px`; continue; }
+    const dxL = target.left - gap - pr.right;
+    if (pr.left + dxL >= 8) { p.style.translate = `${dxL}px 0`; continue; }
+    const dxR = target.right + gap - pr.left;
+    if (pr.right + dxR <= vw - 8) { p.style.translate = `${dxR}px 0`; continue; }
+  }
 }
 
-
-// Color picker popover - always opens below the toolbar
 function ColorPicker({
   currentColor,
   onColorChange,
@@ -2431,9 +2648,10 @@ function ColorPicker({
   // Submenus always open downward so the user never moves the cursor up to reach options.
   return (
     <div
+      data-submenu="true"
       className={cn(
-        "absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
-        "p-3 grid grid-cols-4 gap-2",
+        "absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[132px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150",
+        "p-2 grid grid-cols-4 gap-1.5",
       )}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -2456,6 +2674,13 @@ function ColorPicker({
           }}
         />
       ))}
+      <GradientToolButton
+        value={currentColor}
+        onChange={onColorChange}
+        className="rounded"
+        fallbackColor={currentColor}
+      />
+      <SavedGradients onPick={onColorChange} className="col-span-4 mt-0.5" />
     </div>
   );
 }
@@ -2470,22 +2695,20 @@ function ShapeTypePicker({
   onTypeSelect: (shapeType: ShapeType) => void;
   onClose: () => void;
 }) {
-  const shapeTypes: { type: ShapeType; label: string; icon: React.ReactNode }[] = [
-    { type: "rectangle", label: "Rectangle", icon: <div className="w-4 h-3 bg-current rounded-sm" /> },
-    { type: "circle", label: "Circle", icon: <div className="w-4 h-4 bg-current rounded-full" /> },
-    { type: "diamond", label: "Diamond", icon: <div className="w-3 h-3 bg-current rotate-45" /> },
-    { type: "triangle", label: "Triangle", icon: <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-current" /> },
-    { type: "hexagon", label: "Hexagon", icon: <div className="w-4 h-4 bg-current" style={{ clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }} /> },
-    { type: "star", label: "Star", icon: <Star className="w-4 h-4 fill-current" /> },
-  ];
+  const shapeTypes = SHAPE_DEFS.map(({ type, label }) => ({
+    type,
+    label,
+    icon: <ShapeGlyph type={type} className="w-5 h-5" />,
+  }));
 
   return (
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      data-submenu="true"
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-1 px-1.5 py-1">
+      <div className="grid grid-cols-6 gap-1 px-1 py-1">
         {shapeTypes.map(({ type, label, icon }) => (
           <button
             key={type}
@@ -2504,123 +2727,6 @@ function ShapeTypePicker({
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-// Shape text style picker - simplified to only show font weight (secondary popover)
-function ShapeTextStylePicker({
-  style,
-  onStyleChange,
-  onOpenColorPicker,
-  onClose,
-}: {
-  style?: ElementStyle;
-  onStyleChange: (updates: Partial<ElementStyle>) => void;
-  onOpenColorPicker?: () => void;
-  onClose: () => void;
-}) {
-  const currentFontWeight = style?.fontWeight || 'normal';
-  const currentFontFamily = style?.fontFamily || 'inherit';
-  const currentFontSize = style?.fontSize || 14;
-  const isBold = currentFontWeight === 'bold' || currentFontWeight === 'semibold';
-  const isItalic = style?.fontStyle === 'italic';
-  const isUnderline = style?.textDecoration === 'underline';
-  const currentTextAlign = style?.textAlign || 'center';
-
-  return (
-    <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {/* Font family */}
-      <select
-        value={currentFontFamily}
-        onChange={(e) => onStyleChange({ fontFamily: e.target.value })}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full h-7 px-2 mb-2 text-[11px] rounded bg-muted/50 border border-border/50 text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/50"
-      >
-        {FONT_FAMILIES.map(({ value, label }) => (
-          <option key={value} value={value}>{label}</option>
-        ))}
-      </select>
-
-      {/* Font size slider */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] text-muted-foreground w-8">Size</span>
-        <input
-          type="range" value={currentFontSize}
-          onChange={(e) => onStyleChange({ fontSize: parseInt(e.target.value) })}
-          min={8} max={72} step={1}
-          className="flex-1 h-1 rounded-full appearance-none bg-muted cursor-pointer"
-        />
-        <span className="text-[10px] text-muted-foreground w-6 text-right">{currentFontSize}</span>
-      </div>
-
-      {/* Formatting buttons row: B | I | U | divider | AlignLeft | AlignCenter | AlignRight */}
-      <div className="flex items-center gap-1 mb-2">
-        {/* Bold */}
-        <button
-          onClick={() => onStyleChange({ fontWeight: isBold ? 'normal' : 'bold' })}
-          className={cn("p-1.5 rounded transition-colors text-xs font-bold", isBold ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Bold"
-        >
-          B
-        </button>
-        {/* Italic */}
-        <button
-          onClick={() => onStyleChange({ fontStyle: isItalic ? 'normal' : 'italic' })}
-          className={cn("p-1.5 rounded transition-colors text-xs italic", isItalic ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Italic"
-        >
-          I
-        </button>
-        {/* Underline */}
-        <button
-          onClick={() => onStyleChange({ textDecoration: isUnderline ? 'none' : 'underline' })}
-          className={cn("p-1.5 rounded transition-colors text-xs underline", isUnderline ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Underline"
-        >
-          U
-        </button>
-        {/* Divider */}
-        <div className="w-px h-4 bg-border/50 mx-0.5" />
-        {/* Align Left */}
-        <button
-          onClick={() => onStyleChange({ textAlign: 'left' })}
-          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'left' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Left"
-        >
-          <AlignLeft className="w-3.5 h-3.5" />
-        </button>
-        {/* Align Center */}
-        <button
-          onClick={() => onStyleChange({ textAlign: 'center' })}
-          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'center' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Center"
-        >
-          <AlignCenter className="w-3.5 h-3.5" />
-        </button>
-        {/* Align Right */}
-        <button
-          onClick={() => onStyleChange({ textAlign: 'right' })}
-          className={cn("p-1.5 rounded transition-colors", currentTextAlign === 'right' ? "bg-primary/20 text-primary" : "hover:bg-white/10 text-muted-foreground")}
-          title="Align Right"
-        >
-          <AlignRight className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Text color button */}
-      {onOpenColorPicker && (
-        <button
-          onClick={() => { onClose(); onOpenColorPicker(); }}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground rounded hover:bg-white/5 transition-colors"
-        >
-          <Palette className="w-3.5 h-3.5" /> Text Color
-        </button>
-      )}
     </div>
   );
 }
@@ -2770,7 +2876,7 @@ export function ShapeColorPicker({
   const customColorRef = useRef<HTMLInputElement>(null);
   const currentWidth = strokeWidth || 2;
   const currentOpacity = fillOpacity !== undefined ? fillOpacity : 100;
-  const currentFontSize = fontSize || 16;
+  const currentFontSize = fontSize || 14; // matches ShapeCard's default
 
   const colorToHex = (color?: string): string => {
     if (!color || color === "transparent" || color === "inherit") return "#ffffff";
@@ -2819,7 +2925,8 @@ export function ShapeColorPicker({
 
   return (
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      data-submenu="true"
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -2934,6 +3041,12 @@ export function ShapeColorPicker({
               title={`Gradient ${i + 1}`}
             />
           ))}
+          <GradientToolButton
+            value={mode === "fill" ? fillColor : mode === "stroke" ? strokeColor : textColor}
+            onChange={handleColorChange}
+            fallbackColor={getCurrentColor()}
+          />
+          <SavedGradients onPick={handleColorChange} className="w-full justify-center mt-0.5" />
         </div>
       </div>
 
@@ -3027,7 +3140,8 @@ export function StoryboardColorPicker({
 
   return (
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      data-submenu="true"
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3082,6 +3196,8 @@ export function StoryboardColorPicker({
             className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
           />
         </button>
+        <GradientToolButton value={current} onChange={apply} tileClassName="w-7 h-7" className="rounded-md" fallbackColor={customHex} />
+        <SavedGradients onPick={apply} className="col-span-6" swatchClassName="w-7 h-7" />
       </div>
 
       {/* Border width */}
@@ -3172,7 +3288,8 @@ function ContainerStylePicker({
 
   return (
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      data-submenu="true"
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3377,7 +3494,8 @@ function TextColorPicker({
 
   return (
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      data-submenu="true"
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3473,6 +3591,13 @@ function TextColorPicker({
               title={`Gradient ${index + 1}`}
             />
           ))}
+          <GradientToolButton
+            value={currentGradient}
+            onChange={onGradientChange}
+            tileClassName="w-7 h-7"
+            fallbackColor={currentColor}
+          />
+          <SavedGradients onPick={onGradientChange} className="w-full justify-center" swatchClassName="w-7 h-7" />
         </div>
       )}
     </div>
@@ -3483,10 +3608,13 @@ function TextColorPicker({
 function GradientPicker({
   currentGradient,
   onGradientChange,
+  onLiveChange,
   onClose,
 }: {
   currentGradient?: string;
   onGradientChange: (gradient: string) => void;
+  /** Live edits from the gradient editor: apply without closing the menu. */
+  onLiveChange?: (gradient: string) => void;
   onClose: () => void;
 }) {
   const gradients = [
@@ -3506,7 +3634,8 @@ function GradientPicker({
 
   return (
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      data-submenu="true"
+      className={cn("absolute right-full bottom-0 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3532,6 +3661,16 @@ function GradientPicker({
           />
         ))}
       </div>
+      <div className="flex items-center gap-2 mt-2">
+        <GradientToolButton
+          value={currentGradient}
+          onChange={onLiveChange ?? onGradientChange}
+          tileClassName="w-7 h-7"
+          title="Custom gradient"
+        />
+        <span className="text-xs text-muted-foreground">Custom gradient</span>
+      </div>
+      <SavedGradients onPick={onLiveChange ?? onGradientChange} className="mt-2" swatchClassName="w-7 h-7" />
       <button
         onClick={onClose}
         className="w-full mt-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -3547,16 +3686,81 @@ function HypercubeTagPicker({
   currentTags,
   onTagToggle,
   onClose,
+  anchorRef,
 }: {
   currentTags: HypercubeFaceTag[];
   onTagToggle: (tag: HypercubeFaceTag) => void;
   onClose: () => void;
+  /** The tag badge; the menu is placed around the element that owns it. */
+  anchorRef: React.RefObject<HTMLElement | null>;
 }) {
-  return (
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Fixed, portaled placement that never covers the tagged element: above the
+  // badge (and its toolbar) when it fits, else beside the element, else below.
+  // Re-evaluated every frame so it follows pan, zoom and dragging.
+  useLayoutEffect(() => {
+    let raf = 0;
+    const sticky: { current: number | null } = { current: null };
+    const W = 240, GAP = 12, M = 8, TOP = 72;
+    const hit = (a: { left: number; top: number; right: number; bottom: number }, r: DOMRect) =>
+      a.left < r.right - 2 && a.right > r.left + 2 && a.top < r.bottom - 2 && a.bottom > r.top + 2;
+    const place = () => {
+      const panel = panelRef.current, badge = anchorRef.current;
+      const owner = badge?.closest("[data-element-id]") as HTMLElement | null;
+      if (panel && badge && owner) {
+        const id = owner.getAttribute("data-element-id");
+        const er = owner.getBoundingClientRect();
+        const br = badge.getBoundingClientRect();
+        const toolbar = document.querySelector(`[data-avoid-selector='[data-element-id="${id}"]']`);
+        const avoid = [er, ...(toolbar ? [toolbar.getBoundingClientRect()] : [])];
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const H = panel.offsetHeight || 360;
+        const clampX = (x: number) => Math.max(M, Math.min(vw - W - M, x));
+        const clampY = (y: number) => Math.max(TOP, Math.min(vh - H - M, y));
+        const topOfStack = Math.min(er.top, ...(toolbar ? [toolbar.getBoundingClientRect().top] : []));
+        const cands = [
+          { left: clampX(br.left + br.width / 2 - W / 2), top: topOfStack - GAP - H },
+          { left: er.right + GAP, top: clampY(er.top + er.height / 2 - H / 2) },
+          { left: er.left - GAP - W, top: clampY(er.top + er.height / 2 - H / 2) },
+          { left: clampX(br.left + br.width / 2 - W / 2), top: er.bottom + GAP },
+        ];
+        const fits = (c: { left: number; top: number }) =>
+          c.top >= TOP && c.top + H <= vh - M && c.left >= M && c.left + W <= vw - M &&
+          !avoid.some((r) => hit({ left: c.left, top: c.top, right: c.left + W, bottom: c.top + H }, r));
+        // Sticky choice (see the gradient editor): no flipping while neighbours animate.
+        let idx = sticky.current;
+        if (idx === null || !fits(cands[idx])) {
+          const found = cands.findIndex(fits);
+          idx = found >= 0 ? found : null;
+          sticky.current = idx;
+        }
+        const pick = idx !== null ? cands[idx] : { left: clampX(er.right + GAP), top: clampY(er.top) };
+        const L = `${Math.round(pick.left)}px`, T = `${Math.round(pick.top)}px`;
+        if (panel.style.left !== L) panel.style.left = L;
+        if (panel.style.top !== T) panel.style.top = T;
+        panel.style.visibility = "visible";
+      }
+      raf = requestAnimationFrame(place);
+    };
+    place();
+    return () => cancelAnimationFrame(raf);
+  }, [anchorRef]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div
-      className={cn("absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150", "p-3")}
+      ref={panelRef}
+      data-tag-badge="true"
+      data-tag-menu="true"
+      data-prevent-canvas-wheel="true"
+      style={{ left: 0, top: 0, visibility: "hidden" }}
+      className={cn("fixed z-[10040] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in duration-150", "p-3")}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
     >
       <div className="text-xs font-medium text-muted-foreground mb-2">
         Tag to Hypercube
@@ -3569,13 +3773,16 @@ function HypercubeTagPicker({
               key={tag}
               onClick={() => onTagToggle(tag)}
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-all text-left",
+                "group/row flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-all text-left",
                 isSelected
                   ? "bg-primary/20 text-primary"
                   : "hover:bg-primary/10 text-muted-foreground hover:text-foreground",
               )}
             >
-              <span className="text-base">{HYPERCUBE_TAG_ICONS[tag]}</span>
+              <span
+                className={isSelected ? "" : "text-white/45 group-hover/row:[color:var(--tag-c)] transition-colors"}
+                style={{ "--tag-c": HYPERCUBE_TAG_COLORS[tag], ...(isSelected ? { color: HYPERCUBE_TAG_COLORS[tag] } : {}) } as React.CSSProperties}
+              >{(() => { const I = HYPERCUBE_TAG_ICONS[tag]; return <I className="w-4 h-4" />; })()}</span>
               <span className="flex-1">{tag}</span>
               {isSelected && <span className="text-primary">✓</span>}
             </button>
@@ -3588,65 +3795,121 @@ function HypercubeTagPicker({
       >
         Done
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
-// Emoji picker (simple version)
-const COMMON_EMOJIS = [
-  // Marks & energy
-  "💡", "⭐", "❤️", "🎯", "🚀", "✅", "⚡", "🔥", "💎", "🌟", "📌", "🎨",
-  // Emotions & people
-  "😀", "🥹", "😮", "🤯", "😌", "😖", "🤔", "🫶", "👀", "🧠", "🫀", "🙌",
-  // Nature & atmosphere
-  "🌊", "🌙", "☀️", "🌈", "🌱", "🍄", "🌀", "❄️", "🌋", "🪐", "✨", "🌸",
-  // Objects & tools
-  "🔮", "🎧", "🎬", "📷", "🕹️", "🧭", "🗝️", "⏳", "🧪", "📖", "🛠️", "🎁",
-  // Symbols & flow
-  "♾️", "☯️", "🔺", "🟣", "🔗", "❓", "❗", "💭", "🗯️", "🎪", "🏁", "🙏",
+// Emoji picker: categorized, scrollable. Opens anchored under the emoji it edits.
+const EMOJI_CATEGORIES: Array<{ key: string; icon: string; emojis: string[] }> = [
+  {
+    key: "Marks",
+    icon: "⭐",
+    emojis: ["💡", "⭐", "🌟", "✨", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🎯", "🚀", "✅", "❌", "⚡", "🔥", "💎", "📌", "📍", "🏁", "🚩", "❓", "❗", "💭", "🗯️", "🔔", "⚠️", "🛑", "♻️", "🔖", "🏷️", "🎖️", "🏆", "🥇", "🔑", "🗝️", "🔒", "🔓"],
+  },
+  {
+    key: "People",
+    icon: "😀",
+    emojis: ["😀", "😃", "😄", "😁", "😅", "😂", "🙂", "😉", "😊", "😍", "🥰", "😘", "🤩", "🥹", "😮", "🤯", "😌", "😖", "😴", "🤔", "🫠", "🫶", "👀", "🧠", "🫀", "🙌", "👏", "🙏", "💪", "👍", "👎", "🤝", "✌️", "🤞", "🫡", "🧘", "🕺", "💃", "🧑‍💻", "🧑‍🎨"],
+  },
+  {
+    key: "Nature",
+    icon: "🌿",
+    emojis: ["🌊", "🌙", "☀️", "🌈", "🌱", "🌿", "🍀", "🍄", "🌀", "❄️", "🔥", "🌋", "🪐", "🌍", "🌌", "🌸", "🌺", "🌻", "🌲", "🌴", "🍃", "🪷", "🦋", "🐝", "🐙", "🦉", "🐬", "🦄", "🐉", "🌵", "⛰️", "🏔️", "🌅", "🌠", "☁️", "⛈️", "💧", "🪨", "🪵", "🐚"],
+  },
+  {
+    key: "Objects",
+    icon: "🛠️",
+    emojis: ["🔮", "🎧", "🎬", "📷", "🎥", "📹", "🕹️", "🎮", "🧭", "⏳", "⌛", "⏰", "🧪", "🔬", "🔭", "📖", "📚", "📝", "✏️", "🖊️", "📎", "📊", "📈", "📉", "🗂️", "📁", "🗒️", "📅", "💻", "🖥️", "📱", "⌨️", "🖱️", "🛠️", "🔧", "🧰", "🎁", "💰", "🧲", "🔦"],
+  },
+  {
+    key: "Activities",
+    icon: "🎨",
+    emojis: ["🎨", "🎭", "🎪", "🎤", "🎵", "🎶", "🎹", "🥁", "🎸", "🎻", "🎲", "🧩", "♟️", "🎳", "🏹", "⚽", "🏀", "🎾", "🏄", "🧗", "🚴", "🏃", "🤸", "🧑‍🏫", "🎓", "🏛️", "🎡", "🎢", "🎠", "🪩", "🕯️", "🪔", "🧿", "🪬", "🎆", "🎇", "🎉", "🎊", "🥂", "🍷"],
+  },
+  {
+    key: "Places",
+    icon: "🏠",
+    emojis: ["🏠", "🏡", "🏢", "🏫", "🏥", "🏨", "🏰", "🛖", "⛩️", "🕌", "⛪", "🗼", "🗽", "🌉", "🚪", "🪟", "🛋️", "🛏️", "🚗", "🚕", "🚌", "🚆", "✈️", "🛸", "🚁", "⛵", "🚢", "🗺️", "🧳", "🎒", "⛺", "🏕️", "🏝️", "🏜️", "🌐", "📡", "🛰️", "🔭", "🚀", "🧭"],
+  },
+  {
+    key: "Symbols",
+    icon: "♾️",
+    emojis: ["♾️", "☯️", "🔺", "🔻", "🔷", "🔶", "🔵", "🟣", "🟢", "🟡", "🟠", "🔴", "⚫", "⚪", "🟥", "🟦", "🟩", "🟨", "🟪", "⬛", "⬜", "◼️", "◻️", "▶️", "⏸️", "⏩", "🔁", "🔀", "➕", "➖", "✖️", "➗", "💯", "🔗", "🧬", "⚛️", "🕉️", "☮️", "🔱", "♈"],
+  },
 ];
+const COMMON_EMOJIS = EMOJI_CATEGORIES.flatMap((c) => c.emojis);
 
 function EmojiPicker({
   onEmojiSelect,
   onClose,
+  anchored = false,
 }: {
   onEmojiSelect: (emoji: string) => void;
   onClose: () => void;
+  /** true: popover under the emoji being edited. false: left-side toolbar submenu. */
+  anchored?: boolean;
 }) {
+  const [cat, setCat] = useState(0);
+  const category = EMOJI_CATEGORIES[cat];
   return (
-    // Left-side panel (same convention as the other toolbar submenus); the
-    // expanded emoji set scrolls inside a fixed-height window.
     <div
-      className="absolute right-full top-1/2 -translate-y-1/2 mr-3 z-[100] pointer-events-auto w-[240px] rounded-xl bg-zinc-900/95 backdrop-blur-2xl border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in slide-in-from-right-2 duration-150 p-2 grid grid-cols-6 gap-1 max-h-[264px] overflow-y-auto"
+      data-submenu={anchored ? undefined : "true"}
+      className={cn(
+        "z-[100] pointer-events-auto w-[260px] rounded-xl bg-zinc-900 border border-violet-500/30 shadow-[0_10px_40px_rgba(0,0,0,0.55)] animate-in fade-in duration-150 p-2",
+        anchored
+          ? "absolute top-full left-1/2 -translate-x-1/2 mt-2 text-left"
+          : "absolute right-full bottom-0 mr-3 slide-in-from-right-2",
+      )}
       onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      data-prevent-canvas-wheel="true"
     >
-      {COMMON_EMOJIS.map((emoji) => (
-        <button
-          key={emoji}
-          className="w-8 h-8 rounded hover:bg-primary/20 transition-colors flex items-center justify-center text-lg"
-          onClick={() => {
-            onEmojiSelect(emoji);
-            onClose();
-          }}
-        >
-          {emoji}
-        </button>
-      ))}
+      <div className="flex items-center gap-0.5 mb-1.5 pb-1.5 border-b border-white/10">
+        {EMOJI_CATEGORIES.map((c, i) => (
+          <button
+            key={c.key}
+            type="button"
+            title={c.key}
+            onClick={() => setCat(i)}
+            className={cn("flex-1 h-7 rounded text-base flex items-center justify-center transition-colors", i === cat ? "bg-primary/25" : "hover:bg-white/10")}
+          >
+            {c.icon}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-8 gap-0.5 max-h-[168px] overflow-y-auto pr-0.5">
+        {category.emojis.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            className="w-8 h-8 rounded hover:bg-primary/20 transition-colors flex items-center justify-center text-lg"
+            onClick={() => {
+              onEmojiSelect(emoji);
+              onClose();
+            }}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
       <button
-        className="w-8 h-8 rounded hover:bg-destructive/20 transition-colors flex items-center justify-center text-xs text-muted-foreground"
+        type="button"
+        className="w-full mt-1.5 py-1 rounded text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
         onClick={() => {
           onEmojiSelect("");
           onClose();
         }}
       >
-        ✕
+        Remove emoji
       </button>
     </div>
   );
 }
 
 // Board colors - curated cyberdelic palette that looks good with white icons
-const BOARD_HEX_COLORS = [
+export const BOARD_HEX_COLORS = [
   {
     id: "purple",
     gradient:
@@ -3721,8 +3984,15 @@ const BOARD_HEX_COLORS = [
   },
 ];
 
-// Board icon picker
-const BOARD_ICONS = [
+// Board icon picker. The first eight keep their original ids (saved boards use
+// them); the rest are looked up by lucide name.
+type BoardIconDef = { id: string; Icon: React.ComponentType<{ className?: string }>; label: string };
+const lucideByName = (name: string, label: string, id = name.toLowerCase()): BoardIconDef => ({
+  id,
+  Icon: ((LucideIcons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[name] ?? LayoutGrid),
+  label,
+});
+const BOARD_ICONS: BoardIconDef[] = [
   { id: "grid", Icon: LayoutGrid, label: "Grid" },
   { id: "star", Icon: Star, label: "Star" },
   { id: "globe", Icon: Globe, label: "Globe" },
@@ -3731,6 +4001,67 @@ const BOARD_ICONS = [
   { id: "link", Icon: Link2, label: "Link" },
   { id: "box", Icon: Box, label: "Box" },
   { id: "heart", Icon: Heart, label: "Heart" },
+  lucideByName("Lightbulb", "Idea"),
+  lucideByName("Rocket", "Launch"),
+  lucideByName("Target", "Goal"),
+  lucideByName("Flag", "Milestone"),
+  lucideByName("Bookmark", "Bookmark"),
+  lucideByName("Folder", "Folder"),
+  lucideByName("Layers", "Layers"),
+  lucideByName("Map", "Map"),
+  lucideByName("Compass", "Compass"),
+  lucideByName("Sparkles", "Sparkles"),
+  lucideByName("Flame", "Energy"),
+  lucideByName("Leaf", "Nature"),
+  lucideByName("Mountain", "Mountain"),
+  lucideByName("Sun", "Sun"),
+  lucideByName("Moon", "Moon"),
+  lucideByName("Waves", "Waves"),
+  lucideByName("Music", "Music"),
+  lucideByName("Headphones", "Audio"),
+  lucideByName("Camera", "Camera"),
+  lucideByName("Film", "Film"),
+  lucideByName("Mic", "Voice"),
+  lucideByName("Palette", "Design"),
+  lucideByName("Brush", "Brush"),
+  lucideByName("Puzzle", "Puzzle"),
+  lucideByName("Gamepad2", "Game"),
+  lucideByName("Trophy", "Trophy"),
+  lucideByName("Gift", "Gift"),
+  lucideByName("Shield", "Shield"),
+  lucideByName("KeyRound", "Key"),
+  lucideByName("Users", "People"),
+  lucideByName("User", "Person"),
+  lucideByName("MessageCircle", "Chat"),
+  lucideByName("Mail", "Mail"),
+  lucideByName("Calendar", "Calendar"),
+  lucideByName("Clock", "Time"),
+  lucideByName("House", "Home", "home"),
+  lucideByName("Building2", "Place", "building"),
+  lucideByName("GraduationCap", "Learning"),
+  lucideByName("BookOpen", "Book"),
+  lucideByName("Hammer", "Build"),
+  lucideByName("Wrench", "Tools"),
+  lucideByName("Package", "Package"),
+  lucideByName("ShoppingBag", "Shop"),
+  lucideByName("Cpu", "Tech"),
+  lucideByName("Code", "Code"),
+  lucideByName("Database", "Data"),
+  lucideByName("Wifi", "Signal"),
+  lucideByName("Activity", "Pulse"),
+  lucideByName("HeartPulse", "Wellbeing"),
+  lucideByName("Brain", "Mind"),
+  lucideByName("Eye", "Vision"),
+  lucideByName("Hand", "Touch"),
+  lucideByName("Ear", "Hearing"),
+  lucideByName("Atom", "Atom"),
+  lucideByName("Orbit", "Orbit"),
+  lucideByName("Telescope", "Explore"),
+  lucideByName("Plane", "Travel"),
+  lucideByName("Anchor", "Anchor"),
+  lucideByName("Coffee", "Coffee"),
+  lucideByName("Zap", "Spark"),
+  lucideByName("Infinity", "Infinity"),
 ];
 
 function BoardIconPicker({
@@ -3744,15 +4075,17 @@ function BoardIconPicker({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-4 gap-1 w-[165px] h-[96px]"
+      data-submenu="true"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 rounded-lg bg-zinc-900 border border-border shadow-xl grid grid-cols-6 gap-1 w-[252px] max-h-[216px] overflow-y-auto"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
+      data-prevent-canvas-wheel="true"
     >
       {BOARD_ICONS.map(({ id, Icon, label }) => (
         <button
           key={id}
           className={cn(
-            "w-10 h-10 rounded hover:bg-primary/20 transition-colors flex items-center justify-center",
+            "w-9 h-9 rounded hover:bg-primary/20 transition-colors flex items-center justify-center",
             currentIcon === id && "bg-primary/30 ring-1 ring-primary",
           )}
           onClick={() => {
@@ -3771,15 +4104,19 @@ function BoardIconPicker({
 function BoardColorPicker({
   currentColor,
   onColorSelect,
+  onLiveChange,
   onClose,
 }: {
   currentColor?: string;
   onColorSelect: (gradient: string) => void;
+  /** Live edits from the gradient editor: apply without closing the menu. */
+  onLiveChange?: (gradient: string) => void;
   onClose: () => void;
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 grid grid-cols-3 gap-2 w-[133px] h-[156px]"
+      data-submenu="true"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 rounded-lg bg-card backdrop-blur border border-border shadow-xl grid grid-cols-3 gap-2 w-[133px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3800,6 +4137,13 @@ function BoardColorPicker({
           title={label}
         />
       ))}
+      <GradientToolButton
+        value={currentColor}
+        onChange={onLiveChange ?? onColorSelect}
+        tileClassName="w-[30px] h-[30px]"
+        className="rounded-lg"
+      />
+      <SavedGradients onPick={onLiveChange ?? onColorSelect} className="col-span-3" swatchClassName="w-[30px] h-[30px]" />
     </div>
   );
 }
@@ -3816,7 +4160,8 @@ function FileViewSubmenu({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-[14.75px] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 w-[120px]"
+      data-submenu="true"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[120px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -3868,7 +4213,8 @@ function ExperienceViewSubmenu({
 }) {
   return (
     <div
-      className="absolute top-full left-1/2 -translate-x-1/2 mt-[14.75px] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl z-50 w-[140px]"
+      data-submenu="true"
+      className="absolute right-full bottom-0 mr-3 z-[100] p-2 py-[8px] rounded-lg bg-card backdrop-blur border border-border shadow-xl w-[140px]"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -5593,6 +5939,11 @@ function FreeformCard({
 }) {
   // Use the passed-in onBlur handler (from the parent renderer) to avoid undefined refs.
   const handleBlur = onBlur;
+  // Clicking the card's emoji opens the picker right there.
+  const [showCardEmoji, setShowCardEmoji] = useState(false);
+  useEffect(() => {
+    if (!isSelected) setShowCardEmoji(false);
+  }, [isSelected]);
   const bgColor =
     element.style?.bgColor ||
     "linear-gradient(135deg, #2A0A3D 0%, #4B1B6B 50%, #0B2C5A 100%)";
@@ -5638,13 +5989,16 @@ function FreeformCard({
     element.taskMetadata?.description || "",
     (v) => onUpdate({ taskMetadata: { ...element.taskMetadata, description: v } }),
   );
+  // Stable { __html } object (see richHtmlProp in ShapeCard for why).
   const renderedNoteBody = useMemo(
-    () => DOMPurify.sanitize(
-      noteBody
-        .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
-        .replace(/>\s*\n+\s*</g, '><'),
-      { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }
-    ),
+    () => ({
+      __html: DOMPurify.sanitize(
+        noteBody
+          .replace(/<p>\s*<\/p>/gi, "<p><br></p>")
+          .replace(/>\s*\n+\s*</g, '><'),
+        { USE_PROFILES: { html: true }, ADD_ATTR: ['target'] }
+      ),
+    }),
     [noteBody],
   );
 
@@ -6224,7 +6578,7 @@ function FreeformCard({
         boxShadow: element.isDocument ? "none" : "0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.1) inset",
         minWidth: element.isDocument ? "100px" : isNote ? "200px" : "100%",
         maxWidth: element.isDocument ? "100px" : undefined,
-        minHeight: element.isDocument ? "100px" : isNote ? "300px" : "100%",
+        minHeight: element.isDocument ? undefined : isNote ? "300px" : "100%",
       }}
     >
       {/* Task indicator - subtle corner badge */}
@@ -6234,8 +6588,28 @@ function FreeformCard({
           title="Actionable task"
         />
       )}
-      {/* Emoji display (top-left) - hide for documents */}
-      {element.emoji && !element.isDocument && (
+      {/* Emoji (click to change) - notes only; documents have theirs in the icon view */}
+      {!element.isDocument && element.cardType !== "task" && (element.emoji || isSelected) && (
+        <div className="relative z-10 w-full text-center py-[7px] leading-none">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center justify-center rounded-md transition-colors hover:bg-white/10 cursor-pointer",
+              element.emoji ? "text-lg px-1.5 py-0.5" : "text-xs px-2 py-1 text-white/45 border border-dashed border-white/20",
+            )}
+            title="Change emoji"
+            // No stopPropagation: the same click also selects the card (the picker
+            // closes whenever the card is not selected).
+            onClick={() => setShowCardEmoji((v) => !v)}
+          >
+            {element.emoji || "+ Emoji"}
+          </button>
+          {showCardEmoji && (
+            <EmojiPicker anchored onEmojiSelect={(emoji) => onUpdate({ emoji } as Partial<FreeformElement>)} onClose={() => setShowCardEmoji(false)} />
+          )}
+        </div>
+      )}
+      {element.emoji && !element.isDocument && element.cardType === "task" && (
         <div className="top-2 text-lg leading-none z-10 right-[auto] left-[50%] static w-full text-center py-[7px]">
           {element.emoji}
         </div>
@@ -6250,9 +6624,18 @@ function FreeformCard({
             className="w-full h-full flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105"
             onDoubleClick={(e) => { e.stopPropagation(); setIsNoteFocusMode(true); }}
           >
-            <div className="text-4xl mb-1">{element.emoji || '📄'}</div>
+            <div className="text-4xl leading-none mb-1">{element.emoji || '📄'}</div>
             <div className="w-full px-1">
               <textarea
+                rows={1}
+                ref={(ta) => {
+                  // Fit the title on mount too (not just on typing), so a
+                  // one-line title doesn't reserve an empty second row.
+                  if (ta) {
+                    ta.style.height = 'auto';
+                    ta.style.height = ta.scrollHeight + 'px';
+                  }
+                }}
                 value={localNoteTitle}
                 onChange={(e) => {
                   setLocalNoteTitle(e.target.value);
@@ -6312,10 +6695,10 @@ function FreeformCard({
                     onUpdate({ hideNoteTitle: !element.hideNoteTitle });
                   }}
                   className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
-                  title={element.hideNoteTitle ? "Show title" : "Hide title"}
+                  title={element.hideNoteTitle ? "Show note title" : "Hide note title"}
                   data-no-drag
                 >
-                  {element.hideNoteTitle ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  <Heading className={cn("h-3.5 w-3.5", element.hideNoteTitle && "opacity-40")} />
                 </button>
                 <button
                   type="button"
@@ -6452,10 +6835,10 @@ function FreeformCard({
                       onUpdate({ hideNoteTitle: !element.hideNoteTitle });
                     }}
                     className="rounded bg-black/35 p-1 text-white/85 hover:bg-black/55 hover:text-white"
-                    title={element.hideNoteTitle ? "Show title" : "Hide title"}
+                    title={element.hideNoteTitle ? "Show note title" : "Hide note title"}
                     data-no-drag
                   >
-                    {element.hideNoteTitle ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                    <Heading className={cn("h-3.5 w-3.5", element.hideNoteTitle && "opacity-40")} />
                   </button>
                   <button
                     type="button"
@@ -6503,7 +6886,7 @@ function FreeformCard({
                     <div
                       className="w-full break-words overflow-wrap-anywhere [&_a]:text-purple-300 [&_a]:underline [&_h1]:mt-1 [&_h1]:mb-0.5 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mt-1 [&_h2]:mb-0.5 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mt-0.5 [&_h3]:mb-0 [&_h3]:text-base [&_h3]:font-semibold [&_p]:my-0.5 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_p]:break-words [&_h1]:break-words [&_h2]:break-words [&_h3]:break-words [&_li]:break-words"
                       style={{ wordWrap: "break-word", overflowWrap: "anywhere" }}
-                      dangerouslySetInnerHTML={{ __html: renderedNoteBody }}
+                      dangerouslySetInnerHTML={renderedNoteBody}
                     />
                   ) : (
                     <span className="text-white/40">Write your note...</span>
@@ -7221,13 +7604,51 @@ function ImageCard({
   isSelected,
   isReadOnly = false,
   onCropModeChange,
+  canvasZoom = 1,
 }: {
   element: ImageElement;
   onUpdate: (updates: Partial<ImageElement>) => void;
   isSelected: boolean;
   isReadOnly?: boolean;
   onCropModeChange?: (cropping: boolean) => void;
+  canvasZoom?: number;
 }) {
+  // The image toolbar renders in the canvas overlay layer (above every element and
+  // line) and at a constant on-screen size. Inside the element it was scaled with
+  // the canvas (huge when zoomed in), painted under neighbours, and overlapped
+  // whatever sat below the image.
+  const overlayToolbar = (node: React.ReactNode, tone: "default" | "crop" = "default") => {
+    const layer = typeof document !== "undefined" ? document.getElementById(CANVAS_OVERLAY_LAYER_ID) : null;
+    const inner = (
+      <div
+        className={cn(
+          "absolute left-1/2 flex items-center gap-0.5 px-1.5 py-1 rounded-xl pointer-events-auto",
+          "bg-zinc-950/95 backdrop-blur-2xl border shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
+          tone === "crop" ? "border-cyan-500/50" : "border-violet-500/25",
+        )}
+        style={{
+          top: "100%",
+          marginTop: 12 / canvasZoom,
+          transform: `translateX(-50%) scale(${1 / canvasZoom})`,
+          transformOrigin: "top center",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {node}
+      </div>
+    );
+    if (!layer) return inner;
+    return createPortal(
+      <div
+        className="absolute pointer-events-none"
+        style={{ left: element.x, top: element.y, width: element.width, height: element.height, zIndex: 2000000002 }}
+      >
+        {inner}
+      </div>,
+      layer,
+    );
+  };
   const [isUploading, setIsUploading] = useState(false);
   const [hasImage, setHasImage] = useState(!!element.src);
   const [isCropping, setIsCropping] = useState(false);
@@ -7736,7 +8157,7 @@ function ImageCard({
               className="gap-2"
               data-no-drag
             >
-              <Upload className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
               Upload Image
             </Button>
             <div className="text-xs text-muted-foreground">
@@ -8113,12 +8534,8 @@ function ImageCard({
       </div>
       {/* Image edit toolbar — single icon-only pill below the image.
           Positioned at -bottom-16 to clear the rotation handle (~ -39px stem). */}
-      {isSelected && !isCropping && !isReadOnly && (
-        <div
-          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-border shadow-lg z-10"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
+      {isSelected && !isCropping && !isReadOnly && overlayToolbar(
+        <>
           {/* Replace the image file (storyboard keeps its cell ratio; a plain
               image block re-fits to the new image's aspect ratio). */}
           <input
@@ -8130,17 +8547,17 @@ function ImageCard({
           />
           <button
             onClick={() => replaceInputRef.current?.click()}
-            className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            className="p-1.5 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
             title="Replace image"
             disabled={isUploading}
           >
             {isUploading ? (
-              <RotateCcw className="w-4 h-4 animate-spin" />
+              <RotateCcw className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <Upload className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
             )}
           </button>
-          <div className="w-px h-5 bg-border mx-0.5" />
+          <div className="w-px h-4 bg-border mx-0.5" />
           <button
             onClick={() => {
               setIsCropping(true);
@@ -8150,34 +8567,34 @@ function ImageCard({
                   : crop,
               );
             }}
-            className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+            className="p-1.5 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
             title="Crop"
           >
-            <Crop className="w-4 h-4" />
+            <Crop className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={toggleFlipH}
             className={cn(
-              "p-2 rounded-md transition-colors",
+              "p-1.5 rounded-md transition-colors",
               flipH
                 ? "bg-primary/20 text-primary"
                 : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
             )}
             title="Flip horizontal"
           >
-            <FlipHorizontal className="w-4 h-4" />
+            <FlipHorizontal className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={toggleFlipV}
             className={cn(
-              "p-2 rounded-md transition-colors",
+              "p-1.5 rounded-md transition-colors",
               flipV
                 ? "bg-primary/20 text-primary"
                 : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
             )}
             title="Flip vertical"
           >
-            <FlipVertical className="w-4 h-4" />
+            <FlipVertical className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => {
@@ -8201,65 +8618,62 @@ function ImageCard({
               onUpdate({ storyboard: !element.storyboard });
             }}
             className={cn(
-              "p-2 rounded-md transition-colors",
+              "p-1.5 rounded-md transition-colors",
               isStoryboard
                 ? "bg-primary/20 text-primary"
                 : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
             )}
             title={isStoryboard ? "Remove caption frame" : "Add caption (storyboard)"}
           >
-            <Captions className="w-4 h-4" />
+            <Captions className="w-3.5 h-3.5" />
           </button>
           {isStoryboard && (
             <button
               onClick={() => setIsRepositioning((v) => !v)}
               className={cn(
-                "p-2 rounded-md transition-colors",
+                "p-1.5 rounded-md transition-colors",
                 isRepositioning
                   ? "bg-cyan-500/20 text-cyan-400"
                   : "hover:bg-primary/20 text-muted-foreground hover:text-primary",
               )}
               title={isRepositioning ? "Done repositioning" : "Reposition image (drag focal point)"}
             >
-              <Move className="w-4 h-4" />
+              <Move className="w-3.5 h-3.5" />
             </button>
           )}
           {hasEdits && (
             <>
-              <div className="w-px h-5 bg-border mx-0.5" />
+              <div className="w-px h-4 bg-border mx-0.5" />
               <button
                 onClick={resetImage}
-                className="p-2 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                className="p-1.5 rounded-md hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
                 title="Reset image"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="w-3.5 h-3.5" />
               </button>
             </>
           )}
-        </div>
+        </>,
       )}
       {/* Crop controls */}
-      {isCropping && (
-        <div
-          className="absolute -bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-card backdrop-blur border border-cyan-500/50 shadow-lg z-10"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
+      {isCropping && overlayToolbar(
+        <>
           <button
             onClick={applyCrop}
             title="Apply crop"
-            className="p-2 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 transition-colors flex items-center justify-center"
+            className="p-1.5 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 transition-colors flex items-center justify-center"
           >
             <Check className="w-4 h-4" />
           </button>
           <button
             onClick={cancelCrop}
             title="Cancel"
-            className="p-2 rounded-md bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
+            className="p-1.5 rounded-md bg-primary/10 hover:bg-primary/20 text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center"
           >
             <X className="w-4 h-4" />
           </button>
-        </div>
+        </>,
+        "crop",
       )}
     </div>
   );
@@ -8270,6 +8684,7 @@ function ShapeCard({
   element,
   onUpdate,
   isEditing,
+  typedChar,
   onBlur,
   isSelected,
   onCreateConnectedShape,
@@ -8277,21 +8692,22 @@ function ShapeCard({
   element: ShapeElement;
   onUpdate: (updates: Partial<ShapeElement>) => void;
   isEditing: boolean;
+  typedChar?: string | null;
   onBlur: (e?: React.FocusEvent) => void;
   isSelected?: boolean;
   onCreateConnectedShape?: (direction: "top" | "right" | "bottom" | "left") => void;
 }) {
-  const [localContent, setLocalContent] = useLocalInput(
-    element.content || "",
-    (v) => onUpdate({ content: v }),
-  );
-
-  const bgColor = element.style?.bgColor || "hsl(var(--primary) / 0.3)";
-  const borderColor = element.style?.borderColor || "hsl(var(--primary))";
-  const borderWidth = element.style?.borderWidth || 2;
-  const textColor = element.style?.textColor || "inherit";
+  // Unstyled shapes fall back to the default preset (gradient fill + ring).
+  const bgColor = element.style?.bgColor || DEFAULT_SHAPE_STYLE.bgColor!;
+  const borderColor = element.style?.borderColor || DEFAULT_SHAPE_STYLE.borderColor!;
+  const borderWidth = element.style?.borderWidth ?? DEFAULT_SHAPE_STYLE.borderWidth!;
+  const textColor = element.style?.textColor || DEFAULT_SHAPE_STYLE.textColor!;
   const fillOpacity =
-    element.style?.fillOpacity !== undefined ? element.style.fillOpacity : 100;
+    element.style?.fillOpacity !== undefined
+      ? element.style.fillOpacity
+      : element.style?.bgColor
+        ? 100
+        : DEFAULT_SHAPE_STYLE.fillOpacity!;
 
   // Convert fillOpacity (0-100) to CSS opacity (0-1) and apply to background
   const getBackgroundWithOpacity = (color: string, opacity: number): string => {
@@ -8349,192 +8765,48 @@ function ShapeCard({
     const gradientDefs = (
       <defs>
         {bgColor.includes("gradient") && (
-          <linearGradient
-            id={`gradient-${element.id}`}
-            x1="0%"
-            y1="0%"
-            x2="100%"
-            y2="100%"
-          >
-            <stop
-              offset="0%"
-              style={{
-                stopColor: extractGradientColor(bgColor, 0),
-                stopOpacity: 1,
-              }}
-            />
-            <stop
-              offset="100%"
-              style={{
-                stopColor: extractGradientColor(bgColor, 1),
-                stopOpacity: 1,
-              }}
-            />
-          </linearGradient>
+          <SvgGradientDef id={`gradient-${element.id}`} css={bgColor} />
         )}
         {isGradientStroke && (
-          <linearGradient
-            id={`stroke-gradient-${element.id}`}
-            x1="0%"
-            y1="0%"
-            x2="100%"
-            y2="100%"
-          >
-            <stop
-              offset="0%"
-              style={{
-                stopColor: extractGradientColor(borderColor, 0),
-                stopOpacity: 1,
-              }}
-            />
-            <stop
-              offset="100%"
-              style={{
-                stopColor: extractGradientColor(borderColor, 1),
-                stopOpacity: 1,
-              }}
-            />
-          </linearGradient>
+          <SvgGradientDef id={`stroke-gradient-${element.id}`} css={borderColor} />
         )}
       </defs>
     );
 
-    switch (element.shapeType) {
-      case "circle":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <circle
-              cx="50"
-              cy="50"
-              r="48"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "diamond":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <polygon
-              points="50,5 95,50 50,95 5,50"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "hexagon":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <polygon
-              points="50,5 93.3,25 93.3,75 50,95 6.7,75 6.7,25"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "star":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <path
-              d="M50,10 L61,40 L92,40 L68,60 L78,90 L50,70 L22,90 L32,60 L8,40 L39,40 Z"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      case "triangle":
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <polygon
-              points="50,10 90,90 10,90"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-      default: // rectangle
-        return (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 100 100"
-            className="absolute inset-0"
-            preserveAspectRatio="none"
-            style={{ overflow: "visible" }}
-          >
-            {gradientDefs}
-            <rect
-              x="2"
-              y="2"
-              width="96"
-              height="96"
-              rx="8"
-              fill={fill}
-              fillOpacity={opacity}
-              stroke={stroke}
-              strokeWidth={strokeWidth}
-            />
-          </svg>
-        );
-    }
+    // Drawn at the element's real pixel size (no stretched viewBox), inset by
+    // half the stroke so it isn't clipped.
+    const w = Math.max(1, element.width || 100);
+    const h = Math.max(1, element.height || 100);
+    const { d, detail } = shapePath(element.shapeType, w, h, Math.max(1, strokeWidth / 2));
+    return (
+      <svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        className="absolute inset-0"
+        style={{ overflow: "visible" }}
+      >
+        {gradientDefs}
+        <path
+          d={d}
+          fill={fill}
+          fillOpacity={opacity}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          strokeLinejoin="round"
+        />
+        {detail && (
+          <path d={detail} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeLinecap="round" />
+        )}
+      </svg>
+    );
   };
 
   // Check if this shape is actionable
   const isActionable =
     element.taskMetadata?.isActionable ||
     element.content?.includes("[ ]") ||
-    element.content?.includes("[x]") ||
-    (element.hypercubeTags && element.hypercubeTags.length > 0);
+    element.content?.includes("[x]");
 
   // Gradient text detection
   const isGradientText = textColor?.includes("gradient");
@@ -8542,9 +8814,20 @@ function ShapeCard({
   const shapeFontStyle = element.style?.fontStyle || 'normal';
   const shapeTextDecoration = element.style?.textDecoration || 'none';
 
+  const baseFontSize = element.style?.fontSize || 14;
+  const textInsets = shapeTextInsets(element.shapeType);
+  // The { __html } OBJECT must be referentially stable: with the React bundled in
+  // Next 14 a new object each render makes React reset innerHTML, which replaces
+  // the text node under the pointer between mousedown and mouseup, so the browser
+  // never fires click/dblclick and the shape can't be re-entered.
+  const richHtmlProp = useMemo(
+    () => ({ __html: element.richContent ? DOMPurify.sanitize(element.richContent, { USE_PROFILES: { html: true } }) : "" }),
+    [element.richContent],
+  );
+
   // Common text styles (shared between editing and display)
   const baseTextStyle: React.CSSProperties = {
-    fontSize: element.style?.fontSize || 14,
+    fontSize: baseFontSize,
     fontWeight: element.style?.fontWeight === '300' ? 300 : element.style?.fontWeight || 'normal',
     fontFamily: element.style?.fontFamily || 'inherit',
     fontStyle: shapeFontStyle,
@@ -8577,9 +8860,9 @@ function ShapeCard({
       )}
       {renderSVGShape()}
       <div
-        className="absolute inset-0 z-10 overflow-hidden"
+        className={cn("absolute inset-0 z-10", isEditing ? "overflow-visible" : "overflow-hidden")}
         style={{
-          padding: '8%',
+          padding: `${textInsets[0] * 100}% ${textInsets[1] * 100}% ${textInsets[2] * 100}% ${textInsets[3] * 100}%`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -8587,32 +8870,29 @@ function ShapeCard({
         }}
       >
         {isEditing ? (
-          <textarea
-            ref={(el) => {
-              if (el) {
-                el.focus();
-                // Auto-size to content
-                el.style.height = 'auto';
-                el.style.height = `${Math.min(el.scrollHeight, el.parentElement?.clientHeight || 9999)}px`;
-              }
-            }}
-            value={localContent}
-            onChange={(e) => {
-              setLocalContent(e.target.value);
-              // Re-size on content change
-              const target = e.target;
-              target.style.height = 'auto';
-              target.style.height = `${Math.min(target.scrollHeight, target.parentElement?.clientHeight || 9999)}px`;
-            }}
-            onBlur={onBlur}
-            className="w-full bg-transparent border-0 focus:outline-none resize-none"
+          <ShapeRichTextEditor
+            html={element.richContent || plainTextToHtml(element.content || "")}
+            replaceWithChar={typedChar}
+            shapeStyle={element.style}
+            onShapeStyleChange={(updates) => onUpdate({ style: { ...element.style, ...updates } })}
+            baseFontSize={baseFontSize}
+            textStyle={{ ...baseTextStyle, ...textColorStyle }}
+            onChange={(html, plain) => onUpdate({ richContent: html, content: plain })}
+            onBlur={() => onBlur()}
+          />
+        ) : element.richContent ? (
+          <div
+            key={isGradientText ? textColor : 'solid'}
+            className="shape-rich-display w-full [&_p]:m-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
             style={{
               ...baseTextStyle,
               ...textColorStyle,
+              display: isGradientText ? 'inline-block' : 'block',
+              maxWidth: '100%',
               maxHeight: '100%',
+              overflow: 'hidden',
             }}
-            placeholder="Text..."
-            data-no-drag
+            dangerouslySetInnerHTML={richHtmlProp}
           />
         ) : (
           <span
@@ -8946,21 +9226,27 @@ function ContainerCard({
 }
 
 // Text card component - clean, auto-sizing, context menu controls
+// Inner padding of a text element's box, per side. Kept small so the selection
+// box hugs the glyphs (was 8px, which made small text float in a big frame).
+const TEXT_PAD = 4;
+const TEXT_LINE_HEIGHT = 1.3;
+
 function TextCard({
   element,
   onUpdate,
   isEditing,
+  isSelected = false,
   onBlur,
 }: {
   element: TextElement;
   onUpdate: (updates: Partial<TextElement>) => void;
   isEditing: boolean;
+  isSelected?: boolean;
   onBlur: (e?: React.FocusEvent) => void;
 }) {
   const measureRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [originalContent, setOriginalContent] = useState("");
 
   const [localContent, setLocalContent, onLocalBlur] = useLocalInput(
     element.content || "",
@@ -8973,16 +9259,11 @@ function TextCard({
   const textColor = element.style?.textColor || "#ffffff";
   const gradient = element.style?.bgColor; // We'll use bgColor to store gradient
   const textAlign = element.textAlign || "left";
-  const wrapWidth = element.wrapWidth; // Can be undefined for auto-width
+  // Auto-width text hugs its content (no wrapping except explicit line breaks);
+  // fixed-width text wraps at element.width. Height always follows the content.
+  const autoWidth = !!element.autoWidth;
 
-  // Store original content when entering edit mode
-  useEffect(() => {
-    if (isEditing) {
-      setOriginalContent(element.content);
-    }
-  }, [isEditing]);
-
-  // Click outside to deselect/exit edit mode
+  // Click outside to exit edit mode
   useEffect(() => {
     if (!isEditing) return;
 
@@ -9006,117 +9287,106 @@ function TextCard({
     };
   }, [isEditing, onBlur]);
 
-  // Auto-grow textarea height while editing — uses refs to avoid re-render cascades
-  const elementHeightRef = useRef(element.height);
-  elementHeightRef.current = element.height;
-
-  const autoGrowTextarea = useCallback(() => {
-    if (textareaRef.current) {
-      const textarea = textareaRef.current;
-      // Reset height to auto to get accurate scrollHeight
-      textarea.style.height = "0px";
-      // Set height to scrollHeight to show all content
-      const newHeight = Math.max(30, textarea.scrollHeight);
-      textarea.style.height = newHeight + "px";
-
-      // Update element height to match (plus padding)
-      const totalHeight = newHeight + 16;
-      if (Math.abs(elementHeightRef.current - totalHeight) > 2) {
-        onUpdate({ height: totalHeight });
-      }
-    }
-  }, [onUpdate]);
-
-  // Auto-grow on mount (enter edit mode)
+  // Focus with the caret at the end when editing starts
   useEffect(() => {
-    if (isEditing) {
-      // Small delay to ensure textarea is rendered
-      if (typeof window !== "undefined") {
-        window.requestAnimationFrame(() => {
-          autoGrowTextarea();
-          // Focus WITHOUT selecting all - normal typing behavior
-          if (textareaRef.current) {
-            textareaRef.current.focus();
-            // Move cursor to end of text
-            const length = textareaRef.current.value.length;
-            textareaRef.current.setSelectionRange(length, length);
-          }
-        });
-      }
+    if (isEditing && typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (ta) {
+          ta.focus();
+          const length = ta.value.length;
+          ta.setSelectionRange(length, length);
+        }
+      });
     }
-  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isEditing]);
 
-  // Auto-size: only adjust HEIGHT to fit content, never change width
-  // Width is controlled by the user via resize handles
+  // Size the box to the text. A hidden mirror renders the same text with the
+  // same font; its size (plus padding) becomes the element's size. Runs on
+  // every input that affects layout — including font size, which the old
+  // version ignored, so shrinking text left a tall empty box.
+  const shownText = isEditing ? localContent : element.content || "";
+  const sizeRef = useRef({ w: element.width, h: element.height });
+  sizeRef.current = { w: element.width, h: element.height };
+  // Re-measure once web fonts finish loading (first paint may use a fallback).
+  const [fontsReady, setFontsReady] = useState(0);
   useEffect(() => {
-    if (!isEditing && measureRef.current && element.content) {
-      const measured = measureRef.current.getBoundingClientRect();
+    let alive = true;
+    document.fonts?.ready.then(() => alive && setFontsReady((n) => n + 1)).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  // The textarea is sized from this LOCAL measurement, not from element.width/
+  // height: those arrive a frame (or more) later through the store, and a
+  // textarea that is briefly too small scrolls itself, which showed up as the
+  // text box jumping up and down while typing.
+  const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const m = measureRef.current;
+    if (!m) return;
+    const rect = m.getBoundingClientRect();
+    // getBoundingClientRect is in screen px (canvas is scaled); offset* are layout px.
+    const mw = m.offsetWidth || rect.width;
+    const mh = m.offsetHeight || rect.height;
+    const minLine = Math.ceil(fontSize * TEXT_LINE_HEIGHT);
+    const nextH = Math.max(minLine, Math.ceil(mh)) + TEXT_PAD * 2;
+    const nextW = autoWidth
+      ? Math.max(Math.ceil(fontSize * 0.6), Math.ceil(mw) + 2) + TEXT_PAD * 2
+      : sizeRef.current.w;
+    setMeasured((prev) => (prev && prev.w === nextW && prev.h === nextH ? prev : { w: nextW, h: nextH }));
+    // Only the client working on this text writes its measured size. Two
+    // clients measuring slightly differently (fonts, subpixels) would
+    // otherwise keep overwriting each other's width.
+    if (!isEditing && !isSelected) return;
+    const updates: Partial<TextElement> = {};
+    if (Math.abs(sizeRef.current.h - nextH) >= 1) updates.height = nextH;
+    if (autoWidth && Math.abs(sizeRef.current.w - nextW) >= 1) updates.width = nextW;
+    if (updates.width !== undefined || updates.height !== undefined) onUpdate(updates);
+  }, [shownText, fontSize, fontWeight, fontFamily, autoWidth, element.width, onUpdate, isEditing, isSelected, fontsReady]);
 
-      // Height: auto-size to fit wrapped content within current width
-      const newHeight = Math.max(30, Math.ceil(measured.height) + 16);
-
-      // Only update height if changed significantly
-      if (Math.abs(element.height - newHeight) > 8) {
-        onUpdate({ height: newHeight });
-      }
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.scrollTop = 0;
+      ta.scrollLeft = 0;
     }
-  }, [
-    element.content,
-    wrapWidth,
-    isEditing,
-    onUpdate,
-    element.width, // Re-measure height when width changes (text reflows)
-    // within existing bounds via CSS.
-  ]);
-
-  // Removed automatic click-outside blur - user must click outside or press Escape to exit editing
+  }, [measured, isEditing]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Prevent ALL canvas shortcuts from triggering while editing
     e.stopPropagation();
-
     // Escape exits edit mode WITHOUT reverting changes
     if (e.key === "Escape") {
       e.preventDefault();
       onBlur();
     }
-
-    // Enter creates new line - default behavior works
-    // No need to prevent or handle
   };
 
-  // Handle content change with auto-grow
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setLocalContent(e.target.value);
-    // Auto-grow after content update
-    if (typeof window !== "undefined") {
-      window.requestAnimationFrame(autoGrowTextarea);
-    }
-  };
-
-  // Determine text style (solid color or gradient)
   // CRITICAL: Apply gradient directly to text span, not container
-  const hasGradient = gradient?.startsWith("linear-gradient");
-
-  // Get the effective width for the text
-  const effectiveWidth = wrapWidth || element.width;
+  const hasGradient = isGradientCss(gradient);
 
   // Check if this text is actionable
   const isActionable =
     element.taskMetadata?.isActionable ||
     element.content?.includes("[ ]") ||
-    element.content?.includes("[x]") ||
-    (element.hypercubeTags && element.hypercubeTags.length > 0);
+    element.content?.includes("[x]");
+
+  const textStyle: React.CSSProperties = {
+    fontSize,
+    fontWeight,
+    fontFamily,
+    textAlign,
+    lineHeight: TEXT_LINE_HEIGHT,
+    whiteSpace: autoWidth ? "pre" : "pre-wrap",
+    wordBreak: autoWidth ? "normal" : "break-word",
+    overflowWrap: autoWidth ? "normal" : "break-word",
+  };
 
   return (
     <div
       ref={containerRef}
-      className="w-full h-full flex items-start justify-center p-2 relative"
-      style={{
-        // Allow overflow when editing so text isn't clipped
-        overflow: "visible", // Changed from conditional to always visible to prevent clipping at zoom
-      }}
+      className="w-full h-full relative"
+      style={{ padding: TEXT_PAD, overflow: "visible" }}
     >
       {/* Task indicator */}
       {isActionable && (
@@ -9125,62 +9395,42 @@ function TextCard({
           title="Actionable task"
         />
       )}
-      {/* Hidden measurement element - respects wrapWidth */}
-      {!isEditing && element.content && (
-        <div
-          ref={measureRef}
-          className="absolute opacity-0 pointer-events-none whitespace-pre-wrap"
-          style={{
-            fontSize,
-            fontWeight,
-            fontFamily,
-            textAlign,
-            maxWidth: wrapWidth ? `${wrapWidth - 16}px` : undefined,
-            width: wrapWidth ? `${wrapWidth - 16}px` : "auto",
-          }}
-        >
-          {element.content}
-        </div>
-      )}
-      {/* Text content */}
+      {/* Hidden mirror used to size the box (trailing newline needs a glyph) */}
+      <div
+        ref={measureRef}
+        aria-hidden
+        className="absolute left-0 top-0 opacity-0 pointer-events-none"
+        style={{
+          ...textStyle,
+          width: autoWidth ? "max-content" : Math.max(1, element.width - TEXT_PAD * 2),
+        }}
+      >
+        {(shownText || " ") + (shownText.endsWith("\n") ? "\u200b" : "")}
+      </div>
       {isEditing ? (
         <textarea
           ref={textareaRef}
           value={localContent}
-          onChange={handleContentChange}
+          onChange={(e) => setLocalContent(e.target.value)}
           onBlur={onLocalBlur}
           onKeyDown={handleKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           autoFocus
-          className="resize-none border-0 bg-transparent p-0 focus:outline-none"
+          wrap={autoWidth ? "off" : "soft"}
+          className="block resize-none border-0 bg-transparent p-0 m-0 focus:outline-none overflow-hidden"
           style={{
-            fontSize,
-            fontWeight,
-            fontFamily,
-            textAlign,
+            ...textStyle,
             color: textColor,
-            width: effectiveWidth - 16,
-            minHeight: 24,
-            overflow: "visible", // Allow text to be fully visible while editing
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
+            caretColor: textColor.startsWith("#") ? textColor : "#ffffff",
+            width: autoWidth && measured ? measured.w - TEXT_PAD * 2 : "100%",
+            height: measured ? measured.h - TEXT_PAD * 2 : "100%",
           }}
           placeholder="Type text..."
           data-no-drag
         />
       ) : (
-        <div
-          className="w-full whitespace-pre-wrap"
-          style={{
-            fontSize,
-            fontWeight,
-            fontFamily,
-            textAlign,
-            maxWidth: wrapWidth ? `${wrapWidth - 16}px` : undefined,
-            overflow: "visible", // Prevent text clipping
-          }}
-        >
+        <div className="w-full" style={textStyle}>
           {element.content ? (
             <span
               key={hasGradient ? gradient : textColor}
@@ -9200,7 +9450,7 @@ function TextCard({
               {element.content}
             </span>
           ) : (
-            <span className="text-muted-foreground text-sm">
+            <span className="text-muted-foreground" style={{ fontSize: Math.min(fontSize, 14) }}>
               Double-click to edit
             </span>
           )}
@@ -9313,6 +9563,10 @@ function LinkCard({
         fileSize: file.size,
         linkMode: "file",
         fileViewMode: element.fileViewMode || "bookmark",
+        // A wide bookmark-bar box squeezes the file card's icon: square it up.
+        ...(element.width / Math.max(1, element.height) > 1.6 && (element.fileViewMode || "bookmark") === "bookmark"
+          ? { width: 200, height: 200 }
+          : {}),
       });
     } catch (err) {
       console.error("File upload error:", err);

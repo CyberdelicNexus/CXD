@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, Grid3X3, Undo2, Redo2, AlignVerticalJustifyCenter, Grip, Focus, Download, Tags } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface NavigationToolkitProps {
@@ -17,6 +17,11 @@ export interface NavigationToolkitProps {
   gridVisible?: boolean;
   gridMajorDots?: boolean;
   onCycleGrid?: () => void;
+  /** Tag badges pinned on every tagged element (off = shown on hover only). */
+  showTags?: boolean;
+  onToggleTags?: () => void;
+  onEnterFocusMode?: () => void;
+  onExport?: () => void;
 }
 
 export function NavigationToolkit({
@@ -34,6 +39,10 @@ export function NavigationToolkit({
   gridVisible,
   gridMajorDots,
   onCycleGrid,
+  showTags,
+  onToggleTags,
+  onEnterFocusMode,
+  onExport,
 }: NavigationToolkitProps) {
   return (
     // Vertically centered on the page regardless of viewport height (top-1/2 +
@@ -80,6 +89,21 @@ export function NavigationToolkit({
             <AlignVerticalJustifyCenter className="w-4 h-4" />
           </Button>
         )}
+        {onToggleTags && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleTags}
+            aria-pressed={!!showTags}
+            className={cn(
+              "transition-colors",
+              showTags && "bg-primary/20 text-primary ring-1 ring-primary/50"
+            )}
+            title={showTags ? "Tags: always shown — click to show on hover only" : "Tags: shown on hover — click to always show"}
+          >
+            <Tags className="w-4 h-4" />
+          </Button>
+        )}
       </div>
       <div className="flex items-center gap-1 p-1 rounded-lg bg-card/80 backdrop-blur border border-border flex-col w-[42.599999999999994px]">
         <Button variant="ghost" size="icon" onClick={onZoomOut}>
@@ -110,6 +134,28 @@ export function NavigationToolkit({
       >
         <Grid3X3 className="w-4 h-4" />
       </Button>
+      {onExport && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onExport}
+          className="bg-card/80 backdrop-blur border border-border"
+          title="Export as PNG / JPEG / PDF (Ctrl/Cmd + Shift + E)"
+        >
+          <Download className="w-4 h-4" />
+        </Button>
+      )}
+      {onEnterFocusMode && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onEnterFocusMode}
+          className="bg-card/80 backdrop-blur border border-border"
+          title="Focus Mode: hide all UI (Ctrl/Cmd + .)"
+        >
+          <Focus className="w-4 h-4" />
+        </Button>
+      )}
 
       {onUndo && (
         <Button

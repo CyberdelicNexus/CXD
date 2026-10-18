@@ -21,7 +21,7 @@ const MODEL_OPTIONS: {
   requiredTier: "free" | "pro" | "lifetime";
 }[] = [
   { key: "kimi", label: "Kimi K2.5", costLabel: "Free", requiredTier: "free" },
-  { key: "claude", label: "Claude Sonnet 4.5", costLabel: "2x cost", requiredTier: "pro" },
+  { key: "claude", label: "Claude Sonnet 5.5", costLabel: "2x cost", requiredTier: "pro" },
   { key: "gemini", label: "Gemini 2.5 Pro", costLabel: "1x cost", requiredTier: "pro" },
 ];
 
@@ -67,7 +67,7 @@ export function AIModelSelector({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-56 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
+        <div className="absolute right-0 top-full mt-1 w-56 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-[10050]">
           <div className="px-3 py-2 border-b border-border/50">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
               AI Model

@@ -24,6 +24,7 @@ const SHORTCUTS: ShortcutItem[] = [
       { keys: ["Middle Mouse", "+", "Drag"], description: "Pan canvas" },
       { keys: ["Right Click"], description: "Context menu" },
       { keys: ["Esc"], description: "Cancel current action" },
+      { keys: ["Ctrl/Cmd", "+", "."], description: "Toggle focus mode (hide all UI)" },
     ],
   },
   {
@@ -43,7 +44,7 @@ const SHORTCUTS: ShortcutItem[] = [
     category: "Precision Layout",
     shortcuts: [
       { keys: ["↑", "↓", "←", "→"], description: "Move selected 1px" },
-      { keys: ["Shift", "+", "↑↓←→"], description: "Move selected 10px" },
+      { keys: ["Shift", "+", "↑↓←→"], description: "Move selected 10px (containers carry their contents)" },
     ],
   },
   {
@@ -56,6 +57,7 @@ const SHORTCUTS: ShortcutItem[] = [
       { keys: ["Ctrl/Cmd", "+", "X"], description: "Cut selected" },
       { keys: ["Ctrl/Cmd", "+", "V"], description: "Paste at cursor" },
       { keys: ["Ctrl/Cmd", "+", "D"], description: "Duplicate selected" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "E"], description: "Export selection or board (PNG / JPEG / PDF)" },
       { keys: ["Delete / Backspace"], description: "Delete selected" },
     ],
   },
@@ -63,6 +65,9 @@ const SHORTCUTS: ShortcutItem[] = [
     category: "Selection & Grouping",
     shortcuts: [
       { keys: ["Click"], description: "Select element (or entire group)" },
+      { keys: ["Click again"], description: "Select an element inside the selected group" },
+      { keys: ["Ctrl/Cmd", "+", "G"], description: "Group selection" },
+      { keys: ["Ctrl/Cmd", "+", "Shift", "+", "G"], description: "Ungroup" },
       { keys: ["Shift", "+", "Click"], description: "Add/remove from selection" },
       { keys: ["Ctrl/Cmd", "+", "Click"], description: "Select individual in group" },
       { keys: ["Drag"], description: "Marquee select (elements & lines)" },

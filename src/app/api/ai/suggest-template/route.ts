@@ -31,7 +31,8 @@ const MAX_SUMMARY_LEN = 8000;
 
 const suggestionSchema = z.object({
   templateId: z.string().describe("The id of the single best-fitting template from the catalog"),
-  reason: z.string().max(240).describe("One sentence, addressed to the user, explaining why this template fits their framing"),
+  // No .max(): the reason is sliced to 240 below; length bounds are not portable across providers.
+  reason: z.string().describe("One sentence, addressed to the user, explaining why this template fits their framing"),
 });
 
 function isMissing(error: { code?: string; message?: string } | null): boolean {
@@ -153,7 +154,8 @@ export async function POST(request: Request) {
         model,
         prompt,
         schema: suggestionSchema,
-        maxOutputTokens: Math.min(modelConfig.maxTokens, 400),
+        // Thinking counts toward this ceiling on current models, so 400 could cut the answer off.
+        maxOutputTokens: Math.min(modelConfig.maxTokens, 2000),
         ...(modelConfig.isReasoning ? {} : { temperature: 0.2 }),
         abortSignal: abortController.signal,
       });

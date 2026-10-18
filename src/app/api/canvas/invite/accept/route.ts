@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
+import { getPlan } from '@/lib/plans';
 
 // GET - Accept invitation with token
 export async function GET(request: Request) {
@@ -124,6 +125,37 @@ export async function GET(request: Request) {
       .select('owner_id, name')
       .eq('id', invitation.canvas_id)
       .single();
+
+    // Re-check the OWNER's plan and collaborator cap at accept time (mirrors
+    // join/route.ts) — invite/route.ts only counts accepted collaborators, so
+    // pending invitations could otherwise overshoot the cap.
+    const { data: subscription } = await supabaseAdmin
+      .from('subscriptions')
+      .select('plan_id')
+      .eq('user_id', canvas?.owner_id)
+      .single();
+
+    const plan = getPlan(subscription?.plan_id || 'free');
+
+    if (!plan.limits.hasCollaboration) {
+      return NextResponse.json(
+        { error: 'This canvas owner’s plan does not include collaboration' },
+        { status: 403 }
+      );
+    }
+
+    const { count: collaboratorCount } = await supabaseAdmin
+      .from('canvas_collaborators')
+      .select('*', { count: 'exact', head: true })
+      .eq('canvas_id', invitation.canvas_id)
+      .neq('role', 'owner');
+
+    if ((collaboratorCount || 0) >= plan.limits.maxCollaborators) {
+      return NextResponse.json(
+        { error: `Maximum ${plan.limits.maxCollaborators} collaborators reached` },
+        { status: 403 }
+      );
+    }
 
     // Create the collaborator record
     const { error: collabError } = await supabaseAdmin

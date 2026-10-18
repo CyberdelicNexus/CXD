@@ -7,15 +7,25 @@ import { useCXDStore } from "@/store/cxd-store";
 import { CXD_SECTIONS, CXDSectionId } from "@/types/cxd-schema";
 import { ExperienceFlowDrawer } from "./canvas/experience-flow-drawer";
 import { CanvasToolkit } from "./canvas/canvas-toolkit";
-import { CanvasElementRenderer } from "./canvas/canvas-element";
+import { CanvasElementRenderer, requestStartEditing } from "./canvas/canvas-element";
 import { canResizeFreeformCard, sanitizeFreeformResizeUpdate } from "./canvas/card-type-utils";
 import { ExperienceInspector } from "./canvas/experience-inspector";
+import { PinnedInboxNote } from "./canvas/pinned-inbox-note";
+import { CANVAS_OVERLAY_LAYER_ID } from "./canvas/canvas-overlay";
+import { QuickColorFan } from "./canvas/quick-color-fan";
+import { ExportDialog } from "./canvas/export-dialog";
+import { SHAPE_DEFAULT_SIZES } from "@/lib/shape-geometry";
+import { uploadCanvasImage } from "@/lib/canvas-image-upload";
+import { DEFAULT_SHAPE_STYLE } from "@/lib/style-presets";
 import { NavigationToolkit } from "./canvas/navigation-toolkit";
+import { useTagVisibility, toggleTagVisibility } from "@/lib/tag-visibility";
+import { useBuildReveal, useBuildSelection, skipBuild, CAMERA_GLIDE_MS } from "@/lib/ai/assistant-build";
 import { LineLayer } from "./canvas/line-layer";
 import { TaskInbox } from "./canvas/task-inbox";
+import { CanvasAssistant } from "./canvas/canvas-assistant";
 import { MultiSelectionBox } from "./canvas/multi-selection-box";
 import { Button } from "@/components/ui/button";
-import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid, SmilePlus } from "lucide-react";
+import { Minus, Trash2, Circle, ArrowRight, Square, Diamond, Copy, Scissors, Clipboard, ClipboardPaste, Files, ImageIcon, Type, MessageSquare, Link as LinkIcon, Download, Link2, LayoutGrid, SmilePlus, Minimize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   CanvasElement,
@@ -24,6 +34,7 @@ import {
   DEFAULT_ELEMENT_SIZES,
   ShapeType,
   ShapeElement,
+  FreeformElement,
   LineElement,
   getAnchorPosition,
   getClosestAnchors,
@@ -54,6 +65,9 @@ const MAX_ZOOM = 3;
  * disambiguate. Falls back to the old +20/+20 diagonal offset when width is
  * missing/unusable (e.g. 0).
  */
+// Boards with more elements than this only render what's near the viewport.
+const VIEWPORT_CULL_THRESHOLD = 150;
+
 function getDuplicateOffset(element: { width?: number }): { dx: number; dy: number } {
   const w = element.width;
   if (typeof w === "number" && w > 0) {
@@ -217,6 +231,8 @@ function CanvasContextMenu({
   onDuplicate,
   onDelete,
   onDownloadImage,
+  onExport,
+  allowCreate = true,
   onConnectSelected,
   onAutoOrganize,
   hasSelection,
@@ -234,6 +250,9 @@ function CanvasContextMenu({
   onDuplicate: () => void;
   onDelete: () => void;
   onDownloadImage?: () => void;
+  onExport?: () => void;
+  /** False in focus mode: elements are added from the toolbar only. */
+  allowCreate?: boolean;
   onConnectSelected?: () => void;
   onAutoOrganize?: () => void;
   hasSelection: boolean;
@@ -292,7 +311,7 @@ function CanvasContextMenu({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {target.type === 'canvas' && (
+      {target.type === 'canvas' && allowCreate && (
         <>
           <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
             Create Element
@@ -366,6 +385,17 @@ function CanvasContextMenu({
         </>
       )}
 
+      {onExport && (
+        <button
+          onClick={onExport}
+          className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          {hasSelection ? 'Export selection…' : 'Export board…'}
+          <span className="ml-auto text-xs text-muted-foreground">{typeof navigator !== 'undefined' && navigator.platform.includes('Mac') ? '⇧⌘E' : 'Ctrl+⇧+E'}</span>
+        </button>
+      )}
+
       {hasClipboard && (
         <button
           onClick={onPaste}
@@ -432,6 +462,7 @@ export function CXDCanvas() {
     setCanvasViewMode,
     addCanvasElement,
     addCanvasElements,
+    addCanvasEdges,
     updateCanvasElement,
     removeCanvasElement,
     getCanvasElements,
@@ -470,6 +501,8 @@ export function CXDCanvas() {
     showResolvedComments,
     setActiveComment,
     getThreads,
+    canvasFocusMode,
+    setCanvasFocusMode,
   } = useCXDStore();
 
   const project = getCurrentProject();
@@ -531,6 +564,84 @@ export function CXDCanvas() {
     addCanvasEdge(edge);
     broadcastUpdate({ type: 'edge_add', edge });
   }, [addCanvasEdge, broadcastUpdate, canEdit]);
+
+  // Duplicate a set of elements in ONE batched insert (addCanvasElements), so the
+  // copies land in Zustand in the same tick as the new selection. Looping
+  // syncAddElement left the selection pointing at ids the store didn't have yet
+  // for a frame. A multi-selection shifts as a whole (arrangement kept), group
+  // and container links are remapped inside the copy, and connections whose
+  // both endpoints were duplicated are duplicated too. Returns the new ids.
+  const duplicateElements = useCallback((ids: Iterable<string>): string[] => {
+    if (!canEdit) return [];
+    const all = getCanvasElements();
+    const idSet = new Set(ids);
+    const sources = all.filter((el) => idSet.has(el.id));
+    if (sources.length === 0) return [];
+
+    let dx: number;
+    let dy: number;
+    if (sources.length === 1) {
+      ({ dx, dy } = getDuplicateOffset(sources[0]));
+    } else {
+      const minX = Math.min(...sources.map((el) => el.x));
+      const maxX = Math.max(...sources.map((el) => el.x + (el.width || 0)));
+      dx = maxX - minX + 24;
+      dy = 0;
+    }
+
+    const idRemap = new Map<string, string>();
+    sources.forEach((el) => idRemap.set(el.id, uuidv4()));
+    const groupIdRemap = new Map<string, string>();
+    let maxZ = Math.max(0, ...all.map((el) => el.zIndex || 0));
+    const shift = (p?: { x: number; y: number }) => (p ? { x: p.x + dx, y: p.y + dy } : p);
+
+    const clones: CanvasElement[] = sources.map((el) => {
+      const cloned = (typeof structuredClone === "function"
+        ? structuredClone(el)
+        : JSON.parse(JSON.stringify(el))) as CanvasElement;
+      const anyClone = cloned as any;
+      anyClone.id = idRemap.get(el.id)!;
+      anyClone.x = el.x + dx;
+      anyClone.y = el.y + dy;
+      anyClone.zIndex = ++maxZ;
+      if (anyClone.groupId && sources.length > 1) {
+        if (!groupIdRemap.has(anyClone.groupId)) groupIdRemap.set(anyClone.groupId, uuidv4());
+        anyClone.groupId = groupIdRemap.get(anyClone.groupId);
+      } else {
+        anyClone.groupId = undefined;
+      }
+      if (anyClone.containerId && idRemap.has(anyClone.containerId)) {
+        anyClone.containerId = idRemap.get(anyClone.containerId);
+      }
+      if (cloned.type === "line") {
+        anyClone.start = shift(anyClone.start);
+        anyClone.end = shift(anyClone.end);
+        anyClone.bend = shift(anyClone.bend);
+      }
+      if (cloned.type === "connector") {
+        if (idRemap.has(anyClone.fromNodeId)) anyClone.fromNodeId = idRemap.get(anyClone.fromNodeId);
+        if (idRemap.has(anyClone.toNodeId)) anyClone.toNodeId = idRemap.get(anyClone.toNodeId);
+      }
+      return cloned;
+    });
+
+    const edgeClones: CanvasEdge[] = getCanvasEdges()
+      .filter((edge) => idRemap.has(edge.fromNodeId) && idRemap.has(edge.toNodeId))
+      .map((edge) => ({
+        ...(typeof structuredClone === "function" ? structuredClone(edge) : JSON.parse(JSON.stringify(edge))),
+        id: uuidv4(),
+        fromNodeId: idRemap.get(edge.fromNodeId)!,
+        toNodeId: idRemap.get(edge.toNodeId)!,
+        bend: shift(edge.bend),
+      }));
+
+    // addCanvasElements pushes history itself; addCanvasEdges joins that entry.
+    addCanvasElements(clones);
+    addCanvasEdges(edgeClones);
+    clones.forEach((el) => broadcastUpdate({ type: "element_add", element: el }));
+    edgeClones.forEach((edge) => broadcastUpdate({ type: "edge_add", edge }));
+    return clones.map((el) => el.id);
+  }, [canEdit, getCanvasElements, getCanvasEdges, addCanvasElements, addCanvasEdges, broadcastUpdate]);
 
   // Gradient for a NEW connector: if either endpoint already has connectors,
   // continue THEIR gradient family so a chain reads as one flow (the user can
@@ -676,6 +787,19 @@ export function CXDCanvas() {
   );
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
+  // Canvas Assistant build: the running reveal (for connectors + Skip), the
+  // camera glide flag, and the "select what was just built" request.
+  const buildReveal = useBuildReveal();
+  const buildSelection = useBuildSelection();
+  const [cameraGlide, setCameraGlide] = useState(false);
+  const lastBuildSelectionNonce = useRef(buildSelection?.nonce ?? 0);
+  useEffect(() => {
+    if (!buildSelection || buildSelection.nonce === lastBuildSelectionNonce.current) return;
+    lastBuildSelectionNonce.current = buildSelection.nonce;
+    setSelectedElementIds(new Set(buildSelection.ids));
+    setSelectedEdgeId(null);
+  }, [buildSelection]);
+
   // Bend handle dragging state
   const [draggingBendHandle, setDraggingBendHandle] = useState<string | null>(
     null,
@@ -786,17 +910,46 @@ export function CXDCanvas() {
 
   // Snap to grid and alignment guides state
   const snapToGrid = false;
+  // Element just placed that the quick colour fan is offering colours for.
+  const [quickColorTargetId, setQuickColorTargetId] = useState<string | null>(null);
+  const closeQuickColor = useCallback(() => setQuickColorTargetId(null), []);
+
+  // Group the user has "entered" (clicked a member of an already-selected group):
+  // clicks and drags then act on individual members instead of the whole group.
+  const [enteredGroupId, setEnteredGroupId] = useState<string | null>(null);
+  // Pointer-down info for the element being pressed, read by onSelect on click.
+  const elementPressRef = useRef<{ x: number; y: number; wholeGroupSelected: boolean } | null>(null);
+
+  // True while the view is moving (pan/zoom) and shortly after; see willChange below.
+  const [isTransforming, setIsTransforming] = useState(false);
+  const transformIdleTimer = useRef<number | null>(null);
+  useEffect(() => {
+    setIsTransforming(true);
+    if (transformIdleTimer.current !== null) window.clearTimeout(transformIdleTimer.current);
+    transformIdleTimer.current = window.setTimeout(() => setIsTransforming(false), 220);
+    return () => {
+      if (transformIdleTimer.current !== null) window.clearTimeout(transformIdleTimer.current);
+    };
+  }, [canvasPosition.x, canvasPosition.y, canvasZoom]);
+
+  // Export dialog (PNG / JPEG / PDF of the board or the selection).
+  const [exportDialog, setExportDialog] = useState<null | { scope: 'selection' | 'board' }>(null);
+
   const [showAlignmentGuides, setShowAlignmentGuides] = useState(true);
+  const tagsPinned = useTagVisibility();
+  // Guide segments: a horizontal guide runs at `at` from `from` to `to` along x,
+  // a vertical one along y. Only spans the aligned elements, not the board.
+  type GuideSegment = { at: number; from: number; to: number };
   const [alignmentGuides, setAlignmentGuides] = useState<{
-    horizontal: number[];
-    vertical: number[];
+    horizontal: GuideSegment[];
+    vertical: GuideSegment[];
   }>({ horizontal: [], vertical: [] });
 
   // Grid constants - use settings.gridSize for main grid
   const GRID_SIZE = settings.gridSize; // Main grid size from settings
   const MINOR_GRID_SIZE = Math.floor(settings.gridSize / 2); // Minor grid for finer snapping
   const SNAP_THRESHOLD = 6; // Distance threshold for snapping
-  const ALIGNMENT_THRESHOLD = 5; // Distance for alignment guide detection
+  const ALIGNMENT_THRESHOLD = 6; // Screen px within which an edge/centre snaps to a guide
 
   // Snap a value to the nearest grid increment
   const snapToGridValue = useCallback((value: number, useMinorGrid: boolean = false): number => {
@@ -961,87 +1114,72 @@ export function CXDCanvas() {
     newX: number,
     newY: number,
     excludeIds?: Set<string>,
-  ): { horizontal: number[]; vertical: number[]; snapX?: number; snapY?: number } => {
+  ): { horizontal: GuideSegment[]; vertical: GuideSegment[]; snapX?: number; snapY?: number } => {
     if (!showAlignmentGuides) return { horizontal: [], vertical: [] };
 
-    const horizontal: number[] = [];
-    const vertical: number[] = [];
-    let snapX: number | undefined;
-    let snapY: number | undefined;
+    // Threshold in screen pixels, so snapping feels the same at every zoom.
+    const threshold = ALIGNMENT_THRESHOLD / Math.max(canvasZoom, 0.05);
+    // A dragged container's own children move with it: never align to them.
+    const ownChildren =
+      draggingEl.type === "container" ? getContainerDescendantIds(draggingEl.id, canvasElements) : null;
 
-    const draggingCenterX = newX + draggingEl.width / 2;
-    const draggingCenterY = newY + draggingEl.height / 2;
-    const draggingRight = newX + draggingEl.width;
-    const draggingBottom = newY + draggingEl.height;
+    type Cand = { line: number; snap: number; dist: number; el: CanvasElement };
+    const yCands: Cand[] = [];
+    const xCands: Cand[] = [];
+    const w = draggingEl.width;
+    const h = draggingEl.height;
+    // Edge pairs checked per axis: [dragged edge offset, other edge fraction]
+    const OFFSETS: Array<[number, number]> = [[0, 0], [1, 1], [0.5, 0.5], [0, 1], [1, 0]];
 
-    // Check against all other elements (skip dragging, selected, and explicitly excluded)
     canvasElements.forEach((el) => {
       if (el.id === draggingEl.id) return;
       if (selectedElementIds.has(el.id)) return;
       if (excludeIds?.has(el.id)) return;
-
-      const elCenterX = el.x + el.width / 2;
-      const elCenterY = el.y + el.height / 2;
-      const elRight = el.x + el.width;
-      const elBottom = el.y + el.height;
-
-      // Horizontal alignment checks (Y-axis alignments)
-      // Top edge alignment
-      if (Math.abs(newY - el.y) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(el.y);
-        if (!snapY) snapY = el.y;
-      }
-      // Bottom edge alignment
-      if (Math.abs(draggingBottom - elBottom) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(elBottom);
-        if (!snapY) snapY = elBottom - draggingEl.height;
-      }
-      // Center Y alignment
-      if (Math.abs(draggingCenterY - elCenterY) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(elCenterY);
-        if (!snapY) snapY = elCenterY - draggingEl.height / 2;
-      }
-      // Top to bottom alignment
-      if (Math.abs(newY - elBottom) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(elBottom);
-        if (!snapY) snapY = elBottom;
-      }
-      // Bottom to top alignment
-      if (Math.abs(draggingBottom - el.y) < ALIGNMENT_THRESHOLD) {
-        horizontal.push(el.y);
-        if (!snapY) snapY = el.y - draggingEl.height;
-      }
-
-      // Vertical alignment checks (X-axis alignments)
-      // Left edge alignment
-      if (Math.abs(newX - el.x) < ALIGNMENT_THRESHOLD) {
-        vertical.push(el.x);
-        if (!snapX) snapX = el.x;
-      }
-      // Right edge alignment
-      if (Math.abs(draggingRight - elRight) < ALIGNMENT_THRESHOLD) {
-        vertical.push(elRight);
-        if (!snapX) snapX = elRight - draggingEl.width;
-      }
-      // Center X alignment
-      if (Math.abs(draggingCenterX - elCenterX) < ALIGNMENT_THRESHOLD) {
-        vertical.push(elCenterX);
-        if (!snapX) snapX = elCenterX - draggingEl.width / 2;
-      }
-      // Left to right alignment
-      if (Math.abs(newX - elRight) < ALIGNMENT_THRESHOLD) {
-        vertical.push(elRight);
-        if (!snapX) snapX = elRight;
-      }
-      // Right to left alignment
-      if (Math.abs(draggingRight - el.x) < ALIGNMENT_THRESHOLD) {
-        vertical.push(el.x);
-        if (!snapX) snapX = el.x - draggingEl.width;
+      if (ownChildren?.has(el.id)) return;
+      if (el.type === "line" || el.type === "connector") return;
+      for (const [mine, theirs] of OFFSETS) {
+        const lineY = el.y + el.height * theirs;
+        const dy = Math.abs(newY + h * mine - lineY);
+        if (dy < threshold) yCands.push({ line: lineY, snap: lineY - h * mine, dist: dy, el });
+        const lineX = el.x + el.width * theirs;
+        const dx = Math.abs(newX + w * mine - lineX);
+        if (dx < threshold) xCands.push({ line: lineX, snap: lineX - w * mine, dist: dx, el });
       }
     });
 
+    // One guide per axis: the closest alignment wins, and the drawn segment spans
+    // only the dragged element and the elements sharing that exact line.
+    const pick = (cands: Cand[]) => {
+      if (cands.length === 0) return null;
+      const best = cands.reduce((a, c) => (c.dist < a.dist ? c : a));
+      const aligned = cands.filter((c) => Math.abs(c.line - best.line) < 0.5).map((c) => c.el);
+      return { best, aligned };
+    };
+    const py = pick(yCands);
+    const px = pick(xCands);
+    const snapY = py?.best.snap;
+    const snapX = px?.best.snap;
+    const finalX = snapX ?? newX;
+    const finalY = snapY ?? newY;
+    const PAD = 12;
+
+    const horizontal: GuideSegment[] = py
+      ? [{
+          at: py.best.line,
+          from: Math.min(finalX, ...py.aligned.map((e) => e.x)) - PAD,
+          to: Math.max(finalX + w, ...py.aligned.map((e) => e.x + e.width)) + PAD,
+        }]
+      : [];
+    const vertical: GuideSegment[] = px
+      ? [{
+          at: px.best.line,
+          from: Math.min(finalY, ...px.aligned.map((e) => e.y)) - PAD,
+          to: Math.max(finalY + h, ...px.aligned.map((e) => e.y + e.height)) + PAD,
+        }]
+      : [];
+
     return { horizontal, vertical, snapX, snapY };
-  }, [showAlignmentGuides, canvasElements, selectedElementIds]);
+  }, [showAlignmentGuides, canvasElements, selectedElementIds, canvasZoom]);
 
 
   // Line creation callback from LineLayer
@@ -1387,6 +1525,10 @@ export function CXDCanvas() {
         const alignExclude = new Set<string>();
         if (currentBoardTargetId) alignExclude.add(currentBoardTargetId);
         if (currentContainerTargetId) alignExclude.add(currentContainerTargetId);
+        // Everything moving with this drag (incl. children of selected containers,
+        // captured at drag start) must not be a snap target: it would snap to its
+        // own previous-frame position and make the drag feel sticky.
+        dragOriginalPositionsRef.current.forEach((_pos, id) => alignExclude.add(id));
 
         // If multiple items are selected, move them all
         if (
@@ -1930,7 +2072,9 @@ export function CXDCanvas() {
       },
     ) => {
       if (!canEdit) return;
-      const size = DEFAULT_ELEMENT_SIZES[type];
+      const size =
+        (type === "shape" && SHAPE_DEFAULT_SIZES[options?.shapeType || "rectangle"]) ||
+        DEFAULT_ELEMENT_SIZES[type];
       const placedWidth = options?.width ?? size.width;
       const placedHeight = options?.height ?? size.height;
       const maxZIndex = canvasElements.reduce(
@@ -1995,6 +2139,7 @@ export function CXDCanvas() {
             ...baseElement,
             type: "shape",
             shapeType: options?.shapeType || "rectangle",
+            style: { ...DEFAULT_SHAPE_STYLE },
           };
           break;
         case "container":
@@ -2021,7 +2166,11 @@ export function CXDCanvas() {
             ...baseElement,
             type: "text",
             content: "",
-            width: 400,
+            // A click places auto-width text that hugs what you type; dragging
+            // out a box gives fixed-width text that wraps at that width.
+            ...(options?.width
+              ? { width: placedWidth, autoWidth: false }
+              : { width: 60, height: 50, autoWidth: true }),
             style: { fontSize: 32, fontWeight: 'bold' },
           };
           break;
@@ -2038,8 +2187,11 @@ export function CXDCanvas() {
               height: 360,
             }),
             // For file mode, set file view mode to bookmark by default
+            // File cards are a vertical icon + name layout: square by default (the
+            // wide bookmark-bar default squeezed the icon). A dragged-out size wins.
             ...(linkMode === "file" && {
               fileViewMode: "bookmark" as const,
+              ...(options?.width ? {} : { width: 200, height: 200 }),
             }),
           };
           break;
@@ -2134,6 +2286,18 @@ export function CXDCanvas() {
 
       // Select the freshly placed element (a captured-container draw selects the container).
       setSelectedElementIds(new Set([newElement.id]));
+
+      // A placed text is ready for typing: no double-click needed.
+      if (newElement.type === "text") requestStartEditing(newElement.id);
+
+      // Offer the quick colour fan so the next click can style it.
+      const isColourableCard =
+        newElement.type === "freeform" &&
+        ((newElement as FreeformElement).cardType === "note" || (newElement as FreeformElement).cardType === "task") &&
+        !(newElement as FreeformElement).isDocument;
+      if (newElement.type === "shape" || newElement.type === "container" || newElement.type === "board" || isColourableCard) {
+        setQuickColorTargetId(newElement.id);
+      }
     },
     [
       canvasElements,
@@ -2351,7 +2515,7 @@ export function CXDCanvas() {
       // If this element belongs to a group, auto-select all group members immediately
       // UNLESS Ctrl/Cmd is held (user wants individual element selection)
       let effectiveSelectedIds = selectedElementIds;
-      if (element?.groupId && !e.ctrlKey && !e.metaKey) {
+      if (element?.groupId && !e.ctrlKey && !e.metaKey && element.groupId !== enteredGroupId) {
         const groupMembers = canvasElements
           .filter((el) => el.groupId === element.groupId)
           .map((el) => el.id);
@@ -2426,7 +2590,7 @@ export function CXDCanvas() {
       setDragElementStart({ x: e.clientX, y: e.clientY });
       setSelectedElementId(elementId);
     },
-    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition, canEdit],
+    [canvasElements, selectedElementIds, addCanvasElement, syncAddElement, pushCanvasHistory, isSpacePressed, canvasPosition, canEdit, enteredGroupId],
   );
 
   // Move a set of elements onto a (child) board, either preserving their current
@@ -2436,68 +2600,121 @@ export function CXDCanvas() {
   const moveElementsIntoBoard = useCallback(
     (ids: string[], childBoardId: string, mode: "keep" | "distribute") => {
       const els = getCanvasElements();
-      const movable = ids
-        .map((id) => els.find((e) => e.id === id))
+      const byId = new Map(els.map((el) => [el.id, el]));
+      const picked = ids
+        .map((id) => byId.get(id))
         .filter((el): el is CanvasElement => !!el && el.type !== "board");
-      if (movable.length === 0) return;
+      if (picked.length === 0) return;
+
+      // A container travels with everything nested in it.
+      const movedIds = new Set(picked.map((el) => el.id));
+      picked.forEach((el) => {
+        if (el.type === "container") getContainerDescendantIds(el.id, els).forEach((id) => movedIds.add(id));
+      });
+      const moved = els.filter((el) => movedIds.has(el.id) && el.type !== "board");
+      // Roots are placed; nested elements follow their root container's offset.
+      const roots = moved.filter((el) => !el.containerId || !movedIds.has(el.containerId));
+      const rootOf = (el: CanvasElement): CanvasElement => {
+        let cur = el;
+        while (cur.containerId && movedIds.has(cur.containerId)) cur = byId.get(cur.containerId)!;
+        return cur;
+      };
 
       type Rect = { x: number; y: number; width: number; height: number };
       const MARGIN = 32;
       const START_X = 80;
       const START_Y = 80;
+      const deltas = new Map<string, { dx: number; dy: number }>();
 
       if (mode === "keep") {
         // Preserve relative positions: translate the whole group so its top-left
         // lands at (START_X, START_Y) in the board's coordinate space.
-        const minX = Math.min(...movable.map((el) => el.x));
-        const minY = Math.min(...movable.map((el) => el.y));
-        movable.forEach((el) => {
-          updateCanvasElement(el.id, {
-            boardId: childBoardId,
-            x: START_X + (el.x - minX),
-            y: START_Y + (el.y - minY),
-          });
+        const minX = Math.min(...roots.map((el) => el.x));
+        const minY = Math.min(...roots.map((el) => el.y));
+        roots.forEach((el) => deltas.set(el.id, { dx: START_X - minX, dy: START_Y - minY }));
+      } else {
+        // distribute → grid of empty slots that avoids existing board content.
+        const occupied: Rect[] = els
+          .filter((el) => el.boardId === childBoardId && el.type !== "line" && el.type !== "connector")
+          .map((el) => ({ x: el.x, y: el.y, width: el.width || 200, height: el.height || 200 }));
+
+        const GRID_STEP_X = 260;
+        const GRID_STEP_Y = 220;
+        const MAX_COLS = 8;
+        const MAX_ROWS = 30;
+        const findEmptySlot = (width: number, height: number): { x: number; y: number } => {
+          const overlapsAny = (cx: number, cy: number) =>
+            occupied.some(
+              (p) =>
+                cx < p.x + p.width + MARGIN &&
+                cx + width + MARGIN > p.x &&
+                cy < p.y + p.height + MARGIN &&
+                cy + height + MARGIN > p.y,
+            );
+          for (let row = 0; row < MAX_ROWS; row++) {
+            for (let col = 0; col < MAX_COLS; col++) {
+              const cx = START_X + col * GRID_STEP_X;
+              const cy = START_Y + row * GRID_STEP_Y;
+              if (!overlapsAny(cx, cy)) return { x: cx, y: cy };
+            }
+          }
+          return { x: START_X + Math.random() * 400, y: START_Y + Math.random() * 400 };
+        };
+
+        roots.forEach((el) => {
+          const w = el.width || 200;
+          const h = el.height || 200;
+          const { x, y } = findEmptySlot(w, h);
+          occupied.push({ x, y, width: w, height: h });
+          deltas.set(el.id, { dx: x - el.x, dy: y - el.y });
         });
-        return;
       }
 
-      // distribute → grid of empty slots that avoids existing board content.
-      const occupied: Rect[] = els
-        .filter((el) => el.boardId === childBoardId && el.type !== "line" && el.type !== "connector")
-        .map((el) => ({ x: el.x, y: el.y, width: el.width || 200, height: el.height || 200 }));
+      const shift = (pt: { x: number; y: number } | undefined, d: { dx: number; dy: number }) =>
+        pt ? { x: pt.x + d.dx, y: pt.y + d.dy } : undefined;
+      const newCenters = new Map<string, { x: number; y: number }>();
 
-      const GRID_STEP_X = 260;
-      const GRID_STEP_Y = 220;
-      const MAX_COLS = 8;
-      const MAX_ROWS = 30;
-      const findEmptySlot = (width: number, height: number): { x: number; y: number } => {
-        const overlapsAny = (cx: number, cy: number) =>
-          occupied.some(
-            (p) =>
-              cx < p.x + p.width + MARGIN &&
-              cx + width + MARGIN > p.x &&
-              cy < p.y + p.height + MARGIN &&
-              cy + height + MARGIN > p.y,
-          );
-        for (let row = 0; row < MAX_ROWS; row++) {
-          for (let col = 0; col < MAX_COLS; col++) {
-            const cx = START_X + col * GRID_STEP_X;
-            const cy = START_Y + row * GRID_STEP_Y;
-            if (!overlapsAny(cx, cy)) return { x: cx, y: cy };
+      moved.forEach((el) => {
+        const d = deltas.get(rootOf(el).id)!;
+        const updates: Partial<CanvasElement> = { boardId: childBoardId, x: el.x + d.dx, y: el.y + d.dy };
+        if (el.type === "line") {
+          const line = el as any;
+          Object.assign(updates, {
+            start: shift(line.start, d),
+            end: shift(line.end, d),
+            ...(line.bend ? { bend: shift(line.bend, d) } : {}),
+          });
+        }
+        newCenters.set(el.id, { x: el.x + d.dx + (el.width || 0) / 2, y: el.y + d.dy + (el.height || 0) / 2 });
+        updateCanvasElement(el.id, updates);
+        // A root nested in a container that stays behind is no longer inside it.
+        if (el.containerId && !movedIds.has(el.containerId)) removeNodeFromContainer(el.id);
+      });
+
+      // Carry connections along: an edge whose endpoints BOTH moved is re-scoped to
+      // the child board. Edges are filtered by their own boardId, so without this
+      // they stay on the source board with endpoints that no longer live there,
+      // and render on neither board.
+      getCanvasEdges().forEach((edge) => {
+        if (!movedIds.has(edge.fromNodeId) || !movedIds.has(edge.toNodeId)) return;
+        const changes: Partial<CanvasEdge> = { boardId: childBoardId };
+        if (edge.bend) {
+          const dFrom = deltas.get(rootOf(byId.get(edge.fromNodeId)!).id)!;
+          const dTo = deltas.get(rootOf(byId.get(edge.toNodeId)!).id)!;
+          if (dFrom.dx === dTo.dx && dFrom.dy === dTo.dy) {
+            changes.bend = shift(edge.bend, dFrom);
+          } else {
+            // Endpoints moved independently: re-seat the curve's control point
+            // midway between them so it doesn't loop back to the old spot.
+            const a = newCenters.get(edge.fromNodeId)!;
+            const b = newCenters.get(edge.toNodeId)!;
+            changes.bend = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
           }
         }
-        return { x: START_X + Math.random() * 400, y: START_Y + Math.random() * 400 };
-      };
-
-      movable.forEach((el) => {
-        const w = el.width || 200;
-        const h = el.height || 200;
-        const { x, y } = findEmptySlot(w, h);
-        occupied.push({ x, y, width: w, height: h });
-        updateCanvasElement(el.id, { boardId: childBoardId, x, y });
+        syncUpdateEdge(edge.id, changes);
       });
     },
-    [getCanvasElements, updateCanvasElement],
+    [getCanvasElements, getCanvasEdges, updateCanvasElement, removeNodeFromContainer, syncUpdateEdge],
   );
 
   // Resolve a pending multi-element board drop with the user's chosen layout.
@@ -2556,6 +2773,7 @@ export function CXDCanvas() {
         }
 
         // Single element → drop straight into the next empty slot.
+        pushCanvasHistory();
         moveElementsIntoBoard(elementsToMove, targetChildBoardId, "distribute");
 
         // Clear selection after move
@@ -2573,6 +2791,16 @@ export function CXDCanvas() {
     // an edge (mid-removal, or left attached after an undo) must not make the container
     // chase/expand to swallow it back.
     const enteredContainers = new Set<string>();
+    // …and WHICH elements entered each one. The grow pass fits only these: fitting
+    // every child that carries the containerId stretched the box towards stale or
+    // far-away children (left behind by align/distribute, undo, remote merges),
+    // which read as the container expanding to fit things that were never there.
+    const enteredByContainer = new Map<string, Set<string>>();
+    const markEntered = (cid: string, id: string) => {
+      enteredContainers.add(cid);
+      if (!enteredByContainer.has(cid)) enteredByContainer.set(cid, new Set());
+      enteredByContainer.get(cid)!.add(id);
+    };
 
     // Check if elements were dropped into a container (support multi-drop)
     if (dropTargetContainerId) {
@@ -2612,10 +2840,11 @@ export function CXDCanvas() {
         // once, below, by the unified drop-time grow pass (growContainersToFit) — never here
         // and never reactively — so it can grow on ANY side (origin-shifting for left/top).
         elementsToDrop.forEach((id) => {
+          const wasChild = canvasElements.find((e) => e.id === id)?.containerId === targetContainer.id;
           syncAddNodeToContainer(id, targetContainer.id);
+          // Re-arranging something already inside never resizes its container.
+          if (!wasChild) markEntered(targetContainer.id, id);
         });
-        // Explicit drop into a container is an intentional "put INTO" → grow to fit it.
-        enteredContainers.add(targetContainer.id);
       }
     }
 
@@ -2668,7 +2897,7 @@ export function CXDCanvas() {
         if (foundContainer && el.containerId !== foundContainer) {
           // Attach to new container
           syncAddNodeToContainer(id, foundContainer);
-          enteredContainers.add(foundContainer);
+          markEntered(foundContainer, id);
         } else if (!foundContainer && el.containerId) {
           // Detach from old container
           syncRemoveNodeFromContainer(id);
@@ -2689,7 +2918,6 @@ export function CXDCanvas() {
       const PAD = 20;
       const liveEls = useCXDStore.getState().getCurrentProject()?.canvasLayout?.elements || [];
       const containersToFit = new Set<string>(enteredContainers);
-      if (dropTargetContainerId) containersToFit.add(dropTargetContainerId);
 
       for (const cid of Array.from(containersToFit)) {
         const container = liveEls.find((e) => e.id === cid);
@@ -2698,8 +2926,9 @@ export function CXDCanvas() {
         // Lines/connectors have no meaningful x/y/w/h box (lines live at 0,0 with
         // start/end world coords) — including them here dragged the fit bounds to
         // the canvas origin and blew the container up on the next drop pass.
+        const entered = enteredByContainer.get(cid);
         const children = liveEls.filter(
-          (e) => e.containerId === cid && e.type !== 'line' && e.type !== 'connector',
+          (e) => entered?.has(e.id) && e.containerId === cid && e.type !== 'line' && e.type !== 'connector',
         );
         if (children.length === 0) continue;
 
@@ -2787,6 +3016,7 @@ export function CXDCanvas() {
     commitDragPositionsToYjs,
     moveElementsIntoBoard,
     lastMousePos,
+    pushCanvasHistory,
   ]);
 
   // Handle experience block drag start
@@ -2902,6 +3132,10 @@ export function CXDCanvas() {
         boardId: activeBoardId,
         surface: activeSurface,
       });
+      // Task and note cards dragged out of the inbox get the quick colour fan too.
+      if (element?.type === "freeform" && !(element as FreeformElement).isDocument) {
+        setQuickColorTargetId(elementId);
+      }
     },
     [pushCanvasHistory, updateCanvasElement, project, activeBoardId, activeSurface]
   );
@@ -2974,8 +3208,9 @@ export function CXDCanvas() {
             0,
           );
 
+          const experienceBlockId = uuidv4();
           addElement({
-            id: uuidv4(),
+            id: experienceBlockId,
             type: "experienceBlock" as const,
             componentKey: draggingExperienceBlock.sectionId as any,
             title: draggingExperienceBlock.label,
@@ -2988,6 +3223,10 @@ export function CXDCanvas() {
             boardId: boardId,
             surface: surface,
           } as any);
+          // Offer the colour fan for the freshly dropped block.
+          setSelectedElementId(experienceBlockId);
+          setSelectedElementIds(new Set([experienceBlockId]));
+          setQuickColorTargetId(experienceBlockId);
         }
       }
 
@@ -3189,9 +3428,17 @@ export function CXDCanvas() {
           const file = item.getAsFile();
           if (!file) continue;
           const reader = new FileReader();
-          reader.onload = (evt) => {
-            const src = evt.target?.result as string;
-            if (!src) return;
+          reader.onload = async (evt) => {
+            const dataUri = evt.target?.result as string;
+            if (!dataUri) return;
+            // Prefer a Storage URL: data URIs bloat the project row on every save.
+            // Falls back to the data URI only if the upload fails.
+            const uploaded = await uploadCanvasImage(
+              file,
+              file.name || 'pasted',
+              useCXDStore.getState().uploadMaxBytes,
+            );
+            const src = uploaded?.url ?? dataUri;
             // Read natural dimensions before creating the element so we preserve aspect ratio
             const img = new window.Image();
             img.onload = () => {
@@ -3359,6 +3606,16 @@ export function CXDCanvas() {
     );
   }, []);
 
+  // Other parts of the app (navbar, hub) can ask the canvas to open the export dialog.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const scope = (e as CustomEvent<{ scope?: 'selection' | 'board' }>).detail?.scope ?? 'board';
+      setExportDialog({ scope });
+    };
+    window.addEventListener('cxd:export-canvas', open);
+    return () => window.removeEventListener('cxd:export-canvas', open);
+  }, []);
+
   // Global keyboard shortcut system
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -3395,8 +3652,21 @@ export function CXDCanvas() {
           setSelectedElementId(null);
           setHoveredAnchor(null);
           setSelectedEdgeId(null);
+          // Esc with nothing selected leaves focus mode; with a selection it
+          // only deselects, so clearing a selection never drops you out.
+          if (canvasFocusMode && selectedElementIds.size === 0 && !selectedEdgeId) {
+            setCanvasFocusMode(false);
+          }
         }
         // If editing text, let the text element's own handler deal with it
+        return;
+      }
+
+      // FOCUS MODE: Ctrl/Cmd + . toggles hiding all canvas UI. Handled before the
+      // text-editing bail-out so it also works while writing inside a note.
+      if ((e.ctrlKey || e.metaKey) && e.key === ".") {
+        e.preventDefault();
+        setCanvasFocusMode(!canvasFocusMode);
         return;
       }
 
@@ -3426,10 +3696,18 @@ export function CXDCanvas() {
           if (e.key === "ArrowUp") deltaY = -moveAmount;
           if (e.key === "ArrowDown") deltaY = moveAmount;
 
-          // Move all selected elements
+          // Move all selected elements, plus everything nested inside selected
+          // containers (children use absolute coords, so they must move too).
+          const moveIds = new Set(selectedElementIds);
           selectedElementIds.forEach((id) => {
+            const el = canvasElements.find((c) => c.id === id);
+            if (el?.type === 'container') {
+              getContainerDescendantIds(id, canvasElements).forEach((d) => moveIds.add(d));
+            }
+          });
+          moveIds.forEach((id) => {
             const element = canvasElements.find((el) => el.id === id);
-            if (element) {
+            if (element && !(element.locked && !selectedElementIds.has(id))) {
               if (element.type === 'line' && 'start' in element && 'end' in element) {
                 // Lines use start/end/bend coordinates, not x/y
                 const line = element as any;
@@ -3450,11 +3728,11 @@ export function CXDCanvas() {
             }
           });
 
-          // Move bend points of edges connecting two selected elements
-          if (selectedElementIds.size > 1) {
+          // Move bend points of edges connecting two moved elements
+          if (moveIds.size > 1) {
             canvasEdges.forEach((edge) => {
-              const fromSelected = selectedElementIds.has(edge.fromNodeId);
-              const toSelected = selectedElementIds.has(edge.toNodeId);
+              const fromSelected = moveIds.has(edge.fromNodeId);
+              const toSelected = moveIds.has(edge.toNodeId);
               // Only move bend if BOTH endpoints are selected
               if (fromSelected && toSelected && edge.bend) {
                 syncUpdateEdge(edge.id, {
@@ -3483,6 +3761,9 @@ export function CXDCanvas() {
           return;
         }
       }
+
+      // In focus mode elements are added from the toolbar only: no tool hotkeys.
+      if (canvasFocusMode && !isMod && /^[tcblioef]$/i.test(e.key)) return;
 
       // ONE-KEY TOOL ACTIVATION (only when no modifier keys are pressed)
       // T → Text tool
@@ -3722,40 +4003,46 @@ export function CXDCanvas() {
         return;
       }
 
+      // EXPORT: Ctrl/Cmd + Shift + E
+      if (isMod && e.shiftKey && (e.key === "e" || e.key === "E")) {
+        e.preventDefault();
+        setExportDialog({ scope: selectedElementIds.size > 0 ? "selection" : "board" });
+        return;
+      }
+
+      // GROUP: Ctrl/Cmd + G  ·  UNGROUP: Ctrl/Cmd + Shift + G
+      if (isMod && (e.key === "g" || e.key === "G")) {
+        if (!canEdit) return;
+        e.preventDefault();
+        const selected = canvasElements.filter((el) => selectedElementIds.has(el.id));
+        if (e.shiftKey) {
+          const groupIds = new Set(selected.map((el) => el.groupId).filter(Boolean) as string[]);
+          if (groupIds.size > 0) {
+            pushCanvasHistory();
+            groupIds.forEach((gid) => ungroup(gid));
+            setEnteredGroupId(null);
+          }
+        } else if (selected.length >= 2) {
+          pushCanvasHistory();
+          createGroup(selected.map((el) => el.id));
+          setEnteredGroupId(null);
+        }
+        return;
+      }
+
       // DUPLICATE: Ctrl/Cmd + D
       if (isMod && e.key === "d" && selectedElementIds.size > 0) {
         if (!canEdit) return;
         e.preventDefault();
-        pushCanvasHistory(); // Save state before duplicate
-
-        const newIds = new Set<string>();
-        const elements = getCanvasElements();
-        // Copies must render above everything else on the canvas — an
-        // unbumped (equal) zIndex leaves them buried under other elements.
-        let ctrlDMaxZ = Math.max(0, ...elements.map((el) => el.zIndex || 0));
-        selectedElementIds.forEach((id) => {
-          const element = elements.find((el) => el.id === id);
-          if (element) {
-            ctrlDMaxZ += 1;
-            const { dx, dy } = getDuplicateOffset(element);
-            const newElement: CanvasElement = {
-              ...element,
-              id: uuidv4(),
-              x: element.x + dx,
-              y: element.y + dy,
-              zIndex: ctrlDMaxZ,
-            };
-            syncAddElement(newElement);
-            newIds.add(newElement.id);
-          }
-        });
-
+        const newIds = duplicateElements(selectedElementIds);
         // Select duplicated elements — replace BOTH selection pieces of
         // state. `selectedElementId` (the single/"primary" selection) is
         // otherwise left pointing at an original, which keeps it at the
         // forced top z-index and ties with (or beats) the new copies.
-        setSelectedElementIds(newIds);
-        setSelectedElementId(newIds.size > 0 ? Array.from(newIds)[0] : null);
+        if (newIds.length > 0) {
+          setSelectedElementIds(new Set(newIds));
+          setSelectedElementId(newIds[0]);
+        }
         return;
       }
 
@@ -3821,6 +4108,11 @@ export function CXDCanvas() {
     connectSelectedElements,
     autoOrganizeSelected,
     canEdit,
+    duplicateElements,
+    canvasFocusMode,
+    setCanvasFocusMode,
+    createGroup,
+    ungroup,
   ]);
 
   // Keep zoomSensitivity in a ref so the wheel handler never needs to be recreated.
@@ -4131,12 +4423,16 @@ export function CXDCanvas() {
     const cx = (bMinX + bMaxX) / 2;
     const cy = (bMinY + bMaxY) / 2;
 
-    const UI_TOP = 80, UI_BOTTOM = 50, UI_LEFT = 70, UI_RIGHT = 70;
+    const animate = !!pendingCanvasFitBounds.animate;
+    const UI_TOP = 80, UI_BOTTOM = 50, UI_LEFT = 70;
+    const UI_RIGHT = Math.max(70, pendingCanvasFitBounds.insetRight ?? 0);
     const vw = rect.width - UI_LEFT - UI_RIGHT;
     const vh = rect.height - UI_TOP - UI_BOTTOM;
     if (vw <= 0 || vh <= 0) return;
 
-    const zoom = Math.max(MIN_ZOOM, Math.min(vw / contentW, vh / contentH, MAX_ZOOM));
+    // A glide never zooms in past 100%: framing a four-node loop at 300% would
+    // feel like being thrown at it.
+    const zoom = Math.max(MIN_ZOOM, Math.min(vw / contentW, vh / contentH, animate ? 1 : MAX_ZOOM));
     if (!isFinite(zoom)) {
       setPendingCanvasFitBounds(null);
       return;
@@ -4151,6 +4447,12 @@ export function CXDCanvas() {
       return;
     }
 
+    if (animate) {
+      // Same commit as the new transform, so the browser interpolates from the
+      // old one; the flag drops once the glide is over so user pans stay instant.
+      setCameraGlide(true);
+      window.setTimeout(() => setCameraGlide(false), CAMERA_GLIDE_MS + 80);
+    }
     setCanvasZoom(zoom);
     setCanvasPosition({ x: posX, y: posY });
     setPendingCanvasFitBounds(null);
@@ -4210,23 +4512,27 @@ export function CXDCanvas() {
   // which the browser compositor interpolates on the GPU at 60fps between our
   // ~30fps discrete targets. This avoids running a 60fps state-update loop that
   // would otherwise cause full React re-renders and drop frames on rich canvases.
+  // Keyed on the followed cursor's own coordinates, NOT on `collaborators`: that
+  // array changes on every peer's cursor broadcast, so depending on it re-panned
+  // (and re-saved the viewport) once per message from anyone in the room.
+  const followX = followedCollaborator?.cursor?.x;
+  const followY = followedCollaborator?.cursor?.y;
+  const followZoom = followedCollaborator?.cursor?.zoom;
   useEffect(() => {
-    if (!followingCollaboratorId) return;
-    const followed = collaborators.find((c) => c.id === followingCollaboratorId);
-    if (!followed?.cursor) return;
+    if (!followingCollaboratorId || followX === undefined || followY === undefined) return;
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     // Mirror the followed user's zoom if available
-    const targetZoom = followed.cursor.zoom ?? canvasZoom;
-    if (followed.cursor.zoom !== undefined && followed.cursor.zoom !== canvasZoom) {
-      setCanvasZoom(followed.cursor.zoom);
+    const targetZoom = followZoom ?? canvasZoom;
+    if (followZoom !== undefined && followZoom !== canvasZoom) {
+      setCanvasZoom(followZoom);
     }
     setCanvasPosition({
-      x: rect.width / 2 - followed.cursor.x * targetZoom,
-      y: rect.height / 2 - followed.cursor.y * targetZoom,
+      x: rect.width / 2 - followX * targetZoom,
+      y: rect.height / 2 - followY * targetZoom,
     });
-  }, [followingCollaboratorId, collaborators, canvasZoom, setCanvasPosition, setCanvasZoom]);
+  }, [followingCollaboratorId, followX, followY, followZoom, canvasZoom, setCanvasPosition, setCanvasZoom]);
 
   // Apply the smoothing transition only while following. Stays off during user
   // pans/zooms so their own interactions feel instant. Duration/timing match
@@ -4234,12 +4540,19 @@ export function CXDCanvas() {
   // cursor stays visually glued to the canvas underneath.
   const canvasTransformTransition = followingCollaboratorId
     ? 'transform 80ms linear'
-    : 'none';
+    : cameraGlide
+      ? `transform ${CAMERA_GLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
+      : 'none';
 
   // Stop following when the viewer clicks anywhere
   useEffect(() => {
     if (!followingCollaboratorId) return;
-    const stop = () => setFollowingCollaboratorId(null);
+    const stop = (e: MouseEvent) => {
+      // The navbar follow bubbles toggle follow themselves on click; stopping
+      // here first would make that click read "not following" and re-follow.
+      if ((e.target as Element | null)?.closest?.('[data-follow-bubble]')) return;
+      setFollowingCollaboratorId(null);
+    };
     document.addEventListener('mousedown', stop, { capture: true });
     return () => document.removeEventListener('mousedown', stop, { capture: true });
   }, [followingCollaboratorId, setFollowingCollaboratorId]);
@@ -4293,6 +4606,26 @@ export function CXDCanvas() {
     return selectedElementsArray.every((el) => el.groupId === firstGroupId);
   }, [selectedElementsArray]);
 
+  // The group whose members are ALL selected (and nothing else): it reads as one
+  // object, so only the group outline shows, not every member's ring.
+  const wholeGroupSelectedId = useMemo(() => {
+    if (!allSameGroup) return null;
+    const gid = selectedElementsArray[0].groupId!;
+    const memberCount = canvasElements.filter((el) => el.groupId === gid).length;
+    return memberCount === selectedElementsArray.length ? gid : null;
+  }, [allSameGroup, selectedElementsArray, canvasElements]);
+
+  // Leave a drilled-into group once the selection moves outside it.
+  useEffect(() => {
+    if (!enteredGroupId) return;
+    const stillInside =
+      selectedElementIds.size > 0 &&
+      Array.from(selectedElementIds).every(
+        (id) => canvasElements.find((el) => el.id === id)?.groupId === enteredGroupId,
+      );
+    if (!stillInside) setEnteredGroupId(null);
+  }, [enteredGroupId, selectedElementIds, canvasElements]);
+
   const handleMultiSelectUpdateElements = useCallback(
     (updates: Map<string, Partial<CanvasElement>>) => {
       pushCanvasHistory();
@@ -4309,6 +4642,35 @@ export function CXDCanvas() {
           return;
         }
         syncUpdateElement(id, update);
+
+        // Aligning or distributing a container moves it; everything nested in it
+        // (absolute coords) must move by the same offset, as it does when the
+        // container is dragged. Pure moves only: a resize leaves children alone.
+        if (
+          source?.type === "container" &&
+          update.width === undefined &&
+          update.height === undefined &&
+          (update.x !== undefined || update.y !== undefined)
+        ) {
+          const dx = (update.x ?? source.x) - source.x;
+          const dy = (update.y ?? source.y) - source.y;
+          if (dx === 0 && dy === 0) return;
+          getContainerDescendantIds(id, canvasElements).forEach((childId) => {
+            if (updates.has(childId)) return; // moved explicitly by this same operation
+            const child = canvasElements.find((el) => el.id === childId);
+            if (!child) return;
+            if (child.type === "line") {
+              const l = child as LineElement;
+              syncUpdateElement(childId, {
+                start: { x: l.start.x + dx, y: l.start.y + dy },
+                end: { x: l.end.x + dx, y: l.end.y + dy },
+                ...(l.bend ? { bend: { x: l.bend.x + dx, y: l.bend.y + dy } } : {}),
+              } as Partial<CanvasElement>);
+            } else {
+              syncUpdateElement(childId, { x: child.x + dx, y: child.y + dy });
+            }
+          });
+        }
       });
     },
     [pushCanvasHistory, syncUpdateElement, canvasElements]
@@ -4331,34 +4693,15 @@ export function CXDCanvas() {
   }, [pushCanvasHistory, selectedElementIds, syncRemoveElement, syncRemoveEdge, getCanvasEdges]);
 
   const handleMultiSelectDuplicateElements = useCallback(() => {
-    pushCanvasHistory();
-    const newIds = new Set<string>();
-    // Copies must render above everything else on the canvas — an
-    // unbumped (equal) zIndex leaves them buried under other elements.
-    let multiDupMaxZ = Math.max(0, ...canvasElements.map((el) => el.zIndex || 0));
-    selectedElementIds.forEach((id) => {
-      const element = canvasElements.find((el) => el.id === id);
-      if (element) {
-        multiDupMaxZ += 1;
-        const { dx, dy } = getDuplicateOffset(element);
-        const newElement: CanvasElement = {
-          ...element,
-          id: uuidv4(),
-          x: element.x + dx,
-          y: element.y + dy,
-          zIndex: multiDupMaxZ,
-          groupId: undefined, // Don't copy group assignment
-        };
-        syncAddElement(newElement);
-        newIds.add(newElement.id);
-      }
-    });
+    const newIds = duplicateElements(selectedElementIds);
     // Replace both selection pieces of state — leaving `selectedElementId`
     // pointing at an original keeps it at the forced top z-index, tying
     // with (or beating) the new copies.
-    setSelectedElementIds(newIds);
-    setSelectedElementId(newIds.size > 0 ? Array.from(newIds)[0] : null);
-  }, [pushCanvasHistory, selectedElementIds, canvasElements, syncAddElement]);
+    if (newIds.length > 0) {
+      setSelectedElementIds(new Set(newIds));
+      setSelectedElementId(newIds[0]);
+    }
+  }, [duplicateElements, selectedElementIds]);
 
   const handleMultiSelectCreateGroup = useCallback(() => {
     pushCanvasHistory();
@@ -4776,12 +5119,12 @@ export function CXDCanvas() {
 
   // Calculate right margin based on inspector panel state
   // When panel is open, add a small margin (60px for icon rail). When closed, just the icon rail width.
-  const canvasRightMargin = inspectorPanelOpen ? 60 : 60;
+  const canvasRightMargin = canvasFocusMode ? 0 : 60;
 
   return (
     <div
       ref={containerRef}
-      className={`fixed inset-0 top-16 overflow-hidden select-none transition-[right] duration-300 w-full h-full ${isPanning
+      className={`fixed inset-0 ${canvasFocusMode ? "top-0" : "top-16"} overflow-hidden select-none transition-[right] duration-300 w-full h-full ${isPanning
         ? "cursor-grabbing"
         : isSpacePressed
           ? "cursor-grab"
@@ -4862,7 +5205,9 @@ export function CXDCanvas() {
           <div
             className="dot-grid pointer-events-none absolute inset-0"
             style={{
-              transition: canvasTransformTransition,
+              // The grid pans via background-position, not transform — it needs
+              // the same easing on that property or it steps while content glides.
+              transition: canvasTransformTransition.replace('transform', 'background-position'),
               backgroundImage: settings.gridMajorDots ? `${thick}, ${fine}` : fine,
               backgroundSize: settings.gridMajorDots
                 ? `${major}px ${major}px, ${spacing}px ${spacing}px`
@@ -4880,17 +5225,37 @@ export function CXDCanvas() {
           canvasOffset={{ x: canvasPosition.x, y: canvasPosition.y }}
           zoom={canvasZoom}
           currentBoardId={activeBoardId ?? null}
+          cameraTransition={canvasTransformTransition}
         />
       )}
 
+      {/* Overlay layer for floating per-element UI (toolbars, popovers): same
+          transform as the content layer, but stacked above elements (z 10),
+          container lines (z 11) and the side toolkits (z 10–40). */}
+      <div
+        id={CANVAS_OVERLAY_LAYER_ID}
+        className="absolute pointer-events-none"
+        style={{
+          transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
+          transformOrigin: "0 0",
+          transition: canvasTransformTransition,
+          zIndex: 45,
+        }}
+      />
       {/* Canvas Content - z-index 10 to render above connector lines (z-index 5) */}
       <div
-        className="absolute will-change-transform"
+        className="absolute"
         style={{
           transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
           transformOrigin: "0 0",
           transition: canvasTransformTransition,
           zIndex: 10,
+          // GPU-promote the layer only WHILE panning/zooming. A permanent
+          // will-change: transform keeps the bitmap rastered at an old scale and
+          // just stretches it, so zoomed-in text and images looked soft/pixelated
+          // until something forced a repaint. Dropping it at rest makes the
+          // browser re-raster crisply at the final zoom.
+          willChange: isTransforming ? "transform" : "auto",
         }}
       >
         {/* Canvas Elements (freeform, images, shapes, etc.) - excluding lines which are rendered in overlay */}
@@ -4901,9 +5266,33 @@ export function CXDCanvas() {
               .filter((el) => el.type === 'container' && (el as ContainerElement).collapsed)
               .map((el) => el.id),
           );
+          // Viewport culling on large boards: only mount elements within a
+          // screen's margin of the visible area (plus anything selected or being
+          // dragged). Off-screen elements cost a full React render on every pan
+          // and zoom frame otherwise.
+          let inView: (el: CanvasElement) => boolean = () => true;
+          if (canvasElements.length > VIEWPORT_CULL_THRESHOLD && typeof window !== "undefined") {
+            const vw = window.innerWidth / canvasZoom;
+            const vh = window.innerHeight / canvasZoom;
+            const left = -canvasPosition.x / canvasZoom - vw;
+            const top = -canvasPosition.y / canvasZoom - vh;
+            const right = left + vw * 3;
+            const bottom = top + vh * 3;
+            inView = (el) =>
+              el.x <= right &&
+              el.x + (el.width || 0) >= left &&
+              el.y <= bottom &&
+              el.y + (el.height || 0) >= top;
+          }
           return canvasElements
             .filter((el) => el.type !== 'line')
             .filter((el) => !el.containerId || !collapsedIds.has(el.containerId))
+            .filter((el) =>
+              inView(el) ||
+              selectedElementIds.has(el.id) ||
+              selectedElementId === el.id ||
+              draggingElement === el.id,
+            )
             .map((element, _elIdx) => (
             <CanvasElementRenderer
                 key={element.id}
@@ -4923,6 +5312,11 @@ export function CXDCanvas() {
                   }
                 }}
                 onDragStart={(e) => {
+                  elementPressRef.current = {
+                    x: e.clientX,
+                    y: e.clientY,
+                    wholeGroupSelected: !!element.groupId && element.groupId === wholeGroupSelectedId,
+                  };
                   // Prevent dragging while connecting
                   if (!isConnecting) {
                     handleElementDragStart(element.id, e);
@@ -4930,6 +5324,7 @@ export function CXDCanvas() {
                 }}
                 onDragEnd={handleElementDragEnd}
                 isDragging={draggingElement === element.id}
+                hideSelectionRing={!!element.groupId && element.groupId === wholeGroupSelectedId}
                 isSelected={
                   selectedElementId === element.id ||
                   selectedElementIds.has(element.id)
@@ -5002,8 +5397,20 @@ export function CXDCanvas() {
                   setSelectedElementIds(newSelected);
                   setSelectedElementId(element.id);
                 } else {
-                  // Single select - also select all group members
-                  if (element.groupId) {
+                  // Single select. First click on a grouped element selects the
+                  // whole group; clicking a member of the already-selected group
+                  // (without dragging) enters it and selects just that member.
+                  const press = elementPressRef.current;
+                  elementPressRef.current = null; // one press, one click
+                  const moved = press && e ? Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4 : false;
+                  const drillIn =
+                    !!element.groupId &&
+                    (element.groupId === enteredGroupId || (!!press?.wholeGroupSelected && !moved));
+                  if (drillIn) {
+                    setEnteredGroupId(element.groupId!);
+                    setSelectedElementId(element.id);
+                    setSelectedElementIds(new Set([element.id]));
+                  } else if (element.groupId) {
                     const groupElements = canvasElements.filter(
                       (el) => el.groupId === element.groupId
                     );
@@ -5082,6 +5489,7 @@ export function CXDCanvas() {
             onUpdateElements={handleMultiSelectUpdateElements}
             onDeleteElements={handleMultiSelectDeleteElements}
             onDuplicateElements={handleMultiSelectDuplicateElements}
+            onExport={() => setExportDialog({ scope: 'selection' })}
             onCreateGroup={handleMultiSelectCreateGroup}
             onUngroup={handleMultiSelectUngroup}
             onBringForward={handleMultiSelectBringForward}
@@ -5127,31 +5535,29 @@ export function CXDCanvas() {
             }}
           >
             {/* Horizontal alignment guides (Y-axis lines that run left-to-right) */}
-            {alignmentGuides.horizontal.map((y, i) => (
+            {alignmentGuides.horizontal.map((g, i) => (
               <line
-                key={`h-${i}-${y}`}
-                x1={0}
-                y1={y + 5000}
-                x2={10000}
-                y2={y + 5000}
-                stroke="hsl(280 100% 70%)"
-                strokeWidth={1}
-                strokeDasharray="4,4"
-                opacity={0.8}
+                key={`h-${i}-${g.at}`}
+                x1={g.from + 5000}
+                y1={g.at + 5000}
+                x2={g.to + 5000}
+                y2={g.at + 5000}
+                stroke="hsl(300 100% 72%)"
+                strokeWidth={1 / canvasZoom}
+                opacity={0.95}
               />
             ))}
             {/* Vertical alignment guides (X-axis lines that run top-to-bottom) */}
-            {alignmentGuides.vertical.map((x, i) => (
+            {alignmentGuides.vertical.map((g, i) => (
               <line
-                key={`v-${i}-${x}`}
-                x1={x + 5000}
-                y1={0}
-                x2={x + 5000}
-                y2={10000}
-                stroke="hsl(280 100% 70%)"
-                strokeWidth={1}
-                strokeDasharray="4,4"
-                opacity={0.8}
+                key={`v-${i}-${g.at}`}
+                x1={g.at + 5000}
+                y1={g.from + 5000}
+                x2={g.at + 5000}
+                y2={g.to + 5000}
+                stroke="hsl(300 100% 72%)"
+                strokeWidth={1 / canvasZoom}
+                opacity={0.95}
               />
             ))}
           </svg>
@@ -5349,8 +5755,9 @@ export function CXDCanvas() {
         return (
           <div
             key={edge.id}
-            className="absolute pointer-events-none"
+            className={`absolute pointer-events-none${buildReveal?.delays.has(edge.id) ? " assistant-reveal" : ""}`}
             style={{
+              ...(buildReveal?.delays.has(edge.id) ? { animationDelay: `${buildReveal.delays.get(edge.id)}ms` } : {}),
               transform: `translate(${canvasPosition.x}px, ${canvasPosition.y}px) scale(${canvasZoom})`,
               transformOrigin: "0 0",
               transition: canvasTransformTransition,
@@ -5676,7 +6083,7 @@ export function CXDCanvas() {
                       } else if (elType === 'task') {
                         newEl = { ...base, type: 'freeform', x: worldX - 125, y: worldY - 70, width: 250, height: 140, cardType: 'task', content: 'Task Title', emoji: '✅', taskMetadata: { isActionable: true, subtasks: [] }, style: { bgColor: DEFAULT_BG, textColor: '#ffffff' } } as CanvasElement;
                       } else if (elType === 'shape') {
-                        newEl = { ...base, type: 'shape', x: worldX - 75, y: worldY - 75, width: 150, height: 150, shapeType: 'rectangle', content: '', style: { bgColor: 'hsl(var(--primary) / 0.3)', borderColor: 'hsl(var(--primary))' } } as CanvasElement;
+                        newEl = { ...base, type: 'shape', x: worldX - 80, y: worldY - 50, width: 160, height: 100, shapeType: 'rectangle', content: '', style: { ...DEFAULT_SHAPE_STYLE } } as CanvasElement;
                       } else if (elType === 'container') {
                         newEl = { ...base, type: 'container', x: worldX - 160, y: worldY - 120, width: 320, height: 240, label: '', zIndex: CONTAINER_Z_BASE } as CanvasElement;
                       } else if (elType === 'image') {
@@ -5925,7 +6332,7 @@ export function CXDCanvas() {
         })()}
 
 
-      {/* Canvas Toolkit */}
+      {/* Canvas Toolkit — stays in focus mode: it is the one way to add elements there */}
       {canEdit && (
         <CanvasToolkit
           onPlaceElement={handlePlaceElement}
@@ -5936,7 +6343,20 @@ export function CXDCanvas() {
           onActiveToolChange={setActiveTool}
         />
       )}
+      {/* Focus mode: all chrome hidden; this pill is the only way back besides the shortcut */}
+      {canvasFocusMode && (
+        <button
+          className="absolute top-4 right-4 z-[60] flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur border border-white/10 text-xs text-white/50 opacity-40 hover:opacity-100 hover:text-white hover:border-violet-500/50 transition-all"
+          onClick={() => setCanvasFocusMode(false)}
+          onMouseDown={(e) => e.stopPropagation()}
+          title="Exit focus mode (Ctrl/Cmd + . or Esc)"
+        >
+          <Minimize2 className="w-3.5 h-3.5" />
+          Exit focus
+        </button>
+      )}
       {/* Zoom Controls */}
+      {!canvasFocusMode && (
       <NavigationToolkit
         canvasZoom={canvasZoom}
         onZoomIn={handleZoomIn}
@@ -5959,6 +6379,8 @@ export function CXDCanvas() {
         canRedo={canRedo()}
         showAlignmentGuides={showAlignmentGuides}
         onToggleAlignmentGuides={() => setShowAlignmentGuides(!showAlignmentGuides)}
+        showTags={tagsPinned}
+        onToggleTags={toggleTagVisibility}
         gridVisible={settings.gridVisible}
         gridMajorDots={settings.gridMajorDots}
         onCycleGrid={() => {
@@ -5967,8 +6389,12 @@ export function CXDCanvas() {
           else if (!settings.gridMajorDots) updateSettings({ gridMajorDots: true });
           else updateSettings({ gridVisible: false, gridMajorDots: false });
         }}
+        onEnterFocusMode={() => setCanvasFocusMode(true)}
+        onExport={() => setExportDialog({ scope: selectedElementIds.size > 0 ? 'selection' : 'board' })}
       />
+      )}
       {/* Task Inbox - for tasks created in Plan Tab */}
+      {!canvasFocusMode && (
       <TaskInbox
         inboxItems={inboxItems}
         onPlaceOnCanvas={handlePlaceInboxItem}
@@ -5977,6 +6403,50 @@ export function CXDCanvas() {
         onGoToPlanTab={() => setCanvasViewMode('plan')}
         canvasZoom={canvasZoom}
       />
+      )}
+      {exportDialog && (
+        <ExportDialog
+          open
+          initialScope={exportDialog.scope}
+          onClose={() => setExportDialog(null)}
+          elements={canvasElements}
+          edges={canvasEdges}
+          selectedIds={selectedElementIds}
+          projectName={project?.name || 'canvas'}
+        />
+      )}
+      {/* Quick colour fan after placing an element */}
+      {quickColorTargetId && (() => {
+        const target = canvasElements.find((el) => el.id === quickColorTargetId);
+        if (!target) return null;
+        return (
+          <QuickColorFan
+            element={target}
+            canvasPosition={canvasPosition}
+            canvasZoom={canvasZoom}
+            onApply={(updates) => {
+              pushCanvasHistory();
+              syncUpdateElement(target.id, updates);
+            }}
+            onClose={closeQuickColor}
+          />
+        );
+      })()}
+      {/* Inbox note pinned open for writing — stays up in focus mode too */}
+      {canEdit && <PinnedInboxNote />}
+      {/* Canvas AI Assistant — canvas view only, edit mode only */}
+      {buildReveal && (
+        <button
+          type="button"
+          onClick={skipBuild}
+          className="absolute bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full border border-white/15 bg-card/90 px-3.5 py-1.5 text-xs text-foreground/80 shadow-lg backdrop-blur transition-colors hover:border-white/30 hover:text-foreground"
+        >
+          Building on canvas… <span className="ml-1 font-medium text-violet-300">Skip</span>
+        </button>
+      )}
+      {canEdit && !canvasFocusMode && (
+        <CanvasAssistant selectedElementIds={Array.from(selectedElementIds)} />
+      )}
       {/* Drag preview for inbox items */}
       {draggingInboxItem && inboxDragPos && (
         <div
@@ -6034,8 +6504,9 @@ export function CXDCanvas() {
         </>
       )}
       {/* Experience Flow Timeline */}
-      <ExperienceFlowDrawer />
+      {!canvasFocusMode && <ExperienceFlowDrawer />}
       {/* Experience Inspector - Icon rail with editable section panels */}
+      {!canvasFocusMode && (
       <ExperienceInspector
         project={project}
         onPanelOpenChange={setInspectorPanelOpen}
@@ -6047,6 +6518,7 @@ export function CXDCanvas() {
         }}
         className=" right-[15px] static"
       />
+      )}
       {/* Experience Block Drag Preview */}
       {draggingExperienceBlock && experienceBlockDragPos && (
         <div
@@ -6167,6 +6639,7 @@ export function CXDCanvas() {
       {/* Context Menu */}
       {contextMenuPos && contextMenuTarget && (
         <CanvasContextMenu
+          allowCreate={!canvasFocusMode}
           position={contextMenuPos}
           target={contextMenuTarget}
           onClose={() => {
@@ -6195,13 +6668,14 @@ export function CXDCanvas() {
               let newElement: CanvasElement;
               switch (type) {
                 case 'text':
-                  newElement = { ...baseElement, type: 'text', content: '', width: 400, style: { fontSize: 32, fontWeight: 'bold' } };
+                  newElement = { ...baseElement, type: 'text', content: '', width: 60, height: 50, autoWidth: true, style: { fontSize: 32, fontWeight: 'bold' } };
+                  requestStartEditing(baseElement.id);
                   break;
                 case 'image':
                   newElement = { ...baseElement, type: 'image', src: '', alt: '' };
                   break;
                 case 'shape':
-                  newElement = { ...baseElement, type: 'shape', shapeType: 'rectangle' as ShapeType, style: {} };
+                  newElement = { ...baseElement, type: 'shape', shapeType: 'rectangle' as ShapeType, width: 160, height: 100, style: { ...DEFAULT_SHAPE_STYLE } };
                   break;
                 case 'link':
                   newElement = { ...baseElement, type: 'link', url: '', title: '', linkMode: 'embed' };
@@ -6325,25 +6799,9 @@ export function CXDCanvas() {
                 setSelectedElementIds(new Set([newElement.id]));
               }
             } else if (selectedElementIds.size > 0) {
-              const newIds: string[] = [];
-              selectedElementIds.forEach(id => {
-                const element = canvasElements.find(el => el.id === id);
-                if (element) {
-                  ctxDupMaxZ += 1;
-                  const { dx, dy } = getDuplicateOffset(element);
-                  const newElement = {
-                    ...element,
-                    id: uuidv4(),
-                    x: element.x + dx,
-                    y: element.y + dy,
-                    zIndex: ctxDupMaxZ,
-                  };
-                  syncAddElement(newElement);
-                  newIds.push(newElement.id);
-                }
-              });
-              setSelectedElementIds(new Set(newIds));
+              const newIds = duplicateElements(selectedElementIds);
               if (newIds.length > 0) {
+                setSelectedElementIds(new Set(newIds));
                 setSelectedElementId(newIds[0]);
               }
             }
@@ -6373,6 +6831,11 @@ export function CXDCanvas() {
           })()}
           onConnectSelected={() => { connectSelectedElements(); setContextMenuPos(null); setContextMenuTarget(null); }}
           onAutoOrganize={() => { autoOrganizeSelected(); setContextMenuPos(null); setContextMenuTarget(null); }}
+          onExport={() => {
+            setExportDialog({ scope: selectedElementIds.size > 0 ? 'selection' : 'board' });
+            setContextMenuPos(null);
+            setContextMenuTarget(null);
+          }}
           onDownloadImage={async () => {
             if (selectedElementId) {
               const element = canvasElements.find(el => el.id === selectedElementId);

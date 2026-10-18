@@ -12,6 +12,7 @@ import {
   PlanContext,
   FaceContext,
 } from "@/types/ai-types";
+import type { CanvasInventory } from "@/types/ai-operations";
 import { calculateFaceIntensities } from "@/utils/diagnostic-engine";
 import { generateDiagnostics } from "@/utils/diagnostic-engine";
 
@@ -361,21 +362,99 @@ function buildPlanContext(elements: CanvasElement[]): PlanContext {
 }
 
 // ============================================================
+// Canvas inventory (for the Canvas Assistant operations route)
+// ============================================================
+
+const INVENTORY_CAP = 150;
+const CONNECTION_CAP = 200;
+
+/**
+ * Bounded, model-facing element inventory. Unlike buildCanvasContext (counts +
+ * prose digest), this carries ids and geometry so the model can target specific
+ * elements. Priority when over the cap: selected elements first, then canvas-
+ * surface elements, then most recently listed — so the selection always
+ * survives truncation.
+ */
+export function buildCanvasInventory(
+  elements: CanvasElement[],
+  selectedIds: string[],
+  edges: CanvasEdge[] = [],
+): CanvasInventory {
+  const selectedSet = new Set(selectedIds);
+  const content = elements.filter((el) => el.type !== "line" && el.type !== "connector");
+
+  const scored = content.map((el, idx) => ({
+    el,
+    idx,
+    score: selectedSet.has(el.id) ? 2 : el.surface === "canvas" ? 1 : 0,
+  }));
+  scored.sort((a, b) => b.score - a.score || b.idx - a.idx);
+
+  const kept = scored.slice(0, INVENTORY_CAP).map(({ el }) => ({
+    id: el.id,
+    type: el.type,
+    title: getElementTitle(el),
+    ...(getElementBody(el) ? { text: getElementBody(el) } : {}),
+    x: Math.round(el.x),
+    y: Math.round(el.y),
+    width: Math.round(el.width),
+    height: Math.round(el.height),
+    ...(el.containerId ? { containerId: el.containerId } : {}),
+    ...(el.hypercubeTags && el.hypercubeTags.length > 0 ? { tags: el.hypercubeTags as string[] } : {}),
+    ...(selectedSet.has(el.id) ? { selected: true } : {}),
+  }));
+
+  const contentIds = new Set(content.map((el) => el.id));
+  // How the kept elements are wired: without this the model sees a diagram as
+  // a scatter of boxes and cannot keep its structure when asked to redraw it.
+  const keptIds = new Set(kept.map((k) => k.id));
+  const connections = edges
+    .filter((e) => keptIds.has(e.fromNodeId) && keptIds.has(e.toNodeId))
+    .slice(0, CONNECTION_CAP)
+    .map((e) => ({ from: e.fromNodeId, to: e.toNodeId, ...(e.label?.text ? { label: e.label.text } : {}) }));
+
+  return {
+    totalCount: content.length,
+    truncated: content.length > INVENTORY_CAP,
+    selectedIds: selectedIds.filter((id) => contentIds.has(id)),
+    elements: kept,
+    ...(connections.length > 0 ? { connections } : {}),
+  };
+}
+
+// ============================================================
 // Helpers
 // ============================================================
 
-function getElementTitle(element: CanvasElement): string {
+const firstLineOf = (s: unknown): string =>
+  (typeof s === "string" ? s : "").split("\n").find((l) => l.trim().length > 0)?.trim().slice(0, 80) ?? "";
+const plainText = (html: unknown): string =>
+  (typeof html === "string" ? html : "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * What an element is called, as the user sees it. Every type must return its
+ * VISIBLE text: a type that fell through to a generic word here made the
+ * assistant blind to it (shapes all read as "Element", so a selected diagram
+ * arrived with no content and the model invented one).
+ */
+export function getElementTitle(element: CanvasElement): string {
+  const el = element as any;
   switch (element.type) {
     case "freeform":
-    case "text": {
-      const content = (element as any).content || "";
-      const firstLine = content.split("\n").find((l: string) => l.trim().length > 0);
-      return firstLine?.trim().slice(0, 60) || "Untitled Card";
+      // Note cards keep their title in noteTitle; task cards and older cards in content.
+      return firstLineOf(el.noteTitle) || firstLineOf(el.content) || firstLineOf(plainText(el.noteBody)) || "Untitled Card";
+    case "text":
+      return firstLineOf(el.content) || "Untitled Text";
+    case "shape":
+      return firstLineOf(el.content) || firstLineOf(plainText(el.richContent)) || `Empty ${el.shapeType || "shape"}`;
+    case "table": {
+      const header = Array.isArray(el.cells?.[0]) ? el.cells[0].map((c: any) => c?.text).filter(Boolean).join(" | ") : "";
+      return header ? `Table: ${header}`.slice(0, 80) : "Table";
     }
     case "board":
-      return (element as any).title || "Untitled Board";
+      return el.title || "Untitled Board";
     case "container":
-      return (element as any).title || "Container";
+      return el.label || el.title || "Container";
     case "link":
       return (element as any).title || (element as any).url?.slice(0, 40) || "Link";
     case "image":
@@ -384,6 +463,33 @@ function getElementTitle(element: CanvasElement): string {
       return (element as any).title || "Experience Block";
     default:
       return "Element";
+  }
+}
+
+/** The rest of an element's text beyond its title, for the assistant's inventory. */
+export function getElementBody(element: CanvasElement): string {
+  const el = element as any;
+  const MAX = 220;
+  switch (element.type) {
+    case "freeform": {
+      const body = plainText(el.noteBody) || String(el.content || "").split("\n").slice(1).join(" ").trim();
+      return body.slice(0, MAX);
+    }
+    case "text":
+    case "shape": {
+      const rest = String(el.content || "").split("\n").filter((l: string) => l.trim()).slice(1).join(" ").trim();
+      return rest.slice(0, MAX);
+    }
+    case "table": {
+      const rows = Array.isArray(el.cells) ? el.cells.slice(1, 6) : [];
+      return rows.map((r: any[]) => r.map((c) => c?.text ?? "").join(" | ")).join(" / ").slice(0, MAX);
+    }
+    case "image":
+      return String(el.description || "").slice(0, MAX);
+    case "link":
+      return String(el.url || "").slice(0, MAX);
+    default:
+      return "";
   }
 }
 

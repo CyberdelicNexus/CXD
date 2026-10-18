@@ -10,7 +10,7 @@
 import type { CanvasElement, CanvasEdge, HypercubeFaceTag } from '@/types/canvas-elements';
 import { useCXDStore } from '@/store/cxd-store';
 import { elementsBoundingBox } from '@/lib/framing-to-canvas';
-import { layoutDraftElements, findClearGroupOrigin, type BoundingBox } from '@/lib/ai/draft-layout';
+import { layoutDraftElements, findClearGroupOrigin, connectorsThroughNodes, type BoundingBox } from '@/lib/ai/draft-layout';
 import { FACE_DISPLAY_NAMES } from '@/lib/display-utils';
 
 export interface ElementGenerationOptions {
@@ -67,7 +67,7 @@ export async function generateElementsFromPrompt(
     }
 
     const elements = (data as { elements?: CanvasElement[] }).elements || [];
-    const edges = (data as { edges?: CanvasEdge[] }).edges || [];
+    const allEdges = (data as { edges?: CanvasEdge[] }).edges || [];
     if (elements.length === 0) {
       return { success: false, count: 0, error: 'No elements generated' };
     }
@@ -83,7 +83,14 @@ export async function generateElementsFromPrompt(
     // container + its children becomes a grouped column, loose elements
     // flow into a grid, all shelf-packed with generous gaps. When the model
     // emitted connectors, this becomes a radial mind map instead.
-    const laidOut = layoutDraftElements(elements, edges);
+    const laidOut = layoutDraftElements(elements, allEdges);
+    // A connector the canvas can only draw straight through the diagram is
+    // worse than no connector (see connectorsThroughNodes).
+    const unroutable = connectorsThroughNodes(laidOut, allEdges);
+    const edges = allEdges.filter((e) => !unroutable.has(e.id));
+    if (unroutable.size > 0) {
+      console.info(`[ElementGeneration] left out ${unroutable.size} connector(s) that would cut through the diagram`);
+    }
     const bbox = elementsBoundingBox(laidOut);
 
     // Then place that group in free space near the current viewport
@@ -91,6 +98,8 @@ export async function generateElementsFromPrompt(
     // top of it, instead of trusting the model's suggested coordinates.
     let dx = 0;
     let dy = 0;
+    // Place into the board the user is currently inside (breadcrumb), not the root.
+    const activeBoardId = store.activeBoardId ?? null;
     if (bbox) {
       const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1200;
       const viewportH = typeof window !== 'undefined' ? window.innerHeight - 64 : 700;
@@ -101,7 +110,7 @@ export async function generateElementsFromPrompt(
       const obstacles: BoundingBox[] = (project.canvasLayout?.elements || [])
         .filter(
           (el) =>
-            !el.inInbox && !el.boardId && el.surface !== 'hypercube' && el.type !== 'line' &&
+            !el.inInbox && (el.boardId ?? null) === activeBoardId && el.surface !== 'hypercube' && el.type !== 'line' &&
             el.width > 0 && el.height > 0
         )
         .map((el) => ({ minX: el.x, minY: el.y, maxX: el.x + el.width, maxY: el.y + el.height }));
@@ -111,13 +120,18 @@ export async function generateElementsFromPrompt(
       dy = clearOrigin.y - bbox.minY;
     }
 
-    const hypercubeTags: HypercubeFaceTag[] = (options.sourceFaces || [])
+    // sourceFaces from a face-specific chat is one face and worth carrying. From
+    // the general chat it is every face the answer happened to mention, which
+    // stamped all seven tags on every node of a diagram: that says nothing, so
+    // anything broader than two faces is dropped.
+    const faces = options.sourceFaces || [];
+    const hypercubeTags: HypercubeFaceTag[] = (faces.length <= 2 ? faces : [])
       .filter((face) => TAGGABLE_FACES.includes(face))
       .map((face) => FACE_DISPLAY_NAMES[face] as HypercubeFaceTag)
       .filter(Boolean);
 
     const placed = laidOut.map((el) => {
-      const shifted = { ...el, x: el.x + dx, y: el.y + dy };
+      const shifted = { ...el, x: el.x + dx, y: el.y + dy, boardId: activeBoardId };
       // Tag hygiene: only top-level elements and containers carry face tags.
       // Children inside a container inherit their parent's tags at query time
       // in the Map views, so tagging each child would just be chip spam.
@@ -133,7 +147,7 @@ export async function generateElementsFromPrompt(
     // (addCanvasEdges is batched + freeze-proof and deliberately skips its own
     // history snapshot — see cxd-store.ts). Ids are preserved through layout.
     if (edges.length > 0) {
-      store.addCanvasEdges(edges);
+      store.addCanvasEdges(edges.map((e) => ({ ...e, boardId: activeBoardId })));
     }
 
     // Frame the camera on the freshly placed group, same UX as the wizard's

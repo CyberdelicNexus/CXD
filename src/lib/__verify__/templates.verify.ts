@@ -10,6 +10,7 @@ import { QUICKSTART_TEMPLATES } from '../templates-quickstart';
 import { CLASSIC_TEMPLATES } from '../templates-classics';
 import { EXPERIENCE_TEMPLATES } from '../templates-experience';
 import { TEMPLATES, instantiateTemplate } from '../templates';
+import { checkLayout } from '../canvas-layout-rules';
 import type { CanvasElement } from '../../types/canvas-elements';
 
 const ALL_VERIFIED = [...QUICKSTART_TEMPLATES, ...EXPERIENCE_TEMPLATES, ...CLASSIC_TEMPLATES];
@@ -20,40 +21,23 @@ const check = (cond: boolean, msg: string) => {
   if (cond) { pass++; } else { fail++; console.error(`  ✗ ${msg}`); }
 };
 
-/** Real rendered bounds (note height floor 300, etc.). Lines return null (no box). */
-function realBounds(el: CanvasElement): { x: number; y: number; w: number; h: number } | null {
-  if (el.type === 'line' || el.type === 'connector') return null;
-  let w = el.width;
-  let h = el.height;
-  if (el.type === 'freeform') {
-    const f = el as any;
-    if (f.isDocument) { w = Math.max(w, 100); h = Math.max(h, 130); }
-    else if (f.cardType === 'note') { w = Math.max(w, 200); h = Math.max(h, 300); }
-  }
-  return { x: el.x, y: el.y, w, h };
-}
-
-const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
-  a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+// Geometry rules live in canvas-layout-rules.ts so AI-generated layouts are
+// audited against the exact same rubric as these hand-authored templates.
 
 for (const tpl of ALL_VERIFIED) {
   console.log(`\n▶ ${tpl.name} (${tpl.elements.length} elements, ${tpl.edges?.length ?? 0} edges)`);
 
-  // 1. Unique ids (elements + childBoardIds + edges)
+  // 1-4. Shared rubric: unique ids, edge endpoints, container refs + bounds,
+  //      and same-scope overlaps, all on real rendered footprints.
+  const violations = checkLayout(tpl.elements, tpl.edges ?? []);
+  for (const x of violations) check(false, `[${x.rule}] ${x.message}`);
+  if (violations.length === 0) pass++;
+
   const ids = new Set<string>();
-  let dupes = 0;
   for (const el of tpl.elements) {
-    if (ids.has(el.id)) dupes++;
     ids.add(el.id);
     const cb = (el as any).childBoardId;
-    if (cb) { if (ids.has(cb)) dupes++; ids.add(cb); }
-  }
-  check(dupes === 0, `duplicate ids: ${dupes}`);
-
-  // 2. Edge endpoints resolve to element ids
-  for (const e of tpl.edges ?? []) {
-    check(ids.has(e.fromNodeId), `edge ${e.id}: unknown fromNodeId ${e.fromNodeId}`);
-    check(ids.has(e.toNodeId), `edge ${e.id}: unknown toNodeId ${e.toNodeId}`);
+    if (cb) ids.add(cb);
   }
 
   // 2b. Interior elements/edges reference a real board's childBoardId
@@ -65,49 +49,6 @@ for (const tpl of ALL_VERIFIED) {
   }
   for (const e of tpl.edges ?? []) {
     if (e.boardId) check(childBoardIds.has(e.boardId), `edge ${e.id}: boardId ${e.boardId} is not any template board's childBoardId`);
-  }
-
-  // 3. containerId references exist + children within container bounds
-  const byId = new Map(tpl.elements.map((el) => [el.id, el]));
-  for (const el of tpl.elements) {
-    if (!el.containerId) continue;
-    const parent = byId.get(el.containerId);
-    check(!!parent && parent.type === 'container', `${el.id}: containerId ${el.containerId} is not a container`);
-    if (!parent) continue;
-    const rb = realBounds(el);
-    if (!rb) continue; // lines: no box containment check
-    const inX = rb.x >= parent.x && rb.x + rb.w <= parent.x + parent.width;
-    const inY = rb.y >= parent.y && rb.y + rb.h <= parent.y + parent.height;
-    check(inX && inY, `${el.id} (${el.type}) escapes container ${parent.id}: child ${JSON.stringify(rb)} vs parent ${parent.x},${parent.y} ${parent.width}x${parent.height}`);
-  }
-
-  // 4. Overlaps among siblings (same containment scope), skipping text headers
-  //    against their own zone content is NOT allowed either — text is a real box.
-  const scopes = new Map<string, CanvasElement[]>();
-  for (const el of tpl.elements) {
-    // Scope by board AND container: interior (pre-seeded board) elements live in
-    // another board's coordinate space and must never be compared against root
-    // canvas elements.
-    const scope = `${el.boardId ?? '__rootboard__'}|${el.containerId ?? '__root__'}`;
-    if (!scopes.has(scope)) scopes.set(scope, []);
-    scopes.get(scope)!.push(el);
-  }
-  for (const [scope, els] of Array.from(scopes.entries())) {
-    for (let i = 0; i < els.length; i++) {
-      for (let j = i + 1; j < els.length; j++) {
-        const a = realBounds(els[i]);
-        const b = realBounds(els[j]);
-        if (!a || !b) continue;
-        // Containers at root scope may legitimately sit near each other; still
-        // require zero overlap. A child overlapping its own container is fine
-        // (that's containment), so only same-scope pairs are compared here.
-        if (overlaps(a, b)) {
-          check(false, `[${scope}] ${els[i].id} (${els[i].type}) overlaps ${els[j].id} (${els[j].type})`);
-        } else {
-          pass++;
-        }
-      }
-    }
   }
 
   // 5. instantiateTemplate: fresh ids, endpoints remapped, nothing dropped

@@ -1,5 +1,6 @@
 // Canvas element types for the spatial moodboard
 
+import { shapeOutlinePoint } from '@/lib/shape-outline';
 export type CanvasElementType =
   | 'freeform'
   | 'image'
@@ -14,7 +15,9 @@ export type CanvasElementType =
   | 'table';
 
 // Shape types available in the shape palette
-export type ShapeType = 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'hexagon' | 'star';
+export type ShapeType =
+  | 'rectangle' | 'circle' | 'diamond' | 'triangle' | 'hexagon' | 'star'
+  | 'pill' | 'parallelogram' | 'cylinder' | 'document' | 'arrow' | 'callout';
 
 // Preset colors for cards and shapes (dark cyberdelic gradients)
 export const PRESET_COLORS = [
@@ -65,19 +68,39 @@ export const TEXT_GRADIENTS = [
 ] as const;
 
 // Font families for text elements
+// Every Google font listed here is requested in src/app/cxd/layout.tsx (keep the
+// two in sync) and allowed by the CSP in next.config.js (fonts.googleapis.com /
+// fonts.gstatic.com). Values are stored on elements, so never rename them.
 export const FONT_FAMILIES = [
   { value: 'inherit', label: 'Default' },
-  { value: 'Inter, sans-serif', label: 'Inter' },
-  { value: 'Georgia, serif', label: 'Georgia' },
-  { value: 'ui-monospace, monospace', label: 'Mono' },
+  { value: "'Inter', sans-serif", label: 'Inter' },
+  { value: "'DM Sans', sans-serif", label: 'DM Sans' },
+  { value: "'Poppins', sans-serif", label: 'Poppins' },
+  { value: "'Montserrat', sans-serif", label: 'Montserrat' },
+  { value: "'Raleway', sans-serif", label: 'Raleway' },
+  { value: "'Outfit', sans-serif", label: 'Outfit' },
   // Creative/Display
   { value: "'Space Grotesk', sans-serif", label: 'Space Grotesk' },
   { value: "'Syne', sans-serif", label: 'Syne' },
   { value: "'Unbounded', sans-serif", label: 'Unbounded' },
-  // Professional/Versatile
+  { value: "'Orbitron', sans-serif", label: 'Orbitron' },
+  { value: "'Righteous', sans-serif", label: 'Righteous' },
+  { value: "'Bebas Neue', sans-serif", label: 'Bebas Neue' },
+  { value: "'Oswald', sans-serif", label: 'Oswald' },
+  // Serif
+  { value: 'Georgia, serif', label: 'Georgia' },
   { value: "'Playfair Display', serif", label: 'Playfair' },
-  { value: "'Raleway', sans-serif", label: 'Raleway' },
-  { value: "'Outfit', sans-serif", label: 'Outfit' },
+  { value: "'Lora', serif", label: 'Lora' },
+  { value: "'Merriweather', serif", label: 'Merriweather' },
+  { value: "'Cinzel', serif", label: 'Cinzel' },
+  // Handwriting
+  { value: "'Caveat', cursive", label: 'Caveat' },
+  { value: "'Permanent Marker', cursive", label: 'Marker' },
+  { value: "'Pacifico', cursive", label: 'Pacifico' },
+  // Monospace
+  { value: 'ui-monospace, monospace', label: 'Mono' },
+  { value: "'Space Mono', monospace", label: 'Space Mono' },
+  { value: "'JetBrains Mono', monospace", label: 'JetBrains Mono' },
 ] as const;
 
 // Style properties shared across elements
@@ -253,7 +276,8 @@ export interface ImageElement extends CanvasElementBase {
 export interface ShapeElement extends CanvasElementBase {
   type: 'shape';
   shapeType: ShapeType;
-  content?: string; // Text inside the shape
+  content?: string; // Text inside the shape (plain; kept in sync with richContent)
+  richContent?: string; // Same text as HTML with per-selection formatting (sizes, bold...)
   style?: ElementStyle;
   taskMetadata?: TaskMetadata;       // Plan Tab task extension
 }
@@ -315,6 +339,9 @@ export interface TextElement extends CanvasElementBase {
   style?: ElementStyle;
   textAlign?: 'left' | 'center' | 'right';
   wrapWidth?: number; // Custom width for text wrapping (defaults to auto if not set)
+  // true: box hugs the text (no wrapping except explicit line breaks).
+  // false/undefined: fixed width, text wraps. Height always follows content.
+  autoWidth?: boolean;
   taskMetadata?: TaskMetadata;       // Plan Tab task extension
 }
 
@@ -591,10 +618,16 @@ export const CANVAS_TOOLS: ToolDefinition[] = [
 export const SHAPE_TYPES: { type: ShapeType; label: string }[] = [
   { type: 'rectangle', label: 'Rectangle' },
   { type: 'circle', label: 'Circle' },
-  { type: 'diamond', label: 'Diamond' },
-  { type: 'triangle', label: 'Triangle' },
+  { type: 'pill', label: 'Start / End' },
+  { type: 'diamond', label: 'Decision' },
+  { type: 'parallelogram', label: 'Input / Output' },
   { type: 'hexagon', label: 'Hexagon' },
+  { type: 'triangle', label: 'Triangle' },
   { type: 'star', label: 'Star' },
+  { type: 'cylinder', label: 'Database' },
+  { type: 'document', label: 'Document' },
+  { type: 'arrow', label: 'Arrow' },
+  { type: 'callout', label: 'Callout' },
 ];
 
 // Helper function to get anchor position on an element
@@ -629,6 +662,12 @@ export function getAnchorPosition(
   const { x, y, width, height } = element;
   // Clamp offset to 0-1 range
   const clampedOffset = Math.max(0, Math.min(1, offset));
+
+  // Non-rectangular shapes: connect to the OUTLINE, not the bounding box edge.
+  if (element.type === 'shape') {
+    const hit = shapeOutlinePoint((element as ShapeElement).shapeType, width, height, anchor, clampedOffset);
+    if (hit) return { x: x + hit.x, y: y + hit.y };
+  }
 
   switch (anchor) {
     case 'top':

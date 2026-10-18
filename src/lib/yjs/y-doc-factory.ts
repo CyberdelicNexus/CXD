@@ -30,6 +30,8 @@ import {
   yMapToCanvasElement,
   canvasEdgeToYMap,
   yMapToCanvasEdge,
+  applyElementUpdates,
+  applyEdgeUpdates,
 } from './element-serializers';
 import { versionToYMap, okrToYMap, yMapToVersion, yMapToOKR } from './yjs-version-actions';
 import { commentToYMap, yMapToComment } from './yjs-comment-actions';
@@ -309,32 +311,112 @@ export function seedProjectExtrasIntoYDoc(doc: Y.Doc, project: CXDProject): void
  * write project_data only, so for these two fields project_data is always
  * at-least-as-fresh as doc meta (canvas renames write both).
  *
- * Returns seed counts so the caller can emit telemetry — divergence should be
- * visible in Sentry, not silent.
+ * MODIFICATIONS (pass `dbState`, the yjs_state binary exactly as loaded from
+ * the DB): every writer of yjs_state also writes project_data in the same
+ * UPDATE, so when project_data's version of a known element differs from the
+ * DB yjs_state's version, project_data was written LATER by a project_data-only
+ * path (a session that ran without the CRDT, e.g. every post-reload session
+ * before the reload fix). "Doc wins for known ids" silently reverted those
+ * edits; instead project_data's version replaces the doc's. Elements the live
+ * doc changed beyond the DB state (unsaved IndexedDB edits) are unaffected:
+ * they only get replaced where project_data itself diverged from the DB.
+ *
+ * Returns seed/repair counts so the caller can emit telemetry — divergence
+ * should be visible in Sentry, not silent.
  */
 export function reconcileCanvasIntoYDoc(
   doc: Y.Doc,
-  project: CXDProject
-): { seededElements: number; seededEdges: number } {
+  project: CXDProject,
+  dbState?: Uint8Array | null
+): { seededElements: number; seededEdges: number; repairedElements: number; repairedEdges: number } {
   const elements = project.canvasLayout?.elements ?? [];
   const edges = project.canvasLayout?.edges ?? [];
   let seededElements = 0;
   let seededEdges = 0;
+  let repairedElements = 0;
+  let repairedEdges = 0;
+
+  // Canonical forms of the DB yjs_state's elements/edges, and a normalizer that
+  // round-trips project_data items through the same serializer so formatting
+  // differences (Y.Text, JSON arrays, undefined keys) never read as edits.
+  let dbElements: Map<string, Record<string, unknown>> | null = null;
+  let dbEdges: Map<string, Record<string, unknown>> | null = null;
+  const scratch = new Y.Doc();
+  const scratchEls = scratch.getMap<Y.Map<unknown>>('els');
+  const scratchEdges = scratch.getMap<Y.Map<unknown>>('edges');
+  const normElement = (el: CanvasElement): Record<string, unknown> => {
+    scratchEls.set('x', canvasElementToYMap(el));
+    return JSON.parse(stableStringify(yMapToCanvasElement(scratchEls.get('x')!)));
+  };
+  const normEdge = (edge: CanvasEdge): Record<string, unknown> => {
+    scratchEdges.set('x', canvasEdgeToYMap(edge));
+    return JSON.parse(stableStringify(yMapToCanvasEdge(scratchEdges.get('x')!)));
+  };
+  // Keys whose value differs between project_data and the DB state. Only these
+  // are written to the live doc, so unsaved local edits to OTHER fields of the
+  // same element (IndexedDB, peers) are kept.
+  const changedKeys = (fromPd: Record<string, unknown>, fromDb: Record<string, unknown>) => {
+    const set: Record<string, unknown> = {};
+    const removed: string[] = [];
+    for (const k of Object.keys(fromPd)) {
+      if (k === 'id') continue;
+      if (stableStringify(fromPd[k]) !== stableStringify(fromDb[k])) set[k] = fromPd[k];
+    }
+    for (const k of Object.keys(fromDb)) if (!(k in fromPd)) removed.push(k);
+    return { set, removed };
+  };
+  if (dbState && dbState.length > 0) {
+    try {
+      const dbDoc = new Y.Doc();
+      Y.applyUpdate(dbDoc, dbState);
+      dbElements = new Map();
+      dbEdges = new Map();
+      dbDoc.getMap<Y.Map<unknown>>(YDOC_KEYS.ELEMENTS).forEach((yEl, id) => {
+        if (yEl instanceof Y.Map) dbElements!.set(id, normElement(yMapToCanvasElement(yEl)));
+      });
+      dbDoc.getMap<Y.Map<unknown>>(YDOC_KEYS.EDGES).forEach((yEdge, id) => {
+        if (yEdge instanceof Y.Map) dbEdges!.set(id, normEdge(yMapToCanvasEdge(yEdge)));
+      });
+      dbDoc.destroy();
+    } catch (err) {
+      console.warn('[reconcile] Could not decode DB yjs_state; skipping modification repair:', err);
+      dbElements = null;
+      dbEdges = null;
+    }
+  }
 
   doc.transact(() => {
     const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
     for (const element of elements) {
-      if (element?.id && !yElements.has(element.id)) {
+      if (!element?.id) continue;
+      if (!yElements.has(element.id)) {
         yElements.set(element.id, canvasElementToYMap(element));
         seededElements++;
+      } else if (dbElements?.has(element.id)) {
+        const { set, removed } = changedKeys(normElement(element), dbElements.get(element.id)!);
+        const yEl = yElements.get(element.id);
+        if ((Object.keys(set).length > 0 || removed.length > 0) && yEl instanceof Y.Map) {
+          applyElementUpdates(yEl, set as Partial<CanvasElement>);
+          removed.forEach((k) => yEl.delete(k));
+          repairedElements++;
+        }
       }
     }
 
     const yEdges = doc.getMap(YDOC_KEYS.EDGES);
     for (const edge of edges) {
-      if (edge?.id && !yEdges.has(edge.id)) {
+      if (!edge?.id) continue;
+      if (!yEdges.has(edge.id)) {
         yEdges.set(edge.id, canvasEdgeToYMap(edge));
         seededEdges++;
+      } else if (dbEdges?.has(edge.id)) {
+        const { set, removed } = changedKeys(normEdge(edge), dbEdges.get(edge.id)!);
+        const yEdge = yEdges.get(edge.id);
+        if ((Object.keys(set).length > 0 || removed.length > 0) && yEdge instanceof Y.Map) {
+          applyEdgeUpdates(yEdge, set as Partial<CanvasEdge>);
+          removed.forEach((k) => yEdge.delete(k));
+          repairedEdges++;
+        }
       }
     }
 
@@ -346,8 +428,53 @@ export function reconcileCanvasIntoYDoc(
       }
     }
   }, 'initialization');
+  scratch.destroy();
 
-  return { seededElements, seededEdges };
+  return { seededElements, seededEdges, repairedElements, repairedEdges };
+}
+
+/**
+ * Remove duplicate edges (same from→to pair on the same board and surface)
+ * left behind by the old double-completed connection bug. Keeps the richest
+ * edge of each group (label, then custom styling), otherwise the first.
+ * Returns how many were removed.
+ */
+export function dedupeEdgesInYDoc(doc: Y.Doc): number {
+  const yEdges = doc.getMap(YDOC_KEYS.EDGES);
+  const groups = new Map<string, Array<{ id: string; score: number }>>();
+  yEdges.forEach((v, id) => {
+    if (!(v instanceof Y.Map)) return;
+    const key = [v.get('fromNodeId'), v.get('toNodeId'), v.get('boardId') ?? '', v.get('surface') ?? ''].join('|');
+    const score = (v.has('label') ? 2 : 0) + (v.has('style') ? 1 : 0);
+    const list = groups.get(key) ?? [];
+    list.push({ id, score });
+    groups.set(key, list);
+  });
+  let removed = 0;
+  doc.transact(() => {
+    groups.forEach((list) => {
+      if (list.length < 2) return;
+      const keep = list.reduce((best, cur) => (cur.score > best.score ? cur : best), list[0]);
+      list.forEach((e) => {
+        if (e.id !== keep.id) { yEdges.delete(e.id); removed++; }
+      });
+    });
+  }, 'initialization');
+  return removed;
+}
+
+/** JSON with sorted keys and undefined dropped, for order-insensitive equality. */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v).sort()) {
+        if (v[k] !== undefined) sorted[k] = v[k];
+      }
+      return sorted;
+    }
+    return v;
+  });
 }
 
 // ─── Conversion: Y.Doc → CXDProject ─────────────────────────────────────────

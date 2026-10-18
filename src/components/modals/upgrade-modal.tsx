@@ -25,7 +25,7 @@ const PRO_FEATURES = [
   '500 AI Credits/month',
   'Plan View with Kanban Boards',
   'Smart Templates Library',
-  'Team Collaboration (3 members)',
+  'Team Collaboration (5 members)',
   'Priority Support',
 ];
 
@@ -74,7 +74,7 @@ export function UpgradeModal({ isOpen, onClose, feature, onUpgrade }: UpgradeMod
       },
       'premium-ai': {
         title: 'Premium AI Models',
-        description: 'Get faster, more accurate responses with Claude Sonnet 4.5 and Gemini 2.5 Pro.',
+        description: 'Get faster, more accurate responses with Claude Sonnet 5.5 and Gemini 2.5 Pro.',
         benefits: [
           'Faster response times',
           'Higher quality insights',

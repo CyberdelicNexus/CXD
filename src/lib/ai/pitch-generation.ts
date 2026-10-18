@@ -37,7 +37,8 @@ export const pitchSectionSchema = z.object({
 });
 
 export const generatePitchSchema = z.object({
-  sections: z.array(pitchSectionSchema).min(1).max(8),
+  // No .min()/.max(): Anthropic structured output rejects them. The sanitizer caps at MAX_SECTIONS.
+  sections: z.array(pitchSectionSchema).describe("1 to 8 sections"),
 });
 
 export type GeneratedPitchSection = z.infer<typeof pitchSectionSchema>;

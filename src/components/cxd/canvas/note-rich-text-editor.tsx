@@ -23,13 +23,20 @@ import {
 } from "lucide-react";
 
 type NoteTextStyle = "heading" | "subheading" | "body" | "small";
-type NoteMenu = "none" | "style" | "textColor" | "highlight";
+type NoteMenu = "none" | "style" | "textColor" | "highlight" | "link";
 
 interface NoteRichTextEditorProps {
   value: string;
   textColor: string;
   isSelected: boolean;
   isFocusMode?: boolean;
+  /** Where the formatting toolbar sits: floating left/right of the editor, or
+   *  a horizontal bar inline above it ("top"). */
+  toolbarSide?: "left" | "right" | "top";
+  /** Hide the toolbar while keeping the editor editable. */
+  hideToolbar?: boolean;
+  /** Scroll the text area itself past this height (keeps the toolbar unclipped). */
+  contentMaxHeight?: string;
   onChange: (nextHtml: string) => void;
   onBlurCard: () => void;
   onFocusBody: () => void;
@@ -65,6 +72,9 @@ export function NoteRichTextEditor({
   textColor,
   isSelected,
   isFocusMode = false,
+  toolbarSide = "left",
+  hideToolbar = false,
+  contentMaxHeight,
   onChange,
   onBlurCard,
   onFocusBody,
@@ -72,9 +82,7 @@ export function NoteRichTextEditor({
 }: NoteRichTextEditorProps) {
   const [menu, setMenu] = useState<NoteMenu>("none");
   const [textStyle, setTextStyle] = useState<NoteTextStyle>("body");
-  const [showLinkPopup, setShowLinkPopup] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
-  const [linkPopupPosition, setLinkPopupPosition] = useState<{ left: number; top: number } | null>(null);
   const [selectionForLink, setSelectionForLink] = useState<{ from: number; to: number } | null>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -140,7 +148,7 @@ export function NoteRichTextEditor({
       }
       isFocusedRef.current = false;
       setMenu("none");
-      setShowLinkPopup(false);
+      setMenu("none");
       onBlurCard();
     },
   });
@@ -159,7 +167,7 @@ export function NoteRichTextEditor({
   useEffect(() => {
     if (!isSelected) {
       setMenu("none");
-      setShowLinkPopup(false);
+      setMenu("none");
     }
   }, [isSelected]);
 
@@ -193,34 +201,20 @@ export function NoteRichTextEditor({
     [editor],
   );
 
+  // The link editor is one of the toolbar's submenus (same place, same chrome),
+  // so opening it closes whichever other submenu was open, and vice versa.
   const openLinkPopup = useCallback(() => {
     if (!editor) return;
     const { from, to } = editor.state.selection;
     setSelectionForLink({ from, to });
     setLinkUrl(editor.getAttributes("link").href || "");
-
-    const viewRect = editor.view.dom.getBoundingClientRect();
-    let left = viewRect.left + 24;
-    let top = viewRect.top + 40;
-    if (from !== to) {
-      const start = editor.view.coordsAtPos(from);
-      const end = editor.view.coordsAtPos(to);
-      left = (start.left + end.right) / 2;
-      top = end.bottom + 8;
-    } else if (linkButtonRef.current) {
-      const btn = linkButtonRef.current.getBoundingClientRect();
-      left = btn.left + btn.width / 2;
-      top = btn.bottom + 10;
-    }
-    setLinkPopupPosition({ left, top });
-    setShowLinkPopup(true);
-    setMenu("none");
+    setMenu((prev) => (prev === "link" ? "none" : "link"));
     window.requestAnimationFrame(() => linkInputRef.current?.focus());
   }, [editor]);
 
   const applyLink = useCallback(() => {
     if (!editor || !linkUrl.trim()) {
-      setShowLinkPopup(false);
+      setMenu("none");
       return;
     }
     const chain = editor.chain().focus();
@@ -228,7 +222,7 @@ export function NoteRichTextEditor({
       chain.setTextSelection(selectionForLink);
     }
     chain.extendMarkRange("link").setLink({ href: linkUrl.trim() }).run();
-    setShowLinkPopup(false);
+    setMenu("none");
     setLinkUrl("");
   }, [editor, linkUrl, selectionForLink]);
 
@@ -239,7 +233,7 @@ export function NoteRichTextEditor({
       chain.setTextSelection(selectionForLink);
     }
     chain.unsetLink().run();
-    setShowLinkPopup(false);
+    setMenu("none");
     setLinkUrl("");
   }, [editor, selectionForLink]);
 
@@ -292,21 +286,32 @@ export function NoteRichTextEditor({
 
   if (!editor) return null;
 
+  // Colour/style popovers open beside a vertical toolbar, or below a top bar.
+  // Submenus are OPAQUE: the translucent chrome let the note text show through them.
+  const btnSize = toolbarSide === "top" ? "h-6 w-6 flex-shrink-0 rounded text-white hover:bg-white/10" : "h-7 w-7 rounded text-white hover:bg-white/10";
+  const subMenuClass = "border border-white/10 bg-zinc-900 shadow-[0_8px_32px_rgba(0,0,0,0.55)]";
+  const subMenuPos =
+    toolbarSide === "top" ? "left-0 top-full mt-2" : "left-full top-1/2 ml-2 -translate-y-1/2";
+
   return (
     <div ref={editorWrapRef} className="relative w-full overflow-visible">
       <div className="relative overflow-visible">
-        {isSelected && (
+        {isSelected && !hideToolbar && (
           <div className={cn(
-            "absolute z-20 flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
-            isFocusMode
-              ? "right-full mr-3 top-0"
-              : "right-full mr-6"
-          )} style={isFocusMode ? undefined : { top: -105 }}>
+            "z-20 flex gap-1 rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-xl p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+            toolbarSide === "top"
+              ? "relative mb-2 flex-row flex-nowrap items-center gap-0.5 p-1"
+              : toolbarSide === "right"
+                ? "absolute flex-col left-full ml-3 top-0"
+                : isFocusMode
+                  ? "absolute flex-col right-full mr-3 top-0"
+                  : "absolute flex-col right-full mr-6"
+          )} style={isFocusMode || toolbarSide !== "left" ? undefined : { top: -105 }}>
             {editorButtons.map((button) => (
               <button
                 key={button.title}
                 className={cn(
-                  "h-7 w-7 rounded text-white hover:bg-white/10",
+                  btnSize,
                   button.active && "bg-white/15",
                 )}
                 onMouseDown={(e) => e.preventDefault()}
@@ -320,7 +325,7 @@ export function NoteRichTextEditor({
 
             <button
               ref={linkButtonRef}
-              className={cn("h-7 w-7 rounded text-white hover:bg-white/10", editor.isActive("link") && "bg-white/15")}
+              className={cn(btnSize, editor.isActive("link") && "bg-white/15")}
               onMouseDown={(e) => e.preventDefault()}
               onClick={openLinkPopup}
               title="Link"
@@ -330,7 +335,7 @@ export function NoteRichTextEditor({
             </button>
 
             <button
-              className="h-7 w-7 rounded text-white hover:bg-white/10"
+              className={btnSize}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setMenu((prev) => (prev === "textColor" ? "none" : "textColor"))}
               title="Text color"
@@ -340,7 +345,7 @@ export function NoteRichTextEditor({
             </button>
 
             <button
-              className="h-7 w-7 rounded text-white hover:bg-white/10"
+              className={btnSize}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setMenu((prev) => (prev === "highlight" ? "none" : "highlight"))}
               title="Highlight"
@@ -349,8 +354,40 @@ export function NoteRichTextEditor({
               <Highlighter className="mx-auto h-3.5 w-3.5" />
             </button>
 
+            {menu === "link" && (
+              <div
+                ref={popupRef}
+                className={cn("absolute z-30 w-[260px] rounded-xl p-2.5", subMenuClass, toolbarSide === "top" ? "left-0 top-full mt-2" : "left-full ml-2 top-1/2 -translate-y-1/2")}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <input
+                  ref={linkInputRef}
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="Paste or type URL"
+                  className="w-full rounded border border-white/15 bg-black/40 px-2 py-1.5 text-xs text-white outline-none focus:border-purple-400"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      applyLink();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setMenu("none");
+                    }
+                  }}
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <button type="button" className="rounded px-2 py-1 text-xs text-white/80 hover:bg-white/10" onClick={clearLink}>
+                    Clear
+                  </button>
+                  <button type="button" className="rounded bg-purple-500/80 px-2 py-1 text-xs text-white hover:bg-purple-500" onClick={applyLink}>
+                    Apply
+                  </button>
+                </div>
+              </div>
+            )}
             {menu === "style" && (
-              <div className="absolute left-full top ml-2 min-w-[150px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+              <div className={cn("absolute z-30 min-w-[150px] rounded-xl p-2", subMenuClass, toolbarSide === "top" ? subMenuPos : "left-full ml-2 -translate-y-1/2")}>
                 {[
                   { value: "heading", label: "Heading" },
                   { value: "subheading", label: "Subheading" },
@@ -374,7 +411,7 @@ export function NoteRichTextEditor({
             )}
 
             {menu === "textColor" && (
-              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+              <div className={cn("absolute z-30 min-w-[122px] rounded-xl p-2.5", subMenuClass, subMenuPos)}>
                 <div className="grid grid-cols-3 place-items-center gap-1.5">
                   {TEXT_COLORS.map((color) => (
                     <button
@@ -405,7 +442,7 @@ export function NoteRichTextEditor({
             )}
 
             {menu === "highlight" && (
-              <div className="absolute left-full top-1/2 ml-2 min-w-[122px] -translate-y-1/2 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+              <div className={cn("absolute z-30 min-w-[122px] rounded-xl p-2.5", subMenuClass, subMenuPos)}>
                 <div className="grid grid-cols-3 place-items-center gap-1.5">
                   {HIGHLIGHT_COLORS.map((color) => (
                     <button
@@ -437,7 +474,10 @@ export function NoteRichTextEditor({
           </div>
         )}
 
-        <div className="min-w-0 flex-1">
+        <div
+          className={cn("min-w-0 flex-1", contentMaxHeight && "overflow-y-auto pr-1")}
+          style={contentMaxHeight ? { maxHeight: contentMaxHeight } : undefined}
+        >
           <EditorContent
             editor={editor}
             className="w-full rounded bg-transparent p-0 text-sm leading-relaxed [box-sizing:border-box] overflow-visible"
@@ -446,47 +486,6 @@ export function NoteRichTextEditor({
         </div>
       </div>
 
-      {showLinkPopup && linkPopupPosition && (
-        <div
-          ref={popupRef}
-          className="fixed z-[999] w-[260px] rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.4)]"
-          style={{ left: linkPopupPosition.left - 130, top: linkPopupPosition.top }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <input
-            ref={linkInputRef}
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-            placeholder="Paste or type URL"
-            className="w-full rounded border border-white/15 bg-black/30 px-2 py-1.5 text-xs text-white outline-none focus:border-purple-400"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                applyLink();
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                setShowLinkPopup(false);
-              }
-            }}
-          />
-          <div className="mt-2 flex justify-end gap-2">
-            <button
-              type="button"
-              className="rounded px-2 py-1 text-xs text-white/80 hover:bg-white/10"
-              onClick={clearLink}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              className="rounded bg-purple-500/80 px-2 py-1 text-xs text-white hover:bg-purple-500"
-              onClick={applyLink}
-            >
-              Apply
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

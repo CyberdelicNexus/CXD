@@ -19,6 +19,7 @@
  *      same message shape live clients already expect from a remote peer
  */
 
+import { YJS_FINGERPRINT_FIELD, fingerprintYjsState } from '@/lib/yjs/state-fingerprint';
 import * as Y from 'yjs';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import {
@@ -170,7 +171,10 @@ export async function applyTaskWriteback(params: {
   const base64State = uint8ArrayToBase64(merged);
   const nowIso = new Date().toISOString();
   const fromDoc = yDocToProject(doc);
-  const projectData = mergeProjectionOverBase(row.project_data as CXDProject | null, fromDoc, nowIso);
+  const projectData = {
+    ...mergeProjectionOverBase(row.project_data as CXDProject | null, fromDoc, nowIso),
+    [YJS_FINGERPRINT_FIELD]: fingerprintYjsState(base64State),
+  } as CXDProject;
   doc.destroy();
 
   const { error: saveError } = await admin

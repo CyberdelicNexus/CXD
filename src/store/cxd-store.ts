@@ -25,6 +25,8 @@ import {
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
 import type { Comment, CommentThread } from '@/types/comment-types';
 import { countQuotaObjects, isQuotaCounted } from '@/lib/quota';
+import type { CanvasBatchMutation } from '@/types/ai-operations';
+import { splitPatchForYDoc } from '@/lib/yjs/element-serializers';
 import {
   Version, OKR, KeyResult, Objective, VersionStatus,
   createDefaultVersion, createDefaultOKR, createDefaultObjective, createDefaultKeyResult,
@@ -85,6 +87,14 @@ interface CXDState {
   focusedSection: CXDSectionId | null;
   canvasViewMode: 'canvas' | 'hexagon' | 'hypercube' | 'plan';
   defaultView: 'canvas' | 'hexagon' | 'plan'; // User's preferred default view
+  // Canvas focus mode: hides all canvas chrome (navbar, toolkits, panels) so only
+  // the elements are visible. Session-only, deliberately not persisted.
+  canvasFocusMode: boolean;
+  setCanvasFocusMode: (on: boolean) => void;
+  // Inbox note kept open in a floating editor while the user moves around the
+  // canvas. Session-only, deliberately not persisted.
+  pinnedInboxNoteId: string | null;
+  setPinnedInboxNoteId: (id: string | null) => void;
 
   // Active surface state - determines which surface (canvas vs hypercube) elements are created in
   activeSurface: 'canvas' | 'hypercube';
@@ -102,7 +112,9 @@ interface CXDState {
    * viewport onto it — so the user never has to manually pan/zoom to find
    * newly generated content. Cleared back to null after being consumed.
    */
-  pendingCanvasFitBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
+  /** `animate` glides the camera there instead of cutting (assistant builds);
+   *  `insetRight` keeps the framed area clear of a docked panel on that side. */
+  pendingCanvasFitBounds: { minX: number; minY: number; maxX: number; maxY: number; animate?: boolean; insetRight?: number } | null;
 
   // Per-canvas viewport persistence (keyed by canvasId: "root" or boardId)
   viewportByCanvasId: Record<string, Viewport>;
@@ -157,7 +169,7 @@ interface CXDState {
   // Actions - Canvas
   setCanvasPosition: (position: { x: number; y: number }) => void;
   setCanvasZoom: (zoom: number) => void;
-  setPendingCanvasFitBounds: (bounds: { minX: number; minY: number; maxX: number; maxY: number } | null) => void;
+  setPendingCanvasFitBounds: (bounds: { minX: number; minY: number; maxX: number; maxY: number; animate?: boolean; insetRight?: number } | null) => void;
 
   // Actions - Viewport persistence
   saveCurrentViewport: () => void;
@@ -258,6 +270,10 @@ interface CXDState {
   // Actions - Canvas Elements
   addCanvasElement: (element: CanvasElement) => void;
   addCanvasElements: (elements: CanvasElement[]) => void;
+  /** Canvas Assistant: apply one confirmed AI batch (creates/updates/deletes)
+   *  as ONE Zustand set + ONE 'ai-apply' Y.Doc transaction (= one Ctrl+Z step).
+   *  Returns false when the free-tier quota wall blocks the creates. */
+  applyCanvasBatch: (batch: CanvasBatchMutation) => boolean;
   updateCanvasElement: (elementId: string, updates: Partial<CanvasElement>) => void;
   removeCanvasElement: (elementId: string) => void;
   /** Write positions directly to Zustand without touching Yjs (used during drag for instant visual feedback). */
@@ -280,6 +296,7 @@ interface CXDState {
   enterBoard: (boardId: string, title: string) => void;
   exitBoard: () => void;
   navigateToBoardPath: (index: number) => void;
+  renameBoard: (childBoardId: string, title: string) => void;
   createBoard: (title: string) => string;
   setActiveBoardId: (boardId: string | null) => void;
   getActiveBoardId: () => string | null;
@@ -368,6 +385,17 @@ interface CXDState {
   isTourCompleted: (tourId: 'canvas' | 'map' | 'plan') => boolean;
 }
 
+/** Same id, or the same from→to pair on the same board and surface. */
+function isDuplicateEdge(a: CanvasEdge, b: CanvasEdge): boolean {
+  return (
+    a.id === b.id ||
+    (a.fromNodeId === b.fromNodeId &&
+      a.toNodeId === b.toNodeId &&
+      (a.boardId ?? null) === (b.boardId ?? null) &&
+      (a.surface ?? null) === (b.surface ?? null))
+  );
+}
+
 export const useCXDStore = create<CXDState>()(
   persist(
     (set, get) => ({
@@ -376,6 +404,10 @@ export const useCXDStore = create<CXDState>()(
       focusedSection: null,
       canvasViewMode: 'canvas',
       defaultView: 'canvas', // User's preferred default view
+      canvasFocusMode: false,
+      setCanvasFocusMode: (on) => set({ canvasFocusMode: on }),
+      pinnedInboxNoteId: null,
+      setPinnedInboxNoteId: (id) => set({ pinnedInboxNoteId: id }),
       activeSurface: 'canvas', // default to canvas surface
       projects: [],
       currentProjectId: null,
@@ -434,7 +466,7 @@ export const useCXDStore = create<CXDState>()(
 
         // When switching canvas view mode, also update activeSurface
         const newSurface = mode === 'hexagon' ? 'hypercube' : 'canvas';
-        set({ canvasViewMode: mode, activeSurface: newSurface });
+        set({ canvasViewMode: mode, activeSurface: newSurface, canvasFocusMode: false });
 
         // Apply appropriate viewport
         if (mode === 'hexagon') {
@@ -1652,11 +1684,19 @@ export const useCXDStore = create<CXDState>()(
         const activeBoardId = get().activeBoardId;
         const activeSurface = get().activeSurface;
 
-        const prepared = edges.map(e => ({
-          ...e,
-          boardId: e.boardId !== undefined ? e.boardId : activeBoardId,
-          surface: e.surface !== undefined ? e.surface : activeSurface,
-        }));
+        const existingEdges = currentProject.canvasLayout?.edges || [];
+        const prepared: CanvasEdge[] = [];
+        for (const e of edges) {
+          const withScope = {
+            ...e,
+            boardId: e.boardId !== undefined ? e.boardId : activeBoardId,
+            surface: e.surface !== undefined ? e.surface : activeSurface,
+          };
+          // Skip edges that already exist (or repeat within this batch).
+          if (existingEdges.some((x) => isDuplicateEdge(x, withScope)) || prepared.some((x) => isDuplicateEdge(x, withScope))) continue;
+          prepared.push(withScope);
+        }
+        if (prepared.length === 0) return;
 
         // Direct Zustand update (single setState — no Yjs observer cascade)
         set((state) => ({
@@ -1686,6 +1726,117 @@ export const useCXDStore = create<CXDState>()(
             });
           }, 'template-batch');
         }
+      },
+
+      applyCanvasBatch: (batch) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return false;
+
+        // Free-tier quota: an AI batch is all-or-nothing — applying half a
+        // reviewed change set is worse than applying none.
+        const quota = get().objectQuota;
+        if (quota != null && batch.addElements.length > 0) {
+          const used = countQuotaObjects(currentProject.canvasLayout?.elements);
+          const incoming = countQuotaObjects(batch.addElements);
+          if (incoming > 0 && used + incoming > quota) {
+            set({ quotaWallOpen: true });
+            return false;
+          }
+        }
+
+        const activeBoardId = get().activeBoardId;
+        const activeSurface = get().activeSurface;
+        // AI output is board-agnostic (the sanitizer stamps boardId: null), so
+        // new elements always land where the user is: the board in the breadcrumb.
+        const preparedAdds = batch.addElements.map(el => ({
+          ...el,
+          boardId: activeBoardId,
+          surface: el.surface !== undefined ? el.surface : activeSurface,
+        }));
+        const preparedEdges = batch.addEdges.map(e => ({
+          ...e,
+          boardId: activeBoardId,
+          surface: e.surface !== undefined ? e.surface : activeSurface,
+        }));
+        const removeSet = new Set(batch.removeElementIds);
+        const removeEdgeSet = new Set(batch.removeEdgeIds);
+        // Deletes win over updates for the same id, so a stale update can never
+        // resurrect fields on an element this batch is removing.
+        const updateMap = new Map(
+          batch.updates.filter(u => !removeSet.has(u.id)).map(u => [u.id, u.updates]),
+        );
+
+        // A hexagon portal is meaningless without the board it opens into, so
+        // mint the matching records here rather than in a second write.
+        const now = new Date().toISOString();
+        const newBoards = preparedAdds
+          .filter((el) => el.type === 'board')
+          .map((el) => ({
+            id: (el as { childBoardId: string }).childBoardId,
+            parentBoardId: activeBoardId,
+            title: (el as { title?: string }).title || 'Board',
+            nodes: [],
+            edges: [],
+            createdAt: now,
+            updatedAt: now,
+          }));
+
+        // Snapshot for the no-yDoc fallback history path.
+        get().pushCanvasHistory();
+
+        // ONE direct Zustand set — no per-element Yjs observer cascade.
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? {
+                ...p,
+                canvasLayout: {
+                  ...(p.canvasLayout || {}),
+                  ...(newBoards.length
+                    ? { boards: [...(p.canvasLayout?.boards || []), ...newBoards] }
+                    : {}),
+                  elements: [
+                    ...(p.canvasLayout?.elements || [])
+                      .filter(el => !removeSet.has(el.id))
+                      .map(el => updateMap.has(el.id)
+                        ? ({ ...el, ...updateMap.get(el.id) } as typeof el)
+                        : el),
+                    ...preparedAdds,
+                  ],
+                  edges: [
+                    ...(p.canvasLayout?.edges || []).filter(e => !removeEdgeSet.has(e.id)),
+                    ...preparedEdges,
+                  ],
+                },
+                updatedAt: new Date().toISOString(),
+              }
+              : p
+          ),
+        }));
+
+        // ONE 'ai-apply' transaction: the nested helper transacts reuse this
+        // already-open one, so the whole batch keeps the outer origin — the
+        // canvas UndoManager captures it as a single step and both bridge
+        // observers skip their re-flush (Zustand is already correct above).
+        const { yDoc } = get();
+        if (yDoc) {
+          yDoc.transact(() => {
+            preparedAdds.forEach(el => yjsAddElement(yDoc, el));
+            updateMap.forEach((updates, id) => {
+              // A patch key set to undefined means "clear this field". The
+              // serializer skips undefined, so those keys must be deleted from
+              // the Y.Map or the Zustand spread and the authoritative doc
+              // diverge — an orphan-healed containerId would come back on reload.
+              const { defined, cleared } = splitPatchForYDoc(updates);
+              if (Object.keys(defined).length > 0) yjsUpdateElement(yDoc, id, defined);
+              cleared.forEach(field => yjsDeleteElementField(yDoc, id, field));
+            });
+            batch.removeElementIds.forEach(id => yjsRemoveElement(yDoc, id));
+            preparedEdges.forEach(e => yjsAddEdge(yDoc, e));
+            batch.removeEdgeIds.forEach(id => yjsRemoveEdge(yDoc, id));
+          }, 'ai-apply');
+        }
+        return true;
       },
 
       updateCanvasElement: (elementId, updates) => {
@@ -1910,8 +2061,10 @@ export const useCXDStore = create<CXDState>()(
 
         const { yDoc } = get();
         if (yDoc) {
-          yjsAddEdge(yDoc, edgeWithBoardAndSurface);
+          yjsAddEdge(yDoc, edgeWithBoardAndSurface); // ignores duplicates (id or same pair)
         } else {
+          const existing = currentProject.canvasLayout?.edges || [];
+          if (existing.some((e) => isDuplicateEdge(e, edgeWithBoardAndSurface))) return;
           get().pushCanvasHistory();
           set((state) => ({
             projects: state.projects.map((p) =>
@@ -2041,6 +2194,20 @@ export const useCXDStore = create<CXDState>()(
           // Restore viewport for the target canvas
           restoreViewport(targetCanvasId);
         }
+      },
+
+      // Rename a board from anywhere (breadcrumb): the board element is the source
+      // of truth; the breadcrumb entry is a cached copy of its title.
+      renameBoard: (childBoardId, title) => {
+        const trimmed = title.trim();
+        if (!trimmed) return;
+        const el = get()
+          .getCurrentProject()
+          ?.canvasLayout?.elements?.find((e) => e.type === 'board' && (e as { childBoardId?: string }).childBoardId === childBoardId);
+        if (el) get().updateCanvasElement(el.id, { title: trimmed } as Partial<CanvasElement>);
+        set((state) => ({
+          boardPath: state.boardPath.map((entry) => (entry.id === childBoardId ? { ...entry, title: trimmed } : entry)),
+        }));
       },
 
       navigateToBoardPath: (index) => {

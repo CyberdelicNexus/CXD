@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { ModelId } from '@/lib/ai-credit-config';
+import { resolveSelectedModel, type ModelId } from '@/lib/ai-credit-config';
 
 // Module-level cache — shared across all hook instances.
 // Prevents N simultaneous DB reads when multiple components mount at once.
@@ -34,7 +34,7 @@ async function _fetchCreditsShared(): Promise<AICreditsInfo | null> {
         total,
         used: d.usedThisPeriod,
         periodEnd: d.periodEnd ? new Date(d.periodEnd) : null,
-        selectedModel: (d.selectedModel as ModelId) || 'gemini-2.0-flash',
+        selectedModel: resolveSelectedModel(d.selectedModel),
       };
       _cacheTime = Date.now();
       return _cachedCredits;
@@ -220,7 +220,7 @@ export function useAICredits() {
     // Individual properties for easier access
     remainingCredits,
     totalCredits,
-    selectedModel: (credits?.selectedModel as ModelId) || 'gemini-2.0-flash',
+    selectedModel: resolveSelectedModel(credits?.selectedModel),
     isLow,
     isDepleted,
     setSelectedModel: updateSelectedModel,
