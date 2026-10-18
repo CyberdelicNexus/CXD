@@ -36,7 +36,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Package,
-  ArrowLeft,
 } from "lucide-react";
 import { Link } from "lucide-react";
 import NextLink from "next/link";
@@ -61,6 +60,7 @@ import { NavCreditMeter } from "./nav-credit-meter";
 import { AccountMenu } from "./account-menu";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useNexusReturnLink } from "@/hooks/use-nexus-return-link";
+import { NexusReturnButton } from "@/components/nexus-return-button";
 import { useAICredits } from "@/hooks/use-ai-credits";
 import { UpgradeModal } from "@/components/modals/upgrade-modal";
 import { SettingsModal } from "@/components/modals/settings-modal";
@@ -1011,17 +1011,7 @@ export function CXDNavbar() {
           </div>
 
           {/* Back to the member's dashboard on Cyberdelic Nexus (only for members who came from there) */}
-          {nexusReturnUrl && (
-            <a
-              href={nexusReturnUrl}
-              title="Cyberdelic Nexus"
-              aria-label="Cyberdelic Nexus"
-              className="flex-shrink-0 h-10 px-3 flex items-center gap-2 rounded-full bg-white/[0.05] backdrop-blur-md border border-white/10 hover:bg-violet-600/20 hover:border-violet-500/50 hover:shadow-[0_0_15px_rgba(139,92,246,0.3)] transition-all group"
-            >
-              <ArrowLeft className="w-4 h-4 text-white/60 group-hover:text-white transition-colors" />
-              <span className="hidden lg:inline text-xs font-medium whitespace-nowrap text-white/70 group-hover:text-white transition-colors">Cyberdelic Nexus</span>
-            </a>
-          )}
+          {nexusReturnUrl && <NexusReturnButton href={nexusReturnUrl} />}
 
           {/* Always visible: Collaborate and Account */}
           {project && viewMode !== "home" && (
