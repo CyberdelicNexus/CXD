@@ -79,6 +79,10 @@ export interface TaskProjection {
   startDate?: string;                // ISO date string
   assignee?: string;                 // User identifier
   estimatedHours?: number;
+  plannedDate?: string;              // YYYY-MM-DD day the task is planned for (Master Plan → Plan)
+  planOrder?: number;                // Manual order within plannedDate
+  scheduledStart?: string;           // HH:mm wall-clock start on plannedDate
+  durationMinutes?: number;          // Time block length in minutes
   tags?: string[];                   // Custom tags beyond hypercube
   customProperties?: Record<string, string | number | boolean>; // User-defined properties
   isArchived?: boolean;

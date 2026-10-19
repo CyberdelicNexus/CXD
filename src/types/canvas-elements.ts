@@ -215,6 +215,12 @@ export interface TaskMetadata {
   subtasks?: Subtask[];              // Direct subtask storage (not markdown)
   dependencies?: TaskDependencyMeta[]; // Gantt chart task dependencies
   versionId?: string;                // Link to Version.id (version management)
+  // Day planning (Master Plan → Plan view). One slot per task, shared by
+  // every collaborator on the canvas.
+  plannedDate?: string;              // YYYY-MM-DD — the day the task is planned for (not its deadline)
+  planOrder?: number;                // Manual order within plannedDate (fractional; lower sorts first)
+  scheduledStart?: string;           // HH:mm wall-clock start on plannedDate (no timezone conversion)
+  durationMinutes?: number;          // Length of the time block starting at scheduledStart
 }
 
 // Freeform Card (Post-it style)

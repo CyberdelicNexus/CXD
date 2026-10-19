@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutGrid,
@@ -14,6 +14,7 @@ import {
   Sparkles,
   AlertTriangle,
   CalendarPlus,
+  CalendarCheck,
 } from "lucide-react";
 import { useSubscription } from "@/hooks/use-subscription";
 import { UpgradeModal } from "@/components/modals/upgrade-modal";
@@ -27,12 +28,18 @@ import { MasterPlanTimelineView } from "@/components/master-plan/timeline-view";
 import { MasterPlanCalendarView } from "@/components/master-plan/calendar-view";
 import { MasterPlanRoadmapView } from "@/components/master-plan/roadmap-view";
 import { MasterPlanTaskDetailPanel } from "@/components/master-plan/task-detail-panel";
-import { toServerTaskPatch, type MasterPlanProject, type MasterPlanTaskItem } from "@/components/master-plan/shared";
+import { MasterPlanPlanView, type NewPlanTask } from "@/components/master-plan/plan/plan-view";
+import {
+  applyTaskUpdate,
+  toServerTaskPatch,
+  type MasterPlanProject,
+  type MasterPlanTaskItem,
+  type TaskUpdate,
+} from "@/components/master-plan/shared";
 import type { MasterPlanVersionItem } from "@/app/api/master-plan/versions/route";
-import type { TaskProjection } from "@/types/plan-types";
 import type { OKR } from "@/types/version-types";
 
-type MasterPlanView = "table" | "kanban" | "list" | "timeline" | "calendar" | "roadmap";
+type MasterPlanView = "plan" | "table" | "kanban" | "list" | "timeline" | "calendar" | "roadmap";
 
 const VIEWS: { id: MasterPlanView; label: string; icon: typeof LayoutGrid }[] = [
   { id: "table", label: "Table", icon: LayoutGrid },
@@ -41,6 +48,7 @@ const VIEWS: { id: MasterPlanView; label: string; icon: typeof LayoutGrid }[] = 
   { id: "timeline", label: "Timeline", icon: CalendarRange },
   { id: "calendar", label: "Calendar", icon: CalendarIcon },
   { id: "roadmap", label: "Roadmap", icon: RoadmapIcon },
+  { id: "plan", label: "Plan", icon: CalendarCheck },
 ];
 
 export function MasterPlanContent() {
@@ -60,6 +68,13 @@ export function MasterPlanContent() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [calSyncOpen, setCalSyncOpen] = useState(false);
 
+  const fetchTasks = useCallback(async () => {
+    const tasksRes = await fetch("/api/master-plan/tasks");
+    const tasksData = await tasksRes.json();
+    if (!tasksRes.ok) throw new Error(tasksData.error || `Failed to load (${tasksRes.status})`);
+    return tasksData as { items?: MasterPlanTaskItem[]; projects?: MasterPlanProject[] };
+  }, []);
+
   useEffect(() => {
     if (subLoading || !hasMasterPlan) return;
     let cancelled = false;
@@ -67,12 +82,7 @@ export function MasterPlanContent() {
       setIsLoading(true);
       setError(null);
       try {
-        const [tasksRes, versionsRes] = await Promise.all([
-          fetch("/api/master-plan/tasks"),
-          fetch("/api/master-plan/versions"),
-        ]);
-        const tasksData = await tasksRes.json();
-        if (!tasksRes.ok) throw new Error(tasksData.error || `Failed to load (${tasksRes.status})`);
+        const [tasksData, versionsRes] = await Promise.all([fetchTasks(), fetch("/api/master-plan/versions")]);
         if (cancelled) return;
         setItems(tasksData.items || []);
         setProjects(tasksData.projects || []);
@@ -93,7 +103,7 @@ export function MasterPlanContent() {
     return () => {
       cancelled = true;
     };
-  }, [subLoading, hasMasterPlan]);
+  }, [subLoading, hasMasterPlan, fetchTasks]);
 
   const visibleItems = useMemo(
     () => items.filter((it) => !hiddenProjectIds.has(it.projectId)),
@@ -112,40 +122,89 @@ export function MasterPlanContent() {
       return next;
     });
 
+  // Writes to one project go out one at a time: each PATCH loads that
+  // project's Y.Doc, mutates it and saves it back, so two in flight for the
+  // same project could overwrite each other (a Plan reorder can send several
+  // at once). Different projects still write in parallel.
+  const projectQueues = useRef(new Map<string, Promise<unknown>>());
+  const enqueue = useCallback(<T,>(projectId: string, run: () => Promise<T>): Promise<T> => {
+    const prev = projectQueues.current.get(projectId) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(run);
+    projectQueues.current.set(projectId, next);
+    next
+      .finally(() => {
+        if (projectQueues.current.get(projectId) === next) projectQueues.current.delete(projectId);
+      })
+      .catch(() => undefined);
+    return next;
+  }, []);
+
   // Optimistic update, rolled back on a failed PATCH. Shared by every view —
-  // inline table edits, Kanban drag, Gantt reschedule, and the detail panel
-  // all funnel through this one path so there's exactly one place that talks
-  // to the write API and one place that handles rollback.
-  const updateTask = useCallback((projectId: string, taskId: string, updates: Partial<TaskProjection>) => {
-    let prevItem: MasterPlanTaskItem | null = null;
-    setItems((prev) =>
-      prev.map((it) => {
-        if (it.projectId === projectId && it.task.id === taskId) {
-          prevItem = it;
-          return { ...it, task: { ...it.task, ...updates } };
-        }
-        return it;
-      })
-    );
-    fetch(`/api/master-plan/tasks/${projectId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taskId, patch: toServerTaskPatch(updates) }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || `Failed to update task (${res.status})`);
-        }
-      })
-      .catch((e) => {
+  // inline table edits, Kanban drag, Gantt reschedule, Plan moves, and the
+  // detail panel all funnel through this one path so there's exactly one
+  // place that talks to the write API and one place that handles rollback.
+  const updateTask = useCallback(
+    (projectId: string, taskId: string, updates: TaskUpdate) => {
+      let prevItem: MasterPlanTaskItem | null = null;
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.projectId === projectId && it.task.id === taskId) {
+            prevItem = it;
+            return { ...it, task: applyTaskUpdate(it.task, updates) };
+          }
+          return it;
+        })
+      );
+      enqueue(projectId, () =>
+        fetch(`/api/master-plan/tasks/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, patch: toServerTaskPatch(updates) }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `Failed to update task (${res.status})`);
+          }
+        })
+      ).catch((e) => {
         if (prevItem) {
           const restored = prevItem;
           setItems((prev) => prev.map((it) => (it.projectId === projectId && it.task.id === taskId ? restored : it)));
         }
         setUpdateError(e instanceof Error ? e.message : "Failed to update task");
       });
-  }, []);
+    },
+    [enqueue]
+  );
+
+  // Quick add: creates the task card in that project's Task Inbox, then
+  // reloads the task list so the new task arrives as a real projection
+  // (never a client-side guess at its shape). Resolves true on success.
+  const createTask = useCallback(
+    async (projectId: string, fields: NewPlanTask): Promise<boolean> => {
+      try {
+        await enqueue(projectId, async () => {
+          const res = await fetch(`/api/master-plan/tasks/${projectId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fields),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `Failed to add task (${res.status})`);
+          }
+        });
+        const tasksData = await fetchTasks();
+        setItems(tasksData.items || []);
+        setProjects(tasksData.projects || []);
+        return true;
+      } catch (e) {
+        setUpdateError(e instanceof Error ? e.message : "Failed to add task");
+        return false;
+      }
+    },
+    [enqueue, fetchTasks]
+  );
 
   const selectedItem = useMemo(
     () => (selected ? items.find((it) => it.projectId === selected.projectId && it.task.id === selected.taskId) || null : null),
@@ -166,8 +225,8 @@ export function MasterPlanContent() {
         <h1 className="text-2xl font-bold text-white mb-2">Master Plan is a Pro feature</h1>
         <p className="text-white/50 mb-8">
           A single cockpit for every task across every canvas in your account: Table, Kanban,
-          List, Timeline, Calendar, and Roadmap views, all filtered live and editable across your
-          whole workspace.
+          List, Timeline, Calendar, and Roadmap views, plus a Plan view for running your day, all
+          filtered live and editable across your whole workspace.
         </p>
         <button
           onClick={() => setShowUpgradeModal(true)}
@@ -252,6 +311,14 @@ export function MasterPlanContent() {
             </div>
           ) : visibleItems.length === 0 && activeView !== "roadmap" ? (
             <div className="py-16 text-center text-white/40 text-sm">All projects are hidden. Toggle one back on above to see its tasks.</div>
+          ) : activeView === "plan" ? (
+            <MasterPlanPlanView
+              items={visibleItems}
+              projects={projects.filter((p) => !hiddenProjectIds.has(p.id))}
+              onTaskClick={openTask}
+              onTaskUpdate={updateTask}
+              onTaskCreate={createTask}
+            />
           ) : activeView === "table" ? (
             <MasterPlanTableView items={visibleItems} onTaskClick={openTask} onTaskUpdate={updateTask} />
           ) : activeView === "kanban" ? (

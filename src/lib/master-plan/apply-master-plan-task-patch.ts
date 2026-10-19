@@ -28,33 +28,19 @@ import {
   yDocToProject,
 } from '@/lib/yjs/y-doc-factory';
 import { YDOC_KEYS } from '@/lib/yjs/y-doc-types';
-import { applyElementUpdates } from '@/lib/yjs/element-serializers';
+import { applyElementUpdates, canvasElementToYMap } from '@/lib/yjs/element-serializers';
+import { randomUUID } from 'crypto';
 import { uint8ArrayToBase64, base64ToUint8Array } from '@/lib/yjs/encoding-utils';
 import { parseMarkdownTasks, updateSubtaskInContent } from '@/utils/task-engine';
 import type { CXDProject } from '@/types/cxd-schema';
-import type { CanvasElement, TaskMetadata } from '@/types/canvas-elements';
+import type { CanvasElement, FreeformElement, TaskMetadata } from '@/types/canvas-elements';
+import { buildTaskMetadataPatch, type MasterPlanTaskPatch } from '@/lib/master-plan/task-metadata-patch';
 
 const ORIGIN = 'master-plan';
 const SENDER_ID = 'master-plan';
 const YJS_SYNC_EVENT = 'yjs_sync';
 
-export type MasterPlanTaskPatch = {
-  title?: string;
-  description?: string;
-  status?: 'not_started' | 'in_progress' | 'completed' | 'blocked';
-  priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
-  taskType?: string | null;
-  dueDate?: string | null;
-  startDate?: string | null;
-  assignee?: string | null;
-  estimatedHours?: number | null;
-  tags?: string[];
-  hypercubeTags?: string[];
-  subtasks?: unknown[];
-  customProperties?: Record<string, string | number | boolean>;
-  versionId?: string | null;
-  isArchived?: boolean;
-};
+export type { MasterPlanTaskPatch };
 
 export type ApplyOutcome = 'applied' | 'rejected' | 'error' | 'not_found' | 'unsupported';
 
@@ -90,26 +76,9 @@ export async function applyMasterPlanTaskPatch(params: {
 }): Promise<ApplyResult> {
   const { projectId, taskId, patch } = params;
   const { elementId, taskKey } = parseTaskId(taskId);
-  const admin = getSupabaseAdmin();
-
-  const { data: row, error: loadError } = await admin
-    .from('cxd_projects')
-    .select('yjs_state, project_data')
-    .eq('id', projectId)
-    .maybeSingle();
-
-  if (loadError) return { outcome: 'error', reason: `Failed to load project: ${loadError.message}` };
-  if (!row) return { outcome: 'not_found', reason: `Project ${projectId} not found` };
-
-  const doc = createProjectYDoc();
-  if (row.yjs_state) {
-    try {
-      Y.applyUpdate(doc, base64ToUint8Array(row.yjs_state as string), 'persistence');
-    } catch (err) {
-      doc.destroy();
-      return { outcome: 'error', reason: `Corrupt yjs_state, failed to decode: ${String(err)}` };
-    }
-  }
+  const loaded = await loadProjectDoc(projectId);
+  if ('outcome' in loaded) return loaded;
+  const { doc, row } = loaded;
 
   const targetElement = getYDocElement(doc, elementId);
   const yElements = doc.getMap(YDOC_KEYS.ELEMENTS);
@@ -175,36 +144,71 @@ export async function applyMasterPlanTaskPatch(params: {
         (elementUpdates as any).hypercubeTags = patch.hypercubeTags;
       }
 
-      const taskMetadataPatch: Partial<TaskMetadata> = {};
-      if (patch.status !== undefined) taskMetadataPatch.status = patch.status;
-      if (patch.priority !== undefined) taskMetadataPatch.priority = patch.priority ?? undefined;
-      if (patch.taskType !== undefined) taskMetadataPatch.taskType = (patch.taskType as TaskMetadata['taskType']) ?? undefined;
-      if (patch.dueDate !== undefined) taskMetadataPatch.dueDate = patch.dueDate ?? undefined;
-      if (patch.startDate !== undefined) taskMetadataPatch.startDate = patch.startDate ?? undefined;
-      if (patch.assignee !== undefined) taskMetadataPatch.assignee = patch.assignee ?? undefined;
-      if (patch.estimatedHours !== undefined) taskMetadataPatch.estimatedHours = patch.estimatedHours ?? undefined;
-      if (patch.tags !== undefined) taskMetadataPatch.customTags = patch.tags;
-      if (patch.subtasks !== undefined) taskMetadataPatch.subtasks = patch.subtasks as TaskMetadata['subtasks'];
-      if (patch.customProperties !== undefined) taskMetadataPatch.customProperties = patch.customProperties;
-      if (patch.versionId !== undefined) taskMetadataPatch.versionId = patch.versionId ?? undefined;
-      if (patch.isArchived !== undefined) taskMetadataPatch.isArchived = patch.isArchived;
-      if (patch.description !== undefined) taskMetadataPatch.description = patch.description || undefined;
-
-      if (Object.keys(taskMetadataPatch).length > 0) {
-        (elementUpdates as any).taskMetadata = taskMetadataPatch;
+      const metadataPatch = buildTaskMetadataPatch(patch);
+      if (Object.keys(metadataPatch.set).length > 0) {
+        (elementUpdates as any).taskMetadata = metadataPatch.set;
       }
 
       if (Object.keys(elementUpdates).length > 0) {
         applyElementUpdates(yEl, elementUpdates);
+      }
+
+      // applyElementUpdates skips undefined values, so clearing a field has
+      // to delete its key from the nested taskMetadata map directly.
+      const yMeta = yEl.get('taskMetadata');
+      if (metadataPatch.clear.length > 0 && yMeta instanceof Y.Map) {
+        for (const key of metadataPatch.clear) yMeta.delete(key);
       }
     }, ORIGIN);
   } finally {
     doc.off('update', captureHandler);
   }
 
+  return persistProjectDoc(projectId, row, doc, capturedUpdate);
+}
+
+type ProjectRow = { yjs_state: string | null; project_data: CXDProject | null };
+
+/** Load a project's row and decode its yjs_state into a fresh server-side Y.Doc. */
+async function loadProjectDoc(projectId: string): Promise<{ doc: Y.Doc; row: ProjectRow } | ApplyResult> {
+  const admin = getSupabaseAdmin();
+  const { data: row, error: loadError } = await admin
+    .from('cxd_projects')
+    .select('yjs_state, project_data')
+    .eq('id', projectId)
+    .maybeSingle();
+
+  if (loadError) return { outcome: 'error', reason: `Failed to load project: ${loadError.message}` };
+  if (!row) return { outcome: 'not_found', reason: `Project ${projectId} not found` };
+
+  const doc = createProjectYDoc();
+  if (row.yjs_state) {
+    try {
+      Y.applyUpdate(doc, base64ToUint8Array(row.yjs_state as string), 'persistence');
+    } catch (err) {
+      doc.destroy();
+      return { outcome: 'error', reason: `Corrupt yjs_state, failed to decode: ${String(err)}` };
+    }
+  }
+  return { doc, row: row as ProjectRow };
+}
+
+/**
+ * Persist a mutated doc: wipe guard, atomic dual-write of yjs_state +
+ * project_data from the same snapshot, then a best-effort realtime
+ * broadcast of just the captured update. Destroys the doc.
+ */
+async function persistProjectDoc(
+  projectId: string,
+  row: ProjectRow,
+  doc: Y.Doc,
+  capturedUpdate: Uint8Array | null
+): Promise<ApplyResult> {
+  const admin = getSupabaseAdmin();
+
   // Wipe guard — mirrors SupabasePersistence/bridge: refuse to persist if the
   // doc we just decoded looks empty relative to what was last saved.
-  const baseElementCount = (row.project_data as CXDProject | null)?.canvasLayout?.elements?.length ?? 0;
+  const baseElementCount = row.project_data?.canvasLayout?.elements?.length ?? 0;
   const docElementCount = getYDocElements(doc).length;
   if (baseElementCount > 0 && docElementCount === 0) {
     doc.destroy();
@@ -219,7 +223,7 @@ export async function applyMasterPlanTaskPatch(params: {
   const nowIso = new Date().toISOString();
   const fromDoc = yDocToProject(doc);
   const projectData = {
-    ...mergeProjectionOverBase(row.project_data as CXDProject | null, fromDoc, nowIso),
+    ...mergeProjectionOverBase(row.project_data, fromDoc, nowIso),
     [YJS_FINGERPRINT_FIELD]: fingerprintYjsState(base64State),
   } as CXDProject;
   doc.destroy();
@@ -236,6 +240,73 @@ export async function applyMasterPlanTaskPatch(params: {
   }
 
   return { outcome: 'applied' };
+}
+
+/**
+ * Create a task card in a project's Task Inbox — the same shape the canvas
+ * Plan tab creates (an actionable freeform task card, unplaced), so the task
+ * shows up in the canvas inbox for the user to place later.
+ *
+ * Refuses projects with no yjs_state: persisting a doc that holds only the
+ * new card would make it the project's entire live canvas.
+ */
+export async function createMasterPlanTask(params: {
+  projectId: string;
+  title: string;
+  metadata: Partial<TaskMetadata>;
+}): Promise<ApplyResult & { taskId?: string }> {
+  const { projectId, title, metadata } = params;
+
+  const loaded = await loadProjectDoc(projectId);
+  if ('outcome' in loaded) return loaded;
+  const { doc, row } = loaded;
+
+  if (!row.yjs_state) {
+    doc.destroy();
+    return {
+      outcome: 'unsupported',
+      reason: 'Open this project in the canvas once before adding tasks to it from the Master Plan.',
+    };
+  }
+  const baseElementCount = row.project_data?.canvasLayout?.elements?.length ?? 0;
+  if (baseElementCount > 0 && getYDocElements(doc).length === 0) {
+    doc.destroy();
+    return { outcome: 'rejected', reason: 'Wipe guard: decoded yjs_state has no elements — refusing to add to it.' };
+  }
+
+  const element: FreeformElement = {
+    id: randomUUID(),
+    type: 'freeform',
+    cardType: 'task',
+    content: title,
+    emoji: '📌',
+    x: 0,
+    y: 0,
+    width: 300,
+    height: 100,
+    zIndex: Date.now(),
+    hypercubeTags: [],
+    inInbox: true,
+    taskMetadata: { isActionable: true, status: 'not_started', ...metadata },
+  };
+
+  let capturedUpdate: Uint8Array | null = null;
+  const captureHandler = (update: Uint8Array, origin: unknown) => {
+    if (origin === ORIGIN) {
+      capturedUpdate = capturedUpdate ? Y.mergeUpdates([capturedUpdate, update]) : update;
+    }
+  };
+  doc.on('update', captureHandler);
+  try {
+    doc.transact(() => {
+      doc.getMap(YDOC_KEYS.ELEMENTS).set(element.id, canvasElementToYMap(element));
+    }, ORIGIN);
+  } finally {
+    doc.off('update', captureHandler);
+  }
+
+  const result = await persistProjectDoc(projectId, row, doc, capturedUpdate);
+  return result.outcome === 'applied' ? { ...result, taskId: element.id } : result;
 }
 
 async function broadcastUpdate(projectId: string, update: Uint8Array): Promise<void> {
