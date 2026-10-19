@@ -310,6 +310,10 @@ export function projectElementAsTasks(
     startDate: metadata?.startDate,
     assignee: metadata?.assignee,
     estimatedHours: metadata?.estimatedHours,
+    plannedDate: metadata?.plannedDate,
+    planOrder: metadata?.planOrder,
+    scheduledStart: metadata?.scheduledStart,
+    durationMinutes: metadata?.durationMinutes,
     tags: metadata?.customTags,
     customProperties: metadata?.customProperties,
     dependencies: metadata?.dependencies, // Gantt chart dependencies
