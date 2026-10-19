@@ -19,7 +19,7 @@ import {
   verifyHandoffToken,
   type JtiStore,
 } from '../handoff';
-import { canvasPlanForTier, decideTierSync, isTierCheckDue, parseTierResponse, type SubscriptionSyncRow } from '../tier';
+import { canvasPlanForTier, decideTierSync, showsNexusReturn, isTierCheckDue, parseTierResponse, type SubscriptionSyncRow } from '../tier';
 import {
   buildNewProjectRow,
   buildProjectListing,
@@ -180,6 +180,9 @@ async function main() {
   check(canvasPlanForTier({ tier: 'lifetime', active: true }) === 'pro', 'active lifetime → pro');
   check(canvasPlanForTier({ tier: 'cybernaut', active: true }) === 'free', 'cybernaut → free');
   check(canvasPlanForTier({ tier: 'weaver', active: false }) === 'free', 'inactive weaver → free');
+  check(showsNexusReturn({ ok: true, tier: 'cybernaut', active: true }), 'active member (any tier) → back-to-Nexus button shown');
+  check(!showsNexusReturn({ ok: true, tier: 'weaver', active: false }), 'lapsed member → button hidden');
+  check(!showsNexusReturn({ ok: false }), 'failed tier read → button hidden');
   check(parseTierResponse(200, { tier: 'weaver', active: true }).ok, '200 well-formed parsed');
   check(!parseTierResponse(200, { tier: 'gold', active: true }).ok, 'unknown tier → failure');
   check(!parseTierResponse(200, { tier: 'weaver', active: 'yes' }).ok, 'non-boolean active → failure');

@@ -8,6 +8,14 @@ export type NexusTierAnswer =
   | { ok: true; tier: NexusTier; active: boolean }
   | { ok: false };
 
+/**
+ * The "Back to Cyberdelic Nexus" button is for current members only: a successful tier read
+ * that says the membership is active (D76). A failed read hides it.
+ */
+export function showsNexusReturn(answer: NexusTierAnswer): boolean {
+  return answer.ok && answer.active;
+}
+
 /** Parse a GET /api/handoff/tier response. Anything but a well-formed 200 is a failure. */
 export function parseTierResponse(status: number, body: unknown): NexusTierAnswer {
   if (status !== 200 || !body || typeof body !== 'object' || Array.isArray(body)) {

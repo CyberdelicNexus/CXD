@@ -1,15 +1,17 @@
 /**
  * GET /api/nexus/return-link — where the "Cyberdelic Nexus" button points for
  * the signed-in user: `{ url }` when they came from the platform (a row in
- * nexus_links) and NEXUS_ISSUER is set, otherwise `{ url: null }`. Only the
- * URL leaves the server, never the member id.
+ * nexus_links), their Nexus membership is active right now (a live tier read)
+ * and NEXUS_ISSUER is set, otherwise `{ url: null }`. Only the URL leaves the
+ * server, never the member id or the tier.
  */
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { getNexusReturnUrl } from '@/lib/nexus/config';
-import { getLinkedMemberId } from '@/lib/nexus/server';
+import { fetchNexusTier, getLinkedMemberId } from '@/lib/nexus/server';
+import { showsNexusReturn } from '@/lib/nexus/tier';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -28,7 +30,9 @@ export async function GET() {
 
   try {
     const memberId = await getLinkedMemberId(getSupabaseAdmin(), user.id);
-    return json(memberId ? returnUrl : null);
+    if (!memberId) return json(null);
+    const answer = await fetchNexusTier(memberId, 2000);
+    return json(showsNexusReturn(answer) ? returnUrl : null);
   } catch {
     return json(null);
   }
