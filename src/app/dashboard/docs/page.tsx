@@ -1458,7 +1458,7 @@ export default function DocsPage() {
 
       <DashboardNavbar />
 
-      <div className="relative z-10 container mx-auto px-4 py-8 max-w-7xl">
+      <div className="relative z-10 container mx-auto px-4 pl-24 2xl:pl-4 py-8 max-w-7xl">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl md:text-5xl font-bold mb-3">
