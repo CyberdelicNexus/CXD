@@ -10,18 +10,29 @@ import { Button } from '@/components/ui/button';
  */
 export function RecoveryForm() {
   const [token, setToken] = useState('');
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    setToken(params.get('token_hash') ?? '');
-    window.history.replaceState(null, '', window.location.pathname);
+    const value = params.get('token_hash');
+    // React StrictMode runs this twice in dev; the second run finds the fragment
+    // already removed and must leave the stored token alone.
+    if (value) {
+      setToken(value);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    setChecked(true);
   }, []);
 
   return (
     <form action="/auth/recovery/confirm" method="POST" className="max-w-md space-y-4 text-center">
       <h1 className="text-xl font-semibold">Reset your password</h1>
       <input type="hidden" name="token_hash" value={token} />
-      <Button type="submit" disabled={!token}>Continue</Button>
+      {token ? (
+        <Button type="submit">Continue</Button>
+      ) : (
+        checked && <p className="text-sm text-white/60">This link is incomplete. Open it again from your email.</p>
+      )}
     </form>
   );
 }

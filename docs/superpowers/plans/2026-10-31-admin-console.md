@@ -1933,18 +1933,29 @@ import { Button } from '@/components/ui/button';
  */
 export function RecoveryForm() {
   const [token, setToken] = useState('');
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    setToken(params.get('token_hash') ?? '');
-    window.history.replaceState(null, '', window.location.pathname);
+    const value = params.get('token_hash');
+    // React StrictMode runs this twice in dev; the second run finds the fragment
+    // already removed and must leave the stored token alone.
+    if (value) {
+      setToken(value);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    setChecked(true);
   }, []);
 
   return (
     <form action="/auth/recovery/confirm" method="POST" className="max-w-md space-y-4 text-center">
       <h1 className="text-xl font-semibold">Reset your password</h1>
       <input type="hidden" name="token_hash" value={token} />
-      <Button type="submit" disabled={!token}>Continue</Button>
+      {token ? (
+        <Button type="submit">Continue</Button>
+      ) : (
+        checked && <p className="text-sm text-white/60">This link is incomplete. Open it again from your email.</p>
+      )}
     </form>
   );
 }
@@ -1958,7 +1969,6 @@ import { RecoveryForm } from '@/components/admin/recovery-form';
 export const metadata = {
   title: 'Reset password',
   robots: { index: false, follow: false },
-  referrer: 'no-referrer',
 };
 
 export default function RecoveryPage() {
@@ -2033,7 +2043,8 @@ function scrub<T>(value: T, depth = 0): T {
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = scrub(item, depth + 1);
+      // SDK internals: copy through so the walk does not enter them.
+      out[key] = depth === 0 && key === "sdkProcessingMetadata" ? item : scrub(item, depth + 1);
     }
     return out as T;
   }
@@ -2047,6 +2058,8 @@ Then add these two options to `Sentry.init`, before `debug: false`:
     beforeSend: (event) => scrub(event),
     beforeSendTransaction: (event) => scrub(event),
 ```
+
+And inside `Sentry.replayIntegration({ ... })`, add `beforeAddRecordingEvent: (event) => scrub(event),` so replay payloads are scrubbed too.
 
 - [ ] **Step 7: Check routes and commit**
 

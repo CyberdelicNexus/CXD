@@ -16,7 +16,8 @@ function scrub<T>(value: T, depth = 0): T {
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = scrub(item, depth + 1);
+      // SDK internals: copy through so the walk does not enter them.
+      out[key] = depth === 0 && key === "sdkProcessingMetadata" ? item : scrub(item, depth + 1);
     }
     return out as T;
   }
@@ -40,6 +41,8 @@ if (dsn) {
       Sentry.replayIntegration({
         maskAllText: true,
         blockAllMedia: true,
+        // Replay payloads can carry URLs too: scrub them the same way.
+        beforeAddRecordingEvent: (event) => scrub(event),
       }),
     ],
 
