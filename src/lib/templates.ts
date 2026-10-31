@@ -2,14 +2,59 @@ import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 import { QUICKSTART_TEMPLATES } from './templates-quickstart';
 import { CLASSIC_TEMPLATES } from './templates-classics';
 import { EXPERIENCE_TEMPLATES } from './templates-experience';
+import { FRAMEWORK_TEMPLATES, FREE_FRAMEWORK_IDS } from './templates-frameworks';
 
-export type TemplateCategory = 'experience' | 'product-brand' | 'creative';
+export type TemplateCategory = 'experience' | 'product-brand' | 'creative' | 'framework';
 
 export const TEMPLATE_CATEGORY_LABELS: Record<TemplateCategory, string> = {
   experience: 'Experience Design',
   'product-brand': 'Product & Brand',
   creative: 'Creative & General',
+  framework: 'Frameworks',
 };
+
+/** Where in the life of an experience a framework earns its keep. Order = display order. */
+export type FrameworkStage = 'think' | 'ideate' | 'plan' | 'ship' | 'market' | 'distribute' | 'sell';
+
+export const FRAMEWORK_STAGES: readonly FrameworkStage[] = ['think', 'ideate', 'plan', 'ship', 'market', 'distribute', 'sell'];
+
+export const FRAMEWORK_STAGE_LABELS: Record<FrameworkStage, string> = {
+  think: 'Think',
+  ideate: 'Ideate',
+  plan: 'Plan',
+  ship: 'Ship',
+  market: 'Market',
+  distribute: 'Distribute',
+  sell: 'Sell',
+};
+
+export interface FrameworkStep {
+  title: string;
+  detail: string;
+}
+
+/**
+ * The explainer and coaching brief that turn a template into a framework.
+ * The canvas template carries one numbered step card per `steps` entry with the
+ * same title (checked by src/lib/__verify__/frameworks-registry.verify.ts).
+ */
+export interface FrameworkMeta {
+  stage: FrameworkStage;
+  /** Attribution line, e.g. "Gary Klein, 2007". */
+  origin: string;
+  /** Canonical public reference when one exists. */
+  sourceUrl?: string;
+  /** 2–3 sentences. */
+  whatItIs: string;
+  /** 3–4 bullets. */
+  whenToUse: string[];
+  /** 4–7 steps. */
+  steps: FrameworkStep[];
+  /** 2–4 bullets. */
+  pitfalls: string[];
+  /** ~150 words, imperative. Appended to the assistant's system prompt server-side. */
+  assistantBrief: string;
+}
 
 export interface TemplateDefinition {
   id: string;
@@ -21,6 +66,8 @@ export interface TemplateDefinition {
   /** Curved gradient connectors between template elements (endpoints reference
    *  element ids; remapped alongside them by instantiateTemplate). */
   edges?: CanvasEdge[];
+  /** Present iff category === 'framework'. */
+  framework?: FrameworkMeta;
 }
 
 
@@ -146,6 +193,8 @@ export const TEMPLATES: TemplateDefinition[] = [
   ...EXPERIENCE_TEMPLATES,
   // Classic templates, rebuilt against the same design system.
   ...CLASSIC_TEMPLATES,
+  // Frameworks: method explainer + guided layout + assistant brief.
+  ...FRAMEWORK_TEMPLATES,
 ];
 
 /**
@@ -155,10 +204,43 @@ export const TEMPLATES: TemplateDefinition[] = [
  * (/api/ai/suggest-template) filters its candidate catalog with this same
  * set so it never recommends a template the caller can't insert.
  */
-export const FREE_TEMPLATE_IDS: ReadonlySet<string> = new Set(
-  QUICKSTART_TEMPLATES.map((t) => t.id),
-);
+export const FREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
+  ...QUICKSTART_TEMPLATES.map((t) => t.id),
+  ...FREE_FRAMEWORK_IDS,
+]);
 
 export function isTemplateFree(templateId: string): boolean {
   return FREE_TEMPLATE_IDS.has(templateId);
+}
+
+/**
+ * What the AI Composer may recommend after framing: experience structures,
+ * never thinking methods. Frameworks are reached from the Frameworks tab.
+ */
+export const COMPOSER_TEMPLATES: TemplateDefinition[] = TEMPLATES.filter((t) => t.category !== 'framework');
+
+export function getFrameworkTemplate(id: string): TemplateDefinition | undefined {
+  const t = TEMPLATES.find((x) => x.id === id);
+  return t && t.category === 'framework' && t.framework ? t : undefined;
+}
+
+export function getFrameworkBrief(id: string): string | undefined {
+  return getFrameworkTemplate(id)?.framework?.assistantBrief;
+}
+
+export interface FrameworkStageGroup {
+  stage: FrameworkStage;
+  label: string;
+  templates: TemplateDefinition[];
+}
+
+/** Frameworks grouped by stage in FRAMEWORK_STAGES order; empty stages omitted. */
+export function frameworkTemplatesByStage(list: TemplateDefinition[] = FRAMEWORK_TEMPLATES): FrameworkStageGroup[] {
+  return FRAMEWORK_STAGES
+    .map((stage) => ({
+      stage,
+      label: FRAMEWORK_STAGE_LABELS[stage],
+      templates: list.filter((t) => t.framework?.stage === stage),
+    }))
+    .filter((g) => g.templates.length > 0);
 }
