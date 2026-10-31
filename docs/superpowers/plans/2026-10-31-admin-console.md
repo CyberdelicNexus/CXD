@@ -4721,11 +4721,11 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 ```tsx
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { adminPost } from '@/lib/admin/client';
+import { AdminRequestError, adminPost } from '@/lib/admin/client';
 
 const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -4751,19 +4751,29 @@ export function Composer() {
   const [confirmText, setConfirmText] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // One key per draft. A retry or a second click reuses it, so the server sends the
+  // broadcast once and answers the repeat with "already sent". It rotates only after a
+  // success or when the content changes. A failed or unknown send keeps it.
+  const sendKey = useRef<string | null>(null);
+  // Stops a double click before the disabled state has rendered.
+  const inFlight = useRef(false);
 
-  const payload = useMemo(() => {
-    const ids = userIds.split(/[\s,]+/).filter((value) => UUID.test(value));
+  const { payload, ignoredIds } = useMemo(() => {
+    const tokens = userIds.split(/[\s,]+/).filter(Boolean);
+    const ids = Array.from(new Set(tokens.filter((value) => UUID.test(value))));
     const audience =
       audienceKind === 'plan' ? { kind: 'plan', plan }
       : audienceKind === 'users' ? { kind: 'users', userIds: ids }
       : { kind: 'all' };
     return {
-      channels: [...(inApp ? ['in_app'] : []), ...(email ? ['email'] : [])],
-      category,
-      audience,
-      subject: subject.trim(),
-      body: body.trim(),
+      ignoredIds: tokens.length - tokens.filter((value) => UUID.test(value)).length,
+      payload: {
+        channels: [...(inApp ? ['in_app'] : []), ...(email ? ['email'] : [])],
+        category,
+        audience,
+        subject: subject.trim(),
+        body: body.trim(),
+      },
     };
   }, [inApp, email, category, audienceKind, plan, userIds, subject, body]);
 
@@ -4772,9 +4782,13 @@ export function Composer() {
     setTestToken('');
     setConfirmText('');
     setMessage(null);
+    // Different content is a different broadcast, so it gets its own key.
+    sendKey.current = null;
   }
 
   async function run(action: () => Promise<void>) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setMessage(null);
     try {
@@ -4782,14 +4796,52 @@ export function Composer() {
     } catch (err) {
       setMessage({ ok: false, text: (err as Error).message });
     } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function send() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setMessage(null);
+    sendKey.current ??= crypto.randomUUID();
+    try {
+      await adminPost('/api/admin/comms/send', {
+        ...payload,
+        idempotencyKey: sendKey.current,
+        confirmCount: email ? count : undefined,
+        testToken: testToken || undefined,
+      });
+      changed();
+      setSubject('');
+      setBody('');
+      setMessage({ ok: true, text: 'Sent. Delivery counts update in the history below.' });
+      router.refresh();
+    } catch (err) {
+      // The key is kept on purpose: another click returns "already sent" instead of sending twice.
+      if (err instanceof AdminRequestError) {
+        setMessage({ ok: false, text: err.message });
+        // A partial send has a history row; show it.
+        if (typeof err.data.broadcastId === 'string') router.refresh();
+      } else {
+        setMessage({
+          ok: false,
+          text: 'The connection dropped, so it is not known whether this went out. Check the history below before sending again.',
+        });
+      }
+    } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
 
   const ready = payload.channels.length > 0 && !!payload.subject && !!payload.body;
   const count = preview?.emailCount ?? 0;
+  const reach = preview ? preview.inAppCount + preview.emailCount : 0;
   const canSend =
-    !!preview && !preview.problem && (!email || (!!testToken && confirmText === String(count)));
+    !!preview && !preview.problem && reach > 0 && (!email || (!!testToken && confirmText === String(count)));
 
   return (
     <div className="space-y-4 rounded-lg border border-white/10 p-4">
@@ -4832,13 +4884,20 @@ export function Composer() {
           </select>
         )}
         {audienceKind === 'users' && (
-          <Textarea
-            aria-label="User IDs"
-            placeholder="Paste user IDs from their user pages, separated by spaces or commas"
-            value={userIds}
-            onChange={(e) => { setUserIds(e.target.value); changed(); }}
-            className="bg-white/5 border-white/10"
-          />
+          <>
+            <Textarea
+              aria-label="User IDs"
+              placeholder="Paste user IDs from their user pages, separated by spaces or commas"
+              value={userIds}
+              onChange={(e) => { setUserIds(e.target.value); changed(); }}
+              className="bg-white/5 border-white/10"
+            />
+            {ignoredIds > 0 && (
+              <p role="alert" className="text-xs text-amber-300">
+                {ignoredIds} {ignoredIds === 1 ? 'entry is' : 'entries are'} not a valid user ID and will be ignored.
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -4854,7 +4913,7 @@ export function Composer() {
       <Button
         size="sm"
         variant="outline"
-        disabled={busy || !ready}
+        disabled={busy || !ready || (audienceKind === 'users' && (payload.audience as { userIds: string[] }).userIds.length === 0)}
         onClick={() => run(async () => setPreview(await adminPost<Preview>('/api/admin/comms/preview', payload)))}
       >
         Check recipients
@@ -4863,6 +4922,7 @@ export function Composer() {
       {preview && (
         <div className="space-y-3 rounded-md bg-white/[0.03] p-3 text-sm">
           <p>{inApp ? `${preview.inAppCount} in-app` : ''}{inApp && email ? ' · ' : ''}{email ? `${preview.emailCount} emails` : ''}</p>
+          {reach === 0 && <p role="alert" className="text-amber-300">No one matches this audience on the chosen channels.</p>}
           {preview.problem && <p role="alert" className="text-rose-400">{preview.problem}</p>}
           {email && !preview.problem && (
             <>
@@ -4886,18 +4946,7 @@ export function Composer() {
               )}
             </>
           )}
-          <Button
-            size="sm"
-            disabled={busy || !canSend}
-            onClick={() => run(async () => {
-              await adminPost('/api/admin/comms/send', { ...payload, confirmCount: email ? count : undefined, testToken: testToken || undefined });
-              changed();
-              setSubject('');
-              setBody('');
-              setMessage({ ok: true, text: 'Sent. Delivery counts update in the history below.' });
-              router.refresh();
-            })}
-          >
+          <Button size="sm" disabled={busy || !canSend} onClick={send}>
             Send
           </Button>
         </div>
@@ -4920,11 +4969,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 export default async function AdminCommsPage() {
   await requirePagePermission('comms.send');
-  const { data } = await getSupabaseAdmin()
+  const { data, error } = await getSupabaseAdmin()
     .from('broadcasts')
     .select('id, subject, channels, category, recipient_count, sent_count, failed_count, created_at')
     .order('created_at', { ascending: false })
     .limit(50);
+  // A failed query must not read as "Nothing sent yet": throw so the error boundary shows it.
+  if (error) throw new Error(`broadcast history query failed: ${error.code ?? 'error'}: ${error.message}`);
   const rows = data ?? [];
 
   return (
