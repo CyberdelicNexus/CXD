@@ -2415,7 +2415,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "fix(
  * Ticket title and body shaping for /api/support.
  * Run: npx tsx src/lib/admin/__verify__/admin-tickets.verify.ts
  */
-import { composeTicketBody, resolveTicketType, ticketTitle } from '../tickets';
+import { composeTicketBody, isHttpUrl, parseTicketFilters, resolveTicketType, ticketTitle } from '../tickets';
 
 let passed = 0;
 let failed = 0;
@@ -2436,6 +2436,19 @@ check('first line only', ticketTitle('Bug Report', 'First\nSecond') === 'First')
 
 check('body without steps', composeTicketBody('Hello', undefined) === 'Hello');
 check('body with steps', composeTicketBody('Hello', '1. Click').includes('Steps to reproduce:\n1. Click'));
+
+const UID = '123e4567-e89b-12d3-a456-426614174000';
+check('valid filters kept', JSON.stringify(parseTicketFilters({ type: 'bug', priority: 'high', assignee: UID })) === JSON.stringify({ type: 'bug', priority: 'high', assignee: UID }));
+check('invalid type dropped', parseTicketFilters({ type: 'x' }).type === undefined);
+check('invalid priority dropped', parseTicketFilters({ priority: 'urgent' }).priority === undefined);
+check('invalid assignee dropped', parseTicketFilters({ assignee: 'abc,id.eq.1' }).assignee === undefined);
+
+check('https link allowed', isHttpUrl('https://sentry.io/issues/1'));
+check('http link allowed', isHttpUrl('http://example.com'));
+check('javascript link refused', !isHttpUrl('javascript:alert(1)'));
+check('data link refused', !isHttpUrl('data:text/html,hi'));
+check('garbage refused', !isHttpUrl('not a url'));
+check('null refused', !isHttpUrl(null));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
@@ -2488,6 +2501,34 @@ export function ticketTitle(title: string, description: string): string {
 export function composeTicketBody(description: string, stepsToReproduce: string | undefined): string {
   if (!stepsToReproduce) return description;
   return `${description}\n\nSteps to reproduce:\n${stepsToReproduce}`;
+}
+
+export interface TicketFilters {
+  type?: TicketType;
+  priority?: TicketPriority;
+  assignee?: string;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Keeps only filter values that are valid; anything else is dropped rather than queried. */
+export function parseTicketFilters(raw: { type?: string; priority?: string; assignee?: string }): TicketFilters {
+  const filters: TicketFilters = {};
+  if ((TICKET_TYPES as readonly unknown[]).includes(raw.type)) filters.type = raw.type as TicketType;
+  if ((TICKET_PRIORITIES as readonly unknown[]).includes(raw.priority)) filters.priority = raw.priority as TicketPriority;
+  if (raw.assignee && UUID.test(raw.assignee)) filters.assignee = raw.assignee;
+  return filters;
+}
+
+/** True only for an http or https URL, so a stored link can never render as javascript: or data:. */
+export function isHttpUrl(value: string | null | undefined): value is string {
+  if (!value) return false;
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 ```
 
@@ -2569,7 +2610,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 
 ```ts
 import { getSupabaseAdmin } from '@/supabase/admin';
-import type { TicketPriority, TicketStatus, TicketType } from './tickets';
+import type { TicketFilters, TicketPriority, TicketStatus, TicketType } from './tickets';
 
 export interface Ticket {
   id: string;
@@ -2600,7 +2641,8 @@ export interface StaffMember {
   label: string;
 }
 
-export async function listTickets(filters: { type?: string; assignee?: string; priority?: string }): Promise<Ticket[]> {
+/** Filters must already be validated (see parseTicketFilters). A failed read throws. */
+export async function listTickets(filters: TicketFilters): Promise<Ticket[]> {
   let query = getSupabaseAdmin()
     .from('support_tickets')
     .select('*')
@@ -2614,34 +2656,40 @@ export async function listTickets(filters: { type?: string; assignee?: string; p
   return (data ?? []) as Ticket[];
 }
 
+/** Returns null only when the card does not exist; a failed read throws. */
 export async function getTicket(id: string): Promise<{ ticket: Ticket; events: TicketEvent[] } | null> {
   const admin = getSupabaseAdmin();
-  const { data: ticket } = await admin.from('support_tickets').select('*').eq('id', id).maybeSingle();
+  const { data: ticket, error } = await admin.from('support_tickets').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
   if (!ticket) return null;
-  const { data: events } = await admin
+  const { data: events, error: eventsError } = await admin
     .from('support_ticket_events')
     .select('id, actor_id, kind, body, created_at')
     .eq('ticket_id', id)
     .order('created_at', { ascending: true });
+  if (eventsError) throw eventsError;
   return { ticket: ticket as Ticket, events: (events ?? []) as TicketEvent[] };
 }
 
 export async function listTicketsForUser(userId: string): Promise<Pick<Ticket, 'id' | 'title' | 'status'>[]> {
-  const { data } = await getSupabaseAdmin()
+  const { data, error } = await getSupabaseAdmin()
     .from('support_tickets')
     .select('id, title, status')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(50);
+  if (error) throw error;
   return (data ?? []) as Pick<Ticket, 'id' | 'title' | 'status'>[];
 }
 
 export async function listStaff(): Promise<StaffMember[]> {
   const admin = getSupabaseAdmin();
-  const { data: roles } = await admin.from('staff_roles').select('user_id');
+  const { data: roles, error: rolesError } = await admin.from('staff_roles').select('user_id');
+  if (rolesError) throw rolesError;
   const ids = (roles ?? []).map((row) => row.user_id as string);
   if (ids.length === 0) return [];
-  const { data: people } = await admin.from('users').select('id, full_name, email').in('id', ids);
+  const { data: people, error: peopleError } = await admin.from('users').select('id, full_name, email').in('id', ids);
+  if (peopleError) throw peopleError;
   return (people ?? []).map((person) => ({
     id: person.id as string,
     label: (person.full_name as string | null) || (person.email as string) || 'Staff',
@@ -2718,17 +2766,24 @@ Replace lines 67-69:
         email: reporterEmail,
         type: ticketType,
         title: ticketTitle(title, description),
-        description: composeTicketBody(description, stepsToReproduce),
+        description: composeTicketBody(
+          description,
+          typeof stepsToReproduce === 'string' ? stepsToReproduce.slice(0, 10000) : undefined,
+        ),
         source_path: typeof sourcePath === 'string' ? sourcePath.slice(0, 500) : null,
       });
-      if (ticketError) throw ticketError;
+      if (ticketError) throw new Error(`${ticketError.code ?? 'error'}: ${ticketError.message}`);
     } catch (ticketErr) {
-      console.error('Failed to store support ticket:', ticketErr);
-      Sentry.captureException(ticketErr, { tags: { route: 'support', phase: 'store-ticket' } });
+      // Code and message only: a constraint error's details can echo the row, which holds the user's text.
+      const reason = ticketErr instanceof Error ? ticketErr.message : 'unknown';
+      console.error('Failed to store support ticket:', reason);
+      Sentry.captureException(new Error(`support ticket insert failed: ${reason}`), {
+        tags: { route: 'support', phase: 'store-ticket' },
+      });
     }
 ```
 
-Change the Sentry tag on line 77 to `reportType: ticketType`.
+Change the Sentry tag to `reportType: ticketType`. Add `stepsToReproduce` handling as shown above (only a string, capped at 10,000 characters, reaches the ticket).
 
 - [ ] **Step 4: Update the dialogs**
 
@@ -2981,9 +3036,9 @@ import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { parseBody } from '@/lib/admin/http';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
 import { recordAudit } from '@/lib/admin/audit';
-import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES } from '@/lib/admin/tickets';
+import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES, isHttpUrl } from '@/lib/admin/tickets';
 
 type Ctx = { params: { id: string } };
 
@@ -2991,19 +3046,36 @@ const schema = z.object({
   status: z.enum(TICKET_STATUSES).optional(),
   priority: z.enum(TICKET_PRIORITIES).optional(),
   assigneeId: z.string().uuid().nullable().optional(),
-  sentryIssueUrl: z.string().url().max(500).nullable().optional(),
+  // z.string().url() also accepts javascript: and data: URLs, so require http or https.
+  sentryIssueUrl: z.string().max(500).refine(isHttpUrl, 'Must be an http or https link').nullable().optional(),
 });
+
+function reportDbError(error: { code?: string; message: string }, step: string) {
+  // Code and message only: details can echo the row.
+  Sentry.captureException(new Error(`admin support ${step} failed: ${error.code ?? 'error'}: ${error.message}`), {
+    tags: { route: 'admin-support', step },
+  });
+}
 
 export async function PATCH(request: Request, context: Ctx) {
   const gate = await requirePermission('tickets.work');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
   const { status, priority, assigneeId, sentryIssueUrl } = body.data;
   const ticketId = context.params.id;
   const admin = getSupabaseAdmin();
 
-  const { data: before } = await admin.from('support_tickets').select('status, assignee_id, priority').eq('id', ticketId).maybeSingle();
+  const { data: before, error: readError } = await admin
+    .from('support_tickets')
+    .select('status, assignee_id, priority')
+    .eq('id', ticketId)
+    .maybeSingle();
+  if (readError) {
+    reportDbError(readError, 'read');
+    return NextResponse.json({ error: 'The card could not be loaded.' }, { status: 500 });
+  }
   if (!before) return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -3013,7 +3085,13 @@ export async function PATCH(request: Request, context: Ctx) {
   if (sentryIssueUrl !== undefined) patch.sentry_issue_url = sentryIssueUrl;
 
   const { error } = await admin.from('support_tickets').update(patch).eq('id', ticketId);
-  if (error) return NextResponse.json({ error: 'The card was not changed.' }, { status: 500 });
+  if (error) {
+    if (error.code === '23503') {
+      return NextResponse.json({ error: 'That assignee does not exist.' }, { status: 409 });
+    }
+    reportDbError(error, 'update');
+    return NextResponse.json({ error: 'The card was not changed.' }, { status: 500 });
+  }
 
   const events: { ticket_id: string; actor_id: string; kind: string; body: string }[] = [];
   if (status && status !== before.status) {
@@ -3022,7 +3100,11 @@ export async function PATCH(request: Request, context: Ctx) {
   if (assigneeId !== undefined && assigneeId !== before.assignee_id) {
     events.push({ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'assignment', body: assigneeId ? 'Assigned' : 'Unassigned' });
   }
-  if (events.length) await admin.from('support_ticket_events').insert(events);
+  if (events.length) {
+    // The change is already saved; a missing history line is reported but does not fail the request.
+    const { error: eventError } = await admin.from('support_ticket_events').insert(events);
+    if (eventError) reportDbError(eventError, 'event-insert');
+  }
 
   // The change is already committed, so a failed audit write is reported but does not fail the request.
   try {
@@ -3048,10 +3130,11 @@ export async function PATCH(request: Request, context: Ctx) {
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { parseBody } from '@/lib/admin/http';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
 
 type Ctx = { params: { id: string } };
 
@@ -3060,6 +3143,7 @@ const schema = z.object({ body: z.string().trim().min(1).max(10000) });
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('tickets.work');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
 
@@ -3069,7 +3153,15 @@ export async function POST(request: Request, context: Ctx) {
     kind: 'note',
     body: body.data.body,
   });
-  if (error) return NextResponse.json({ error: 'The note was not saved.' }, { status: 500 });
+  if (error) {
+    // A missing card breaks the foreign key; anything else is a real failure.
+    if (error.code === '23503') return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
+    // Code and message only: details can echo the note text.
+    Sentry.captureException(new Error(`admin support note failed: ${error.code ?? 'error'}: ${error.message}`), {
+      tags: { route: 'admin-support-note' },
+    });
+    return NextResponse.json({ error: 'The note was not saved.' }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }
 ```
@@ -3078,10 +3170,11 @@ export async function POST(request: Request, context: Ctx) {
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { parseBody } from '@/lib/admin/http';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
 import { withAudit } from '@/lib/admin/audit';
 import { enqueueEmail } from '@/lib/email-queue';
 import SupportReply from '@emails/support-reply';
@@ -3092,24 +3185,44 @@ const SUPPORT_INBOX = 'contact@cyberdelic.design';
 
 const schema = z.object({ body: z.string().trim().min(1).max(10000) });
 
+function report(message: string, step: string) {
+  // Messages here come from the database or mail layer, never from the reply text or a token.
+  Sentry.captureException(new Error(`admin support reply ${step} failed: ${message}`), {
+    tags: { route: 'admin-support-reply', step },
+  });
+}
+
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('tickets.work');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
   const ticketId = context.params.id;
   const admin = getSupabaseAdmin();
 
-  const { data: ticket } = await admin
+  const { data: ticket, error: ticketError } = await admin
     .from('support_tickets')
     .select('email, title, user_id')
     .eq('id', ticketId)
     .maybeSingle();
+  if (ticketError) {
+    report(`${ticketError.code ?? 'error'}: ${ticketError.message}`, 'ticket-read');
+    return NextResponse.json({ error: 'The card could not be loaded.' }, { status: 500 });
+  }
   if (!ticket) return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
 
-  const { data: profile } = ticket.user_id
-    ? await admin.from('users').select('full_name').eq('id', ticket.user_id).maybeSingle()
-    : { data: null };
+  // The name only personalises the greeting, so a failed lookup falls back to "there".
+  let userName = 'there';
+  if (ticket.user_id) {
+    const { data: profile, error: profileError } = await admin
+      .from('users')
+      .select('full_name')
+      .eq('id', ticket.user_id)
+      .maybeSingle();
+    if (profileError) report(`${profileError.code ?? 'error'}: ${profileError.message}`, 'profile-read');
+    else if (profile?.full_name) userName = profile.full_name;
+  }
 
   try {
     await withAudit(
@@ -3120,27 +3233,38 @@ export async function POST(request: Request, context: Ctx) {
           subject: `Re: ${ticket.title}`,
           replyTo: SUPPORT_INBOX,
           template: SupportReply({
-            userName: profile?.full_name || 'there',
+            userName,
             ticketTitle: ticket.title,
             body: body.data.body,
           }),
         }),
     );
-  } catch {
+  } catch (err) {
+    report(err instanceof Error ? err.message : 'unknown', 'send');
     return NextResponse.json({ error: 'The reply was not sent.' }, { status: 500 });
   }
 
-  await admin.from('support_ticket_events').insert({
+  // The email is queued, so from here a failure must not read as "not sent".
+  const { error: eventError } = await admin.from('support_ticket_events').insert({
     ticket_id: ticketId,
     actor_id: gate.staff.userId,
     kind: 'reply',
     body: body.data.body,
   });
-  await admin
+  if (eventError) report(`${eventError.code ?? 'error'}: ${eventError.message}`, 'event-insert');
+
+  const { error: statusError } = await admin
     .from('support_tickets')
     .update({ status: 'waiting', updated_at: new Date().toISOString() })
     .eq('id', ticketId);
+  if (statusError) report(`${statusError.code ?? 'error'}: ${statusError.message}`, 'status-update');
 
+  if (eventError || statusError) {
+    return NextResponse.json(
+      { error: 'The reply was sent, but the card was not fully updated. Do not send it again; reload to check the card.', sent: true },
+      { status: 500 },
+    );
+  }
   return NextResponse.json({ ok: true });
 }
 ```
@@ -3148,7 +3272,7 @@ export async function POST(request: Request, context: Ctx) {
 - [ ] **Step 4: Check routes and commit**
 
 Run: `npx tsx src/lib/admin/__verify__/admin-routes.verify.ts`
-Expected: `8 handlers checked`, exit 0.
+Expected: `8 handlers checked`, exit 0 (the check also counts pages).
 
 ```bash
 git add src
@@ -3288,31 +3412,47 @@ export function TicketCompose({ ticketId, email }: { ticketId: string; email: st
 import Link from 'next/link';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { listStaff, listTickets } from '@/lib/admin/support';
-import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES, TICKET_TYPES, TYPE_LABELS } from '@/lib/admin/tickets';
+import { singleParam } from '@/lib/admin/users-query';
+import {
+  STATUS_LABELS,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  TICKET_TYPES,
+  TYPE_LABELS,
+  parseTicketFilters,
+} from '@/lib/admin/tickets';
 
 const FIELD = 'h-9 rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
+
+type Param = string | string[] | undefined;
 
 export default async function AdminSupportPage({
   searchParams,
 }: {
-  searchParams: { type?: string; assignee?: string; priority?: string };
+  searchParams: { type?: Param; assignee?: Param; priority?: Param };
 }) {
   await requirePagePermission('tickets.work');
-  const [tickets, staff] = await Promise.all([listTickets(searchParams), listStaff()]);
+  // Invalid filter values are dropped here, so only known types, priorities and UUIDs reach the query.
+  const filters = parseTicketFilters({
+    type: singleParam(searchParams.type),
+    assignee: singleParam(searchParams.assignee),
+    priority: singleParam(searchParams.priority),
+  });
+  const [tickets, staff] = await Promise.all([listTickets(filters), listStaff()]);
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Support</h1>
       <form className="flex flex-wrap gap-2">
-        <select name="type" defaultValue={searchParams.type ?? ''} aria-label="Type" className={FIELD}>
+        <select name="type" defaultValue={filters.type ?? ''} aria-label="Type" className={FIELD}>
           <option value="">All types</option>
           {TICKET_TYPES.map((value) => <option key={value} value={value}>{TYPE_LABELS[value]}</option>)}
         </select>
-        <select name="assignee" defaultValue={searchParams.assignee ?? ''} aria-label="Assignee" className={FIELD}>
+        <select name="assignee" defaultValue={filters.assignee ?? ''} aria-label="Assignee" className={FIELD}>
           <option value="">Anyone</option>
           {staff.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}
         </select>
-        <select name="priority" defaultValue={searchParams.priority ?? ''} aria-label="Priority" className={FIELD}>
+        <select name="priority" defaultValue={filters.priority ?? ''} aria-label="Priority" className={FIELD}>
           <option value="">Any priority</option>
           {TICKET_PRIORITIES.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>
@@ -3331,8 +3471,8 @@ export default async function AdminSupportPage({
                   href={`/admin/support/${ticket.id}`}
                   className="block rounded-md border border-white/10 bg-white/[0.03] p-3 hover:bg-white/[0.06]"
                 >
-                  <p className="text-sm">{ticket.title}</p>
-                  <p className="mt-1 text-xs text-white/40">
+                  <p className="text-sm break-words">{ticket.title}</p>
+                  <p className="mt-1 text-xs text-white/40 break-all">
                     {TYPE_LABELS[ticket.type]}{ticket.priority === 'high' ? ' · High' : ''} · {ticket.email}
                   </p>
                 </Link>
@@ -3354,8 +3494,9 @@ export default async function AdminSupportPage({
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePagePermission } from '@/lib/admin/gate';
+import { isUuid } from '@/lib/admin/http';
 import { getTicket, listStaff } from '@/lib/admin/support';
-import { TYPE_LABELS } from '@/lib/admin/tickets';
+import { TYPE_LABELS, isHttpUrl } from '@/lib/admin/tickets';
 import { TicketCompose } from '@/components/admin/ticket-compose';
 import { TicketControls } from '@/components/admin/ticket-controls';
 
@@ -3363,6 +3504,8 @@ const KIND_LABELS = { note: 'Internal note', reply: 'Emailed reply', status: 'St
 
 export default async function AdminTicketPage({ params }: { params: { id: string } }) {
   await requirePagePermission('tickets.work');
+  if (!isUuid(params.id)) notFound();
+  // A failed read throws (500); only a card that does not exist is a 404.
   const [found, staff] = await Promise.all([getTicket(params.id), listStaff()]);
   if (!found) notFound();
   const { ticket, events } = found;
@@ -3371,23 +3514,29 @@ export default async function AdminTicketPage({ params }: { params: { id: string
     <div className="space-y-4">
       <div>
         <Link href="/admin/support" className="text-sm text-white/50 hover:text-white">Support</Link>
-        <h1 className="text-xl font-semibold">{ticket.title}</h1>
-        <p className="text-sm text-white/50">
+        <h1 className="text-xl font-semibold break-words">{ticket.title}</h1>
+        <p className="text-sm text-white/50 break-all">
           {TYPE_LABELS[ticket.type]} from{' '}
           {ticket.user_id ? (
             <Link href={`/admin/users/${ticket.user_id}`} className="text-violet-200 hover:underline">{ticket.email}</Link>
           ) : ticket.email}
           {ticket.source_path ? ` on ${ticket.source_path}` : ''}
         </p>
+        {/* Only an http(s) link becomes a clickable link; anything else stays out of the page. */}
+        {isHttpUrl(ticket.sentry_issue_url) && (
+          <a href={ticket.sentry_issue_url} target="_blank" rel="noreferrer noopener" className="text-sm text-violet-200 hover:underline">
+            Open in Sentry
+          </a>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-[1fr_280px] gap-6">
         <div className="space-y-4 min-w-0">
-          <p className="whitespace-pre-wrap rounded-lg border border-white/10 p-4 text-sm">{ticket.description}</p>
+          <p className="whitespace-pre-wrap break-words rounded-lg border border-white/10 p-4 text-sm">{ticket.description}</p>
           {events.map((event) => (
             <div key={event.id} className="rounded-md bg-white/[0.03] p-3">
               <p className="text-xs text-white/40">{KIND_LABELS[event.kind]} · {event.created_at.slice(0, 16).replace('T', ' ')}</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm">{event.body}</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm">{event.body}</p>
             </div>
           ))}
           <TicketCompose ticketId={ticket.id} email={ticket.email} />
@@ -3420,15 +3569,18 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { formatDate } from '@/lib/admin/users';
+import { isHttpUrl } from '@/lib/admin/tickets';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export default async function AdminErrorsPage() {
   await requirePagePermission('errors.view');
-  const { data } = await getSupabaseAdmin()
+  const { data, error } = await getSupabaseAdmin()
     .from('fix_pipeline')
     .select('id, title, level, status, triage_tier, triage_action, event_count, user_count, permalink, created_at')
     .order('created_at', { ascending: false })
     .limit(100);
+  // A failed query must not read as "nothing triaged": throw so the error boundary shows it.
+  if (error) throw new Error(`fix_pipeline query failed: ${error.code ?? 'error'}: ${error.message}`);
   const rows = data ?? [];
 
   return (
@@ -3453,8 +3605,8 @@ export default async function AdminErrorsPage() {
           {rows.map((row) => (
             <TableRow key={row.id}>
               <TableCell className="max-w-96 truncate">
-                {row.permalink ? (
-                  <a href={row.permalink} target="_blank" rel="noreferrer" className="text-violet-200 hover:underline">{row.title}</a>
+                {isHttpUrl(row.permalink) ? (
+                  <a href={row.permalink} target="_blank" rel="noreferrer noopener" className="text-violet-200 hover:underline">{row.title}</a>
                 ) : row.title}
               </TableCell>
               <TableCell>{row.level ?? '—'}</TableCell>
@@ -3483,18 +3635,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 export default async function AdminAuditPage() {
   await requirePagePermission('audit.view');
   const admin = getSupabaseAdmin();
-  const { data } = await admin
+  const { data, error } = await admin
     .from('admin_audit_log')
     .select('id, actor_id, action, target_type, target_id, reason, outcome, created_at')
     .order('created_at', { ascending: false })
     .limit(200);
+  // A failed query must not read as "nothing recorded": throw so the error boundary shows it.
+  if (error) throw new Error(`audit log query failed: ${error.code ?? 'error'}: ${error.message}`);
   const rows = data ?? [];
 
   const actorIds = Array.from(new Set(rows.map((row) => row.actor_id as string)));
-  const { data: actors } = actorIds.length
-    ? await admin.from('users').select('id, email').in('id', actorIds)
-    : { data: [] };
-  const actorEmail = new Map((actors ?? []).map((actor) => [actor.id as string, actor.email as string]));
+  const actors = actorIds.length ? await admin.from('users').select('id, email').in('id', actorIds) : { data: [], error: null };
+  if (actors.error) throw new Error(`audit actor lookup failed: ${actors.error.code ?? 'error'}: ${actors.error.message}`);
+  const actorEmail = new Map((actors.data ?? []).map((actor) => [actor.id as string, actor.email as string]));
 
   return (
     <div className="space-y-4">
