@@ -115,7 +115,7 @@ templates aren't dead diagrams, they hang off live project data.
 4. At least one portal (hexagon board), placed per §5. Framework templates (category 'framework') are exempt: their depth comes from the method and its explainer.
 5. Anchor block wired in when a matching framing section exists.
 6. Coordinates on the 20px grid; run the layout math (no overlaps, gutters per §8).
-7. Element count 15–30; every element either teaches, seeds, or connects.
+7. Element count 15–30 (framework templates may reach 32); every element either teaches, seeds, or connects.
 
 ## Infra notes (implementation)
 
