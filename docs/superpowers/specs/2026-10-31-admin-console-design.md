@@ -40,7 +40,8 @@ New code lives in:
 
 - `src/app/admin/` for pages, with a real `layout.tsx` that runs the gate
 - `src/app/api/admin/` for routes, using zod `safeParse` (template: `src/app/api/lab/votes/route.ts`)
-- `src/lib/admin/` for `roles.ts`, `audit.ts` and domain logic that `__verify__` scripts can test without a request
+- `src/lib/admin/` for `permissions.ts`, `gate.ts`, `audit.ts` and domain logic that `__verify__` scripts can test without a request
+- `src/app/api/me/staff-role/` for the caller's own role, which drives the nav link and stays outside `/api/admin` so ordinary members get a 200
 
 New migrations follow the service-role-only convention in `20261016000001_nexus_bridge.sql`: RLS on, no policies, `REVOKE ALL FROM anon, authenticated`, `GRANT ALL TO service_role`. Migrations are applied by hand, and the code tolerates their absence until then.
 
@@ -60,7 +61,7 @@ Use `@/supabase/server`, not the root `supabase/server.ts`.
 | View audit log | `audit.view` | | x | x |
 | Assign roles | `roles.assign` | | | x |
 
-The matrix is a single constant in `src/lib/admin/roles.ts`. Code checks permissions, never role names.
+The matrix is a single constant in `src/lib/admin/permissions.ts`. Code checks permissions, never role names.
 
 ### `staff_roles`
 
@@ -74,7 +75,7 @@ Because no decision reads an email address, registering or changing to one grant
 
 ### Gate
 
-`requireRole()` and `requirePermission(key)` live in `src/lib/admin/roles.ts`. They call `supabase.auth.getUser()`, then read `staff_roles` with the service-role client.
+`requirePermission(key)` and `requirePagePermission(key)` live in `src/lib/admin/gate.ts`. They call `supabase.auth.getUser()`, then read `staff_roles` with the service-role client. A suspended account is denied even while its session is still valid.
 
 - Pages: anyone without access gets `notFound()`, including signed-out visitors, so `/admin` does not reveal itself.
 - API routes: 401 when signed out, 403 when the role lacks the permission.
@@ -107,7 +108,7 @@ Profile, subscription, credits, canvas count, Nexus link, Stripe IDs linking to 
 Plan change (`users.edit`):
 
 - Allowed values are `free`, `pro` and `beta_tester`. `lifetime` is excluded because it carries a founding member number.
-- Blocked, with the reason shown, when the row has an active or trialing Stripe subscription, or `plan_source = 'nexus'`. The first would leave the user being charged and be overwritten by the next webhook. The second would be overwritten by the tier sync.
+- Blocked, with the reason shown, when the row has a Stripe subscription that has not ended (any status except `canceled` and `incomplete_expired`, so `past_due` is included), when `plan_source = 'nexus'`, or when the plan is `lifetime`. The first would leave the user being charged and be overwritten by the next webhook. The second would be overwritten by the tier sync. The third was paid for.
 - Handled by RPC `admin_set_plan`, which writes `plan_id` only if it changed, because the `on_subscription_change` trigger resets the credit allowance. The UI warns about that reset first.
 - Sets `plan_source = 'admin'`, or clears it when the plan is set to `free`.
 - `isProtected` in `src/lib/nexus/tier.ts` and the Stripe webhook treat `admin` rows as protected from sync. A real Stripe purchase by that user takes over the row and sets `plan_source = 'stripe'`, because they are now paying.
@@ -117,14 +118,15 @@ Credit adjustment (`users.edit`):
 - New RPC `admin_adjust_credits(target, amount, reason, actor)` locks the `ai_credits` row, changes `addon_credits`, and inserts an `ai_credit_transactions` row with `transaction_type = 'manual_adjustment'` and `balance_after`.
 - A reason is required. The balance cannot go below zero.
 
-Password reset (`users.edit`): sends the standard Supabase reset email.
+Password reset (`users.edit`): the standard flow is PKCE, so a link requested from an admin's session would fail for the user. Instead, the server generates a recovery token and emails a link directly through Resend, bypassing Inngest so the token is not stored in its event history. The link opens `/auth/recovery`, where a button starts the recovery session and continues to `/dashboard/reset-password`. Opening the link changes nothing, because mail scanners open links and the token works once.
 
 Suspend and restore (`users.edit`):
 
 - Uses `auth.admin.updateUserById` with `ban_duration`, with a required reason. All data is kept.
 - Cannot target an Owner or yourself. Only an Owner can suspend someone holding a role.
 - The page warns that suspension does not cancel Stripe billing.
-- To verify during the build: whether an existing session ends at once or at token expiry, and whether the Nexus magic-link path refuses a suspended account. If the Nexus path does not refuse, add a check in `src/app/auth/nexus-callback/route.ts`.
+- `src/app/auth/nexus-callback/route.ts` refuses suspended accounts explicitly, rather than relying on the magic-link step to do so.
+- To verify on preview: whether an existing session ends at once or at token expiry.
 
 Assign role (`roles.assign`): grants or removes `admin` and `staff`, through RPC `admin_set_role`.
 
@@ -175,7 +177,7 @@ Read-only list of `fix_pipeline` rows with severity and status. Acknowledge and 
 
 A send inserts one `notifications` row per recipient through the service role, with `is_global = false`. This works with live RLS and gives each user their own read state, so the bell needs no redesign.
 
-`src/hooks/use-notifications.ts` gains a `user_id=eq.<id>` realtime filter, so a broadcast does not reload every connected client. `createGlobalAnnouncement` is removed because it cannot work.
+`src/hooks/use-notifications.ts` gains a `user_id=eq.<id>` realtime filter, which spares the per-subscriber RLS check on every row of a broadcast. Realtime cannot filter DELETE events, so clearing notifications on one device stops updating other open devices until they reload. `createGlobalAnnouncement` is removed because it cannot work.
 
 ### Email categories
 
@@ -198,7 +200,7 @@ Requires `comms.send`.
 - Channel: in-app, email, or both.
 - Audience: everyone, one plan, or chosen users.
 - Body: plain formatted text, placed in a new `emails/broadcast.tsx` template based on `emails/feature-announcement.tsx`.
-- Suspended users are excluded.
+- Suspended users are excluded, and users with unconfirmed email addresses get in-app messages only.
 - Before sending: preview, and the exact recipient count after opt-outs.
 - Email sends require a test send to yourself for that exact content, then typing the recipient count to confirm.
 
@@ -228,7 +230,8 @@ The repo has no test runner. The gates are `npm run build` and `__verify__/*.ver
 - `admin-routes.verify.ts`: walks every file in `src/app/api/admin/` and fails if a route handler does not call the gate first, so a new route cannot ship unprotected.
 - `admin-plan-guard.verify.ts`: plan edit blocking, and `isProtected` for `admin` rows.
 - `unsubscribe-token.verify.ts`: valid, tampered and wrong-secret tokens.
-- `broadcast-audience.verify.ts`: opt-outs by category, and suspended users excluded.
+- `broadcast-audience.verify.ts`: opt-outs by category, suspended users excluded, and the test-send proof failing when content changes.
+- `admin-tickets.verify.ts`: ticket type, title and body shaping.
 
 Then browser-test on a preview deployment as signed-out, member, Staff, Admin and Owner, using test accounts and test sends only. No broadcast goes to real users as part of testing.
 
