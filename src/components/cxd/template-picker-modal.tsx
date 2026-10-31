@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
-import { Crown } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Crown, Info } from 'lucide-react';
 import { useCXDStore } from '@/store/cxd-store';
-import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds, isTemplateFree } from '@/lib/templates';
+import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds, isTemplateFree, FRAMEWORK_STAGE_LABELS } from '@/lib/templates';
+import { FrameworkDetailDialog } from '@/components/cxd/framework-detail-dialog';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
 import { useSubscription } from '@/hooks/use-subscription';
 import { UpgradeModal } from '@/components/upgrade-modal';
@@ -28,6 +29,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'experience', label: 'Experience Design' },
   { key: 'product-brand', label: 'Product & Brand' },
   { key: 'creative', label: 'Creative & General' },
+  { key: 'framework', label: 'Frameworks' },
 ];
 
 export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps) {
@@ -36,6 +38,13 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
   const setPendingCanvasFitBounds = useCXDStore((s) => s.setPendingCanvasFitBounds);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [detailTemplate, setDetailTemplate] = useState<TemplateDefinition | null>(null);
+  const addProjectFramework = useCXDStore((s) => s.addProjectFramework);
+
+  // Don't let a detail dialog left open when the picker closes reappear on reopen.
+  useEffect(() => {
+    if (!open) setDetailTemplate(null);
+  }, [open]);
   // 'quickstart' (free) or 'full' — the whole catalog stays visible either
   // way; free users just get Pro badges on non-quickstart templates.
   const { templateAccess } = useSubscription();
@@ -51,6 +60,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
   const handleSelectTemplate = (templateId: string) => {
     const tpl = TEMPLATES.find((t) => t.id === templateId);
     if (!tpl) return;
+    setDetailTemplate(null);
 
     if (isLocked(templateId)) {
       setShowUpgrade(true);
@@ -65,6 +75,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     requestAnimationFrame(() => {
       addCanvasElements(elements);
       if (edges.length > 0) addCanvasEdges(edges);
+      if (tpl.framework) addProjectFramework(tpl.id);
       // Auto-frame the inserted template so the user sees it land instead of
       // hunting for it (consumed once by the canvas's pending-fit effect).
       const bbox = templateBounds(elements);
@@ -112,45 +123,74 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
             {filtered.map((tpl) => {
               const locked = isLocked(tpl.id);
               return (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  onClick={() => handleSelectTemplate(tpl.id)}
-                  className={`relative flex flex-col rounded-xl border p-4 text-left transition-all group ${
-                    locked
-                      ? 'border-white/10 bg-white/[0.02] hover:border-amber-400/40 hover:bg-amber-500/5'
-                      : 'border-white/10 bg-white/[0.02] hover:border-purple-500/40 hover:bg-purple-500/5'
-                  }`}
-                >
-                  {locked && (
-                    <span className="absolute top-3 right-3 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
-                      <Crown className="w-3 h-3" />
-                      Pro
-                    </span>
+                <div key={tpl.id} className="relative">
+                  {tpl.framework && (
+                    <button
+                      type="button"
+                      aria-label={`About ${tpl.name}`}
+                      title="How this framework works"
+                      onClick={(e) => { e.stopPropagation(); setDetailTemplate(tpl); }}
+                      className="absolute top-3 left-3 z-10 w-6 h-6 rounded-full bg-black/60 border border-white/15 text-white/60 hover:text-purple-200 hover:border-purple-400/40 flex items-center justify-center"
+                    >
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
                   )}
-                  <TemplateMiniPreview template={tpl} />
-                  <div className="flex items-start gap-3 w-full">
-                    <span className="text-xl shrink-0">{tpl.emoji}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors truncate">
-                        {tpl.name}
-                      </p>
-                      <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{tpl.description}</p>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectTemplate(tpl.id)}
+                    className={`relative w-full flex flex-col rounded-xl border p-4 text-left transition-all group ${
+                      locked
+                        ? 'border-white/10 bg-white/[0.02] hover:border-amber-400/40 hover:bg-amber-500/5'
+                        : 'border-white/10 bg-white/[0.02] hover:border-purple-500/40 hover:bg-purple-500/5'
+                    }`}
+                  >
+                    {locked && (
+                      <span className="absolute top-3 right-3 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
+                        <Crown className="w-3 h-3" />
+                        Pro
+                      </span>
+                    )}
+                    <TemplateMiniPreview template={tpl} />
+                    <div className="flex items-start gap-3 w-full">
+                      <span className="text-xl shrink-0">{tpl.emoji}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors flex items-center gap-1.5 min-w-0">
+                          <span className="truncate">{tpl.name}</span>
+                          {tpl.framework && (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-[9px] font-semibold text-purple-200 uppercase tracking-wide">
+                              {FRAMEWORK_STAGE_LABELS[tpl.framework.stage]}
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{tpl.description}</p>
+                      </div>
                     </div>
-                  </div>
-                  <span className={`mt-2 text-xs transition-colors self-end ${
-                    locked
-                      ? 'text-amber-400/80 group-hover:text-amber-300'
-                      : 'text-purple-400 group-hover:text-purple-300'
-                  }`}>
-                    {locked ? 'Upgrade to add' : 'Add →'}
-                  </span>
-                </button>
+                    <span className={`mt-2 text-xs transition-colors self-end ${
+                      locked
+                        ? 'text-amber-400/80 group-hover:text-amber-300'
+                        : 'text-purple-400 group-hover:text-purple-300'
+                    }`}>
+                      {locked ? 'Upgrade to add' : 'Add →'}
+                    </span>
+                  </button>
+                </div>
               );
             })}
           </div>
         </div>
       </DialogContent>
+
+      {/* `open && …` unmounts the detail dialog's content whenever the picker
+          closes (Esc/X), so it can never be orphaned on screen. */}
+      <FrameworkDetailDialog
+        template={detailTemplate}
+        open={open && detailTemplate !== null}
+        onClose={() => setDetailTemplate(null)}
+        mode="insert"
+        locked={detailTemplate ? isLocked(detailTemplate.id) : false}
+        onInsert={() => detailTemplate && handleSelectTemplate(detailTemplate.id)}
+        onUpgrade={() => { setDetailTemplate(null); setShowUpgrade(true); }}
+      />
 
       <UpgradeModal
         isOpen={showUpgrade}
