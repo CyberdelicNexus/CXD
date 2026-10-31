@@ -11,7 +11,7 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '1.6.0',
-    date: 'October 31, 2026',
+    date: 'November 1, 2026',
     isLatest: true,
     changes: [
       {
@@ -25,6 +25,14 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         category: 'bugfix',
         description: 'Canvases created from the Templates page now always save to your account, and free plan canvas limits apply there too',
+      },
+      {
+        category: 'bugfix',
+        description: 'Inserting a template on a canvas with content now places it beside your work instead of on top of it',
+      },
+      {
+        category: 'bugfix',
+        description: 'The upgrade prompt now opens in front of the template picker, so it can be clicked',
       },
     ],
   },
