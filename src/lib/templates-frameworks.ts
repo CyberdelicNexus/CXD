@@ -312,11 +312,137 @@ const hmwCrazy8: TemplateDefinition = {
   ],
 };
 
+// ─── 5. SCAMPER — HUB: the experience in the centre, seven lenses around it
+
+const SCAMPER_STEPS: FrameworkStep[] = [
+  { title: 'Substitute', detail: 'Swap a material, a role, a place, a sense, a time. What takes its place?' },
+  { title: 'Combine', detail: 'Merge two moments, two audiences, two media. What new thing appears?' },
+  { title: 'Adapt', detail: 'What does another field, culture or ritual do that could be borrowed here?' },
+  { title: 'Modify', detail: 'Magnify or shrink it. Louder, slower, longer, darker, tinier.' },
+  { title: 'Put to other use', detail: 'Who else could this serve? What else could this moment do?' },
+  { title: 'Eliminate', detail: 'Remove a step, a prop, a rule, an explanation. What survives?' },
+  { title: 'Reverse', detail: 'Flip the order, the roles, the direction. End at the beginning.' },
+];
+
+const SCAMPER_LENSES: { key: string; title: string; emoji: string; fill: string; x: number; y: number }[] = [
+  { key: 's', title: 'Substitute', emoji: '🔄', fill: NOTE_VIOLET, x: 200, y: 280 },
+  { key: 'c', title: 'Combine', emoji: '🧬', fill: NOTE_TEAL, x: 560, y: 280 },
+  { key: 'a', title: 'Adapt', emoji: '🦎', fill: NOTE_EMERALD, x: 920, y: 280 },
+  { key: 'm', title: 'Modify', emoji: '🔍', fill: WARM_SUN, x: 40, y: 640 },
+  { key: 'p', title: 'Put to other use', emoji: '🎁', fill: NOTE_ROSE, x: 1080, y: 640 },
+  { key: 'e', title: 'Eliminate', emoji: '✂️', fill: WARM_FIRE, x: 200, y: 1000 },
+  { key: 'r', title: 'Reverse', emoji: '🔃', fill: NOTE_TEAL, x: 920, y: 1000 },
+];
+
+const scamper: TemplateDefinition = {
+  id: 'fw-scamper',
+  name: 'SCAMPER',
+  description: 'Seven lenses that twist an existing experience into new variants',
+  emoji: '🎛️',
+  category: 'framework',
+  framework: {
+    stage: 'ideate',
+    origin: 'Bob Eberle (1971), building on Alex Osborn\u2019s brainstorming checklists',
+    whatItIs: 'SCAMPER is a checklist of seven operations you apply to something that already exists: Substitute, Combine, Adapt, Modify, Put to other use, Eliminate, Reverse. Each lens forces a different kind of change, so you stop polishing and start transforming. It is fastest when you already have an experience, a scene or a ritual to work on.',
+    whenToUse: [
+      'An experience works but feels safe, and you want variants worth testing.',
+      'You are adapting a format to a new audience, venue or budget.',
+      'A brainstorm has stalled and needs mechanical prompts.',
+    ],
+    steps: SCAMPER_STEPS,
+    pitfalls: [
+      'Answering each lens once and moving on; the third answer per lens is usually the interesting one.',
+      'Applying the lenses to the whole experience instead of one concrete moment.',
+      'Treating every result as a proposal; most are stepping stones.',
+    ],
+    assistantBrief: 'Coach SCAMPER. The canvas has the subject card in the centre, seven lens notes around it (Substitute, Combine, Adapt, Modify, Put to other use, Eliminate, Reverse) and a Keepers zone. First make sure the subject card names one concrete moment or element, not the whole experience. Then walk the lenses in order; for each, offer one provocative example drawn from the project and ask for at least three answers before moving on. Do not judge during a lens. After all seven, help the designer move the two or three strongest variants into Keepers and say what would need to be true for each to work. If they stall, pick the lens least like their habits, usually Eliminate or Reverse.',
+  },
+  elements: [
+    ...fwTitle('fws', 'SCAMPER', FAM.violet.grad, 'Put one concrete moment in the centre. Run every lens at it, three answers each. Keep what surprises you.'),
+    ...stepRail('fws', SCAMPER_STEPS),
+    shape('fws-subject', 560, 700, 260, 200, 'hexagon', 'The moment we are twisting', subjectStyle),
+    ...SCAMPER_LENSES.map((l) => note(`fws-${l.key}`, l.x, l.y, l.title, l.emoji, l.fill, 'Three answers, fast.')),
+    ...zone('fws-k', 1420, 280, 520, 1040, 'Keepers', 'emerald',
+      'Variants worth testing. Say what must be true for each to work.'),
+    note('fws-k-n', 1456, 420, 'Keeper', '💎', NOTE_EMERALD, 'Which variant, and what must be true for it to work?', 'fws-k'),
+  ] as CanvasElement[],
+  // Spokes leave the hexagon by distinct points: three share the top side and two the bottom,
+  // so they are pinned at spread offsets; Modify and Put to other use take the left and right.
+  edges: SCAMPER_LENSES.map((l, i) => {
+    const spokes: { from: 'top' | 'bottom' | 'left' | 'right'; to: 'top' | 'bottom' | 'left' | 'right'; off: number }[] = [
+      { from: 'top', to: 'bottom', off: 0.3 }, { from: 'top', to: 'bottom', off: 0.5 }, { from: 'top', to: 'bottom', off: 0.7 },
+      { from: 'left', to: 'right', off: 0.5 }, { from: 'right', to: 'left', off: 0.5 },
+      { from: 'bottom', to: 'top', off: 0.3 }, { from: 'bottom', to: 'top', off: 0.7 },
+    ];
+    const s = spokes[i];
+    return {
+      ...pinned(edge(`fws-e${i + 1}`, 'fws-subject', `fws-${l.key}`, (['violet', 'ocean', 'emerald', 'sunset', 'rose', 'glacier', 'ocean'] as const)[i], s.from, s.to)),
+      fromAnchorOffset: s.off,
+    };
+  }),
+};
+
+// ─── 6. Impact–Effort Matrix — HUB 2×2 + idea inbox
+
+const IMPACT_STEPS: FrameworkStep[] = [
+  { title: 'List the ideas', detail: 'Everything on the table, one per note, in the inbox. No ranking yet.' },
+  { title: 'Score impact', detail: 'How much does it move the experience toward its intended states and traits? High or low.' },
+  { title: 'Score effort', detail: 'Time, money, people, risk. High or low, relative to the rest of the list.' },
+  { title: 'Place and decide', detail: 'Drag each note into its quadrant. Do quick wins now, schedule big bets, drop time sinks.' },
+];
+
+const IMPACT_QUADS: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; body: string; emoji: string; fill: string; x: number; y: number }[] = [
+  { key: 'qw', label: 'Quick wins', fam: 'emerald', cap: 'High impact, low effort. Do these first.', noteTitle: 'Quick win', body: 'One idea that pays off fast and is cheap. Why is it easy?', emoji: '⚡', fill: NOTE_EMERALD, x: 40, y: 340 },
+  { key: 'bb', label: 'Big bets', fam: 'violet', cap: 'High impact, high effort. Schedule and resource them deliberately.', noteTitle: 'Big bet', body: 'One idea worth the investment. What will it need in time and people?', emoji: '🎯', fill: NOTE_VIOLET, x: 700, y: 340 },
+  { key: 'fi', label: 'Fill-ins', fam: 'ocean', cap: 'Low impact, low effort. Only when there is slack.', noteTitle: 'Fill-in', body: 'One small, easy idea. Do it only when there is slack.', emoji: '🧩', fill: NOTE_TEAL, x: 40, y: 900 },
+  { key: 'ts', label: 'Time sinks', fam: 'rose', cap: 'Low impact, high effort. Say no, kindly.', noteTitle: 'Time sink', body: 'One idea that costs a lot and moves little. Why say no?', emoji: '🕳️', fill: NOTE_ROSE, x: 700, y: 900 },
+];
+
+const impactEffort: TemplateDefinition = {
+  id: 'fw-impact-effort',
+  name: 'Impact–Effort Matrix',
+  description: 'Sort ideas into quick wins, big bets, fill-ins and time sinks before committing',
+  emoji: '📐',
+  category: 'framework',
+  framework: {
+    stage: 'plan',
+    origin: 'A widely used prioritisation 2×2 with no single originator; similar in shape, but not in axes, to the Eisenhower matrix',
+    whatItIs: 'The Impact–Effort Matrix is a 2×2 that sorts ideas by how much they move the goal and how much they cost to do. Quick wins get done first, big bets get scheduled, fill-ins wait for slack, and time sinks get dropped. It turns a long wishlist into a short plan in one session.',
+    whenToUse: [
+      'There are more ideas than budget or time.',
+      'A team disagrees about what to build next and needs a shared picture.',
+      'After an ideation session, before anything goes on the timeline.',
+    ],
+    steps: IMPACT_STEPS,
+    pitfalls: [
+      'Scoring effort optimistically; estimates for novel work are usually low by half.',
+      'Confusing impact with excitement. Score against the experience\u2019s intended states and traits.',
+      'Keeping time sinks "just in case". The matrix is for saying no.',
+    ],
+    assistantBrief: 'Coach the Impact–Effort Matrix. The canvas has four quadrant zones (Quick wins, Big bets, Fill-ins, Time sinks) and an Idea inbox. Help the designer get every idea into the inbox first, one per note, without ranking. Then score each idea on impact against the project\u2019s intended states and traits from Framing, not against excitement, and on effort relative to the other ideas, nudging estimates up for anything novel. Suggest where each note belongs and let them drag it. When the matrix is full, summarise: what to do this week (quick wins), what to schedule and resource (big bets), what to park (fill-ins) and what to drop (time sinks). Encourage saying no to time sinks explicitly.',
+  },
+  elements: [
+    ...fwTitle('fwm', 'Impact–Effort Matrix', FAM.emerald.grad, 'Impact high on the top row, low on the bottom. Effort grows left to right. Drag notes from the inbox into their quadrant.'),
+    ...stepRail('fwm', IMPACT_STEPS),
+    caption('fwm-axis', 40, 280, '↑ Impact on the top row   ·   Effort grows left → right', 1280, 12),
+    ...IMPACT_QUADS.flatMap((q) => [
+      ...zone(`fwm-${q.key}`, q.x, q.y, 620, 520, q.label, q.fam, q.cap),
+      note(`fwm-${q.key}-n`, q.x + 36, q.y + 140, q.noteTitle, q.emoji, q.fill, q.body, `fwm-${q.key}`),
+    ]),
+    ...zone('fwm-in', 1360, 340, 520, 1080, 'Idea inbox', 'sunset',
+      'Everything on the table, one per note. Score, then drag into a quadrant.'),
+    note('fwm-in-n', 1396, 480, 'Idea', '💡', WARM_SUN, 'Impact: high / low. Effort: high / low.', 'fwm-in'),
+  ] as CanvasElement[],
+  edges: [],
+};
+
 export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
   iceberg,
   causalLoop,
   theoryOfChange,
   hmwCrazy8,
+  scamper,
+  impactEffort,
 ];
 
 export { stepRail, fwTitle };
