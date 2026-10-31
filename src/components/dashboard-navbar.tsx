@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '../../supabase/client'
 import Image from 'next/image'
@@ -28,6 +28,7 @@ import {
   UserCircle,
   LogOut,
   Settings,
+  Shield,
   HelpCircle,
   Bell,
   FileText,
@@ -118,6 +119,14 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
   const [bugSteps, setBugSteps] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitSuccess, setSubmitSuccess] = useState(false)
+  const [isStaff, setIsStaff] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/me/staff-role')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setIsStaff(!!data?.role))
+      .catch(() => {})
+  }, [])
 
   const handleSupportSubmit = async () => {
     if (!supportMessage.trim()) return
@@ -493,6 +502,12 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
                   <Settings className="w-4 h-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
+                {isStaff && (
+                  <DropdownMenuItem onClick={() => router.push('/admin')} className="cursor-pointer hover:bg-white/5">
+                    <Shield className="w-4 h-4 mr-2" />
+                    Admin
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator className="bg-white/10" />
                 <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-destructive hover:bg-destructive/10">
                   <LogOut className="w-4 h-4 mr-2" />
