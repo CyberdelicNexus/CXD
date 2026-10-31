@@ -48,10 +48,37 @@ export const sendEmailFn = inngest.createFunction(
     retries: 4, // ~4 attempts over ~1 hour with exponential backoff
     // A broadcast enqueues one event per recipient; stay inside Resend's rate limit.
     throttle: { limit: 2, period: '1s' },
+    // Broadcast events run after everything else, so a bulk send cannot hold up
+    // a password reset, receipt or support reply queued behind it. A broadcast
+    // run is treated as enqueued 600 seconds later than it was.
+    priority: { run: 'event.data.broadcastId != null ? -600 : 0' },
     triggers: [{ event: 'email/send' }],
     onFailure: async ({ event }) => {
-      const { broadcastId, ticketId, actorId } = event.data.event.data as EmailSendData;
-      // Staff must see that a reply never arrived. This write cannot throw, so it never blocks the broadcast path below.
+      const { broadcastId, ticketId, actorId, userId, emailKind } = event.data.event.data as EmailSendData;
+      // Each branch handles its own failure, so one cannot stop the other.
+      let broadcastError: unknown = null;
+      if (broadcastId) {
+        try {
+          // A run can fail after the email went out, for example when only the
+          // result count failed. A logged send must not count as failed.
+          let wasSent = false;
+          if (userId && emailKind) {
+            const { data, error } = await getSupabaseAdmin()
+              .from('email_log')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('email_kind', emailKind)
+              .limit(1);
+            if (error) throw new Error(`email_log read failed: ${error.code ?? 'error'}: ${error.message}`);
+            wasSent = (data?.length ?? 0) > 0;
+          }
+          await recordBroadcastResult(broadcastId, wasSent ? 1 : 0, wasSent ? 0 : 1);
+        } catch (err) {
+          broadcastError = err;
+          Sentry.captureException(err, { tags: { route: 'inngest-send-email', step: 'broadcast-result' }, extra: { broadcastId } });
+        }
+      }
+      // Staff must see that a reply never arrived. This write cannot throw, so it never blocks the broadcast path.
       if (ticketId && actorId) {
         try {
           const { error } = await getSupabaseAdmin().from('support_ticket_events').insert({
@@ -67,7 +94,8 @@ export const sendEmailFn = inngest.createFunction(
           });
         }
       }
-      if (broadcastId) await recordBroadcastResult(broadcastId, 0, 1);
+      // Rethrow so the missing count is visible instead of silently lost.
+      if (broadcastError) throw broadcastError;
     },
   },
   async ({ event, step }) => {

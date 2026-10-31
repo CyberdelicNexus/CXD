@@ -3109,6 +3109,11 @@ SupportReply.PreviewProps = {
 - `EnqueueEmailOptions` also takes `eventId?: string` (passed to `inngest.send` as `id`, only on the Inngest path, so pair it with `fallbackOnMissing: false`), `ticketId?: string` and `actorId?: string`; the last two go into the event data. The worker's `EmailSendData` has them too.
 - `onFailure` first, inside its own try/catch that reports to Sentry and never throws, inserts a `support_ticket_events` row `{ ticket_id, actor_id, kind: 'delivery_failed', body: 'Reply could not be delivered.' }` when `ticketId && actorId`. Then the existing `if (broadcastId) await recordBroadcastResult(broadcastId, 0, 1);` runs unchanged. `functions.ts` imports `* as Sentry from '@sentry/nextjs'`.
 
+- [ ] **Step 4c: Phase 4 worker changes (added with Task 24)**
+
+- `priority: { run: 'event.data.broadcastId != null ? -600 : 0' }` in the function options, so broadcast events run after other email and a bulk send cannot delay a password reset or receipt. It is typed in inngest 4.2.6 (`priority.run`, a number from -600 to 600) and sits beside `throttle`. Whether the Inngest server applies it together with `throttle` can only be confirmed against a real deployment.
+- `onFailure` handles the broadcast branch first and the ticket branch second, each in its own try/catch that reports to Sentry. For a broadcast event it looks in `email_log` for `userId` and `emailKind`: a row means the email was sent, so it records `(1, 0)`, otherwise `(0, 1)`. A broadcast-branch error is rethrown at the end, after the ticket branch has run.
+
 - [ ] **Step 5: Type-check and commit**
 
 Run: `npx tsc --noEmit`
@@ -4397,17 +4402,27 @@ import { getSupabaseAdmin } from '@/supabase/admin';
 import { signUnsubscribeToken } from '@/lib/email-unsubscribe';
 import { filterRecipients, type Audience, type Category, type RecipientRow } from './comms';
 
+/** Throws when the lookup fails. A failed lookup must never read as "no recipients" or send anything. */
 export async function resolveRecipients(audience: Audience, category: Category) {
   const { data, error } = await getSupabaseAdmin().rpc('admin_recipients', {
     p_plan: audience.kind === 'plan' ? audience.plan : null,
     p_user_ids: audience.kind === 'users' ? audience.userIds : null,
   });
-  if (error) throw error;
+  if (error) throw new Error(`recipient lookup failed: ${error.code ?? 'error'}: ${error.message}`);
   return filterRecipients((data ?? []) as RecipientRow[], category);
+}
+
+/**
+ * The secret that signs test-send proofs, or null when none is configured.
+ * There is no empty fallback: with no secret, nothing can be proven, so email does not go out.
+ */
+export function testSecret(): string | null {
+  return process.env.EMAIL_UNSUBSCRIBE_SECRET || process.env.CRON_SECRET || null;
 }
 
 /** Why email of this category cannot go out, or null when it can. */
 export function emailConfigProblem(category: Category): string | null {
+  if (!testSecret()) return 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.';
   if (category !== 'product') return null;
   if (!process.env.EMAIL_UNSUBSCRIBE_SECRET) return 'Product updates need EMAIL_UNSUBSCRIBE_SECRET to be set.';
   if (!process.env.EMAIL_POSTAL_ADDRESS) return 'Product updates need EMAIL_POSTAL_ADDRESS to be set.';
@@ -4416,15 +4431,11 @@ export function emailConfigProblem(category: Category): string | null {
 
 export function unsubscribeLinks(userId: string) {
   const token = signUnsubscribeToken(userId, process.env.EMAIL_UNSUBSCRIBE_SECRET ?? '');
-  const base = process.env.NEXT_PUBLIC_APP_URL;
+  const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design').replace(/\/+$/, '');
   return {
     pageUrl: `${base}/unsubscribe?token=${encodeURIComponent(token)}`,
     oneClickUrl: `${base}/api/email/unsubscribe?token=${encodeURIComponent(token)}`,
   };
-}
-
-export function testSecret(): string {
-  return process.env.EMAIL_UNSUBSCRIBE_SECRET || process.env.CRON_SECRET || '';
 }
 ```
 
@@ -4432,6 +4443,7 @@ export function testSecret(): string {
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { requirePermission } from '@/lib/admin/gate';
 import { parseBody } from '@/lib/admin/http';
 import { contentSchema } from '@/lib/admin/comms';
@@ -4443,7 +4455,14 @@ export async function POST(request: Request) {
   const body = await parseBody(request, contentSchema);
   if (!body.ok) return body.response;
 
-  const recipients = await resolveRecipients(body.data.audience, body.data.category);
+  let recipients;
+  try {
+    recipients = await resolveRecipients(body.data.audience, body.data.category);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-comms-preview', step: 'recipients' } });
+    return NextResponse.json({ error: 'The recipients could not be loaded. Try again.' }, { status: 500 });
+  }
+
   const wantsEmail = body.data.channels.includes('email');
   return NextResponse.json({
     inAppCount: body.data.channels.includes('in_app') ? recipients.inApp.length : 0,
@@ -4457,6 +4476,7 @@ export async function POST(request: Request) {
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { requirePermission } from '@/lib/admin/gate';
 import { parseBody } from '@/lib/admin/http';
 import { contentSchema, signContent } from '@/lib/admin/comms';
@@ -4472,24 +4492,38 @@ export async function POST(request: Request) {
   const { subject, category } = body.data;
   const text = body.data.body;
 
-  const problem = emailConfigProblem(category);
-  if (problem) return NextResponse.json({ error: problem }, { status: 409 });
+  if (!gate.staff.email) {
+    return NextResponse.json({ error: 'Your account has no email address to send the test to.' }, { status: 409 });
+  }
 
-  await enqueueEmail({
-    to: gate.staff.email,
-    subject: `[Test] ${subject}`,
-    template: Broadcast({
-      userName: 'there',
-      subject,
-      body: text,
-      unsubscribeUrl: category === 'product' ? unsubscribeLinks(gate.staff.userId).pageUrl : undefined,
-      postalAddress: category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined,
-    }),
-  });
+  // No secret means no proof can be signed, so no token is issued and nothing is sent.
+  const secret = testSecret();
+  const problem = emailConfigProblem(category);
+  if (problem || !secret) {
+    return NextResponse.json({ error: problem ?? 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.' }, { status: 409 });
+  }
+
+  try {
+    await enqueueEmail({
+      to: gate.staff.email,
+      subject: `[Test] ${subject}`,
+      template: Broadcast({
+        userName: 'there',
+        subject,
+        body: text,
+        unsubscribeUrl: category === 'product' ? unsubscribeLinks(gate.staff.userId).pageUrl : undefined,
+        postalAddress: category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined,
+      }),
+    });
+  } catch (err) {
+    // Never the message body or a token.
+    Sentry.captureException(err, { tags: { route: 'admin-comms-test' } });
+    return NextResponse.json({ error: 'The test email could not be sent. Try again.' }, { status: 500 });
+  }
 
   return NextResponse.json({
     ok: true,
-    testToken: signContent({ subject, body: text, category }, gate.staff.userId, testSecret()),
+    testToken: signContent({ subject, body: text, category }, gate.staff.userId, secret),
   });
 }
 ```
@@ -4513,6 +4547,9 @@ const NOTIFICATION_CHUNK = 500;
 const EMAIL_CHUNK = 25;
 
 const schema = contentSchema.extend({
+  // One key per draft, made by the composer. A double submit or a retry hits the
+  // unique constraint on broadcasts, so a bulk send can only go out once.
+  idempotencyKey: z.string().uuid(),
   confirmCount: z.number().int().optional(),
   testToken: z.string().optional(),
 });
@@ -4522,28 +4559,47 @@ export async function POST(request: Request) {
   if (!gate.ok) return gate.response;
   const parsed = await parseBody(request, schema);
   if (!parsed.ok) return parsed.response;
-  const { channels, category, audience, subject, body, confirmCount, testToken } = parsed.data;
+  const { channels, category, audience, subject, body, idempotencyKey, confirmCount, testToken } = parsed.data;
 
   const wantsEmail = channels.includes('email');
   const wantsInApp = channels.includes('in_app');
-  const recipients = await resolveRecipients(audience, category);
+
+  // A failed lookup sends nothing and creates no broadcast row.
+  let recipients;
+  try {
+    recipients = await resolveRecipients(audience, category);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'recipients' } });
+    return NextResponse.json({ error: 'The recipients could not be loaded. Nothing was sent.' }, { status: 500 });
+  }
+
+  const inAppTotal = wantsInApp ? recipients.inApp.length : 0;
+  const emailTotal = wantsEmail ? recipients.email.length : 0;
+  if (inAppTotal + emailTotal === 0) {
+    return NextResponse.json({ error: 'No one matches this audience on the chosen channels. Nothing was sent.' }, { status: 409 });
+  }
 
   if (wantsEmail) {
     const problem = emailConfigProblem(category);
-    if (problem) return NextResponse.json({ error: problem }, { status: 409 });
-    if (!testToken || !verifyContent(testToken, { subject, body, category }, gate.staff.userId, testSecret())) {
+    const secret = testSecret();
+    if (problem || !secret) {
+      return NextResponse.json({ error: problem ?? 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.' }, { status: 409 });
+    }
+    if (!testToken || !verifyContent(testToken, { subject, body, category }, gate.staff.userId, secret)) {
       return NextResponse.json({ error: 'Send yourself a test of this exact content first.' }, { status: 409 });
     }
-    if (confirmCount !== recipients.email.length) {
+    if (confirmCount !== emailTotal) {
       return NextResponse.json({ error: 'The recipient count changed or does not match. Check it and confirm again.' }, { status: 409 });
     }
   }
 
   const admin = getSupabaseAdmin();
-  const recipientCount = wantsEmail ? recipients.email.length : recipients.inApp.length;
+  const recipientCount = wantsEmail ? emailTotal : inAppTotal;
+  // The insert is the gate: a second request with this key fails here, before anything is sent.
   const { data: broadcast, error: createError } = await admin
     .from('broadcasts')
     .insert({
+      idempotency_key: idempotencyKey,
       sender_id: gate.staff.userId,
       channels,
       category: wantsEmail ? category : null,
@@ -4554,7 +4610,13 @@ export async function POST(request: Request) {
     })
     .select('id')
     .single();
+  if (createError?.code === '23505') {
+    return NextResponse.json({ error: 'This message was already sent. Check the history.' }, { status: 409 });
+  }
   if (createError || !broadcast) {
+    Sentry.captureException(new Error(`broadcast insert failed: ${createError?.code ?? 'error'}: ${createError?.message ?? 'no row'}`), {
+      tags: { route: 'admin-comms-send', step: 'insert' },
+    });
     return NextResponse.json({ error: 'Nothing was sent.' }, { status: 500 });
   }
   const broadcastId = broadcast.id as string;
@@ -4580,7 +4642,7 @@ export async function POST(request: Request) {
               metadata: { broadcastId },
             }));
             const { error } = await admin.from('notifications').insert(rows);
-            if (error) throw error;
+            if (error) throw new Error(`notification insert failed: ${error.code ?? 'error'}: ${error.message}`);
           }
         }
 
@@ -4596,7 +4658,9 @@ export async function POST(request: Request) {
                   userId: row.user_id,
                   emailKind: `broadcast-${broadcastId}`,
                   broadcastId,
-                  // The direct fallback skips the worker's duplicate check and result count.
+                  // Inngest drops a second event with this id, so a retried enqueue emails no one twice.
+                  eventId: `broadcast-${broadcastId}-${row.user_id}`,
+                  // The direct fallback skips the worker's duplicate check, the event id and the result count.
                   fallbackOnMissing: false,
                   headers: links
                     ? {
@@ -4619,9 +4683,13 @@ export async function POST(request: Request) {
       },
     );
   } catch (err) {
-    Sentry.captureException(err, { tags: { route: 'admin-comms-send' }, extra: { broadcastId } });
+    // Tagged with the broadcast id only, never the message body or a token.
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'deliver' }, extra: { broadcastId } });
     return NextResponse.json(
-      { error: 'The send stopped partway. Check the history before trying again.', broadcastId },
+      {
+        error: 'The send stopped partway and some people may already have it. Do not send it again. Check the history.',
+        broadcastId,
+      },
       { status: 500 },
     );
   }
