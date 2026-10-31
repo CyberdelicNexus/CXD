@@ -2,8 +2,9 @@
 
 /**
  * Template catalog access:
- * - 'quickstart' — only the Quickstart templates are insertable; the rest of
- *   the catalog stays VISIBLE in the picker with Pro badges (showroom effect).
+ * - 'quickstart' — only the Quickstart templates and the 3 free frameworks
+ *   (FREE_TEMPLATE_IDS) are insertable; the rest of the catalog stays VISIBLE
+ *   in the picker with Pro badges (showroom effect).
  * - 'full' — all templates + the AI Composer picks across the whole catalog.
  */
 export type TemplateAccess = 'quickstart' | 'full';
@@ -21,7 +22,7 @@ export const PLANS = {
     features: [
       '1 Canvas · 100 objects',
       'All Plan views (Kanban, Gantt, Calendar…)',
-      'Quickstart templates',
+      'Quickstart templates and 3 free frameworks',
       '25 AI Credits/month + 50 signup bonus',
       'Infinite workspace & core design tools',
       'Public share links',
