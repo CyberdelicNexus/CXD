@@ -6,6 +6,8 @@
  * authoritative save source), so it must survive initializeYDoc -> yDocToProject,
  * and a project without it must read back as undefined.
  */
+import * as Y from 'yjs';
+import { mergeProjectWithDoc } from '../yjs/supabase-persistence';
 import {
   createProjectYDoc,
   initializeYDoc,
@@ -14,6 +16,7 @@ import {
 import {
   createDefaultProject,
   normalizeFrameworkIds,
+  appendFrameworkId,
   MAX_PROJECT_FRAMEWORKS,
 } from '@/types/cxd-schema';
 
@@ -52,6 +55,26 @@ check('ids round-trip', same(yDocToProject(doc1).frameworkIds, ['iceberg-model',
 const doc2 = createProjectYDoc();
 initializeYDoc(doc2, withoutFw);
 check('no ids -> undefined', yDocToProject(doc2).frameworkIds === undefined);
+
+console.log('appendFrameworkId');
+check('appends', same(appendFrameworkId(['a'], 'b'), ['a', 'b']));
+check('from undefined', same(appendFrameworkId(undefined, 'a'), ['a']));
+check('moves existing id to end', same(appendFrameworkId(['a', 'b', 'c'], 'a'), ['b', 'c', 'a']));
+check('respects cap', same(appendFrameworkId(['1', '2', '3', '4', '5'], '6'), ['2', '3', '4', '5', '6']));
+
+console.log('Binary round trip');
+const src = createProjectYDoc();
+initializeYDoc(src, withFw);
+const fresh = createProjectYDoc();
+Y.applyUpdate(fresh, Y.encodeStateAsUpdate(src));
+check('ids survive encode/apply', same(yDocToProject(fresh).frameworkIds, ['iceberg-model', 'causal-loop-map']));
+
+console.log('mergeProjectWithDoc');
+const base = { ...withFw, frameworkIds: ['kept-1', 'kept-2'] };
+const merged = mergeProjectWithDoc(base, yDocToProject(doc2), new Date().toISOString());
+check('doc without ids does not wipe base ids', same(merged.frameworkIds, ['kept-1', 'kept-2']));
+const merged2 = mergeProjectWithDoc(base, yDocToProject(doc1), new Date().toISOString());
+check('doc ids win when present', same(merged2.frameworkIds, ['iceberg-model', 'causal-loop-map']));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

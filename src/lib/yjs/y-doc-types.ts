@@ -38,6 +38,9 @@ export const META_SCALAR_FIELDS = [
   'currentWizardStep',
   'framingCanvasPopulated',
   'framingType',
+  // frameworkIds is a JSON array written atomically, so concurrent adds are
+  // last-write-wins. Accepted: the cost is one lost coaching brief, canvas
+  // content is untouched, and re-inserting the framework restores it.
   'frameworkIds',
   'schemaVersion',
   'ownerId',

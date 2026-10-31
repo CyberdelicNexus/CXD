@@ -13,7 +13,7 @@
 
 import * as Y from 'yjs';
 import type { CXDProject, ExperienceFlowStageV2 } from '@/types/cxd-schema';
-import { DEFAULT_ENGAGEMENT_DISTRIBUTION, DEFAULT_STAGE_PRESENCE_TYPES } from '@/types/cxd-schema';
+import { DEFAULT_ENGAGEMENT_DISTRIBUTION, DEFAULT_STAGE_PRESENCE_TYPES, normalizeFrameworkIds } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge } from '@/types/canvas-elements';
 import {
   YDOC_KEYS,
@@ -621,7 +621,7 @@ export function yDocToProject(doc: Y.Doc): CXDProject {
     currentWizardStep: (meta.currentWizardStep as number) ?? 0,
     framingCanvasPopulated: (meta.framingCanvasPopulated as boolean) ?? false,
     framingType: meta.framingType as string | undefined,
-    frameworkIds: Array.isArray(meta.frameworkIds) ? (meta.frameworkIds as string[]) : undefined,
+    frameworkIds: normalizeFrameworkIds(Array.isArray(meta.frameworkIds) ? (meta.frameworkIds as string[]) : undefined),
 
     intentionCore: textSections.intentionCore as unknown as CXDProject['intentionCore'],
     desiredChange: textSections.desiredChange as unknown as CXDProject['desiredChange'],

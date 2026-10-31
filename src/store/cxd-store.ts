@@ -21,7 +21,7 @@ import {
   DEFAULT_EXPERIENCE_FLOW_STAGES,
   StagePresenceTypes,
   DEFAULT_STAGE_PRESENCE_TYPES,
-  normalizeFrameworkIds,
+  appendFrameworkId,
 } from '@/types/cxd-schema';
 import type { CreateProjectOptions } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
@@ -735,7 +735,7 @@ export const useCXDStore = create<CXDState>()(
       addProjectFramework: (frameworkId) => {
         const currentProject = get().getCurrentProject();
         if (!currentProject) return;
-        const frameworkIds = normalizeFrameworkIds([...(currentProject.frameworkIds ?? []), frameworkId]);
+        const frameworkIds = appendFrameworkId(currentProject.frameworkIds, frameworkId);
         if (!frameworkIds || frameworkIds.join('|') === (currentProject.frameworkIds ?? []).join('|')) return;
         set((state) => ({
           projects: state.projects.map((p) =>

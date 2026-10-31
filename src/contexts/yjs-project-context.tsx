@@ -553,12 +553,7 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
         if (field === 'framingCanvasPopulated') return { ...p, framingCanvasPopulated: value as boolean };
         if (field === 'framingType') return { ...p, framingType: value as string };
         if (field === 'frameworkIds') {
-          // Array value: the bridge replays every meta key on any meta change,
-          // so keep the existing reference when contents are unchanged.
-          const next = Array.isArray(value) ? (value as string[]) : undefined;
-          const prev = p.frameworkIds;
-          if (prev && next && prev.length === next.length && prev.every((id, i) => id === next[i])) return p;
-          return { ...p, frameworkIds: next };
+          return { ...p, frameworkIds: Array.isArray(value) ? (value as string[]) : undefined };
         }
         if (field === 'shareToken') return { ...p, shareToken: value as string };
         return p;

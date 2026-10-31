@@ -337,11 +337,16 @@ export interface CreateProjectOptions {
   frameworkIds?: string[];
 }
 
-/** Dedupe, keep insertion order, keep the most recent MAX_PROJECT_FRAMEWORKS. */
+/** Dedupe (first occurrence wins position), drop blanks, keep the last MAX_PROJECT_FRAMEWORKS. */
 export function normalizeFrameworkIds(ids: readonly string[] | undefined): string[] | undefined {
   if (!ids || ids.length === 0) return undefined;
   const unique = Array.from(new Set(ids.filter((id) => typeof id === 'string' && id.length > 0)));
   return unique.length ? unique.slice(-MAX_PROJECT_FRAMEWORKS) : undefined;
+}
+
+/** Append id as the most recent framework: any earlier occurrence is removed first. */
+export function appendFrameworkId(ids: readonly string[] | undefined, id: string): string[] | undefined {
+  return normalizeFrameworkIds([...(ids ?? []).filter((existing) => existing !== id), id]);
 }
 
 // Default project factory
