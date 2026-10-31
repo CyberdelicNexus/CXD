@@ -297,9 +297,9 @@ const hmwCrazy8: TemplateDefinition = {
       ({ ...storyboard(`fwh-f${i + 1}`, 76 + (i % 4) * 320, i < 4 ? 930 : 1170, 280, 220), containerId: 'fwh-8' }),
     ),
 
-    ...zone('fwh-p', 1400, 280, 520, 1140, 'Pick & develop', 'emerald',
+    ...zone('fwh-p', 1440, 280, 520, 1140, 'Pick & develop', 'emerald',
       'The frame that won the vote, and what it needs to become a storyboard.'),
-    note('fwh-p-n', 1436, 410, 'Winner', '⭐', NOTE_EMERALD, 'Why this one? What does it need next?', 'fwh-p'),
+    note('fwh-p-n', 1476, 410, 'Winner', '⭐', NOTE_EMERALD, 'Why this one? What does it need next?', 'fwh-p'),
   ] as CanvasElement[],
   edges: [
     pinned(edge('fwh-e1', 'fwh-q', 'fwh-8', 'sunset', 'bottom', 'top')),
@@ -723,7 +723,7 @@ const aarrr: TemplateDefinition = {
   // Five 360px lanes on a 440 pitch: 80px gutters so the arrows read.
   elements: [
     ...fwTitle('fwa', 'Pirate Metrics Funnel', FAM.violet.grad, 'Five lanes, left to right. One metric per lane, measured as conversion from the lane before. Fix the leakiest lane first.'),
-    ...stepRail('fwa', AARRR_STEPS),
+    ...stepRail('fwa', AARRR_STEPS, 40, 160, 440),
     ...AARRR_LANES.flatMap((l, i) => {
       const zx = 40 + i * 440;
       return [
