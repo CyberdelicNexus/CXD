@@ -88,6 +88,72 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     });
   };
 
+  // Frameworks sit under one header in the All view; stage shows as a pill on
+  // each card, no sub-grouping, to keep the picker compact.
+  const plainTemplates = filtered.filter((t) => t.category !== 'framework');
+  const frameworkTemplates = filtered.filter((t) => t.category === 'framework');
+
+  const renderGrid = (list: TemplateDefinition[]) => (
+    <div className="grid grid-cols-2 gap-3">
+      {list.map((tpl) => {
+        const locked = isLocked(tpl.id);
+        return (
+          <div key={tpl.id} className="relative">
+            {tpl.framework && (
+              <button
+                type="button"
+                aria-label={`About ${tpl.name}`}
+                title="How this framework works"
+                onClick={(e) => { e.stopPropagation(); setDetailTemplate(tpl); }}
+                className="absolute top-3 left-3 z-10 w-6 h-6 rounded-full bg-black/60 border border-white/15 text-white/60 hover:text-purple-200 hover:border-purple-400/40 flex items-center justify-center"
+              >
+                <Info className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => handleSelectTemplate(tpl.id)}
+              className={`relative w-full flex flex-col rounded-xl border p-4 text-left transition-all group ${
+                locked
+                  ? 'border-white/10 bg-white/[0.02] hover:border-amber-400/40 hover:bg-amber-500/5'
+                  : 'border-white/10 bg-white/[0.02] hover:border-purple-500/40 hover:bg-purple-500/5'
+              }`}
+            >
+              {locked && (
+                <span className="absolute top-3 right-3 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
+                  <Crown className="w-3 h-3" />
+                  Pro
+                </span>
+              )}
+              <TemplateMiniPreview template={tpl} />
+              <div className="flex items-start gap-3 w-full">
+                <span className="text-xl shrink-0">{tpl.emoji}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{tpl.name}</span>
+                    {tpl.framework && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-[9px] font-semibold text-purple-200 uppercase tracking-wide">
+                        {FRAMEWORK_STAGE_LABELS[tpl.framework.stage]}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{tpl.description}</p>
+                </div>
+              </div>
+              <span className={`mt-2 text-xs transition-colors self-end ${
+                locked
+                  ? 'text-amber-400/80 group-hover:text-amber-300'
+                  : 'text-purple-400 group-hover:text-purple-300'
+              }`}>
+                {locked ? 'Upgrade to add' : 'Add →'}
+              </span>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
       <DialogContent
@@ -122,64 +188,17 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
 
         {/* Template grid */}
         <div className="overflow-y-auto flex-1 -mx-1 px-1 pb-2">
-          <div className="grid grid-cols-2 gap-3">
-            {filtered.map((tpl) => {
-              const locked = isLocked(tpl.id);
-              return (
-                <div key={tpl.id} className="relative">
-                  {tpl.framework && (
-                    <button
-                      type="button"
-                      aria-label={`About ${tpl.name}`}
-                      title="How this framework works"
-                      onClick={(e) => { e.stopPropagation(); setDetailTemplate(tpl); }}
-                      className="absolute top-3 left-3 z-10 w-6 h-6 rounded-full bg-black/60 border border-white/15 text-white/60 hover:text-purple-200 hover:border-purple-400/40 flex items-center justify-center"
-                    >
-                      <Info className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleSelectTemplate(tpl.id)}
-                    className={`relative w-full flex flex-col rounded-xl border p-4 text-left transition-all group ${
-                      locked
-                        ? 'border-white/10 bg-white/[0.02] hover:border-amber-400/40 hover:bg-amber-500/5'
-                        : 'border-white/10 bg-white/[0.02] hover:border-purple-500/40 hover:bg-purple-500/5'
-                    }`}
-                  >
-                    {locked && (
-                      <span className="absolute top-3 right-3 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
-                        <Crown className="w-3 h-3" />
-                        Pro
-                      </span>
-                    )}
-                    <TemplateMiniPreview template={tpl} />
-                    <div className="flex items-start gap-3 w-full">
-                      <span className="text-xl shrink-0">{tpl.emoji}</span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors flex items-center gap-1.5 min-w-0">
-                          <span className="truncate">{tpl.name}</span>
-                          {tpl.framework && (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-[9px] font-semibold text-purple-200 uppercase tracking-wide">
-                              {FRAMEWORK_STAGE_LABELS[tpl.framework.stage]}
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{tpl.description}</p>
-                      </div>
-                    </div>
-                    <span className={`mt-2 text-xs transition-colors self-end ${
-                      locked
-                        ? 'text-amber-400/80 group-hover:text-amber-300'
-                        : 'text-purple-400 group-hover:text-purple-300'
-                    }`}>
-                      {locked ? 'Upgrade to add' : 'Add →'}
-                    </span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+          {plainTemplates.length > 0 && renderGrid(plainTemplates)}
+          {frameworkTemplates.length > 0 && (
+            <>
+              {activeFilter === 'all' && (
+                <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mt-5 mb-3">
+                  {TEMPLATE_CATEGORY_LABELS.framework}
+                </h3>
+              )}
+              {renderGrid(frameworkTemplates)}
+            </>
+          )}
         </div>
       </DialogContent>
 
