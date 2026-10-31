@@ -602,6 +602,19 @@ export function notFoundResponse(): NextResponse {
 - [ ] **Step 4: Write `client.ts`**
 
 ```ts
+/** Thrown for a non-2xx response. `data` is the parsed body, so a caller can read fields like `sent`. */
+export class AdminRequestError extends Error {
+  readonly data: Record<string, unknown>;
+  readonly status: number;
+
+  constructor(message: string, data: Record<string, unknown>, status: number) {
+    super(message);
+    this.name = 'AdminRequestError';
+    this.data = data;
+    this.status = status;
+  }
+}
+
 export async function adminPost<T = unknown>(url: string, body: unknown = {}, method = 'POST'): Promise<T> {
   const response = await fetch(url, {
     method,
@@ -609,7 +622,13 @@ export async function adminPost<T = unknown>(url: string, body: unknown = {}, me
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'The action failed.');
+  if (!response.ok) {
+    throw new AdminRequestError(
+      typeof data.error === 'string' && data.error ? data.error : 'The action failed.',
+      data && typeof data === 'object' ? data : {},
+      response.status,
+    );
+  }
   return data as T;
 }
 ```
@@ -2243,6 +2262,7 @@ import { can, isBanned } from '@/lib/admin/permissions';
 import { isUuid } from '@/lib/admin/http';
 import { planEditBlock } from '@/lib/admin/plan-guard';
 import { formatDate, getUserDetail } from '@/lib/admin/users';
+import * as Sentry from '@sentry/nextjs';
 import { listTicketsForUser } from '@/lib/admin/support';
 import { UserActions } from '@/components/admin/user-actions';
 
@@ -2261,7 +2281,15 @@ export default async function AdminUserPage({ params }: { params: { id: string }
   const canSeeAudit = can(staff.role, 'audit.view');
   const user = await getUserDetail(params.id, { includeAudit: canSeeAudit });
   if (!user) notFound();
-  const tickets = await listTicketsForUser(user.id);
+  // Cards are secondary here: a failed read is reported and the rest of the page still renders.
+  let tickets: Awaited<ReturnType<typeof listTicketsForUser>> | null = null;
+  try {
+    tickets = await listTicketsForUser(user.id);
+  } catch (err) {
+    Sentry.captureException(new Error(`user page ticket list failed: ${(err as { message?: string })?.message ?? 'unknown'}`), {
+      tags: { route: 'admin-user-page', step: 'tickets' },
+    });
+  }
   const suspended = isBanned(user.bannedUntil, new Date());
 
   return (
@@ -2330,8 +2358,9 @@ export default async function AdminUserPage({ params }: { params: { id: string }
 
       <section className="space-y-2">
         <h2 className="font-medium">Support cards</h2>
-        {tickets.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
-        {tickets.map((ticket) => (
+        {tickets === null && <p className="text-sm text-white/50">Support cards unavailable.</p>}
+        {tickets?.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
+        {tickets?.map((ticket) => (
           <Link key={ticket.id} href={`/admin/support/${ticket.id}`} className="block text-sm text-violet-200 hover:underline">
             {ticket.title} ({ticket.status})
           </Link>
@@ -2415,7 +2444,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "fix(
  * Ticket title and body shaping for /api/support.
  * Run: npx tsx src/lib/admin/__verify__/admin-tickets.verify.ts
  */
-import { composeTicketBody, isHttpUrl, parseTicketFilters, resolveTicketType, ticketTitle } from '../tickets';
+import { composeTicketBody, isHttpUrl, parseTicketFilters, replySubject, resolveTicketType, ticketTitle } from '../tickets';
 
 let passed = 0;
 let failed = 0;
@@ -2436,6 +2465,13 @@ check('first line only', ticketTitle('Bug Report', 'First\nSecond') === 'First')
 
 check('body without steps', composeTicketBody('Hello', undefined) === 'Hello');
 check('body with steps', composeTicketBody('Hello', '1. Click').includes('Steps to reproduce:\n1. Click'));
+
+check('title whitespace collapsed', ticketTitle('Export   broken\n\tnow', 'x') === 'Export broken now');
+check('blank real title is Untitled', ticketTitle('   ', 'x') === 'Untitled');
+check('blank description is Untitled', ticketTitle('Bug Report', '   \n  ') === 'Untitled');
+check('description spaces collapsed', ticketTitle('Support Request', 'a   b') === 'a b');
+check('reply subject single line', replySubject('Hello\r\nBcc: x@y.z') === 'Re: Hello Bcc: x@y.z');
+check('reply subject untitled', replySubject('  ') === 'Re: Untitled');
 
 const UID = '123e4567-e89b-12d3-a456-426614174000';
 check('valid filters kept', JSON.stringify(parseTicketFilters({ type: 'bug', priority: 'high', assignee: UID })) === JSON.stringify({ type: 'bug', priority: 'high', assignee: UID }));
@@ -2494,9 +2530,21 @@ export function resolveTicketType(type: unknown, title: string): TicketType {
 
 /** The dialogs send a fixed label as the title, which would make every card look alike. */
 export function ticketTitle(title: string, description: string): string {
-  if (!GENERIC_TITLES.includes(title)) return title.slice(0, TITLE_LENGTH);
-  return description.trim().split('\n')[0].slice(0, TITLE_LENGTH);
+  const source = GENERIC_TITLES.includes(title) ? description.trim().split('\n')[0] : title;
+  return oneLine(source).slice(0, TITLE_LENGTH).trim() || 'Untitled';
 }
+
+/** Collapses every run of whitespace (including line breaks) to one space. */
+export function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+/** The subject of a reply email: single line, so a title with line breaks cannot split the header. */
+export function replySubject(title: string): string {
+  return `Re: ${oneLine(title) || 'Untitled'}`;
+}
+
+export type TicketEventKind = 'note' | 'reply' | 'status' | 'assignment' | 'delivery_failed';
 
 export function composeTicketBody(description: string, stepsToReproduce: string | undefined): string {
   if (!stepsToReproduce) return description;
@@ -2576,20 +2624,42 @@ CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON public.support_tickets (u
 
 CREATE TABLE IF NOT EXISTS public.support_ticket_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE CASCADE,
+  ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE RESTRICT,
   actor_id uuid NOT NULL,
-  kind text NOT NULL CHECK (kind IN ('note', 'reply', 'status', 'assignment')),
+  kind text NOT NULL CHECK (kind IN ('note', 'reply', 'status', 'assignment', 'delivery_failed')),
   body text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_support_ticket_events_ticket ON public.support_ticket_events (ticket_id, created_at);
 
+-- History is append-only, like the audit log. Tickets have no DELETE grant, so
+-- RESTRICT above never fires for service_role; it guards against a future grant.
+CREATE OR REPLACE FUNCTION public.support_ticket_events_append_only()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  RAISE EXCEPTION 'ticket_events_are_append_only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS support_ticket_events_append_only ON public.support_ticket_events;
+CREATE TRIGGER support_ticket_events_append_only
+  BEFORE UPDATE OR DELETE ON public.support_ticket_events
+  FOR EACH ROW EXECUTE FUNCTION public.support_ticket_events_append_only();
+
+DROP TRIGGER IF EXISTS support_ticket_events_no_truncate ON public.support_ticket_events;
+CREATE TRIGGER support_ticket_events_no_truncate
+  BEFORE TRUNCATE ON public.support_ticket_events
+  FOR EACH STATEMENT EXECUTE FUNCTION public.support_ticket_events_append_only();
+
 ALTER TABLE public.support_tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.support_ticket_events ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON public.support_tickets FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.support_ticket_events FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.support_tickets FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.support_ticket_events FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE ON public.support_tickets TO service_role;
 GRANT SELECT, INSERT ON public.support_ticket_events TO service_role;
 ```
@@ -2610,7 +2680,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 
 ```ts
 import { getSupabaseAdmin } from '@/supabase/admin';
-import type { TicketFilters, TicketPriority, TicketStatus, TicketType } from './tickets';
+import type { TicketEventKind, TicketFilters, TicketPriority, TicketStatus, TicketType } from './tickets';
 
 export interface Ticket {
   id: string;
@@ -2631,7 +2701,7 @@ export interface Ticket {
 export interface TicketEvent {
   id: string;
   actor_id: string;
-  kind: 'note' | 'reply' | 'status' | 'assignment';
+  kind: TicketEventKind;
   body: string;
   created_at: string;
 }
@@ -2641,19 +2711,32 @@ export interface StaffMember {
   label: string;
 }
 
-/** Filters must already be validated (see parseTicketFilters). A failed read throws. */
+export const DONE_LIMIT = 100;
+
+/**
+ * Filters must already be validated (see parseTicketFilters). Open cards are
+ * never capped, so a busy day cannot hide work; done cards show the newest
+ * DONE_LIMIT. A failed read throws.
+ */
 export async function listTickets(filters: TicketFilters): Promise<Ticket[]> {
-  let query = getSupabaseAdmin()
-    .from('support_tickets')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(300);
-  if (filters.type) query = query.eq('type', filters.type);
-  if (filters.assignee) query = query.eq('assignee_id', filters.assignee);
-  if (filters.priority) query = query.eq('priority', filters.priority);
-  const { data, error } = await query;
+  const base = () => {
+    let query = getSupabaseAdmin().from('support_tickets').select('*').order('created_at', { ascending: false });
+    if (filters.type) query = query.eq('type', filters.type);
+    if (filters.assignee) query = query.eq('assignee_id', filters.assignee);
+    if (filters.priority) query = query.eq('priority', filters.priority);
+    return query;
+  };
+  const [open, done] = await Promise.all([base().neq('status', 'done'), base().eq('status', 'done').limit(DONE_LIMIT)]);
+  if (open.error) throw open.error;
+  if (done.error) throw done.error;
+  return [...(open.data ?? []), ...(done.data ?? [])] as Ticket[];
+}
+
+/** True when the user currently holds a staff role. A failed read throws. */
+export async function isStaffMember(userId: string): Promise<boolean> {
+  const { data, error } = await getSupabaseAdmin().from('staff_roles').select('user_id').eq('user_id', userId).maybeSingle();
   if (error) throw error;
-  return (data ?? []) as Ticket[];
+  return !!data;
 }
 
 /** Returns null only when the card does not exist; a failed read throws. */
@@ -2847,6 +2930,14 @@ In the Support Modal, make the header and label follow the kind:
             </DialogDescription>
 ```
 
+- [ ] **Step 4b: Review fixes already applied to `/api/support` and the navbar**
+
+- The rate-limit check runs after the field and length validation, not straight after the 401.
+- `const steps = typeof stepsToReproduce === 'string' && stepsToReproduce.trim() ? stepsToReproduce.slice(0, 10000) : undefined;` is computed once and passed to `composeTicketBody`, the Sentry `extra`, and `BugReportNotification`.
+- `const reporterEmail = user.email || userProfile?.email || 'unknown@example.com';` (the auth-verified address first). The confirmation email goes to the same address. The reporter display name is unchanged.
+- `SupportConfirmation` receives `type: ticketType`; `emails/support-confirmation.tsx` widens its prop to `'bug' | 'feature' | 'support'` and labels feature requests "Feature Request".
+- `dashboard-navbar.tsx`: a module-level `class ServerMessage extends Error {}`. On `!data.success` with a `data.error`, throw `new ServerMessage(data.error)`; the catch shows `error instanceof ServerMessage ? error.message : <the generic text with contact@cyberdelic.design>`. Opening any of the three dialogs calls `setSubmitSuccess(false)`. The support textarea placeholder is `'Describe the feature you would like...'` when `supportKind === 'feature'`.
+
 - [ ] **Step 5: Type-check and commit**
 
 Run: `npx tsc --noEmit`
@@ -3013,6 +3104,11 @@ SupportReply.PreviewProps = {
 } satisfies SupportReplyProps;
 ```
 
+- [ ] **Step 4b: Review fixes already applied**
+
+- `EnqueueEmailOptions` also takes `eventId?: string` (passed to `inngest.send` as `id`, only on the Inngest path, so pair it with `fallbackOnMissing: false`), `ticketId?: string` and `actorId?: string`; the last two go into the event data. The worker's `EmailSendData` has them too.
+- `onFailure` first, inside its own try/catch that reports to Sentry and never throws, inserts a `support_ticket_events` row `{ ticket_id, actor_id, kind: 'delivery_failed', body: 'Reply could not be delivered.' }` when `ticketId && actorId`. Then the existing `if (broadcastId) await recordBroadcastResult(broadcastId, 0, 1);` runs unchanged. `functions.ts` imports `* as Sentry from '@sentry/nextjs'`.
+
 - [ ] **Step 5: Type-check and commit**
 
 Run: `npx tsc --noEmit`
@@ -3036,19 +3132,22 @@ import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
+import { isStaffMember } from '@/lib/admin/support';
 import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
 import { recordAudit } from '@/lib/admin/audit';
 import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES, isHttpUrl } from '@/lib/admin/tickets';
 
 type Ctx = { params: { id: string } };
 
-const schema = z.object({
-  status: z.enum(TICKET_STATUSES).optional(),
-  priority: z.enum(TICKET_PRIORITIES).optional(),
-  assigneeId: z.string().uuid().nullable().optional(),
-  // z.string().url() also accepts javascript: and data: URLs, so require http or https.
-  sentryIssueUrl: z.string().max(500).refine(isHttpUrl, 'Must be an http or https link').nullable().optional(),
-});
+const schema = z
+  .object({
+    status: z.enum(TICKET_STATUSES).optional(),
+    priority: z.enum(TICKET_PRIORITIES).optional(),
+    assigneeId: z.string().uuid().nullable().optional(),
+    // z.string().url() also accepts javascript: and data: URLs, so require http or https.
+    sentryIssueUrl: z.string().max(500).refine(isHttpUrl, 'Must be an http or https link').nullable().optional(),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined), 'Nothing to change');
 
 function reportDbError(error: { code?: string; message: string }, step: string) {
   // Code and message only: details can echo the row.
@@ -3069,7 +3168,7 @@ export async function PATCH(request: Request, context: Ctx) {
 
   const { data: before, error: readError } = await admin
     .from('support_tickets')
-    .select('status, assignee_id, priority')
+    .select('status, assignee_id, priority, sentry_issue_url')
     .eq('id', ticketId)
     .maybeSingle();
   if (readError) {
@@ -3077,6 +3176,18 @@ export async function PATCH(request: Request, context: Ctx) {
     return NextResponse.json({ error: 'The card could not be loaded.' }, { status: 500 });
   }
   if (!before) return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
+
+  // Only staff can hold a card. Leaving an existing (former) assignee in place is allowed.
+  if (assigneeId && assigneeId !== before.assignee_id) {
+    let staffMember: boolean;
+    try {
+      staffMember = await isStaffMember(assigneeId);
+    } catch (err) {
+      reportDbError({ message: err instanceof Error ? err.message : (err as { message?: string }).message ?? 'unknown' }, 'assignee-check');
+      return NextResponse.json({ error: 'The assignee could not be checked.' }, { status: 500 });
+    }
+    if (!staffMember) return NextResponse.json({ error: 'That person is not on the staff.' }, { status: 409 });
+  }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (status) patch.status = status;
@@ -3177,13 +3288,18 @@ import { requirePermission } from '@/lib/admin/gate';
 import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
 import { withAudit } from '@/lib/admin/audit';
 import { enqueueEmail } from '@/lib/email-queue';
+import { STATUS_LABELS, replySubject } from '@/lib/admin/tickets';
 import SupportReply from '@emails/support-reply';
 
 type Ctx = { params: { id: string } };
 
 const SUPPORT_INBOX = 'contact@cyberdelic.design';
 
-const schema = z.object({ body: z.string().trim().min(1).max(10000) });
+const schema = z.object({
+  body: z.string().trim().min(1).max(10000),
+  // One key per draft. It becomes the queue event id, so a retried request cannot send twice.
+  idempotencyKey: z.string().uuid(),
+});
 
 function report(message: string, step: string) {
   // Messages here come from the database or mail layer, never from the reply text or a token.
@@ -3203,7 +3319,7 @@ export async function POST(request: Request, context: Ctx) {
 
   const { data: ticket, error: ticketError } = await admin
     .from('support_tickets')
-    .select('email, title, user_id')
+    .select('email, title, user_id, status')
     .eq('id', ticketId)
     .maybeSingle();
   if (ticketError) {
@@ -3230,8 +3346,13 @@ export async function POST(request: Request, context: Ctx) {
       () =>
         enqueueEmail({
           to: ticket.email,
-          subject: `Re: ${ticket.title}`,
+          subject: replySubject(ticket.title),
           replyTo: SUPPORT_INBOX,
+          eventId: `support-reply-${ticketId}-${body.data.idempotencyKey}`,
+          // The direct-send fallback would bypass the event id, so a queue outage fails the request instead.
+          fallbackOnMissing: false,
+          ticketId,
+          actorId: gate.staff.userId,
           template: SupportReply({
             userName,
             ticketTitle: ticket.title,
@@ -3245,12 +3366,11 @@ export async function POST(request: Request, context: Ctx) {
   }
 
   // The email is queued, so from here a failure must not read as "not sent".
-  const { error: eventError } = await admin.from('support_ticket_events').insert({
-    ticket_id: ticketId,
-    actor_id: gate.staff.userId,
-    kind: 'reply',
-    body: body.data.body,
-  });
+  const events = [{ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'reply', body: body.data.body }];
+  if (ticket.status !== 'waiting') {
+    events.push({ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'status', body: `Moved to ${STATUS_LABELS.waiting}` });
+  }
+  const { error: eventError } = await admin.from('support_ticket_events').insert(events);
   if (eventError) report(`${eventError.code ?? 'error'}: ${eventError.message}`, 'event-insert');
 
   const { error: statusError } = await admin
@@ -3291,7 +3411,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 ```tsx
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { adminPost } from '@/lib/admin/client';
 import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES } from '@/lib/admin/tickets';
@@ -3302,35 +3422,51 @@ const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-2 text
 export function TicketControls({ ticket, staff }: { ticket: Ticket; staff: StaffMember[] }) {
   const router = useRouter();
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sentry, setSentry] = useState(ticket.sentry_issue_url ?? '');
+
+  // The selects show the saved card (props), so a status change made elsewhere, such
+  // as a reply moving the card to Waiting, appears after the refresh, and a failed
+  // save leaves them on the saved value.
+  useEffect(() => {
+    setSentry(ticket.sentry_issue_url ?? '');
+  }, [ticket.sentry_issue_url]);
 
   async function update(patch: Record<string, unknown>) {
     setError('');
+    setBusy(true);
     try {
       await adminPost(`/api/admin/support/${ticket.id}`, patch, 'PATCH');
       router.refresh();
     } catch (err) {
       setError((err as Error).message);
+      setSentry(ticket.sentry_issue_url ?? '');
+    } finally {
+      setBusy(false);
     }
   }
+
+  const assigneeKnown = !ticket.assignee_id || staff.some((member) => member.id === ticket.assignee_id);
 
   return (
     <div className="space-y-3 rounded-lg border border-white/10 p-4">
       <div className="space-y-1">
         <label htmlFor="status" className="text-sm text-white/60">Status</label>
-        <select id="status" className={FIELD} defaultValue={ticket.status} onChange={(e) => update({ status: e.target.value })}>
+        <select id="status" className={FIELD} value={ticket.status} disabled={busy} onChange={(e) => update({ status: e.target.value })}>
           {TICKET_STATUSES.map((value) => <option key={value} value={value}>{STATUS_LABELS[value]}</option>)}
         </select>
       </div>
       <div className="space-y-1">
         <label htmlFor="priority" className="text-sm text-white/60">Priority</label>
-        <select id="priority" className={FIELD} defaultValue={ticket.priority} onChange={(e) => update({ priority: e.target.value })}>
+        <select id="priority" className={FIELD} value={ticket.priority} disabled={busy} onChange={(e) => update({ priority: e.target.value })}>
           {TICKET_PRIORITIES.map((value) => <option key={value} value={value}>{value}</option>)}
         </select>
       </div>
       <div className="space-y-1">
         <label htmlFor="assignee" className="text-sm text-white/60">Assignee</label>
-        <select id="assignee" className={FIELD} defaultValue={ticket.assignee_id ?? ''} onChange={(e) => update({ assigneeId: e.target.value || null })}>
+        <select id="assignee" className={FIELD} value={ticket.assignee_id ?? ''} disabled={busy} onChange={(e) => update({ assigneeId: e.target.value || null })}>
           <option value="">Unassigned</option>
+          {!assigneeKnown && ticket.assignee_id && <option value={ticket.assignee_id}>Former staff</option>}
           {staff.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}
         </select>
       </div>
@@ -3340,9 +3476,11 @@ export function TicketControls({ ticket, staff }: { ticket: Ticket; staff: Staff
           id="sentry"
           type="url"
           className={FIELD}
-          defaultValue={ticket.sentry_issue_url ?? ''}
-          onBlur={(e) => {
-            const value = e.target.value.trim() || null;
+          value={sentry}
+          disabled={busy}
+          onChange={(e) => setSentry(e.target.value)}
+          onBlur={() => {
+            const value = sentry.trim() || null;
             if (value !== ticket.sentry_issue_url) update({ sentryIssueUrl: value });
           }}
         />
@@ -3360,27 +3498,47 @@ export function TicketControls({ ticket, staff }: { ticket: Ticket; staff: Staff
 ```tsx
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { adminPost } from '@/lib/admin/client';
+import { AdminRequestError, adminPost } from '@/lib/admin/client';
 
 export function TicketCompose({ ticketId, email }: { ticketId: string; email: string }) {
   const router = useRouter();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  // One key per draft: a retry of the same text reuses it, so the server sends the email once.
+  const replyKey = useRef<string | null>(null);
+
+  function done() {
+    setText('');
+    replyKey.current = null;
+    router.refresh();
+  }
 
   async function submit(path: 'notes' | 'reply') {
     setBusy(true);
     setError('');
+    setNotice('');
     try {
-      await adminPost(`/api/admin/support/${ticketId}/${path}`, { body: text });
-      setText('');
-      router.refresh();
+      if (path === 'reply') {
+        replyKey.current ??= crypto.randomUUID();
+        await adminPost(`/api/admin/support/${ticketId}/reply`, { body: text, idempotencyKey: replyKey.current });
+      } else {
+        await adminPost(`/api/admin/support/${ticketId}/notes`, { body: text });
+      }
+      done();
     } catch (err) {
-      setError((err as Error).message);
+      if (err instanceof AdminRequestError && err.data.sent === true) {
+        // The email went out; only the card update failed. Treat the draft as sent.
+        done();
+        setNotice(err.message);
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -3389,7 +3547,16 @@ export function TicketCompose({ ticketId, email }: { ticketId: string; email: st
   return (
     <div className="space-y-2">
       <label htmlFor="compose" className="text-sm text-white/60">Note or reply</label>
-      <Textarea id="compose" value={text} onChange={(e) => setText(e.target.value)} className="bg-white/5 border-white/10 min-h-28" />
+      <Textarea
+        id="compose"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          // Different text is a different reply, so it gets its own key.
+          replyKey.current = null;
+        }}
+        className="bg-white/5 border-white/10 min-h-28"
+      />
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" disabled={busy || !text.trim()} onClick={() => submit('notes')}>
           Save internal note
@@ -3398,6 +3565,7 @@ export function TicketCompose({ ticketId, email }: { ticketId: string; email: st
           Email reply to {email}
         </Button>
       </div>
+      {notice && <p role="status" className="text-sm text-amber-300">{notice}</p>}
       {error && <p role="alert" className="text-sm text-rose-400">{error}</p>}
     </div>
   );
@@ -3439,6 +3607,7 @@ export default async function AdminSupportPage({
     priority: singleParam(searchParams.priority),
   });
   const [tickets, staff] = await Promise.all([listTickets(filters), listStaff()]);
+  const staffName = new Map(staff.map((member) => [member.id, member.label]));
 
   return (
     <div className="space-y-4">
@@ -3474,6 +3643,7 @@ export default async function AdminSupportPage({
                   <p className="text-sm break-words">{ticket.title}</p>
                   <p className="mt-1 text-xs text-white/40 break-all">
                     {TYPE_LABELS[ticket.type]}{ticket.priority === 'high' ? ' · High' : ''} · {ticket.email}
+                    {ticket.assignee_id ? ` · ${staffName.get(ticket.assignee_id) ?? 'Former staff'}` : ''}
                   </p>
                 </Link>
               ))}
@@ -3496,11 +3666,17 @@ import { notFound } from 'next/navigation';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { isUuid } from '@/lib/admin/http';
 import { getTicket, listStaff } from '@/lib/admin/support';
-import { TYPE_LABELS, isHttpUrl } from '@/lib/admin/tickets';
+import { TYPE_LABELS, isHttpUrl, type TicketEventKind } from '@/lib/admin/tickets';
 import { TicketCompose } from '@/components/admin/ticket-compose';
 import { TicketControls } from '@/components/admin/ticket-controls';
 
-const KIND_LABELS = { note: 'Internal note', reply: 'Emailed reply', status: 'Status', assignment: 'Assignment' };
+const KIND_LABELS: Record<TicketEventKind, string> = {
+  note: 'Internal note',
+  reply: 'Emailed reply',
+  status: 'Status',
+  assignment: 'Assignment',
+  delivery_failed: 'Delivery failed',
+};
 
 export default async function AdminTicketPage({ params }: { params: { id: string } }) {
   await requirePagePermission('tickets.work');
@@ -3509,6 +3685,7 @@ export default async function AdminTicketPage({ params }: { params: { id: string
   const [found, staff] = await Promise.all([getTicket(params.id), listStaff()]);
   if (!found) notFound();
   const { ticket, events } = found;
+  const authorName = new Map(staff.map((member) => [member.id, member.label]));
 
   return (
     <div className="space-y-4">
@@ -3535,8 +3712,8 @@ export default async function AdminTicketPage({ params }: { params: { id: string
           <p className="whitespace-pre-wrap break-words rounded-lg border border-white/10 p-4 text-sm">{ticket.description}</p>
           {events.map((event) => (
             <div key={event.id} className="rounded-md bg-white/[0.03] p-3">
-              <p className="text-xs text-white/40">{KIND_LABELS[event.kind]} · {event.created_at.slice(0, 16).replace('T', ' ')}</p>
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm">{event.body}</p>
+              <p className="text-xs text-white/40">{KIND_LABELS[event.kind]} · {authorName.get(event.actor_id) ?? 'Former staff'} · {event.created_at.slice(0, 16).replace('T', ' ')}</p>
+              <p className={`mt-1 whitespace-pre-wrap break-words text-sm ${event.kind === 'delivery_failed' ? 'text-rose-300' : ''}`}>{event.body}</p>
             </div>
           ))}
           <TicketCompose ticketId={ticket.id} email={ticket.email} />
@@ -3576,7 +3753,7 @@ export default async function AdminErrorsPage() {
   await requirePagePermission('errors.view');
   const { data, error } = await getSupabaseAdmin()
     .from('fix_pipeline')
-    .select('id, title, level, status, triage_tier, triage_action, event_count, user_count, permalink, created_at')
+    .select('id, title, level, status, triage_tier, event_count, user_count, permalink, created_at')
     .order('created_at', { ascending: false })
     .limit(100);
   // A failed query must not read as "nothing triaged": throw so the error boundary shows it.
