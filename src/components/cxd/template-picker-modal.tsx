@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Crown, Info } from 'lucide-react';
 import { useCXDStore } from '@/store/cxd-store';
-import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds, isTemplateFree, FRAMEWORK_STAGE_LABELS } from '@/lib/templates';
+import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds, templateInsertSurface, templateInsertOffset, offsetTemplateElements, isTemplateFree, FRAMEWORK_STAGE_LABELS } from '@/lib/templates';
 import { FrameworkDetailDialog } from '@/components/cxd/framework-detail-dialog';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
 import { useSubscription } from '@/hooks/use-subscription';
@@ -82,14 +82,21 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     // then add elements after dialog unmount completes
     onClose();
     requestAnimationFrame(() => {
+      // Templates use fixed coordinates: read the surface now, so a canvas that
+      // already has content gets the template beside it rather than on top.
+      const { getCurrentProject, activeBoardId } = useCXDStore.getState();
+      const existing = templateInsertSurface(getCurrentProject()?.canvasLayout?.elements ?? [], activeBoardId);
+      const { dx, dy } = templateInsertOffset(existing, elements);
+      const placed = offsetTemplateElements(elements, dx, dy);
+
       // Blocked by the quota cap: nothing landed, so don't record the framework
       // or the assistant would coach something that isn't on the canvas.
-      if (addCanvasElements(elements)) {
+      if (addCanvasElements(placed)) {
         if (edges.length > 0) addCanvasEdges(edges);
         if (tpl.framework) addProjectFramework(tpl.id);
         // Auto-frame the inserted template so the user sees it land instead of
         // hunting for it (consumed once by the canvas's pending-fit effect).
-        const bbox = templateBounds(elements);
+        const bbox = templateBounds(placed);
         if (bbox) setPendingCanvasFitBounds(bbox);
       }
       // Safety: ensure Radix didn't leave pointer-events: none on body
