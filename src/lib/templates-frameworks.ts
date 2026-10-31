@@ -505,16 +505,26 @@ const premortem: TemplateDefinition = {
 const WORKBACK_STEPS: FrameworkStep[] = [
   { title: 'Fix the live date', detail: 'The one date that does not move. Everything else is derived from it.' },
   { title: 'Name the non-negotiable milestones', detail: 'Venue confirmed, cast locked, tech rehearsal, doors open. The few that everything hangs on.' },
-  { title: 'Work back the dependencies', detail: 'For each milestone, what must be finished before it, and how long does that take?' },
+  { title: 'Work back the dependencies', detail: 'For each milestone, what must be finished before it, and how long does that take? If the chain reaches back past today, change the scope or the date.' },
   { title: 'Assign owners', detail: 'One name per milestone. Shared ownership is no ownership.' },
   { title: 'Add buffer', detail: 'Put slack before the milestones that cannot slip. Novel work usually takes longer than planned.' },
 ];
 
 const WORKBACK_ZONES: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; body: string; emoji: string; fill: string }[] = [
-  { key: 'now', label: 'Today', fam: 'glacier', cap: 'What is already true, decided or booked. Start from reality.', noteTitle: 'Already in place', body: 'Owner: · Due: · Depends on:', emoji: '📍', fill: NOTE_TEAL },
-  { key: 'm3', label: 'T − 3 months', fam: 'ocean', cap: 'The long-lead items: venue, partners, funding, permits, key people.', noteTitle: 'Long-lead milestone', body: 'Owner: · Due: · Depends on: · Buffer:', emoji: '🏗️', fill: NOTE_TEAL },
-  { key: 'm1', label: 'T − 1 month', fam: 'violet', cap: 'Content locked, materials ordered, rehearsals scheduled, comms drafted.', noteTitle: 'Lock milestone', body: 'Owner: · Due: · Depends on: · Buffer:', emoji: '🔒', fill: NOTE_VIOLET },
-  { key: 'live', label: 'Live date', fam: 'sunset', cap: 'The date that does not move. Doors open. Everything else is derived from this.', noteTitle: 'Doors open', body: 'Date: · Owner: · What must be true before doors open:', emoji: '🎬', fill: WARM_SUN },
+  { key: 'now', label: 'Today', fam: 'glacier', cap: 'What is already true, decided or booked. Start from reality.', noteTitle: 'Already in place', body: 'Owner:
+Due:
+Depends on:', emoji: '📍', fill: NOTE_TEAL },
+  { key: 'm3', label: 'T − 3 months', fam: 'ocean', cap: 'The long-lead items: venue, partners, funding, permits, key people.', noteTitle: 'Long-lead milestone', body: 'Owner:
+Due:
+Depends on:
+Buffer:', emoji: '🏗️', fill: NOTE_TEAL },
+  { key: 'm1', label: 'T − 1 month', fam: 'violet', cap: 'Content locked, materials ordered, rehearsals scheduled, comms drafted.', noteTitle: 'Lock milestone', body: 'Owner:
+Due:
+Depends on:
+Buffer:', emoji: '🔒', fill: NOTE_VIOLET },
+  { key: 'live', label: 'Live date', fam: 'sunset', cap: 'The date that does not move. Doors open. Everything else is derived from this.', noteTitle: 'Doors open', body: 'Date:
+Owner:
+What must be true before doors open:', emoji: '🎬', fill: WARM_SUN },
 ];
 
 const workback: TemplateDefinition = {
@@ -542,7 +552,7 @@ const workback: TemplateDefinition = {
   },
   // Zones are 380 wide on a 460 pitch: 80px gutters so the arrows read.
   elements: [
-    ...fwTitle('fww', 'Work-back Plan', FAM.sunset.grad, 'Start from the right. The live date does not move; everything to its left is what must already be true.'),
+    ...fwTitle('fww', 'Work-back Plan', FAM.sunset.grad, 'Arrows show time, but fill it from the right. The live date does not move; everything to its left is what must already be true.'),
     ...stepRail('fww', WORKBACK_STEPS),
     ...WORKBACK_ZONES.flatMap((z, i) => {
       const zx = 40 + i * 460;
