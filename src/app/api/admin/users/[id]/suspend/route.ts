@@ -1,22 +1,17 @@
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
 import { withAudit } from '@/lib/admin/audit';
-import { parseBody } from '@/lib/admin/http';
-import { canSuspend } from '@/lib/admin/permissions';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
+import { canSuspend, SUSPEND_REFUSED, type StaffRole } from '@/lib/admin/permissions';
 import { getTargetRole } from '@/lib/admin/users';
 
 type Ctx = { params: { id: string } };
 
 // Supabase has no permanent ban; 100 years stands in for one until restored.
 const SUSPENDED = '876000h';
-
-const REFUSED = {
-  self: 'You cannot suspend your own account.',
-  owner: 'Owner accounts cannot be suspended.',
-  role_holder: 'Only an Owner can suspend someone who holds a role.',
-};
 
 const schema = z.object({
   suspended: z.boolean(),
@@ -26,17 +21,27 @@ const schema = z.object({
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('users.edit');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
   const targetId = context.params.id;
+
+  // A failed role lookup must never read as "no role", or a suspension could slip through.
+  let targetRole: StaffRole | null;
+  try {
+    targetRole = await getTargetRole(targetId);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-suspend', step: 'role-lookup' } });
+    return NextResponse.json({ error: 'The account was not changed.' }, { status: 500 });
+  }
 
   const block = canSuspend({
     actorId: gate.staff.userId,
     actorRole: gate.staff.role,
     targetId,
-    targetRole: await getTargetRole(targetId),
+    targetRole,
   });
-  if (block) return NextResponse.json({ error: REFUSED[block] }, { status: 409 });
+  if (block) return NextResponse.json({ error: SUSPEND_REFUSED[block] }, { status: 409 });
 
   try {
     await withAudit(
@@ -54,7 +59,8 @@ export async function POST(request: Request, context: Ctx) {
         if (error) throw error;
       },
     );
-  } catch {
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-suspend', step: 'update' } });
     return NextResponse.json({ error: 'The account was not changed.' }, { status: 500 });
   }
   return NextResponse.json({ ok: true });

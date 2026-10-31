@@ -213,6 +213,12 @@ export function isBanned(bannedUntil: string | null | undefined, now: Date): boo
 
 export type SuspendBlock = 'self' | 'owner' | 'role_holder';
 
+export const SUSPEND_REFUSED: Record<SuspendBlock, string> = {
+  self: 'You cannot suspend your own account.',
+  owner: 'Owner accounts cannot be suspended.',
+  role_holder: 'Only an Owner can suspend someone who holds a role.',
+};
+
 /** Returns why this suspension is refused, or null when it is allowed. */
 export function canSuspend(input: {
   actorId: string;
@@ -544,6 +550,7 @@ export async function recordAudit(entry: AuditEntry): Promise<void> {
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import type { z } from 'zod';
 
 export async function parseBody<S extends z.ZodType>(
@@ -573,7 +580,22 @@ const RPC_MESSAGES: Record<string, string> = {
 export function rpcError(error: { message?: string }): NextResponse {
   const message = RPC_MESSAGES[error.message ?? ''];
   if (message) return NextResponse.json({ error: message }, { status: 409 });
+  // Unmapped: report the database message (an error code or text, never a payload).
+  Sentry.captureException(new Error(`admin rpc failed: ${error.message ?? 'unknown'}`), {
+    tags: { route: 'admin-rpc' },
+  });
   return NextResponse.json({ error: 'The action failed. Nothing was changed.' }, { status: 500 });
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID.test(value);
+}
+
+/** The 404 an /api/admin/users/[id] route returns for an id that is not a UUID. */
+export function notFoundResponse(): NextResponse {
+  return NextResponse.json({ error: 'Not found.' }, { status: 404 });
 }
 ```
 
@@ -978,6 +1000,11 @@ check('sync writes only the check time', Object.keys(decision.patch ?? {}).join(
 const nexusPro = { ...adminPro, plan_source: 'nexus' };
 check('sync still revokes a Nexus plan', decideTierSync(nexusPro, lapsed, now).outcome === 'revoked_to_free');
 
+const adminFree = { ...adminPro, plan_id: 'free' };
+const active = { ok: true as const, tier: 'hacker' as never, active: true };
+const regranted = decideTierSync(adminFree, active, now);
+check('an admin-source free row is granted pro by an active Nexus tier', regranted.outcome === 'granted_pro' && regranted.planAfter === 'pro');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
 ```
@@ -1027,7 +1054,10 @@ function isProtected(row: SubscriptionSyncRow): boolean {
     row.stripe_subscription_id != null && (row.status === 'active' || row.status === 'trialing');
   const ownedPlan =
     (row.plan_id === 'lifetime' || row.plan_id === 'beta_tester') && row.plan_source !== 'nexus';
-  return activeStripe || ownedPlan || row.plan_source === 'admin';
+  // cancelSubscriptionAction writes plan_id 'free' and leaves plan_source, so a
+  // free row marked 'admin' is not a grant and must not block the sync.
+  const adminGrant = row.plan_source === 'admin' && row.plan_id !== 'free';
+  return activeStripe || ownedPlan || adminGrant;
 }
 ```
 
@@ -1041,6 +1071,33 @@ In `src/app/api/webhooks/stripe/route.ts`, replace lines 616-619:
           // The plan comes from the member's Nexus tier (D182 §5) or an admin
           // grant, not from this Stripe subscription: forget the subscription,
           // keep the plan, and leave the credit allowance alone.
+```
+
+Also change the log text a few lines below to `'Failed to detach Stripe subscription from Nexus or admin plan:'`, and update the `TierSyncOutcome` comment in `tier.ts` to read `'protected' // Stripe / lifetime / beta / admin-granted plan: only nexus_checked_at`.
+
+In the same file, in the `customer.subscription.updated` case, select `plan_source` with the file's missing-column fallback and set it to `'stripe'` when an admin grant gains a live Stripe subscription (Nexus rows are left alone):
+
+```ts
+        let { data: row, error: lookupErr } = await supabase
+          .from('subscriptions')
+          .select('user_id, plan_source')
+          .eq('stripe_customer_id', customerId)
+          .single();
+        if (isMissingPlanSourceColumn(lookupErr)) {
+          ({ data: row, error: lookupErr } = await supabase
+            .from('subscriptions')
+            .select('user_id')
+            .eq('stripe_customer_id', customerId)
+            .single());
+        }
+```
+
+and inside the `.update({ ... })` object, after the existing comment:
+
+```ts
+            ...((row as any).plan_source === 'admin' && (sub.status === 'active' || sub.status === 'trialing')
+              ? { plan_source: 'stripe' }
+              : {}),
 ```
 
 - [ ] **Step 6: Run it to confirm it passes**
@@ -1108,13 +1165,16 @@ BEGIN
   UPDATE public.subscriptions
      SET plan_id = p_plan::public.plan_type,
          status = 'active'::public.subscription_status,
-         plan_source = CASE WHEN p_plan = 'free' THEN NULL ELSE 'admin' END
+         plan_source = CASE WHEN p_plan = 'free' THEN NULL ELSE 'admin' END,
+         -- Reachable only when the subscription ended or is absent. Clearing the
+         -- id keeps an ended Stripe subscription from reading as stripe_managed.
+         stripe_subscription_id = NULL
    WHERE user_id = p_target;
 
   INSERT INTO public.admin_audit_log (actor_id, action, target_type, target_id, before, after, reason, outcome)
   VALUES (
     p_actor, 'plan.set', 'user', p_target::text,
-    jsonb_build_object('plan', v_row.plan_id, 'source', v_row.plan_source),
+    jsonb_build_object('plan', v_row.plan_id, 'source', v_row.plan_source, 'stripe_subscription_id', v_row.stripe_subscription_id),
     jsonb_build_object('plan', p_plan),
     p_reason, 'succeeded'
   );
@@ -1150,8 +1210,10 @@ BEGIN
 
   UPDATE public.ai_credits SET addon_credits = v_new WHERE user_id = p_target;
 
+  -- Members can read their own transaction rows, so the reason written here is
+  -- fixed. The real reason stays in the audit log.
   INSERT INTO public.ai_credit_transactions (user_id, amount, balance_after, reason, transaction_type)
-  VALUES (p_target, p_amount, v_allowance + v_new - v_used, 'Admin: ' || p_reason, 'manual_adjustment');
+  VALUES (p_target, p_amount, v_allowance + v_new - v_used, 'Admin adjustment', 'manual_adjustment');
 
   INSERT INTO public.admin_audit_log (actor_id, action, target_type, target_id, before, after, reason, outcome)
   VALUES (
@@ -1237,7 +1299,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 ## Task 7: User list
 
 **Files:**
-- Create: `src/components/ui/table.tsx`, `src/lib/admin/users.ts`, `src/app/admin/users/page.tsx`
+- Create: `src/components/ui/table.tsx`, `src/lib/admin/users.ts`, `src/lib/admin/users-query.ts`, `src/lib/admin/__verify__/admin-users.verify.ts`, `src/app/admin/users/page.tsx`
 
 - [ ] **Step 1: Add the table primitive**
 
@@ -1326,7 +1388,8 @@ export interface AdminUserDetail {
   audit: { id: string; action: string; outcome: string; reason: string | null; created_at: string }[];
 }
 
-export async function getUserDetail(id: string): Promise<AdminUserDetail | null> {
+/** `includeAudit` is false for roles without audit.view, so their page never receives the history. */
+export async function getUserDetail(id: string, options: { includeAudit: boolean }): Promise<AdminUserDetail | null> {
   const admin = getSupabaseAdmin();
   const { data: authData, error } = await admin.auth.admin.getUserById(id);
   if (error || !authData.user) return null;
@@ -1347,13 +1410,15 @@ export async function getUserDetail(id: string): Promise<AdminUserDetail | null>
     admin.from('staff_roles').select('role').eq('user_id', id).maybeSingle(),
     admin.from('nexus_links').select('member_id').eq('user_id', id).maybeSingle(),
     admin.from('cxd_projects').select('id', { count: 'exact', head: true }).eq('owner_id', id),
-    admin
-      .from('admin_audit_log')
-      .select('id, action, outcome, reason, created_at')
-      .eq('target_type', 'user')
-      .eq('target_id', id)
-      .order('created_at', { ascending: false })
-      .limit(50),
+    options.includeAudit
+      ? admin
+          .from('admin_audit_log')
+          .select('id, action, outcome, reason, created_at')
+          .eq('target_type', 'user')
+          .eq('target_id', id)
+          .order('created_at', { ascending: false })
+          .limit(50)
+      : Promise.resolve({ data: [] as AdminUserDetail['audit'] }),
   ]);
 
   return {
@@ -1362,7 +1427,7 @@ export async function getUserDetail(id: string): Promise<AdminUserDetail | null>
     name: profile.data?.full_name ?? profile.data?.name ?? null,
     createdAt: user.created_at,
     lastSignInAt: user.last_sign_in_at ?? null,
-    bannedUntil: (user as { banned_until?: string | null }).banned_until ?? null,
+    bannedUntil: user.banned_until ?? null,
     role: isStaffRole(role.data?.role) ? role.data.role : null,
     subscription: subscription.data ?? null,
     credits: credits.data ?? null,
@@ -1372,8 +1437,10 @@ export async function getUserDetail(id: string): Promise<AdminUserDetail | null>
   };
 }
 
+/** Throws when the lookup fails: callers must treat that as "unknown", never as "no role". */
 export async function getTargetRole(id: string): Promise<StaffRole | null> {
-  const { data } = await getSupabaseAdmin().from('staff_roles').select('role').eq('user_id', id).maybeSingle();
+  const { data, error } = await getSupabaseAdmin().from('staff_roles').select('role').eq('user_id', id).maybeSingle();
+  if (error) throw error;
   return isStaffRole(data?.role) ? data.role : null;
 }
 
@@ -1382,14 +1449,82 @@ export function formatDate(value: string | null | undefined): string {
 }
 ```
 
+- [ ] **Step 2b: Write the query helpers and their check**
+
+`src/lib/admin/users-query.ts`:
+
+```ts
+export const MAX_PAGE = 1_000_000;
+
+type Param = string | string[] | undefined;
+
+/** A repeated query parameter (`?q=a&q=b`) arrives as an array: take the first. */
+export function singleParam(value: Param): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  return typeof first === 'string' && first !== '' ? first : undefined;
+}
+
+/** An integer from 1 to MAX_PAGE; anything else is page 1. */
+export function parsePage(value: Param): number {
+  const n = Number(singleParam(value));
+  if (!Number.isInteger(n) || n < 1) return 1;
+  return Math.min(n, MAX_PAGE);
+}
+```
+
+`src/lib/admin/__verify__/admin-users.verify.ts` (run it with `npx tsx`; expected: all pass):
+
+```ts
+/**
+ * Pure helpers behind the Users pages and routes.
+ * Run: npx tsx src/lib/admin/__verify__/admin-users.verify.ts
+ */
+import { isUuid } from '../http';
+import { parsePage, singleParam, MAX_PAGE } from '../users-query';
+import { canSuspend, SUSPEND_REFUSED } from '../permissions';
+
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { passed++; console.log('  ✓', name); }
+  else { failed++; console.error('  ✗', name); }
+}
+
+check('a UUID is accepted', isUuid('322d15dd-8477-41ff-8980-f344fda14164'));
+check('uppercase UUID is accepted', isUuid('322D15DD-8477-41FF-8980-F344FDA14164'));
+check('a short id is refused', !isUuid('123'));
+check('a path-like id is refused', !isUuid('../etc'));
+check('an id with a suffix is refused', !isUuid('322d15dd-8477-41ff-8980-f344fda14164x'));
+check('undefined is refused', !isUuid(undefined));
+
+check('page defaults to 1', parsePage(undefined) === 1);
+check('page 3 parses', parsePage('3') === 3);
+check('page 0 becomes 1', parsePage('0') === 1);
+check('negative page becomes 1', parsePage('-4') === 1);
+check('fractional page becomes 1', parsePage('2.5') === 1);
+check('non-numeric page becomes 1', parsePage('abc') === 1);
+check('huge page is capped', parsePage('99999999999') === MAX_PAGE);
+check('repeated page uses the first', parsePage(['2', '9']) === 2);
+check('repeated q uses the first', singleParam(['a', 'b']) === 'a');
+check('empty q is undefined', singleParam('') === undefined);
+
+check('suspending yourself is refused', canSuspend({ actorId: 'a', actorRole: 'owner', targetId: 'a', targetRole: 'owner' }) === 'self');
+check('every refusal has text', (['self', 'owner', 'role_holder'] as const).every((k) => SUSPEND_REFUSED[k].length > 0));
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
+```
+
 - [ ] **Step 3: Write the page**
 
 `src/app/admin/users/page.tsx`:
 
 ```tsx
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { USERS_PAGE_SIZE, formatDate, listUsers } from '@/lib/admin/users';
+import { parsePage, singleParam } from '@/lib/admin/users-query';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const FIELD = 'h-9 rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
@@ -1397,38 +1532,39 @@ const FIELD = 'h-9 rounded-md bg-white/5 border border-white/10 px-3 text-sm tex
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams: { q?: string; plan?: string; role?: string; page?: string };
+  searchParams: { q?: string | string[]; plan?: string | string[]; role?: string | string[]; page?: string | string[] };
 }) {
   await requirePagePermission('users.view');
-  const page = Math.max(1, Number(searchParams.page) || 1);
-  const { rows, total } = await listUsers({
-    search: searchParams.q,
-    plan: searchParams.plan,
-    role: searchParams.role,
-    page,
-  });
+  const q = singleParam(searchParams.q);
+  const plan = singleParam(searchParams.plan);
+  const role = singleParam(searchParams.role);
+  const page = parsePage(searchParams.page);
   const pageHref = (target: number) => {
     const params = new URLSearchParams();
-    if (searchParams.q) params.set('q', searchParams.q);
-    if (searchParams.plan) params.set('plan', searchParams.plan);
-    if (searchParams.role) params.set('role', searchParams.role);
+    if (q) params.set('q', q);
+    if (plan) params.set('plan', plan);
+    if (role) params.set('role', role);
     params.set('page', String(target));
     return `/admin/users?${params}`;
   };
+
+  const { rows, total } = await listUsers({ search: q, plan, role, page });
+  // A page past the end has no rows and so no total: go back to the first page.
+  if (rows.length === 0 && page > 1) redirect(pageHref(1));
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Users</h1>
       <form className="flex flex-wrap gap-2">
-        <input name="q" defaultValue={searchParams.q} placeholder="Name or email" aria-label="Search" className={`${FIELD} flex-1 min-w-48`} />
-        <select name="plan" defaultValue={searchParams.plan ?? ''} aria-label="Plan" className={FIELD}>
+        <input name="q" defaultValue={q} placeholder="Name or email" aria-label="Search" className={`${FIELD} flex-1 min-w-48`} />
+        <select name="plan" defaultValue={plan ?? ''} aria-label="Plan" className={FIELD}>
           <option value="">All plans</option>
           <option value="free">Free</option>
           <option value="pro">Pro</option>
           <option value="lifetime">Lifetime</option>
           <option value="beta_tester">Beta tester</option>
         </select>
-        <select name="role" defaultValue={searchParams.role ?? ''} aria-label="Role" className={FIELD}>
+        <select name="role" defaultValue={role ?? ''} aria-label="Role" className={FIELD}>
           <option value="">All roles</option>
           <option value="owner">Owner</option>
           <option value="admin">Admin</option>
@@ -1492,7 +1628,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 ## Task 8: User action routes
 
 **Files:**
-- Create: `src/app/api/admin/users/[id]/plan/route.ts`, `.../credits/route.ts`, `.../role/route.ts`, `.../suspend/route.ts`, `.../password-reset/route.ts`, `emails/password-reset.tsx`, `src/app/auth/recovery/page.tsx`, `src/app/auth/recovery/confirm/route.ts`
+- Create: `src/app/api/admin/users/[id]/plan/route.ts`, `.../credits/route.ts`, `.../role/route.ts`, `.../suspend/route.ts`, `.../password-reset/route.ts`, `emails/password-reset.tsx`, `src/app/auth/recovery/page.tsx`, `src/app/auth/recovery/confirm/route.ts`, `src/components/admin/recovery-form.tsx`
 
 - [ ] **Step 1: Write the plan route**
 
@@ -1501,7 +1637,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { parseBody, rpcError } from '@/lib/admin/http';
+import { isUuid, notFoundResponse, parseBody, rpcError } from '@/lib/admin/http';
 import { ADMIN_PLANS } from '@/lib/admin/plan-guard';
 
 type Ctx = { params: { id: string } };
@@ -1514,6 +1650,7 @@ const schema = z.object({
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('users.edit');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
 
@@ -1535,7 +1672,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { parseBody, rpcError } from '@/lib/admin/http';
+import { isUuid, notFoundResponse, parseBody, rpcError } from '@/lib/admin/http';
 
 type Ctx = { params: { id: string } };
 
@@ -1547,6 +1684,7 @@ const schema = z.object({
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('users.edit');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
 
@@ -1568,7 +1706,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { parseBody, rpcError } from '@/lib/admin/http';
+import { isUuid, notFoundResponse, parseBody, rpcError } from '@/lib/admin/http';
 import { ASSIGNABLE_ROLES } from '@/lib/admin/permissions';
 
 type Ctx = { params: { id: string } };
@@ -1581,6 +1719,7 @@ const schema = z.object({
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('roles.assign');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
 
@@ -1599,24 +1738,19 @@ export async function POST(request: Request, context: Ctx) {
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
 import { withAudit } from '@/lib/admin/audit';
-import { parseBody } from '@/lib/admin/http';
-import { canSuspend } from '@/lib/admin/permissions';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
+import { canSuspend, SUSPEND_REFUSED, type StaffRole } from '@/lib/admin/permissions';
 import { getTargetRole } from '@/lib/admin/users';
 
 type Ctx = { params: { id: string } };
 
 // Supabase has no permanent ban; 100 years stands in for one until restored.
 const SUSPENDED = '876000h';
-
-const REFUSED = {
-  self: 'You cannot suspend your own account.',
-  owner: 'Owner accounts cannot be suspended.',
-  role_holder: 'Only an Owner can suspend someone who holds a role.',
-};
 
 const schema = z.object({
   suspended: z.boolean(),
@@ -1626,17 +1760,27 @@ const schema = z.object({
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('users.edit');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
   const targetId = context.params.id;
+
+  // A failed role lookup must never read as "no role", or a suspension could slip through.
+  let targetRole: StaffRole | null;
+  try {
+    targetRole = await getTargetRole(targetId);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-suspend', step: 'role-lookup' } });
+    return NextResponse.json({ error: 'The account was not changed.' }, { status: 500 });
+  }
 
   const block = canSuspend({
     actorId: gate.staff.userId,
     actorRole: gate.staff.role,
     targetId,
-    targetRole: await getTargetRole(targetId),
+    targetRole,
   });
-  if (block) return NextResponse.json({ error: REFUSED[block] }, { status: 409 });
+  if (block) return NextResponse.json({ error: SUSPEND_REFUSED[block] }, { status: 409 });
 
   try {
     await withAudit(
@@ -1654,7 +1798,8 @@ export async function POST(request: Request, context: Ctx) {
         if (error) throw error;
       },
     );
-  } catch {
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-suspend', step: 'update' } });
     return NextResponse.json({ error: 'The account was not changed.' }, { status: 500 });
   }
   return NextResponse.json({ ok: true });
@@ -1669,10 +1814,13 @@ Do not call `supabase.auth.resetPasswordForEmail` here. The app's reset flow is 
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { render } from '@react-email/render';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
 import { withAudit } from '@/lib/admin/audit';
+import { isUuid, notFoundResponse } from '@/lib/admin/http';
+import { getTargetRole } from '@/lib/admin/users';
 import { sendEmail } from '@/lib/email';
 import PasswordReset from '@emails/password-reset';
 
@@ -1681,12 +1829,31 @@ type Ctx = { params: { id: string } };
 export async function POST(_request: Request, context: Ctx) {
   const gate = await requirePermission('users.edit');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const targetId = context.params.id;
   const admin = getSupabaseAdmin();
 
-  const { data } = await admin.auth.admin.getUserById(targetId);
-  const email = data.user?.email;
+  const { data, error: lookupError } = await admin.auth.admin.getUserById(targetId);
+  if (lookupError && lookupError.status !== 404) {
+    Sentry.captureException(new Error(`password reset lookup failed: ${lookupError.message}`), {
+      tags: { route: 'admin-password-reset', step: 'user-lookup' },
+    });
+    return NextResponse.json({ error: 'The user could not be looked up.' }, { status: 500 });
+  }
+  const email = data?.user?.email;
   if (!email) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+
+  // Resetting a staff member's password hands over their session, so only an Owner may do it.
+  let targetRole;
+  try {
+    targetRole = await getTargetRole(targetId);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-password-reset', step: 'role-lookup' } });
+    return NextResponse.json({ error: 'The reset email could not be sent.' }, { status: 500 });
+  }
+  if (targetRole && gate.staff.role !== 'owner') {
+    return NextResponse.json({ error: 'Only an Owner can reset the password of someone who holds a role.' }, { status: 409 });
+  }
 
   try {
     await withAudit(
@@ -1695,7 +1862,9 @@ export async function POST(_request: Request, context: Ctx) {
         const { data: link, error } = await admin.auth.admin.generateLink({ type: 'recovery', email });
         const hashed = link?.properties?.hashed_token;
         if (error || !hashed) throw error ?? new Error('no recovery token');
-        const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL}/auth/recovery?token_hash=${encodeURIComponent(hashed)}`;
+        // The token sits in the fragment so it never reaches a server log or Sentry URL.
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
+        const resetUrl = `${baseUrl}/auth/recovery#token_hash=${encodeURIComponent(hashed)}`;
         await sendEmail({
           to: email,
           subject: 'Reset your CXD Canvas password',
@@ -1703,7 +1872,11 @@ export async function POST(_request: Request, context: Ctx) {
         });
       },
     );
-  } catch {
+  } catch (err) {
+    // Message only: the error object may carry request details, and the token must never be reported.
+    Sentry.captureException(new Error(`password reset failed: ${err instanceof Error ? err.message : 'unknown'}`), {
+      tags: { route: 'admin-password-reset', step: 'send' },
+    });
     return NextResponse.json({ error: 'The reset email could not be sent.' }, { status: 500 });
   }
   return NextResponse.json({ ok: true });
@@ -1739,25 +1912,59 @@ export default function PasswordReset({ resetUrl }: PasswordResetProps) {
 }
 
 PasswordReset.PreviewProps = {
-  resetUrl: 'https://canvas.cyberdelic.design/auth/recovery?token_hash=abc123',
+  resetUrl: 'https://canvas.cyberdelic.design/auth/recovery#token_hash=abc123',
 } satisfies PasswordResetProps;
 ```
 
-`src/app/auth/recovery/page.tsx` shows a button, and opening the link changes nothing, because mail scanners open links and would use up the one-time token:
+The token travels in the URL fragment (`#token_hash=...`), so it never reaches a server log or a Sentry request URL. `src/app/auth/recovery/page.tsx` renders a client component that reads it, stores it in a hidden input and removes it from the address bar. Opening the link changes nothing, because mail scanners open links and would use up the one-time token:
+
+`src/components/admin/recovery-form.tsx`:
 
 ```tsx
+'use client';
+
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
-export const metadata = { title: 'Reset password', robots: { index: false, follow: false } };
+/**
+ * The recovery token arrives in the URL fragment, so it never reaches a server
+ * log or a Sentry request URL. Read it once, keep it in a hidden input, and
+ * take it out of the address bar straight away.
+ */
+export function RecoveryForm() {
+  const [token, setToken] = useState('');
 
-export default function RecoveryPage({ searchParams }: { searchParams: { token_hash?: string } }) {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    setToken(params.get('token_hash') ?? '');
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+
+  return (
+    <form action="/auth/recovery/confirm" method="POST" className="max-w-md space-y-4 text-center">
+      <h1 className="text-xl font-semibold">Reset your password</h1>
+      <input type="hidden" name="token_hash" value={token} />
+      <Button type="submit" disabled={!token}>Continue</Button>
+    </form>
+  );
+}
+```
+
+`src/app/auth/recovery/page.tsx`:
+
+```tsx
+import { RecoveryForm } from '@/components/admin/recovery-form';
+
+export const metadata = {
+  title: 'Reset password',
+  robots: { index: false, follow: false },
+  referrer: 'no-referrer',
+};
+
+export default function RecoveryPage() {
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-      <form action="/auth/recovery/confirm" method="POST" className="max-w-md space-y-4 text-center">
-        <h1 className="text-xl font-semibold">Reset your password</h1>
-        <input type="hidden" name="token_hash" value={searchParams.token_hash ?? ''} />
-        <Button type="submit">Continue</Button>
-      </form>
+      <RecoveryForm />
     </main>
   );
 }
@@ -1769,22 +1976,79 @@ export default function RecoveryPage({ searchParams }: { searchParams: { token_h
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 
+function redirectTo(request: Request, path: string): NextResponse {
+  // 303 so the browser follows the redirect with GET.
+  const res = NextResponse.redirect(new URL(path, new URL(request.url).origin), 303);
+  res.headers.set('Cache-Control', 'no-store');
+  res.headers.set('Referrer-Policy', 'no-referrer');
+  return res;
+}
+
+/** Only a form posted from this site may spend the token. */
+function isSameOrigin(request: Request): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site) return site === 'same-origin';
+  const origin = request.headers.get('origin');
+  if (!origin) return false;
+  try {
+    return new URL(origin).host === new URL(request.url).host;
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: Request) {
-  const form = await request.formData();
-  const tokenHash = form.get('token_hash');
-  const origin = new URL(request.url).origin;
+  if (!isSameOrigin(request)) return redirectTo(request, '/forgot-password');
+
+  let tokenHash: FormDataEntryValue | null = null;
+  try {
+    tokenHash = (await request.formData()).get('token_hash');
+  } catch {
+    return redirectTo(request, '/forgot-password');
+  }
 
   if (typeof tokenHash === 'string' && tokenHash) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
-    // 303 so the browser follows the redirect with GET.
-    if (!error) return NextResponse.redirect(new URL('/dashboard/reset-password', origin), 303);
+    if (!error) return redirectTo(request, '/dashboard/reset-password');
   }
-  return NextResponse.redirect(new URL('/forgot-password', origin), 303);
+  return redirectTo(request, '/forgot-password');
 }
 ```
 
-- [ ] **Step 6: Check routes and commit**
+- [ ] **Step 6: Redact the token in Sentry**
+
+In `instrumentation-client.ts`, add this above `if (dsn) {`:
+
+```ts
+// The admin password-reset link carries a one-time token_hash. It travels in the
+// URL fragment, but redact it anywhere it could still appear: request URLs,
+// breadcrumbs, transaction names and span data.
+const TOKEN_HASH = /token_hash([=:]\s*"?)[^&#"\s]+/g;
+
+function scrub<T>(value: T, depth = 0): T {
+  if (depth > 8) return value;
+  if (typeof value === "string") return value.replace(TOKEN_HASH, "token_hash$1[redacted]") as unknown as T;
+  if (Array.isArray(value)) return value.map((item) => scrub(item, depth + 1)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = scrub(item, depth + 1);
+    }
+    return out as T;
+  }
+  return value;
+}
+```
+
+Then add these two options to `Sentry.init`, before `debug: false`:
+
+```ts
+    beforeSend: (event) => scrub(event),
+    beforeSendTransaction: (event) => scrub(event),
+```
+
+- [ ] **Step 7: Check routes and commit**
 
 Run: `npx tsx src/lib/admin/__verify__/admin-routes.verify.ts`
 Expected: `5 handlers checked`, exit 0.
@@ -1793,7 +2057,7 @@ Run: `npx tsc --noEmit`
 Expected: no new errors.
 
 ```bash
-git add src emails
+git add src emails instrumentation-client.ts
 git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add user action routes"
 ```
 
@@ -1812,7 +2076,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { adminPost } from '@/lib/admin/client';
 import { ADMIN_PLANS, type PlanBlock } from '@/lib/admin/plan-guard';
-import { canSuspend, type StaffRole } from '@/lib/admin/permissions';
+import { canSuspend, SUSPEND_REFUSED, type StaffRole } from '@/lib/admin/permissions';
 
 const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
 
@@ -1836,7 +2100,7 @@ export function UserActions({ actor, target }: Props) {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function run(url: string, body: unknown, done: string) {
+  async function run(url: string, body: unknown, done: string): Promise<boolean> {
     setBusy(true);
     setMessage(null);
     try {
@@ -1844,8 +2108,10 @@ export function UserActions({ actor, target }: Props) {
       setMessage({ ok: true, text: done });
       setReason('');
       router.refresh();
+      return true;
     } catch (err) {
       setMessage({ ok: false, text: (err as Error).message });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1891,11 +2157,13 @@ export function UserActions({ actor, target }: Props) {
           <div className="space-y-1">
             <label htmlFor="credits" className="text-sm text-white/60">Add or remove credits (use a minus sign to remove)</label>
             <div className="flex gap-2">
-              <input id="credits" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className={FIELD} />
+              <input id="credits" type="number" step={1} value={amount} onChange={(e) => setAmount(e.target.value)} className={FIELD} />
               <Button
                 size="sm"
                 disabled={busy || !hasReason || !Number(amount)}
-                onClick={() => run(`${base}/credits`, { amount: Number(amount), reason }, 'Credits adjusted.').then(() => setAmount(''))}
+                onClick={async () => {
+                  if (await run(`${base}/credits`, { amount: Number(amount), reason }, 'Credits adjusted.')) setAmount('');
+                }}
               >
                 Apply
               </Button>
@@ -1903,9 +2171,11 @@ export function UserActions({ actor, target }: Props) {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => run(`${base}/password-reset`, {}, 'Reset email sent.')}>
-              Send password reset
-            </Button>
+            {(target.role === null || actor.role === 'owner') && (
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => run(`${base}/password-reset`, {}, 'Reset email sent.')}>
+                Send password reset
+              </Button>
+            )}
             {!suspendBlock && (
               <Button
                 size="sm"
@@ -1917,6 +2187,7 @@ export function UserActions({ actor, target }: Props) {
               </Button>
             )}
           </div>
+          {suspendBlock && <p className="text-xs text-white/40">{SUSPEND_REFUSED[suspendBlock]}</p>}
           {!target.suspended && !suspendBlock && <p className="text-xs text-white/40">Suspending keeps all data and does not cancel Stripe billing.</p>}
         </>
       )}
@@ -1956,6 +2227,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { can, isBanned } from '@/lib/admin/permissions';
+import { isUuid } from '@/lib/admin/http';
 import { planEditBlock } from '@/lib/admin/plan-guard';
 import { formatDate, getUserDetail } from '@/lib/admin/users';
 import { listTicketsForUser } from '@/lib/admin/support';
@@ -1972,7 +2244,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default async function AdminUserPage({ params }: { params: { id: string } }) {
   const staff = await requirePagePermission('users.view');
-  const user = await getUserDetail(params.id);
+  if (!isUuid(params.id)) notFound();
+  const canSeeAudit = can(staff.role, 'audit.view');
+  const user = await getUserDetail(params.id, { includeAudit: canSeeAudit });
   if (!user) notFound();
   const tickets = await listTicketsForUser(user.id);
   const suspended = isBanned(user.bannedUntil, new Date());
@@ -1998,6 +2272,18 @@ export default async function AdminUserPage({ params }: { params: { id: string }
           <Row label="Credits used">{user.credits?.used_this_period ?? 0} / {user.credits?.monthly_allowance ?? 0}</Row>
           <Row label="Add-on credits">{user.credits?.addon_credits ?? 0}</Row>
           <Row label="Nexus member">{user.nexusMemberId ?? '—'}</Row>
+          <Row label="Stripe subscription">
+            {user.subscription?.stripe_subscription_id ? (
+              <a
+                href={`https://dashboard.stripe.com/subscriptions/${user.subscription.stripe_subscription_id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-violet-200 hover:underline"
+              >
+                {user.subscription.stripe_subscription_id}
+              </a>
+            ) : '—'}
+          </Row>
           <Row label="Stripe">
             {user.subscription?.stripe_customer_id ? (
               <a
@@ -2039,15 +2325,17 @@ export default async function AdminUserPage({ params }: { params: { id: string }
         ))}
       </section>
 
-      <section className="space-y-2">
-        <h2 className="font-medium">Admin history</h2>
-        {user.audit.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
-        {user.audit.map((entry) => (
-          <p key={entry.id} className="text-sm text-white/70">
-            {formatDate(entry.created_at)} · {entry.action} · {entry.outcome}{entry.reason ? ` · ${entry.reason}` : ''}
-          </p>
-        ))}
-      </section>
+      {canSeeAudit && (
+        <section className="space-y-2">
+          <h2 className="font-medium">Admin history</h2>
+          {user.audit.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
+          {user.audit.map((entry) => (
+            <p key={entry.id} className="text-sm text-white/70">
+              {formatDate(entry.created_at)} · {entry.action} · {entry.outcome}{entry.reason ? ` · ${entry.reason}` : ''}
+            </p>
+          ))}
+        </section>
+      )}
     </div>
   );
 }
@@ -2083,7 +2371,7 @@ Replace lines 105-107 with:
     const { data: userData, error: userError } = await admin.auth.admin.getUserById(userId);
     const email = userData?.user?.email;
     if (userError || !email) return fail(request, 'failed');
-    if (isBanned((userData.user as { banned_until?: string | null }).banned_until, new Date())) {
+    if (isBanned(userData.user.banned_until, new Date())) {
       return fail(request, 'failed');
     }
 ```

@@ -35,5 +35,10 @@ check('sync writes only the check time', Object.keys(decision.patch ?? {}).join(
 const nexusPro = { ...adminPro, plan_source: 'nexus' };
 check('sync still revokes a Nexus plan', decideTierSync(nexusPro, lapsed, now).outcome === 'revoked_to_free');
 
+const adminFree = { ...adminPro, plan_id: 'free' };
+const active = { ok: true as const, tier: 'hacker' as never, active: true };
+const regranted = decideTierSync(adminFree, active, now);
+check('an admin-source free row is granted pro by an active Nexus tier', regranted.outcome === 'granted_pro' && regranted.planAfter === 'pro');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

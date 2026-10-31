@@ -49,7 +49,7 @@ export interface TierSyncPatch {
 
 export type TierSyncOutcome =
   | 'no_change' // Nexus failed: nothing is written
-  | 'protected' // Stripe / lifetime / beta plan: only nexus_checked_at
+  | 'protected' // Stripe / lifetime / beta / admin-granted plan: only nexus_checked_at
   | 'granted_pro'
   | 'revoked_to_free'
   | 'stays_free';
@@ -67,7 +67,10 @@ function isProtected(row: SubscriptionSyncRow): boolean {
     row.stripe_subscription_id != null && (row.status === 'active' || row.status === 'trialing');
   const ownedPlan =
     (row.plan_id === 'lifetime' || row.plan_id === 'beta_tester') && row.plan_source !== 'nexus';
-  return activeStripe || ownedPlan || row.plan_source === 'admin';
+  // cancelSubscriptionAction writes plan_id 'free' and leaves plan_source, so a
+  // free row marked 'admin' is not a grant and must not block the sync.
+  const adminGrant = row.plan_source === 'admin' && row.plan_id !== 'free';
+  return activeStripe || ownedPlan || adminGrant;
 }
 
 /**

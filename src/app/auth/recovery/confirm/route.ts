@@ -1,16 +1,41 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/supabase/server';
 
+function redirectTo(request: Request, path: string): NextResponse {
+  // 303 so the browser follows the redirect with GET.
+  const res = NextResponse.redirect(new URL(path, new URL(request.url).origin), 303);
+  res.headers.set('Cache-Control', 'no-store');
+  res.headers.set('Referrer-Policy', 'no-referrer');
+  return res;
+}
+
+/** Only a form posted from this site may spend the token. */
+function isSameOrigin(request: Request): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site) return site === 'same-origin';
+  const origin = request.headers.get('origin');
+  if (!origin) return false;
+  try {
+    return new URL(origin).host === new URL(request.url).host;
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: Request) {
-  const form = await request.formData();
-  const tokenHash = form.get('token_hash');
-  const origin = new URL(request.url).origin;
+  if (!isSameOrigin(request)) return redirectTo(request, '/forgot-password');
+
+  let tokenHash: FormDataEntryValue | null = null;
+  try {
+    tokenHash = (await request.formData()).get('token_hash');
+  } catch {
+    return redirectTo(request, '/forgot-password');
+  }
 
   if (typeof tokenHash === 'string' && tokenHash) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
-    // 303 so the browser follows the redirect with GET.
-    if (!error) return NextResponse.redirect(new URL('/dashboard/reset-password', origin), 303);
+    if (!error) return redirectTo(request, '/dashboard/reset-password');
   }
-  return NextResponse.redirect(new URL('/forgot-password', origin), 303);
+  return redirectTo(request, '/forgot-password');
 }

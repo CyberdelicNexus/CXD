@@ -101,7 +101,7 @@ Server-paged table with search by name or email and filters for plan and role. C
 
 ### Detail: `/admin/users/[id]`
 
-Profile, subscription, credits, canvas count, Nexus link, Stripe IDs linking to the Stripe dashboard, support cards and audit history. Read-only for Staff.
+Profile, subscription, credits, canvas count, Nexus link, Stripe customer and subscription IDs linking to the Stripe dashboard, support cards and, for roles with `audit.view` only, audit history. Staff never receive the history: the page does not fetch it for them. Read-only for Staff.
 
 ### Actions
 
@@ -110,15 +110,15 @@ Plan change (`users.edit`):
 - Allowed values are `free`, `pro` and `beta_tester`. `lifetime` is excluded because it carries a founding member number.
 - Blocked, with the reason shown, when the row has a Stripe subscription that has not ended (any status except `canceled` and `incomplete_expired`, so `past_due` is included), when `plan_source = 'nexus'`, or when the plan is `lifetime`. The first would leave the user being charged and be overwritten by the next webhook. The second would be overwritten by the tier sync. The third was paid for.
 - Handled by RPC `admin_set_plan`, which writes `plan_id` only if it changed, because the `on_subscription_change` trigger resets the credit allowance. The UI warns about that reset first.
-- Sets `plan_source = 'admin'`, or clears it when the plan is set to `free`.
+- Sets `plan_source = 'admin'`, or clears it when the plan is set to `free`. It also clears `stripe_subscription_id`, which is only reachable when that subscription had ended.
 - `isProtected` in `src/lib/nexus/tier.ts` and the Stripe webhook treat `admin` rows as protected from sync. A real Stripe purchase by that user takes over the row and sets `plan_source = 'stripe'`, because they are now paying.
 
 Credit adjustment (`users.edit`):
 
 - New RPC `admin_adjust_credits(target, amount, reason, actor)` locks the `ai_credits` row, changes `addon_credits`, and inserts an `ai_credit_transactions` row with `transaction_type = 'manual_adjustment'` and `balance_after`.
-- A reason is required. The balance cannot go below zero.
+- A reason is required and is saved to the audit log. The member-readable `ai_credit_transactions` row carries the fixed text `Admin adjustment`, because members can read their own rows. The balance cannot go below zero.
 
-Password reset (`users.edit`): the standard flow is PKCE, so a link requested from an admin's session would fail for the user. Instead, the server generates a recovery token and emails a link directly through Resend, bypassing Inngest so the token is not stored in its event history. The link opens `/auth/recovery`, where a button starts the recovery session and continues to `/dashboard/reset-password`. Opening the link changes nothing, because mail scanners open links and the token works once.
+Password reset (`users.edit`): the standard flow is PKCE, so a link requested from an admin's session would fail for the user. Instead, the server generates a recovery token and emails a link directly through Resend, bypassing Inngest so the token is not stored in its event history. The token is in the URL fragment (`/auth/recovery#token_hash=...`), so it never reaches a server log or a Sentry request URL; Sentry's `beforeSend` also redacts it. The page reads it in the browser, removes it from the address bar and shows a button that posts it to `/auth/recovery/confirm`, which starts the recovery session and continues to `/dashboard/reset-password`. The confirm route accepts only same-origin posts. Opening the link changes nothing, because mail scanners open links and the token works once. Only an Owner may send a reset to someone who holds a role.
 
 Suspend and restore (`users.edit`):
 

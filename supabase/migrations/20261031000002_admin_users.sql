@@ -43,13 +43,16 @@ BEGIN
   UPDATE public.subscriptions
      SET plan_id = p_plan::public.plan_type,
          status = 'active'::public.subscription_status,
-         plan_source = CASE WHEN p_plan = 'free' THEN NULL ELSE 'admin' END
+         plan_source = CASE WHEN p_plan = 'free' THEN NULL ELSE 'admin' END,
+         -- Reachable only when the subscription ended or is absent. Clearing the
+         -- id keeps an ended Stripe subscription from reading as stripe_managed.
+         stripe_subscription_id = NULL
    WHERE user_id = p_target;
 
   INSERT INTO public.admin_audit_log (actor_id, action, target_type, target_id, before, after, reason, outcome)
   VALUES (
     p_actor, 'plan.set', 'user', p_target::text,
-    jsonb_build_object('plan', v_row.plan_id, 'source', v_row.plan_source),
+    jsonb_build_object('plan', v_row.plan_id, 'source', v_row.plan_source, 'stripe_subscription_id', v_row.stripe_subscription_id),
     jsonb_build_object('plan', p_plan),
     p_reason, 'succeeded'
   );
@@ -85,8 +88,10 @@ BEGIN
 
   UPDATE public.ai_credits SET addon_credits = v_new WHERE user_id = p_target;
 
+  -- Members can read their own transaction rows, so the reason written here is
+  -- fixed. The real reason stays in the audit log.
   INSERT INTO public.ai_credit_transactions (user_id, amount, balance_after, reason, transaction_type)
-  VALUES (p_target, p_amount, v_allowance + v_new - v_used, 'Admin: ' || p_reason, 'manual_adjustment');
+  VALUES (p_target, p_amount, v_allowance + v_new - v_used, 'Admin adjustment', 'manual_adjustment');
 
   INSERT INTO public.admin_audit_log (actor_id, action, target_type, target_id, before, after, reason, outcome)
   VALUES (

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { parseBody, rpcError } from '@/lib/admin/http';
+import { isUuid, notFoundResponse, parseBody, rpcError } from '@/lib/admin/http';
 import { ASSIGNABLE_ROLES } from '@/lib/admin/permissions';
 
 type Ctx = { params: { id: string } };
@@ -15,6 +15,7 @@ const schema = z.object({
 export async function POST(request: Request, context: Ctx) {
   const gate = await requirePermission('roles.assign');
   if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
   const body = await parseBody(request, schema);
   if (!body.ok) return body.response;
 

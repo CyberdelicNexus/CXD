@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { USERS_PAGE_SIZE, formatDate, listUsers } from '@/lib/admin/users';
+import { parsePage, singleParam } from '@/lib/admin/users-query';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const FIELD = 'h-9 rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
@@ -8,38 +10,39 @@ const FIELD = 'h-9 rounded-md bg-white/5 border border-white/10 px-3 text-sm tex
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams: { q?: string; plan?: string; role?: string; page?: string };
+  searchParams: { q?: string | string[]; plan?: string | string[]; role?: string | string[]; page?: string | string[] };
 }) {
   await requirePagePermission('users.view');
-  const page = Math.max(1, Number(searchParams.page) || 1);
-  const { rows, total } = await listUsers({
-    search: searchParams.q,
-    plan: searchParams.plan,
-    role: searchParams.role,
-    page,
-  });
+  const q = singleParam(searchParams.q);
+  const plan = singleParam(searchParams.plan);
+  const role = singleParam(searchParams.role);
+  const page = parsePage(searchParams.page);
   const pageHref = (target: number) => {
     const params = new URLSearchParams();
-    if (searchParams.q) params.set('q', searchParams.q);
-    if (searchParams.plan) params.set('plan', searchParams.plan);
-    if (searchParams.role) params.set('role', searchParams.role);
+    if (q) params.set('q', q);
+    if (plan) params.set('plan', plan);
+    if (role) params.set('role', role);
     params.set('page', String(target));
     return `/admin/users?${params}`;
   };
+
+  const { rows, total } = await listUsers({ search: q, plan, role, page });
+  // A page past the end has no rows and so no total: go back to the first page.
+  if (rows.length === 0 && page > 1) redirect(pageHref(1));
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Users</h1>
       <form className="flex flex-wrap gap-2">
-        <input name="q" defaultValue={searchParams.q} placeholder="Name or email" aria-label="Search" className={`${FIELD} flex-1 min-w-48`} />
-        <select name="plan" defaultValue={searchParams.plan ?? ''} aria-label="Plan" className={FIELD}>
+        <input name="q" defaultValue={q} placeholder="Name or email" aria-label="Search" className={`${FIELD} flex-1 min-w-48`} />
+        <select name="plan" defaultValue={plan ?? ''} aria-label="Plan" className={FIELD}>
           <option value="">All plans</option>
           <option value="free">Free</option>
           <option value="pro">Pro</option>
           <option value="lifetime">Lifetime</option>
           <option value="beta_tester">Beta tester</option>
         </select>
-        <select name="role" defaultValue={searchParams.role ?? ''} aria-label="Role" className={FIELD}>
+        <select name="role" defaultValue={role ?? ''} aria-label="Role" className={FIELD}>
           <option value="">All roles</option>
           <option value="owner">Owner</option>
           <option value="admin">Admin</option>

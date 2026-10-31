@@ -47,7 +47,8 @@ export interface AdminUserDetail {
   audit: { id: string; action: string; outcome: string; reason: string | null; created_at: string }[];
 }
 
-export async function getUserDetail(id: string): Promise<AdminUserDetail | null> {
+/** `includeAudit` is false for roles without audit.view, so their page never receives the history. */
+export async function getUserDetail(id: string, options: { includeAudit: boolean }): Promise<AdminUserDetail | null> {
   const admin = getSupabaseAdmin();
   const { data: authData, error } = await admin.auth.admin.getUserById(id);
   if (error || !authData.user) return null;
@@ -68,13 +69,15 @@ export async function getUserDetail(id: string): Promise<AdminUserDetail | null>
     admin.from('staff_roles').select('role').eq('user_id', id).maybeSingle(),
     admin.from('nexus_links').select('member_id').eq('user_id', id).maybeSingle(),
     admin.from('cxd_projects').select('id', { count: 'exact', head: true }).eq('owner_id', id),
-    admin
-      .from('admin_audit_log')
-      .select('id, action, outcome, reason, created_at')
-      .eq('target_type', 'user')
-      .eq('target_id', id)
-      .order('created_at', { ascending: false })
-      .limit(50),
+    options.includeAudit
+      ? admin
+          .from('admin_audit_log')
+          .select('id, action, outcome, reason, created_at')
+          .eq('target_type', 'user')
+          .eq('target_id', id)
+          .order('created_at', { ascending: false })
+          .limit(50)
+      : Promise.resolve({ data: [] as AdminUserDetail['audit'] }),
   ]);
 
   return {
@@ -93,8 +96,10 @@ export async function getUserDetail(id: string): Promise<AdminUserDetail | null>
   };
 }
 
+/** Throws when the lookup fails: callers must treat that as "unknown", never as "no role". */
 export async function getTargetRole(id: string): Promise<StaffRole | null> {
-  const { data } = await getSupabaseAdmin().from('staff_roles').select('role').eq('user_id', id).maybeSingle();
+  const { data, error } = await getSupabaseAdmin().from('staff_roles').select('role').eq('user_id', id).maybeSingle();
+  if (error) throw error;
   return isStaffRole(data?.role) ? data.role : null;
 }
 

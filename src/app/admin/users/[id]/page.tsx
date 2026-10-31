@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { can, isBanned } from '@/lib/admin/permissions';
+import { isUuid } from '@/lib/admin/http';
 import { planEditBlock } from '@/lib/admin/plan-guard';
 import { formatDate, getUserDetail } from '@/lib/admin/users';
 import { listTicketsForUser } from '@/lib/admin/support';
@@ -18,7 +19,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default async function AdminUserPage({ params }: { params: { id: string } }) {
   const staff = await requirePagePermission('users.view');
-  const user = await getUserDetail(params.id);
+  if (!isUuid(params.id)) notFound();
+  const canSeeAudit = can(staff.role, 'audit.view');
+  const user = await getUserDetail(params.id, { includeAudit: canSeeAudit });
   if (!user) notFound();
   const tickets = await listTicketsForUser(user.id);
   const suspended = isBanned(user.bannedUntil, new Date());
@@ -44,6 +47,18 @@ export default async function AdminUserPage({ params }: { params: { id: string }
           <Row label="Credits used">{user.credits?.used_this_period ?? 0} / {user.credits?.monthly_allowance ?? 0}</Row>
           <Row label="Add-on credits">{user.credits?.addon_credits ?? 0}</Row>
           <Row label="Nexus member">{user.nexusMemberId ?? '—'}</Row>
+          <Row label="Stripe subscription">
+            {user.subscription?.stripe_subscription_id ? (
+              <a
+                href={`https://dashboard.stripe.com/subscriptions/${user.subscription.stripe_subscription_id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-violet-200 hover:underline"
+              >
+                {user.subscription.stripe_subscription_id}
+              </a>
+            ) : '—'}
+          </Row>
           <Row label="Stripe">
             {user.subscription?.stripe_customer_id ? (
               <a
@@ -85,15 +100,17 @@ export default async function AdminUserPage({ params }: { params: { id: string }
         ))}
       </section>
 
-      <section className="space-y-2">
-        <h2 className="font-medium">Admin history</h2>
-        {user.audit.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
-        {user.audit.map((entry) => (
-          <p key={entry.id} className="text-sm text-white/70">
-            {formatDate(entry.created_at)} · {entry.action} · {entry.outcome}{entry.reason ? ` · ${entry.reason}` : ''}
-          </p>
-        ))}
-      </section>
+      {canSeeAudit && (
+        <section className="space-y-2">
+          <h2 className="font-medium">Admin history</h2>
+          {user.audit.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
+          {user.audit.map((entry) => (
+            <p key={entry.id} className="text-sm text-white/70">
+              {formatDate(entry.created_at)} · {entry.action} · {entry.outcome}{entry.reason ? ` · ${entry.reason}` : ''}
+            </p>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

@@ -56,6 +56,12 @@ export function isBanned(bannedUntil: string | null | undefined, now: Date): boo
 
 export type SuspendBlock = 'self' | 'owner' | 'role_holder';
 
+export const SUSPEND_REFUSED: Record<SuspendBlock, string> = {
+  self: 'You cannot suspend your own account.',
+  owner: 'Owner accounts cannot be suspended.',
+  role_holder: 'Only an Owner can suspend someone who holds a role.',
+};
+
 /** Returns why this suspension is refused, or null when it is allowed. */
 export function canSuspend(input: {
   actorId: string;

@@ -1,15 +1,15 @@
-import { Button } from '@/components/ui/button';
+import { RecoveryForm } from '@/components/admin/recovery-form';
 
-export const metadata = { title: 'Reset password', robots: { index: false, follow: false } };
+export const metadata = {
+  title: 'Reset password',
+  robots: { index: false, follow: false },
+  referrer: 'no-referrer',
+};
 
-export default function RecoveryPage({ searchParams }: { searchParams: { token_hash?: string } }) {
+export default function RecoveryPage() {
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-      <form action="/auth/recovery/confirm" method="POST" className="max-w-md space-y-4 text-center">
-        <h1 className="text-xl font-semibold">Reset your password</h1>
-        <input type="hidden" name="token_hash" value={searchParams.token_hash ?? ''} />
-        <Button type="submit">Continue</Button>
-      </form>
+      <RecoveryForm />
     </main>
   );
 }

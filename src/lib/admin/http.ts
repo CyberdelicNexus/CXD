@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import type { z } from 'zod';
 
 export async function parseBody<S extends z.ZodType>(
@@ -28,5 +29,20 @@ const RPC_MESSAGES: Record<string, string> = {
 export function rpcError(error: { message?: string }): NextResponse {
   const message = RPC_MESSAGES[error.message ?? ''];
   if (message) return NextResponse.json({ error: message }, { status: 409 });
+  // Unmapped: report the database message (an error code or text, never a payload).
+  Sentry.captureException(new Error(`admin rpc failed: ${error.message ?? 'unknown'}`), {
+    tags: { route: 'admin-rpc' },
+  });
   return NextResponse.json({ error: 'The action failed. Nothing was changed.' }, { status: 500 });
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID.test(value);
+}
+
+/** The 404 an /api/admin/users/[id] route returns for an id that is not a UUID. */
+export function notFoundResponse(): NextResponse {
+  return NextResponse.json({ error: 'Not found.' }, { status: 404 });
 }

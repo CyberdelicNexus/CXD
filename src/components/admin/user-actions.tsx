@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { adminPost } from '@/lib/admin/client';
 import { ADMIN_PLANS, type PlanBlock } from '@/lib/admin/plan-guard';
-import { canSuspend, type StaffRole } from '@/lib/admin/permissions';
+import { canSuspend, SUSPEND_REFUSED, type StaffRole } from '@/lib/admin/permissions';
 
 const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
 
@@ -29,7 +29,7 @@ export function UserActions({ actor, target }: Props) {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function run(url: string, body: unknown, done: string) {
+  async function run(url: string, body: unknown, done: string): Promise<boolean> {
     setBusy(true);
     setMessage(null);
     try {
@@ -37,8 +37,10 @@ export function UserActions({ actor, target }: Props) {
       setMessage({ ok: true, text: done });
       setReason('');
       router.refresh();
+      return true;
     } catch (err) {
       setMessage({ ok: false, text: (err as Error).message });
+      return false;
     } finally {
       setBusy(false);
     }
@@ -84,11 +86,13 @@ export function UserActions({ actor, target }: Props) {
           <div className="space-y-1">
             <label htmlFor="credits" className="text-sm text-white/60">Add or remove credits (use a minus sign to remove)</label>
             <div className="flex gap-2">
-              <input id="credits" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className={FIELD} />
+              <input id="credits" type="number" step={1} value={amount} onChange={(e) => setAmount(e.target.value)} className={FIELD} />
               <Button
                 size="sm"
                 disabled={busy || !hasReason || !Number(amount)}
-                onClick={() => run(`${base}/credits`, { amount: Number(amount), reason }, 'Credits adjusted.').then(() => setAmount(''))}
+                onClick={async () => {
+                  if (await run(`${base}/credits`, { amount: Number(amount), reason }, 'Credits adjusted.')) setAmount('');
+                }}
               >
                 Apply
               </Button>
@@ -96,9 +100,11 @@ export function UserActions({ actor, target }: Props) {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => run(`${base}/password-reset`, {}, 'Reset email sent.')}>
-              Send password reset
-            </Button>
+            {(target.role === null || actor.role === 'owner') && (
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => run(`${base}/password-reset`, {}, 'Reset email sent.')}>
+                Send password reset
+              </Button>
+            )}
             {!suspendBlock && (
               <Button
                 size="sm"
@@ -110,6 +116,7 @@ export function UserActions({ actor, target }: Props) {
               </Button>
             )}
           </div>
+          {suspendBlock && <p className="text-xs text-white/40">{SUSPEND_REFUSED[suspendBlock]}</p>}
           {!target.suspended && !suspendBlock && <p className="text-xs text-white/40">Suspending keeps all data and does not cancel Stripe billing.</p>}
         </>
       )}

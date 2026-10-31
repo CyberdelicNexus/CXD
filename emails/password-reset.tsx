@@ -24,5 +24,5 @@ export default function PasswordReset({ resetUrl }: PasswordResetProps) {
 }
 
 PasswordReset.PreviewProps = {
-  resetUrl: 'https://canvas.cyberdelic.design/auth/recovery?token_hash=abc123',
+  resetUrl: 'https://canvas.cyberdelic.design/auth/recovery#token_hash=abc123',
 } satisfies PasswordResetProps;
