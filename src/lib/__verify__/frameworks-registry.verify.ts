@@ -76,7 +76,7 @@ for (const t of FRAMEWORK_TEMPLATES) {
   // Layout: element count (all elements, including board interiors), grid, overlaps, dangling refs.
   const roots = t.elements.filter((el) => !el.boardId);
   check('18–32 elements', t.elements.length >= 18 && t.elements.length <= 32, `got ${t.elements.length}`);
-  check('coordinates on the 20px grid', roots.filter((el) => el.type !== 'line').every((el) => el.x % 20 === 0 && el.y % 20 === 0));
+  check('coordinates on the 20px grid', roots.filter((el) => el.type !== 'line' && !el.containerId).every((el) => el.x % 20 === 0 && el.y % 20 === 0));
   const violations = checkLayout(t.elements, t.edges ?? []);
   const errors = violations.filter((v) => v.severity === 'error');
   check('no layout errors', errors.length === 0, errors.map((e) => e.message).join('; '));

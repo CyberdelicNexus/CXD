@@ -1,7 +1,7 @@
 import type { CanvasElement, ElementStyle, ShapeElement } from '@/types/canvas-elements';
 import type { FrameworkStep, TemplateDefinition } from './templates';
 import {
-  title, caption, divider, container, note, block, shape, storyboard, edge, stepStyle, FAM, type Fam,
+  title, caption, note, block, shape, storyboard, edge, zone, stepStyle, FAM, type Fam,
   NOTE_TEAL, NOTE_ROSE, NOTE_VIOLET, NOTE_EMERALD, WARM_SUN, WARM_FIRE,
 } from './templates-quickstart';
 
@@ -25,18 +25,6 @@ function fwTitle(prefix: string, text: string, gradient: string, capText: string
   return [
     title(`${prefix}-title`, 40, 40, text, gradient),
     caption(`${prefix}-cap`, 40, 80, capText, 900),
-  ];
-}
-
-/** Tinted zone like quickstart's zone(), but with the header inset on the 20px
- *  grid (x+40, y+20, caption y+80) because the registry verify snaps every
- *  non-line element, headers included. Contents sit at x+40. */
-function zone(prefix: string, x: number, y: number, w: number, h: number, label: string, fam: Fam, capText: string): CanvasElement[] {
-  return [
-    container(prefix, x, y, w, h, label, fam, true),
-    { ...title(`${prefix}-h-title`, x + 40, y + 20, label, FAM[fam].grad, 20, Math.min(360, w - 80)), containerId: prefix },
-    { ...divider(`${prefix}-h-div`, x + 40, y + 72, x + w - 40, y + 72, FAM[fam].accent), containerId: prefix },
-    { ...caption(`${prefix}-h-cap`, x + 40, y + 80, capText, w - 80, 12), containerId: prefix },
   ];
 }
 
@@ -66,7 +54,7 @@ const variableStyle: ElementStyle = {
 };
 
 // Silence unused-import warnings until the authoring tasks use everything.
-void note; void block; void storyboard; void edge; void subjectStyle; void variableStyle;
+void note; void block; void storyboard; void edge; void zone; void subjectStyle; void variableStyle;
 void NOTE_TEAL; void NOTE_ROSE; void NOTE_VIOLET; void NOTE_EMERALD; void WARM_SUN; void WARM_FIRE;
 type _Fam = Fam;
 
@@ -121,7 +109,7 @@ const iceberg: TemplateDefinition = {
       const zy = 280 + i * 520;
       return [
         ...zone(`fwi-${l.key}`, 40, zy, 1000, 480, l.label, l.fam, l.cap),
-        note(`fwi-${l.key}-n`, 80, zy + 140, l.noteTitle, l.emoji, l.fill, '', `fwi-${l.key}`),
+        note(`fwi-${l.key}-n`, 76, zy + 140, l.noteTitle, l.emoji, l.fill, '', `fwi-${l.key}`),
       ];
     }),
     block('fwi-anchor', 'desiredChange', 'Desired Change', 1120, 280),
@@ -186,7 +174,7 @@ const causalLoop: TemplateDefinition = {
 
     ...zone('fwc-lv', 40, 940, 1560, 480, 'Leverage points', 'emerald',
       'Where would a small push travel furthest? One note per candidate intervention, with the delay you expect.'),
-    note('fwc-lv-n', 80, 1080, 'Intervention', '🎯', NOTE_EMERALD, 'Which loop does this weaken or strengthen? How long until it shows?', 'fwc-lv'),
+    note('fwc-lv-n', 76, 1080, 'Intervention', '🎯', NOTE_EMERALD, 'Which loop does this weaken or strengthen? How long until it shows?', 'fwc-lv'),
   ] as CanvasElement[],
   edges: [
     { ...edge('fwc-e1', 'fwc-r1', 'fwc-r2', 'ocean'), label: { text: '+' } },
