@@ -14,7 +14,7 @@ async function resolveSession(): Promise<{ signedIn: boolean; context: StaffCont
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return { signedIn: false, context: null };
-  if (isBanned((user as { banned_until?: string | null }).banned_until, new Date())) {
+  if (isBanned(user.banned_until, new Date())) {
     return { signedIn: true, context: null };
   }
 

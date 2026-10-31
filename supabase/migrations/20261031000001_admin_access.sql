@@ -68,6 +68,11 @@ CREATE TRIGGER admin_audit_log_append_only
   BEFORE UPDATE OR DELETE ON public.admin_audit_log
   FOR EACH ROW EXECUTE FUNCTION public.admin_audit_log_append_only();
 
+DROP TRIGGER IF EXISTS admin_audit_log_no_truncate ON public.admin_audit_log;
+CREATE TRIGGER admin_audit_log_no_truncate
+  BEFORE TRUNCATE ON public.admin_audit_log
+  FOR EACH STATEMENT EXECUTE FUNCTION public.admin_audit_log_append_only();
+
 ALTER TABLE public.staff_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admin_audit_log ENABLE ROW LEVEL SECURITY;
 
@@ -141,9 +146,13 @@ GRANT EXECUTE ON FUNCTION public.admin_set_role(uuid, uuid, text, text) TO servi
 
 -- Launch Owner: connect@cyberdelic.nexus. Add an Owner with a new migration in
 -- this same form, after that account exists.
-BEGIN;
-SELECT set_config('cxd.allow_owner_change', 'on', true);
-INSERT INTO public.staff_roles (user_id, role)
-SELECT id, 'owner' FROM auth.users WHERE id = '322d15dd-8477-41ff-8980-f344fda14164'
-ON CONFLICT (user_id) DO NOTHING;
-COMMIT;
+DO $$
+BEGIN
+  PERFORM set_config('cxd.allow_owner_change', 'on', true);
+  INSERT INTO public.staff_roles (user_id, role)
+  SELECT id, 'owner' FROM auth.users WHERE id = '322d15dd-8477-41ff-8980-f344fda14164'
+  ON CONFLICT (user_id) DO NOTHING;
+  IF NOT EXISTS (SELECT 1 FROM public.staff_roles WHERE role = 'owner') THEN
+    RAISE EXCEPTION 'owner_not_seeded';
+  END IF;
+END $$;

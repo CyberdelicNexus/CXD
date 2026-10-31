@@ -25,6 +25,13 @@ async function insertAudit(entry: AuditEntry, outcome: 'attempted' | 'succeeded'
   if (error) throw new Error(`audit write failed: ${error.message}`);
 }
 
+function reportAuditFailure(e: unknown, entry: AuditEntry, outcome: 'failed' | 'succeeded') {
+  Sentry.captureException(e, {
+    tags: { route: 'admin-audit', action: entry.action },
+    extra: { targetId: entry.targetId, outcome },
+  });
+}
+
 /**
  * For actions that call outside services. The attempt is recorded first, and a
  * failed attempt write aborts the action. Actions inside the database use RPCs,
@@ -36,10 +43,10 @@ export async function withAudit<T>(entry: AuditEntry, action: () => Promise<T>):
   try {
     result = await action();
   } catch (err) {
-    await insertAudit(entry, 'failed').catch((e) => Sentry.captureException(e));
+    await insertAudit(entry, 'failed').catch((e) => reportAuditFailure(e, entry, 'failed'));
     throw err;
   }
-  await insertAudit(entry, 'succeeded').catch((e) => Sentry.captureException(e));
+  await insertAudit(entry, 'succeeded').catch((e) => reportAuditFailure(e, entry, 'succeeded'));
   return result;
 }
 
