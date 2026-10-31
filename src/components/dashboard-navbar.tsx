@@ -102,11 +102,19 @@ function formatTimeAgo(dateString: string): string {
   return date.toLocaleDateString();
 }
 
-// `overCover`: the dashboard's cover image runs behind the navbar, so the bar goes
-// lighter and blurrier there instead of hiding the image.
-/** A message the server wrote for the user (a rate limit, a validation error): shown as is. */
+/** A message the server wrote for the user (rate limit 429, validation 400): shown as is. */
 class ServerMessage extends Error {}
 
+/** Only 429 and 400 carry text meant for the user; every other failure keeps the generic alert. */
+function serverMessageFor(status: number, error: unknown): ServerMessage | null {
+  if (typeof error !== 'string' || !error) return null;
+  if (status === 429) return new ServerMessage(`${error} If it keeps happening, email contact@cyberdelic.design`);
+  if (status === 400) return new ServerMessage(error);
+  return null;
+}
+
+// `overCover`: the dashboard's cover image runs behind the navbar, so the bar goes
+// lighter and blurrier there instead of hiding the image.
 export default function DashboardNavbar({ overCover = false }: { overCover?: boolean }) {
   const supabase = createClient()
   const router = useRouter()
@@ -160,9 +168,11 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
         // Close dialog after brief success display
         setTimeout(() => {
           setShowSupportModal(false)
+          // Closing here skips onOpenChange, so clear the draft or it reappears on the next open.
+          setSupportMessage('')
         }, 1500)
       } else {
-        throw data.error ? new ServerMessage(data.error) : new Error('Failed to submit support request')
+        throw serverMessageFor(response.status, data.error) ?? new Error('Failed to submit support request')
       }
     } catch (error) {
       console.error('Support submission error:', error)
@@ -200,9 +210,11 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
         // Close dialog after brief success display
         setTimeout(() => {
           setShowBugModal(false)
+          setBugDescription('')
+          setBugSteps('')
         }, 1500)
       } else {
-        throw data.error ? new ServerMessage(data.error) : new Error('Failed to submit bug report')
+        throw serverMessageFor(response.status, data.error) ?? new Error('Failed to submit bug report')
       }
     } catch (error) {
       console.error('Bug report submission error:', error)

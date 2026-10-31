@@ -140,7 +140,7 @@ Deleting users, impersonation, per-user limit overrides, and canvas preferences 
 
 `support_tickets`: `id`, `user_id`, `email`, `type` (`bug`, `feature`, `support`), `title`, `description`, `status` (`new`, `in_progress`, `waiting`, `done`), `priority` (`low`, `normal`, `high`), `assignee_id`, `source_path`, `sentry_issue_url`, `created_at`, `updated_at`.
 
-`support_ticket_events`: `id`, `ticket_id`, `actor_id`, `kind` (`note`, `reply`, `status`, `assignment`), `body`, `created_at`. Append-only.
+`support_ticket_events`: `id`, `ticket_id`, `actor_id`, `kind` (`note`, `reply`, `status`, `assignment`, `delivery_failed`), `body`, `created_at`. Append-only.
 
 Both are service-role-only.
 
