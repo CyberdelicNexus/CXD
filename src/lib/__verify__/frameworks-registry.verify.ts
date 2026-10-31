@@ -42,6 +42,7 @@ check('stage grouping order follows FRAMEWORK_STAGES',
 console.log('Gating & composer');
 check('three free frameworks', FREE_FRAMEWORK_IDS.length === 3);
 check('free frameworks are in FREE_TEMPLATE_IDS', FREE_FRAMEWORK_IDS.every((id) => FREE_TEMPLATE_IDS.has(id)));
+check('free frameworks exist', FREE_FRAMEWORK_IDS.every((id) => getFrameworkTemplate(id)));
 check('composer catalog has no frameworks', COMPOSER_TEMPLATES.every((t) => t.category !== 'framework'));
 check('composer catalog keeps every non-framework', COMPOSER_TEMPLATES.length === TEMPLATES.length - FRAMEWORK_TEMPLATES.length);
 check('getFrameworkTemplate rejects non-frameworks', getFrameworkTemplate('lean-canvas') === undefined);
@@ -53,7 +54,8 @@ for (const t of FRAMEWORK_TEMPLATES) {
   if (!fw) { check('has framework meta', false); continue; }
   check('stage valid', FRAMEWORK_STAGES.includes(fw.stage));
   check('origin present', fw.origin.trim().length > 0);
-  check('whatItIs 2–3 sentences', (fw.whatItIs.match(/[.!?](\s|$)/g) ?? []).length >= 2 && (fw.whatItIs.match(/[.!?](\s|$)/g) ?? []).length <= 4);
+  const sentences = (fw.whatItIs.match(/[.!?](\s|$)/g) ?? []).length;
+  check('whatItIs 2–3 sentences', sentences >= 2 && sentences <= 3, `got ${sentences}`);
   check('whenToUse 3–4 bullets', fw.whenToUse.length >= 3 && fw.whenToUse.length <= 4, `got ${fw.whenToUse.length}`);
   check('steps 4–7', fw.steps.length >= 4 && fw.steps.length <= 7, `got ${fw.steps.length}`);
   check('pitfalls 2–4', fw.pitfalls.length >= 2 && fw.pitfalls.length <= 4, `got ${fw.pitfalls.length}`);
@@ -71,7 +73,7 @@ for (const t of FRAMEWORK_TEMPLATES) {
     check(`step card ${i + 1} title matches`, stepCards[i] === `${i + 1} · ${s.title}`, `card "${stepCards[i]}"`);
   });
 
-  // Layout: root element count, grid, overlaps, dangling refs.
+  // Layout: element count (all elements, including board interiors), grid, overlaps, dangling refs.
   const roots = t.elements.filter((el) => !el.boardId);
   check('18–32 elements', t.elements.length >= 18 && t.elements.length <= 32, `got ${t.elements.length}`);
   check('coordinates on the 20px grid', roots.filter((el) => el.type !== 'line').every((el) => el.x % 20 === 0 && el.y % 20 === 0));
