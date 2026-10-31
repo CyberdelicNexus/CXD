@@ -27,15 +27,15 @@ CXD has become a context-engineering tool for experience design: the canvas, the
 | plan | fw-impact-effort | Impact–Effort Matrix | Prioritise ideas in a 2×2 before committing | yes |
 | plan | fw-premortem | Pre-mortem | Imagine the launch failed, list causes, convert to safeguards | no |
 | ship | fw-workback | Work-back Plan | Backward schedule from the live date with milestones and owners | no |
-| market | fw-value-prop | Value Proposition Canvas | Audience jobs, pains and gains matched to what the experience delivers | no |
-| market | fw-narrative-arc | Narrative Messaging Arc | Seven-beat hero-story structure for pitches and landing pages, adapted from the StoryBrand pattern | no |
+| market | fw-audience-fit | Audience Fit Map | What the audience is trying to do, avoid and gain, matched to real moments in the experience | no |
+| market | fw-narrative-arc | Narrative Messaging Arc | Seven-beat hero-story structure for pitches and landing pages, our own structure, inspired by hero's-journey storytelling | no |
 | distribute | fw-aarrr | Pirate Metrics Funnel | Acquisition to revenue, one lane per stage with tactics and a metric | no |
 | sell | fw-ecosystem-map | Partner & Channel Ecosystem Map | Venues, collaborators, platforms and gatekeepers by influence and reach | no |
 
 Content rules:
 
 - Every explainer carries an `origin` line crediting the originator.
-- Trademarked frameworks are adapted and renamed, never copied. The StoryBrand-derived entry ships as "Narrative Messaging Arc" with its own beat names. Value Proposition Canvas is CC BY-SA (Strategyzer); the explainer links the source and uses our own wording.
+- Protected frameworks are never copied. Strategyzer's Value Proposition Canvas is under copyright and needs Strategyzer AG's permission for use in software (https://strategyzer.com/legal/usage-of-our-tools, confirmed 2026-10-31), so the roster carries our own Audience Fit Map, with original wording and layout and a credit to the source book. "Narrative Messaging Arc" uses its own beat names and credits Building a StoryBrand once in its origin line; STORYBRAND is a US trademark, so that name, SB7 and BrandScript never appear in titles or beats.
 - Explainers are written for a practitioner designing an experience, not a generic business reader: examples reference installations, retreats, events, performances.
 
 ## 4. Data model
@@ -151,11 +151,11 @@ The designer built this canvas with the following framework(s). Coach within the
 
 Each framework template follows `templates.design.md` in full, plus:
 
-- **Spine matches the method.** Rail for sequential methods (Work-back Plan, Pre-mortem, Narrative Arc, AARRR), hub for comparative ones (Impact–Effort, Value Proposition, SCAMPER around the subject), vertical rail for the Iceberg's four layers.
+- **Spine matches the method.** Rail for sequential methods (Work-back Plan, Pre-mortem, Narrative Arc, AARRR), hub for comparative ones (Impact–Effort, Audience Fit, SCAMPER around the subject), vertical rail for the Iceberg's four layers.
 - **Step cards.** A rail of small dark step cards, one per `framework.steps` entry, numbered in the title ("1 · Surface the events"), placed along the spine's top or left edge. Titles must equal `steps[i].title`; the verify script checks this.
 - **Seeds.** Every zone ships one note seed with the zone's prompt as `noteTitle` and a one-line placeholder body.
 - **Edges.** Causal Loop Map uses labelled gradient edges with `+`/`−` labels and two pre-drawn loops (one reinforcing, one balancing). Theory of Change runs edges right-to-left from the trait back to inputs.
-- **Anchors.** Theory of Change anchors on the `traitMapping` experience block; Value Proposition Canvas on `humanContext`; Iceberg on `desiredChange`. Others have no framing anchor.
+- **Anchors.** Theory of Change anchors on the `traitMapping` experience block; Audience Fit Map on `humanContext`; Iceberg on `desiredChange`. Others have no framing anchor.
 - Element count 18–32. Coordinates on the 20px grid, no overlapping root elements.
 
 ## 8. Research and authoring process

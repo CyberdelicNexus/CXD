@@ -10,7 +10,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-31-frameworks-library-design.md`. Read it first.
 
-**Repo root:** `C:\Users\JEMA\Documents\ClaudeCode\CXD\CXD` on branch `feat/frameworks-library`. The working tree also holds four uncommitted files from another branch (`src/app/api/ai/canvas-operations/route.ts`, `src/app/api/ai/chat/route.ts`, `src/app/dashboard/docs/page.tsx`, `src/components/cxd/canvas/ai-action-bar.tsx`). Do not stage them except where a task names the file; when a task names `chat/route.ts`, stage only that file's hunks you wrote with `git add -p` or accept that its prior modifications ride along (ask the user if unsure).
+**Repo root:** the worktree `C:\Users\JEMA\Documents\ClaudeCode\CXD\CXD-frameworks` on branch `feat/frameworks-library`, based on `origin/main`. Do not touch `C:\Users\JEMA\Documents\ClaudeCode\CXD\CXD`: it holds uncommitted assistant work on another branch. Line numbers in this plan were read from that folder, so treat them as approximate here and locate edits by the surrounding code.
+
+**Type-check baseline:** `npx tsc --noEmit -p tsconfig.json` reports 58 existing errors, all in `src/utils/__tests__/diagnostic-chat-handoff.test.ts` and `src/lib/ai/__tests__/ai-response-classifier.test.ts`. "No errors" below means no errors outside those two files.
+
+**Commit trailer:** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` on every commit. Stage named paths only.
+
+**Research corrections:** Task 1 is done. The draft content below already includes its corrections (`docs/superpowers/research/2026-10-31-frameworks-research.md`).
 
 ---
 
@@ -62,7 +68,7 @@ For each row, run one search for the origin and canonical steps and one for pitf
 | fw-impact-effort | `impact effort matrix prioritization origin quick wins` | `impact effort matrix problems estimation bias` |
 | fw-premortem | `pre-mortem Gary Klein 2007 Harvard Business Review steps` | `premortem technique prospective hindsight research Mitchell Russo Pennington` |
 | fw-workback | `work back plan backward scheduling milestones event production` | `backward planning pitfalls buffer dependencies` |
-| fw-value-prop | `value proposition canvas Strategyzer Osterwalder customer profile value map licence` | `value proposition canvas mistakes fit` |
+| fw-audience-fit | `value proposition canvas Strategyzer Osterwalder customer profile value map licence` | `value proposition canvas mistakes fit` |
 | fw-narrative-arc | `StoryBrand seven part framework Donald Miller trademark` | `hero's journey marketing messaging framework alternatives` |
 | fw-aarrr | `AARRR pirate metrics Dave McClure 2007 stages` | `pirate metrics criticism vanity metrics` |
 | fw-ecosystem-map | `stakeholder mapping influence interest grid Mendelow origin` | `partnership ecosystem map channel partners framework events` |
@@ -94,7 +100,7 @@ Every section must have all six fields filled. If a fact cannot be confirmed, wr
 
 ```bash
 git add -f docs/superpowers/research/2026-10-31-frameworks-research.md
-git commit -m "docs(research): frameworks library research pass for the 12 explainers" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "docs(research): frameworks library research pass for the 12 explainers" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 (`docs/superpowers` is gitignored; the repo's existing specs were force-added, so `-f` follows precedent.)
@@ -129,7 +135,7 @@ const EXPECTED_IDS = [
   'fw-hmw-crazy8', 'fw-scamper',
   'fw-impact-effort', 'fw-premortem',
   'fw-workback',
-  'fw-value-prop', 'fw-narrative-arc',
+  'fw-audience-fit', 'fw-narrative-arc',
   'fw-aarrr',
   'fw-ecosystem-map',
 ];
@@ -428,7 +434,7 @@ Expected: `12 framework templates registered` ✗ and each `fw-… present` ✗;
 
 ```bash
 git add src/lib/templates.ts src/lib/templates-frameworks.ts src/lib/__verify__/frameworks-registry.verify.ts
-git commit -m "feat(templates): framework category, FrameworkMeta, stage helpers and registry verify script" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(templates): framework category, FrameworkMeta, stage helpers and registry verify script" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -579,7 +585,7 @@ Expected: no errors.
 
 ```bash
 git add src/types/cxd-schema.ts src/lib/yjs/y-doc-types.ts src/lib/yjs/y-doc-factory.ts src/store/cxd-store.ts src/app/dashboard/templates/page.tsx src/components/dashboard-content.tsx
-git commit -m "feat(project): frameworkIds on projects, Y.Doc round-trip, createProject options, addProjectFramework" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(project): frameworkIds on projects, Y.Doc round-trip, createProject options, addProjectFramework" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -619,8 +625,8 @@ const iceberg: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'think',
-    origin: 'Systems thinking tradition; popularised by Peter Senge and the Waters Center for Systems Thinking',
-    sourceUrl: 'https://thesystemsthinker.com/',
+    origin: 'A widely used systems-thinking tool, often associated with Peter Senge\u2019s The Fifth Discipline (1990); no single originator is documented',
+    sourceUrl: 'https://www.thinknpc.org/resource-hub/the-iceberg-model/',
     whatItIs: 'The Iceberg Model is a systems-thinking tool for looking beneath a single event to the patterns, structures and mental models that produce it. Only the event is visible; the layers below explain why it keeps happening. The deeper the layer you change, the more leverage you have.',
     whenToUse: [
       'Something in an experience keeps going wrong and quick fixes have not held.',
@@ -673,7 +679,7 @@ const causalLoop: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'think',
-    origin: 'System dynamics; Jay Forrester (MIT, 1960s), popularised by Peter Senge in The Fifth Discipline (1990)',
+    origin: 'System dynamics, founded by Jay Forrester at MIT in the 1950s; causal loop diagrams popularised for managers by Peter Senge\u2019s The Fifth Discipline (1990)',
     sourceUrl: 'https://thesystemsthinker.com/causal-loop-construction-the-basics/',
     whatItIs: 'A causal loop map shows how the variables in a system push on each other and close into loops. Reinforcing loops amplify change in one direction; balancing loops resist it. Seeing the loops tells you why an experience grows, plateaus or collapses, and where a small push would travel furthest.',
     whenToUse: [
@@ -738,7 +744,7 @@ Expected: the `fw-iceberg` and `fw-causal-loop` sections all ✓ (step cards mat
 
 ```bash
 git add src/lib/templates-frameworks.ts
-git commit -m "feat(frameworks): Iceberg Model and Causal Loop Map" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(frameworks): Iceberg Model and Causal Loop Map" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -778,8 +784,8 @@ const theoryOfChange: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'think',
-    origin: 'Carol Weiss (1995) and the Aspen Institute Roundtable on Community Change',
-    sourceUrl: 'https://www.theoryofchange.org/what-is-theory-of-change/',
+    origin: 'Popularised by Carol Weiss (1995) through the Aspen Institute Roundtable on Community Change',
+    sourceUrl: 'https://www.theoryofchange.org/what-is-theory-of-change/toc-background/toc-origins/',
     whatItIs: 'A Theory of Change is an explicit chain from the long-term change you want back to what you will do to cause it, with every assumption written down. It starts at the end, with the lasting trait, and asks what must be true one step earlier, and earlier again. The result is a map you can test rather than a hope.',
     whenToUse: [
       'An experience claims transformation and you want to show how, not just that.',
@@ -832,8 +838,8 @@ const hmwCrazy8: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'ideate',
-    origin: 'How Might We: Min Basadur at Procter & Gamble (1970s), spread by IDEO. Crazy 8s: Google Ventures Design Sprint (Jake Knapp)',
-    sourceUrl: 'https://www.gv.com/sprint/',
+    origin: 'How Might We: coined by Min Basadur at Procter & Gamble in the 1970s, popularised by IDEO and the d.school. Crazy 8s: the Google Ventures Design Sprint (Jake Knapp)',
+    sourceUrl: 'https://designsprintkit.withgoogle.com/methodology/phase3-sketch/crazy-8s',
     whatItIs: 'How Might We turns a problem statement into open, optimistic questions that invite many answers. Crazy 8s then forces eight rough sketches in eight minutes, so the first obvious idea does not win by default. Together they move a team from a stuck problem to a spread of candidate ideas in under an hour.',
     whenToUse: [
       'The team keeps circling the same one or two ideas.',
@@ -885,7 +891,7 @@ Expected: all per-framework checks ✓ for the four authored so far; eight missi
 
 ```bash
 git add src/lib/templates-frameworks.ts
-git commit -m "feat(frameworks): Theory of Change and How Might We + Crazy 8s" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(frameworks): Theory of Change and How Might We + Crazy 8s" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -983,7 +989,7 @@ const impactEffort: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'plan',
-    origin: 'Common product and project-management practice; a descendant of the Eisenhower matrix',
+    origin: 'A widely used prioritisation 2×2 with no single originator; similar in shape, but not in axes, to the Eisenhower matrix',
     whatItIs: 'The Impact–Effort Matrix is a 2×2 that sorts ideas by how much they move the goal and how much they cost to do. Quick wins get done first, big bets get scheduled, fill-ins wait for slack, and time sinks get dropped. It turns a long wishlist into a short plan in one session.',
     whenToUse: [
       'There are more ideas than budget or time.',
@@ -1025,7 +1031,7 @@ Expected: per-framework checks ✓ for six frameworks; six missing ids and the c
 
 ```bash
 git add src/lib/templates-frameworks.ts
-git commit -m "feat(frameworks): SCAMPER and Impact-Effort Matrix" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(frameworks): SCAMPER and Impact-Effort Matrix" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1060,7 +1066,7 @@ const premortem: TemplateDefinition = {
     stage: 'plan',
     origin: 'Gary Klein, "Performing a Project Premortem", Harvard Business Review, 2007',
     sourceUrl: 'https://hbr.org/2007/09/performing-a-project-premortem',
-    whatItIs: 'A pre-mortem imagines that the project has already failed and asks the team to explain why. Because the failure is treated as fact, people name risks they would otherwise keep quiet about. Research on prospective hindsight suggests this raises the number of causes identified by around 30 percent.',
+    whatItIs: 'A pre-mortem imagines that the project has already failed and asks the team to explain why. Because the failure is treated as fact, people name risks they would otherwise keep quiet about. Research on prospective hindsight (Mitchell, Russo and Pennington, 1989) found that imagining an event has already happened helped people generate about 30 percent more reasons for it.',
     whenToUse: [
       'A plan is set and the team is confident; that is exactly when blind spots hide.',
       'Before a launch, a premiere or an opening night.',
@@ -1173,70 +1179,72 @@ Expected: per-framework checks ✓ for eight frameworks; four missing ids and th
 
 ```bash
 git add src/lib/templates-frameworks.ts
-git commit -m "feat(frameworks): Pre-mortem and Work-back Plan" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(frameworks): Pre-mortem and Work-back Plan" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 8: Author Value Proposition Canvas and Narrative Messaging Arc (Market)
+### Task 8: Author Audience Fit Map and Narrative Messaging Arc (Market)
 
 **Files:**
 - Modify: `src/lib/templates-frameworks.ts`
 
-Check the research document first, especially licence notes for Strategyzer's canvas and the StoryBrand trademark. The adapted beat names below must not reuse StoryBrand's.
+Check the research document first, especially the licence note: Strategyzer's Value Proposition Canvas is under copyright and needs permission for use in software, so this task builds our own Audience Fit Map instead. The beat names below deliberately avoid StoryBrand's: never use StoryBrand, SB7 or BrandScript in titles or beats. The book is credited once, in `origin`.
 
 - [ ] **Step 1: Add the two definitions above `FRAMEWORK_TEMPLATES`**
 
 ```ts
-// ─── 9. Value Proposition Canvas — TWO HALVES: audience profile ↔ experience offer
+// ─── 9. Audience Fit Map — TWO HALVES: audience ↔ experience
+// Our own map. Strategyzer's Value Proposition Canvas is under copyright and
+// needs permission for use in software: do not reuse its name, its shapes or
+// its "pain relievers" / "gain creators" terms here.
 
-const VALUE_STEPS: FrameworkStep[] = [
-  { title: 'Describe the audience jobs', detail: 'What are they trying to get done, feel or become when they come to you? Functional, emotional, social.' },
-  { title: 'List pains', detail: 'What frustrates, blocks or scares them before, during and after? Rank by intensity.' },
-  { title: 'List gains', detail: 'What outcomes would delight them, beyond the obvious? Rank by how much they matter.' },
-  { title: 'Design relievers and creators', detail: 'For the top pains and gains, what in your experience answers them? Be specific about moments.' },
-  { title: 'Check the fit', detail: 'Draw a line from each reliever or creator to the pain or gain it addresses. Unlinked items are decoration.' },
+const FIT_STEPS: FrameworkStep[] = [
+  { title: 'Hear what they are trying to do', detail: 'What are they hoping to get done, feel or become when they come to you? Use their words.' },
+  { title: 'Name what stands in the way', detail: 'What frustrates, blocks or scares them before, during and after? Rank by intensity.' },
+  { title: 'Name what they hope for', detail: 'What would delight them, beyond the obvious? Rank by how much it matters.' },
+  { title: 'Match real moments', detail: 'For the top items, which specific moment in your experience answers them?' },
+  { title: 'Draw the fit lines', detail: 'Connect each moment to what it answers. Anything unconnected is decoration.' },
 ];
 
-const valueProp: TemplateDefinition = {
-  id: 'fw-value-prop',
-  name: 'Value Proposition Canvas',
+const audienceFit: TemplateDefinition = {
+  id: 'fw-audience-fit',
+  name: 'Audience Fit Map',
   description: 'Match what your audience is trying to do, avoid and gain with what the experience delivers',
   emoji: '🤝',
   category: 'framework',
   framework: {
     stage: 'market',
-    origin: 'Alexander Osterwalder and Strategyzer (2014); canvas shared under CC BY-SA',
-    sourceUrl: 'https://www.strategyzer.com/library/the-value-proposition-canvas',
-    whatItIs: 'The Value Proposition Canvas puts a profile of the audience (their jobs, pains and gains) next to a map of what you offer (experiences, pain relievers, gain creators) and asks where they connect. Fit exists where your offer answers a job that matters. It turns "who is this for" into a testable claim.',
+    origin: 'Our own map, drawing on jobs-to-be-done thinking and on Value Proposition Design (Osterwalder et al., 2014; Strategyzer.com, Strategyzer AG)',
+    whatItIs: 'The Audience Fit Map sets what your audience is trying to do, avoid and gain beside the specific moments your experience offers, then asks where the two connect. Fit exists only where a moment answers something that matters to them. It turns "who is this for" into a claim you can test.',
     whenToUse: [
       'Writing the first marketing copy and you cannot yet say why someone would come.',
       'Attendance is lower than the quality deserves.',
       'Adapting an experience to a new audience.',
     ],
-    steps: VALUE_STEPS,
+    steps: FIT_STEPS,
     pitfalls: [
       'Writing the audience side from the inside ("they want immersion") instead of from interviews.',
-      'Listing every feature as a gain creator; only linked items count.',
-      'Skipping ranking, so minor pains get the same attention as the one that stops people coming.',
+      'Mixing several audiences on one map; make one map per audience.',
+      'Skipping ranking, so a minor annoyance gets the same attention as the one thing that stops people coming.',
     ],
-    assistantBrief: 'Coach the Value Proposition Canvas. The canvas has an Audience profile zone (Jobs, Pains, Gains notes) and an Experience offer zone (Experiences & features, Pain relievers, Gain creators). Start on the audience side and keep the designer in the audience\u2019s own words; when a statement sounds like the designer\u2019s wish, ask what evidence or interview it came from. Push for ranking: which pain stops people coming, which gain they would tell a friend about. Use the Human Context block when present as a source. Then move to the offer side and insist each reliever or creator names a concrete moment in the experience. Finish by checking fit: propose edges from each reliever or creator to the pain or gain it answers, and point out anything left unlinked.',
+    assistantBrief: 'Coach the Audience Fit Map. The canvas has an Audience zone (Trying to do, In the way, Hoping for) and an Experience zone (Moments we offer, What eases it, What lifts it). Start on the audience side and keep the designer in the audience\u2019s own words; when a statement sounds like the designer\u2019s wish, ask what evidence or interview it came from. Keep to one audience per map. Push for ranking: which obstacle stops people coming, which hope they would tell a friend about. Use the Human Context block when present as a source. Then move to the experience side and insist each entry names a concrete moment. Finish by checking fit: propose edges from each moment to what it answers, and point out anything left unconnected.',
   },
   elements: [
-    ...fwTitle('fwv', 'Value Proposition Canvas', FAM.ocean.grad, 'Left: the audience in their own words. Right: what the experience does about it. Fit is where lines connect.'),
-    ...stepRail('fwv', VALUE_STEPS),
+    ...fwTitle('fwv', 'Audience Fit Map', FAM.ocean.grad, 'Left: the audience in their own words. Right: what the experience does about it. Fit is where lines connect.'),
+    ...stepRail('fwv', FIT_STEPS),
 
-    ...zone('fwv-a', 40, 280, 900, 1160, 'Audience profile', 'ocean',
-      'Jobs they are trying to do, pains that block them, gains they hope for. Rank each list.'),
-    note('fwv-a-j', 76, 420, 'Jobs', '🎯', NOTE_TEAL, 'What are they trying to get done, feel or become?', 'fwv-a'),
-    note('fwv-a-p', 76, 760, 'Pains', '🌧️', NOTE_ROSE, 'What frustrates, blocks or scares them?', 'fwv-a'),
-    note('fwv-a-g', 76, 1100, 'Gains', '🌤️', NOTE_EMERALD, 'What would delight them beyond the obvious?', 'fwv-a'),
+    ...zone('fwv-a', 40, 280, 900, 1160, 'Audience', 'ocean',
+      'What they are trying to do, what stands in the way, what they hope for. Rank each list.'),
+    note('fwv-a-j', 76, 420, 'Trying to do', '🎯', NOTE_TEAL, 'What are they hoping to get done, feel or become?', 'fwv-a'),
+    note('fwv-a-p', 76, 760, 'In the way', '🌧️', NOTE_ROSE, 'What frustrates, blocks or scares them?', 'fwv-a'),
+    note('fwv-a-g', 76, 1100, 'Hoping for', '🌤️', NOTE_EMERALD, 'What would delight them beyond the obvious?', 'fwv-a'),
 
-    ...zone('fwv-o', 1000, 280, 900, 1160, 'Experience offer', 'violet',
-      'Name concrete moments, not features. Link each one to the pain or gain it answers.'),
-    note('fwv-o-e', 1036, 420, 'Experiences & features', '✨', NOTE_VIOLET, 'The moments and elements you offer.', 'fwv-o'),
-    note('fwv-o-r', 1036, 760, 'Pain relievers', '🩹', WARM_FIRE, 'Which pain does this moment remove or soften?', 'fwv-o'),
-    note('fwv-o-c', 1036, 1100, 'Gain creators', '🎁', WARM_SUN, 'Which gain does this moment deliver?', 'fwv-o'),
+    ...zone('fwv-o', 1000, 280, 900, 1160, 'Experience', 'violet',
+      'Name concrete moments, not features. Connect each one to what it answers.'),
+    note('fwv-o-e', 1036, 420, 'Moments we offer', '✨', NOTE_VIOLET, 'The moments and elements you offer.', 'fwv-o'),
+    note('fwv-o-r', 1036, 760, 'What eases it', '🩹', WARM_FIRE, 'Which obstacle does this moment remove or soften?', 'fwv-o'),
+    note('fwv-o-c', 1036, 1100, 'What lifts it', '🎁', WARM_SUN, 'Which hope does this moment deliver?', 'fwv-o'),
 
     block('fwv-anchor', 'humanContext', 'Human Context', 1960, 280),
   ] as CanvasElement[],
@@ -1251,7 +1259,7 @@ const valueProp: TemplateDefinition = {
 const ARC_STEPS: FrameworkStep[] = [
   { title: 'The hero', detail: 'Your audience, not you. What do they want? One desire, stated simply.' },
   { title: 'The tension', detail: 'What stands in their way: the outer obstacle, the inner feeling, the bigger wrong.' },
-  { title: 'The guide', detail: 'You enter as the one who understands and has a way. Empathy first, then credibility.' },
+  { title: 'The ally', detail: 'You enter as the one who understands and has a way. Empathy first, then credibility.' },
   { title: 'The path', detail: 'Three steps that make saying yes feel safe. Simple enough to remember.' },
   { title: 'The invitation', detail: 'The direct ask (book, join, come) and the soft one (learn more, follow).' },
   { title: 'The stakes', detail: 'What they lose by doing nothing. Said once, without fear-mongering.' },
@@ -1261,7 +1269,7 @@ const ARC_STEPS: FrameworkStep[] = [
 const ARC_BEATS: { key: string; title: string; emoji: string; fill: string }[] = [
   { key: 'h', title: 'The hero', emoji: '🧑‍🚀', fill: NOTE_VIOLET },
   { key: 't', title: 'The tension', emoji: '⛈️', fill: WARM_FIRE },
-  { key: 'g', title: 'The guide', emoji: '🧙', fill: NOTE_TEAL },
+  { key: 'g', title: 'The ally', emoji: '🧙', fill: NOTE_TEAL },
   { key: 'p', title: 'The path', emoji: '🪜', fill: NOTE_EMERALD },
   { key: 'i', title: 'The invitation', emoji: '✉️', fill: WARM_SUN },
   { key: 's', title: 'The stakes', emoji: '⚖️', fill: NOTE_ROSE },
@@ -1276,8 +1284,8 @@ const narrativeArc: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'market',
-    origin: 'Adapted from hero\u2019s-journey messaging frameworks, including Donald Miller\u2019s StoryBrand (2017); beat names are our own',
-    whatItIs: 'The Narrative Messaging Arc arranges your marketing message as a story in which the audience is the hero and you are the guide. Seven beats carry a reader from a desire through tension to an invitation and a transformation. Because the structure is a story, people remember it, and because the hero is them, they lean in.',
+    origin: 'Our own structure, inspired by hero\u2019s-journey storytelling and by Donald Miller\u2019s Building a StoryBrand (2017)',
+    whatItIs: 'The Narrative Messaging Arc arranges your marketing message as a story in which the audience is the hero and you are the ally. Seven beats carry a reader from a desire through tension to an invitation and a transformation. Because the structure is a story, people remember it, and because the hero is them, they lean in.',
     whenToUse: [
       'Writing a landing page, pitch deck, invitation or funding narrative.',
       'The current copy talks mostly about you and your method.',
@@ -1285,14 +1293,14 @@ const narrativeArc: TemplateDefinition = {
     ],
     steps: ARC_STEPS,
     pitfalls: [
-      'Casting yourself as the hero. The audience is the hero; you are the guide.',
+      'Casting yourself as the hero. The audience is the hero; you are the ally.',
       'Stakes that threaten; stakes should clarify what is lost by inaction, once.',
       'A path with seven steps. Three is the limit people remember.',
     ],
-    assistantBrief: 'Coach the Narrative Messaging Arc. The canvas is a rail of seven beat cards (The hero, The tension, The guide, The path, The invitation, The stakes, The transformation) plus a One-liner zone and a Where it lives zone. Keep the audience as the hero: whenever the designer writes about themselves in the hero slot, move it to the guide slot. Push each beat to one or two concrete sentences in the audience\u2019s language, using Framing for the hero\u2019s desire and the transformation (states and traits). Keep the path to three steps and the stakes to a single calm statement. When all seven beats hold text, help them compress into a one-liner (hero, tension, transformation in one breath) and list where the message lives: page, deck, invitation, social.',
+    assistantBrief: 'Coach the Narrative Messaging Arc. The canvas is a rail of seven beat cards (The hero, The tension, The ally, The path, The invitation, The stakes, The transformation) plus a One-liner zone and a Where it lives zone. Keep the audience as the hero: whenever the designer writes about themselves in the hero slot, move it to the ally slot. Push each beat to one or two concrete sentences in the audience\u2019s language, using Framing for the hero\u2019s desire and the transformation (states and traits). Keep the path to three steps and the stakes to a single calm statement. When all seven beats hold text, help them compress into a one-liner (hero, tension, transformation in one breath) and list where the message lives: page, deck, invitation, social.',
   },
   elements: [
-    ...fwTitle('fwn', 'Narrative Messaging Arc', FAM.violet.grad, 'Seven beats, left to right. The audience is the hero; you are the guide. Compress it into one line at the end.'),
+    ...fwTitle('fwn', 'Narrative Messaging Arc', FAM.violet.grad, 'Seven beats, left to right. The audience is the hero; you are the ally. Compress it into one line at the end.'),
     ...stepRail('fwn', ARC_STEPS),
     ...ARC_BEATS.map((b, i) => note(`fwn-${b.key}`, 40 + i * 300, 280, b.title, b.emoji, b.fill, 'One or two sentences, in their words.')),
     ...zone('fwn-1', 40, 680, 2060, 480, 'The one-liner', 'sunset',
@@ -1308,7 +1316,7 @@ const narrativeArc: TemplateDefinition = {
 };
 ```
 
-Add `valueProp, narrativeArc,` to `FRAMEWORK_TEMPLATES`.
+Add `audienceFit, narrativeArc,` to `FRAMEWORK_TEMPLATES`.
 
 - [ ] **Step 2: Run the verify script**
 
@@ -1319,7 +1327,7 @@ Expected: per-framework checks ✓ for ten frameworks; two missing ids and the c
 
 ```bash
 git add src/lib/templates-frameworks.ts
-git commit -m "feat(frameworks): Value Proposition Canvas and Narrative Messaging Arc" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(frameworks): Audience Fit Map and Narrative Messaging Arc" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1360,7 +1368,7 @@ const aarrr: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'distribute',
-    origin: 'Dave McClure, "Startup Metrics for Pirates", 2007',
+    origin: 'Dave McClure, "Startup Metrics for Pirates", Ignite Seattle talk, around 2007',
     sourceUrl: 'https://www.slideshare.net/dmc500hats/startup-metrics-for-pirates-long-version',
     whatItIs: 'Pirate Metrics (AARRR) breaks how people find, try, keep, share and pay for something into five stages, each with one metric. It replaces vanity numbers with a funnel you can act on: the stage with the worst conversion is where to work next. For experiences, it links distribution to the moments that actually make people come back.',
     whenToUse: [
@@ -1420,7 +1428,7 @@ const ecosystemMap: TemplateDefinition = {
   category: 'framework',
   framework: {
     stage: 'sell',
-    origin: 'Adapted from stakeholder power–interest mapping (Aubrey Mendelow, 1991) for partnerships and distribution channels',
+    origin: 'Our adaptation of stakeholder power–interest mapping, attributed to Aubrey Mendelow (1991), for partnerships and distribution channels',
     whatItIs: 'The Partner & Channel Ecosystem Map sorts everyone who could help an experience reach its audience by two questions: how much influence they have over whether it happens, and how many of the right people they can reach. The four quadrants tell you how to treat each one. It turns a vague "we should partner" into three concrete asks.',
     whenToUse: [
       'Selling an experience into venues, festivals, institutions or brands.',
@@ -1467,7 +1475,7 @@ export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
   // Ship
   workback,
   // Market
-  valueProp,
+  audienceFit,
   narrativeArc,
   // Distribute
   aarrr,
@@ -1490,7 +1498,7 @@ Expected: no errors (unused-import errors mean a helper from Task 2 is unused; r
 
 ```bash
 git add src/lib/templates-frameworks.ts
-git commit -m "feat(frameworks): Pirate Metrics Funnel and Partner & Channel Ecosystem Map; registry complete" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(frameworks): Pirate Metrics Funnel and Partner & Channel Ecosystem Map; registry complete" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1628,17 +1636,9 @@ Expected: no errors.
 
 - [ ] **Step 7: Commit**
 
-`chat/route.ts` carries unrelated uncommitted changes from another branch. Stage only this task's hunk:
-
 ```bash
-git add src/types/ai-types.ts src/utils/ai-context-aggregator.ts src/lib/ai/system-prompts.ts src/app/api/ai/suggest-template/route.ts src/lib/__verify__/frameworks-registry.verify.ts
-git add -p src/app/api/ai/chat/route.ts
-```
-
-In the interactive prompt answer `y` only for the import line change and the `frameworksBlock` hunk, `n` for everything else. If `git add -p` is unavailable in this shell, stop and ask the user whether the pre-existing changes may ride along. Then:
-
-```bash
-git commit -m "feat(assistant): coach inside the project's active frameworks; composer skips framework templates" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git add src/types/ai-types.ts src/utils/ai-context-aggregator.ts src/lib/ai/system-prompts.ts src/app/api/ai/chat/route.ts src/app/api/ai/suggest-template/route.ts src/lib/__verify__/frameworks-registry.verify.ts
+git commit -m "feat(assistant): coach inside the project's active frameworks; composer skips framework templates" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1894,7 +1894,7 @@ Expected: no errors.
 
 ```bash
 git add src/components/cxd/framework-detail-dialog.tsx
-git commit -m "feat(frameworks): framework detail dialog with explainer, layout preview and create/insert footers" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(frameworks): framework detail dialog with explainer, layout preview and create/insert footers" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2058,7 +2058,7 @@ Stop the dev server.
 
 ```bash
 git add src/app/dashboard/templates/page.tsx
-git commit -m "feat(templates): Frameworks tab grouped by stage, detail dialog, framework-aware create" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(templates): Frameworks tab grouped by stage, detail dialog, framework-aware create" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2178,7 +2178,7 @@ Stop the dev server.
 
 ```bash
 git add src/components/cxd/template-picker-modal.tsx
-git commit -m "feat(picker): Frameworks tab, info icon to the detail dialog, record framework on insert" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "feat(picker): Frameworks tab, info icon to the detail dialog, record framework on insert" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2190,7 +2190,7 @@ git commit -m "feat(picker): Frameworks tab, info icon to the detail dialog, rec
 
 - [ ] **Step 1: Changelog entry**
 
-In `src/data/changelog.ts`, remove `isLatest: true,` from the `1.5.1` entry and insert a new first entry. Use the real date of the day you run this task in the same format as the others (for example `'November 3, 2026'`):
+In `src/data/changelog.ts`, remove `isLatest: true,` from the current first entry (`1.5.0` on this branch) and insert a new first entry. Use the real date of the day you run this task in the same format as the others (for example `'November 3, 2026'`):
 
 ```ts
   {
@@ -2235,9 +2235,9 @@ Record anything that fails as a bug and fix it before the final commit.
 
 ```bash
 git add src/data/changelog.ts
-git commit -m "chore(changelog): 1.6.0 frameworks library" -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+git commit -m "chore(changelog): 1.6.0 frameworks library" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 5: Hand off**
 
-Push the branch and open a PR against `main` with a summary of the feature, the verification steps run, and the note that `chat/route.ts` carried only the frameworks hunk. End the PR body with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. Do not merge; the user merges via GitHub.
+Push the branch and open a PR against `main` with a summary of the feature, the verification steps run, and a note that this branch is based on `origin/main`, so it will need merging with the uncommitted assistant work (`system-prompts.ts`, `chat/route.ts`, `y-doc-factory.ts`, `changelog.ts`). End the PR body with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. Do not merge; the user merges via GitHub.
