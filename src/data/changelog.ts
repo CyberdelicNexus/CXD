@@ -10,9 +10,27 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.6.0',
+    date: 'October 31, 2026',
+    isLatest: true,
+    changes: [
+      {
+        category: 'feature',
+        description: 'Frameworks: a new tab in Templates with 12 guided methods for thinking, ideating, planning, shipping, marketing, distributing and selling experiences. Each one explains what it is, when to use it and how to run it, builds a canvas with numbered step cards, and the Canvas Assistant coaches inside it',
+      },
+      {
+        category: 'feature',
+        description: 'Iceberg Model, How Might We + Crazy 8s and the Impact–Effort Matrix are free. The rest are Pro, and every explainer is readable on any plan',
+      },
+      {
+        category: 'bugfix',
+        description: 'Canvases created from the Templates page now always save to your account, and free plan canvas limits apply there too',
+      },
+    ],
+  },
+  {
     version: '1.5.0',
     date: 'October 11, 2026',
-    isLatest: true,
     changes: [
       {
         category: 'feature',
