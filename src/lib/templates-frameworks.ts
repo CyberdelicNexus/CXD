@@ -559,6 +559,130 @@ const workback: TemplateDefinition = {
   ],
 };
 
+// ─── 9. Audience Fit Map — TWO HALVES: audience ↔ experience
+// Our own map. Strategyzer's Value Proposition Canvas is under copyright and
+// needs permission for use in software: do not reuse its name, its shapes or
+// its "pain relievers" / "gain creators" terms here.
+
+const FIT_STEPS: FrameworkStep[] = [
+  { title: 'Hear what they are trying to do', detail: 'What are they hoping to get done, feel or become when they come to you? Use their words.' },
+  { title: 'Name what stands in the way', detail: 'What frustrates, blocks or scares them before, during and after? Rank by intensity.' },
+  { title: 'Name what they hope for', detail: 'What would delight them, beyond the obvious? Rank by how much it matters.' },
+  { title: 'Match real moments', detail: 'For the top items, which specific moment in your experience answers them?' },
+  { title: 'Draw the fit lines', detail: 'Connect each moment to what it answers. Anything unconnected is decoration.' },
+];
+
+const audienceFit: TemplateDefinition = {
+  id: 'fw-audience-fit',
+  name: 'Audience Fit Map',
+  description: 'Match what your audience is trying to do, avoid and gain with what the experience delivers',
+  emoji: '🤝',
+  category: 'framework',
+  framework: {
+    stage: 'market',
+    origin: 'Our own map, drawing on jobs-to-be-done thinking and on Value Proposition Design (Osterwalder et al., 2014; Strategyzer.com, Strategyzer AG)',
+    whatItIs: 'The Audience Fit Map sets what your audience is trying to do, avoid and gain beside the specific moments your experience offers, then asks where the two connect. Fit exists only where a moment answers something that matters to them. It turns "who is this for" into a claim you can test.',
+    whenToUse: [
+      'Writing the first marketing copy and you cannot yet say why someone would come.',
+      'Attendance is lower than the quality deserves.',
+      'Adapting an experience to a new audience.',
+    ],
+    steps: FIT_STEPS,
+    pitfalls: [
+      'Writing the audience side from the inside ("they want immersion") instead of from interviews.',
+      'Mixing several audiences on one map; make one map per audience.',
+      'Skipping ranking, so a minor annoyance gets the same attention as the one thing that stops people coming.',
+    ],
+    assistantBrief: 'Coach the Audience Fit Map. The canvas has an Audience zone (Trying to do, In the way, Hoping for) and an Experience zone (Moments we offer, What eases it, What lifts it). Start on the audience side and keep the designer in the audience’s own words; when a statement sounds like the designer’s wish, ask what evidence or interview it came from. Keep to one audience per map. Push for ranking: which obstacle stops people coming, which hope they would tell a friend about. Use the Human Context block when present as a source. Then move to the experience side and insist each entry names a concrete moment. Finish by checking fit: propose edges from each moment to what it answers, and point out anything left unconnected.',
+  },
+  // The Human Context block sits left of the Audience zone it feeds, so its edge is short and
+  // crosses nothing; both zone gutters are 80px so the arrows read.
+  elements: [
+    ...fwTitle('fwv', 'Audience Fit Map', FAM.ocean.grad, 'Left: the audience in their own words. Right: what the experience does about it. Fit is where lines connect.'),
+    ...stepRail('fwv', FIT_STEPS),
+
+    block('fwv-anchor', 'humanContext', 'Human Context', 40, 280),
+
+    ...zone('fwv-a', 540, 280, 900, 1160, 'Audience', 'ocean',
+      'What they are trying to do, what stands in the way, what they hope for. Rank each list, most intense first.'),
+    note('fwv-a-j', 576, 420, 'Trying to do', '🎯', NOTE_TEAL, 'What are they hoping to get done, feel or become?', 'fwv-a'),
+    note('fwv-a-p', 576, 760, 'In the way', '🌧️', NOTE_ROSE, 'What frustrates, blocks or scares them?', 'fwv-a'),
+    note('fwv-a-g', 576, 1100, 'Hoping for', '🌤️', NOTE_EMERALD, 'What would delight them beyond the obvious?', 'fwv-a'),
+
+    ...zone('fwv-o', 1520, 280, 900, 1160, 'Experience', 'violet',
+      'Name concrete moments, not features. Draw a connector from each moment to what it answers: those are your fit lines.'),
+    note('fwv-o-e', 1556, 420, 'Moments we offer', '✨', NOTE_VIOLET, 'The moments and elements you offer.', 'fwv-o'),
+    note('fwv-o-r', 1556, 760, 'What eases it', '🩹', WARM_FIRE, 'Which obstacle does this moment remove or soften?', 'fwv-o'),
+    note('fwv-o-c', 1556, 1100, 'What lifts it', '🎁', WARM_SUN, 'Which hope does this moment deliver?', 'fwv-o'),
+  ] as CanvasElement[],
+  edges: [
+    edge('fwv-e1', 'fwv-anchor', 'fwv-a', 'glacier'),
+    edge('fwv-e2', 'fwv-a', 'fwv-o', 'ocean'),
+  ],
+};
+
+// ─── 10. Narrative Messaging Arc — RAIL of seven beats + one-liner + placements
+
+const ARC_STEPS: FrameworkStep[] = [
+  { title: 'The hero', detail: 'Your audience, not you. What do they want? One desire, stated simply.' },
+  { title: 'The tension', detail: 'What stands in their way: the outer obstacle, the inner feeling, the bigger wrong.' },
+  { title: 'The ally', detail: 'You enter as the one who understands and has a way. Empathy first, then credibility.' },
+  { title: 'The path', detail: 'Three steps that make saying yes feel safe. Simple enough to remember.' },
+  { title: 'The invitation', detail: 'The direct ask (book, join, come) and the soft one (learn more, follow).' },
+  { title: 'The stakes', detail: 'What they lose by doing nothing. Said once, without fear-mongering.' },
+  { title: 'The transformation', detail: 'Who they are afterwards. Paint it concretely; this is what they are buying.' },
+];
+
+const ARC_BEATS: { key: string; title: string; emoji: string; fill: string }[] = [
+  { key: 'h', title: 'The hero', emoji: '🧑‍🚀', fill: NOTE_VIOLET },
+  { key: 't', title: 'The tension', emoji: '⛈️', fill: WARM_FIRE },
+  { key: 'g', title: 'The ally', emoji: '🧙', fill: NOTE_TEAL },
+  { key: 'p', title: 'The path', emoji: '🪜', fill: NOTE_EMERALD },
+  { key: 'i', title: 'The invitation', emoji: '✉️', fill: WARM_SUN },
+  { key: 's', title: 'The stakes', emoji: '⚖️', fill: NOTE_ROSE },
+  { key: 'x', title: 'The transformation', emoji: '🦋', fill: NOTE_VIOLET },
+];
+
+const narrativeArc: TemplateDefinition = {
+  id: 'fw-narrative-arc',
+  name: 'Narrative Messaging Arc',
+  description: 'A seven-beat story structure for pitches, pages and invitations, with your audience as the hero',
+  emoji: '📜',
+  category: 'framework',
+  framework: {
+    stage: 'market',
+    origin: 'Our own structure, inspired by hero’s-journey storytelling and by Donald Miller’s Building a StoryBrand (2017)',
+    whatItIs: 'The Narrative Messaging Arc arranges your marketing message as a story in which the audience is the hero and you are the ally. Seven beats carry a reader from a desire through tension to an invitation and a transformation. Because the structure is a story, people remember it, and because the hero is them, they lean in.',
+    whenToUse: [
+      'Writing a landing page, pitch deck, invitation or funding narrative.',
+      'The current copy talks mostly about you and your method.',
+      'Different channels tell slightly different stories and you want one spine.',
+    ],
+    steps: ARC_STEPS,
+    pitfalls: [
+      'Casting yourself as the hero. The audience is the hero; you are the ally.',
+      'Stakes that threaten; stakes should clarify what is lost by inaction, once.',
+      'A path with seven steps. Three is the limit people remember.',
+    ],
+    assistantBrief: 'Coach the Narrative Messaging Arc. The canvas is a rail of seven beat cards (The hero, The tension, The ally, The path, The invitation, The stakes, The transformation) plus a One-liner zone and a Where it lives zone. Keep the audience as the hero: whenever the designer writes about themselves in the hero slot, move it to the ally slot. Push each beat to one or two concrete sentences in the audience’s language, using Framing for the hero’s desire and the transformation (states and traits). Keep the path to three steps and the stakes to a single calm statement. When all seven beats hold text, help them compress into a one-liner (hero, tension, transformation in one breath) and list where the message lives: page, deck, invitation, social.',
+  },
+  // Seven 260px beats on a 340 pitch (80px gutters so the arrows read); the two zones span the row.
+  elements: [
+    ...fwTitle('fwn', 'Narrative Messaging Arc', FAM.violet.grad, 'Seven beats, left to right. The audience is the hero; you are the ally. Compress it into one line at the end.'),
+    ...stepRail('fwn', ARC_STEPS),
+    ...ARC_BEATS.map((b, i) => note(`fwn-${b.key}`, 40 + i * 340, 280, b.title, b.emoji, b.fill, 'One or two sentences, in their words.')),
+    ...zone('fwn-1', 40, 680, 2300, 480, 'The one-liner', 'sunset',
+      'Hero, tension, transformation in one breath. This goes at the top of every page.'),
+    note('fwn-1-n', 76, 820, 'One-liner', '🗣️', WARM_SUN, '"For people who… who feel… this is… so they…"', 'fwn-1'),
+    ...zone('fwn-2', 40, 1200, 2300, 480, 'Where it lives', 'emerald',
+      'Pages, decks, invitations, posts. Which beats each one carries.'),
+    note('fwn-2-n', 76, 1340, 'Placement', '📍', NOTE_EMERALD, 'Landing page: beats 1–7. Invitation: 1, 5, 7.', 'fwn-2'),
+  ] as CanvasElement[],
+  edges: ARC_BEATS.slice(0, -1).map((b, i) =>
+    edge(`fwn-e${i + 1}`, `fwn-${b.key}`, `fwn-${ARC_BEATS[i + 1].key}`, (['violet', 'rose', 'ocean', 'emerald', 'sunset', 'rose'] as const)[i]),
+  ),
+};
+
 export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
   iceberg,
   causalLoop,
@@ -568,6 +692,8 @@ export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
   impactEffort,
   premortem,
   workback,
+  audienceFit,
+  narrativeArc,
 ];
 
 export { stepRail, fwTitle };
