@@ -138,7 +138,7 @@ The templates page's `handleCreate` passes `{ frameworkIds: [tpl.id] }` when the
 
 ```
 ## Active frameworks
-The designer built this canvas with the following framework(s). Coach within them: use their vocabulary, keep the steps in order, and when the canvas shows which step they are on, name it and suggest the next one.
+The designer is using the following framework(s) in this project. Coach within them: use their vocabulary, keep the steps in order, and when the canvas shows which step they are on, name it and suggest the next one.
 
 ### Pre-mortem (Gary Klein, 2007)
 <assistantBrief>
