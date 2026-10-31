@@ -21,7 +21,9 @@ import {
   DEFAULT_EXPERIENCE_FLOW_STAGES,
   StagePresenceTypes,
   DEFAULT_STAGE_PRESENCE_TYPES,
+  normalizeFrameworkIds,
 } from '@/types/cxd-schema';
+import type { CreateProjectOptions } from '@/types/cxd-schema';
 import type { CanvasElement, CanvasEdge, CanvasBoard } from '@/types/canvas-elements';
 import type { Comment, CommentThread } from '@/types/comment-types';
 import { countQuotaObjects, isQuotaCounted } from '@/lib/quota';
@@ -159,7 +161,9 @@ interface CXDState {
   setClipboard: (elements: CanvasElement[]) => void;
 
   // Actions - Projects
-  createProject: (name: string, ownerId: string, initialElements?: CanvasElement[], initialEdges?: CanvasEdge[]) => string;
+  createProject: (name: string, ownerId: string, initialElements?: CanvasElement[], initialEdges?: CanvasEdge[], options?: CreateProjectOptions) => string;
+  /** Record that a framework template was inserted into the current project (deduped, capped). */
+  addProjectFramework: (frameworkId: string) => void;
   loadProject: (id: string) => void;
   deleteProject: (id: string) => void;
   getCurrentProject: () => CXDProject | null;
@@ -496,9 +500,9 @@ export const useCXDStore = create<CXDState>()(
       setClipboard: (elements) => set({ clipboard: elements }),
 
       // Project actions
-      createProject: (name, ownerId, initialElements, initialEdges) => {
+      createProject: (name, ownerId, initialElements, initialEdges, options) => {
         const id = uuidv4();
-        const project = createDefaultProject(id, name, ownerId, initialElements, initialEdges);
+        const project = createDefaultProject(id, name, ownerId, initialElements, initialEdges, options);
         set((state) => ({
           projects: [...state.projects, project],
           currentProjectId: id,
@@ -725,6 +729,24 @@ export const useCXDStore = create<CXDState>()(
         const { yDoc } = get();
         if (yDoc) {
           yjsSetMetaField(yDoc, 'framingType', framingType);
+        }
+      },
+
+      addProjectFramework: (frameworkId) => {
+        const currentProject = get().getCurrentProject();
+        if (!currentProject) return;
+        const frameworkIds = normalizeFrameworkIds([...(currentProject.frameworkIds ?? []), frameworkId]);
+        if (!frameworkIds || frameworkIds.join('|') === (currentProject.frameworkIds ?? []).join('|')) return;
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === currentProject.id
+              ? { ...p, frameworkIds, updatedAt: new Date().toISOString() }
+              : p
+          ),
+        }));
+        const { yDoc } = get();
+        if (yDoc) {
+          yjsSetMetaField(yDoc, 'frameworkIds', frameworkIds);
         }
       },
 

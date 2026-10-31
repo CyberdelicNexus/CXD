@@ -621,6 +621,7 @@ export function yDocToProject(doc: Y.Doc): CXDProject {
     currentWizardStep: (meta.currentWizardStep as number) ?? 0,
     framingCanvasPopulated: (meta.framingCanvasPopulated as boolean) ?? false,
     framingType: meta.framingType as string | undefined,
+    frameworkIds: Array.isArray(meta.frameworkIds) ? (meta.frameworkIds as string[]) : undefined,
 
     intentionCore: textSections.intentionCore as unknown as CXDProject['intentionCore'],
     desiredChange: textSections.desiredChange as unknown as CXDProject['desiredChange'],

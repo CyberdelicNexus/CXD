@@ -118,7 +118,13 @@ export default function TemplatesPage() {
     const userId =
       useCXDStore.getState().projects[0]?.ownerId ?? 'pending';
 
-    createProject(projectName.trim(), userId, freshElements, freshEdges);
+    createProject(
+      projectName.trim(),
+      userId,
+      freshElements,
+      freshEdges,
+      selectedTemplate.framework ? { frameworkIds: [selectedTemplate.id] } : undefined,
+    );
     setProjectName('');
     setSelectedTemplate(null);
     setDialogOpen(false);
