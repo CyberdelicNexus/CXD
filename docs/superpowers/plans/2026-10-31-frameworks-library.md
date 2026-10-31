@@ -14,7 +14,7 @@
 
 **Type-check baseline:** `npx tsc --noEmit -p tsconfig.json` reports 58 existing errors, all in `src/utils/__tests__/diagnostic-chat-handoff.test.ts` and `src/lib/ai/__tests__/ai-response-classifier.test.ts`. "No errors" below means no errors outside those two files.
 
-**Commit trailer:** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` on every commit. Stage named paths only.
+**Commits:** never add Co-Authored-By trailers (see CLAUDE.md: they block Vercel Hobby deployments). Stage named paths only.
 
 **Research corrections:** Task 1 is done. The draft content below already includes its corrections (`docs/superpowers/research/2026-10-31-frameworks-research.md`).
 
