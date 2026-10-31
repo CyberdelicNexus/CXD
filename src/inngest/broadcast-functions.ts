@@ -72,11 +72,13 @@ export const broadcastFanoutFn = inngest.createFunction(
     const plan = await step.run('load', async () => {
       const { data: row, error } = await getSupabaseAdmin()
         .from('broadcasts')
-        .select('id, channels, category, audience, subject, body')
+        .select('id, channels, category, audience, subject, body, failure_note')
         .eq('id', broadcastId)
         .maybeSingle();
       if (error) throw new Error(`broadcast read failed: ${error.code ?? 'error'}: ${error.message}`);
       if (!row) throw new NonRetriableError('broadcast not found');
+      // Marked failed (for example the queue send was reported as failed): it must not deliver.
+      if (row.failure_note) return { halted: true as const, subject: '', body: '', category: 'service' as Category, wantsEmail: false, inApp: [] as Target[], email: [] as Target[] };
 
       const audience = audienceSchema.safeParse(row.audience);
       if (!audience.success) throw new NonRetriableError('broadcast audience is not valid');
@@ -94,6 +96,7 @@ export const broadcastFanoutFn = inngest.createFunction(
       const inApp: Target[] = wantsInApp ? recipients.inApp.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
       const email: Target[] = wantsEmail ? recipients.email.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
       return {
+        halted: false as const,
         subject: row.subject as string,
         body: row.body as string,
         category,
@@ -102,6 +105,8 @@ export const broadcastFanoutFn = inngest.createFunction(
         email,
       };
     });
+
+    if (plan.halted) return { broadcastId, halted: true };
 
     // The count shown in history becomes the number actually reachable now.
     const recipientCount = plan.wantsEmail ? plan.email.length : plan.inApp.length;
@@ -126,7 +131,7 @@ export const broadcastFanoutFn = inngest.createFunction(
         const { error } = await admin.from('notifications').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
         if (error) throw new Error(`notification insert failed: ${error.code ?? 'error'}: ${error.message}`);
         // For an in-app only broadcast the notifications are the whole send.
-        if (!plan.wantsEmail) await recordProgress(broadcastId, rows.length);
+        if (!plan.wantsEmail) await recordProgress(broadcastId, Math.min((index + 1) * NOTIFICATION_CHUNK, plan.inApp.length));
       });
     }
 
@@ -164,7 +169,8 @@ export const broadcastFanoutFn = inngest.createFunction(
             });
           }),
         );
-        await recordProgress(broadcastId, batch.length);
+        // The running total from this chunk's fixed position, so a re-run reports the same number.
+        await recordProgress(broadcastId, Math.min((index + 1) * EMAIL_CHUNK, plan.email.length));
       });
     }
 

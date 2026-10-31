@@ -89,7 +89,9 @@ AS $$
    WHERE id = p_broadcast;
 $$;
 
--- The fan-out job reports progress here. p_recipient_count, when given, replaces the
+-- The fan-out job reports progress here. p_enqueued is the running total, taken from
+-- fixed chunk positions, so a step that runs twice reports the same number and the
+-- count never moves backwards. p_recipient_count, when given, replaces the
 -- count taken at send time with the count that was actually reachable at fan-out
 -- (someone may have unsubscribed since the preview).
 CREATE OR REPLACE FUNCTION public.admin_record_broadcast_progress(
@@ -103,7 +105,7 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
   UPDATE public.broadcasts
-     SET enqueued_count = enqueued_count + p_enqueued,
+     SET enqueued_count = GREATEST(enqueued_count, p_enqueued),
          recipient_count = COALESCE(p_recipient_count, recipient_count)
    WHERE id = p_broadcast;
 $$;

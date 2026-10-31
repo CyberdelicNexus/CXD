@@ -14,6 +14,13 @@ export default async function AdminCommsPage() {
   // A failed query must not read as "Nothing sent yet": throw so the error boundary shows it.
   if (error) throw new Error(`broadcast history query failed: ${error.code ?? 'error'}: ${error.message}`);
   const rows = data ?? [];
+  const now = Date.now();
+  // Queued but nothing done after 15 minutes, and no failure recorded: the job never started.
+  const notStarted = (row: (typeof rows)[number]) =>
+    row.enqueued_count === 0 &&
+    !row.failure_note &&
+    row.recipient_count > 0 &&
+    now - new Date(row.created_at as string).getTime() > 15 * 60 * 1000;
 
   return (
     <div className="space-y-6">
@@ -42,8 +49,11 @@ export default async function AdminCommsPage() {
                   {row.failure_note && <p className="text-xs text-rose-400">{row.failure_note}</p>}
                 </TableCell>
                 <TableCell>{(row.channels as string[]).join(', ')}</TableCell>
-                <TableCell>{row.recipient_count}</TableCell>
-                <TableCell>{row.enqueued_count}</TableCell>
+                <TableCell>
+                  {(row.channels as string[]).includes('email') ? `${row.recipient_count} emails` : `${row.recipient_count} in-app`}
+                  {(row.channels as string[]).length > 1 && <p className="text-xs text-white/40">plus in-app, not counted separately</p>}
+                </TableCell>
+                <TableCell>{notStarted(row) ? <span className="text-amber-300">Not started</span> : row.enqueued_count}</TableCell>
                 <TableCell>{row.sent_count}</TableCell>
                 <TableCell>{row.failed_count}</TableCell>
               </TableRow>

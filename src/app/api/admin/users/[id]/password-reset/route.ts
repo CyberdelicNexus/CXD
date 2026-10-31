@@ -50,11 +50,13 @@ export async function POST(_request: Request, context: Ctx) {
         // The token sits in the fragment so it never reaches a server log or Sentry URL.
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
         const resetUrl = `${baseUrl}/auth/recovery#token_hash=${encodeURIComponent(hashed)}`;
-        await sendEmail({
+        const sent = await sendEmail({
           to: email,
           subject: 'Reset your CXD Canvas password',
           html: await render(PasswordReset({ resetUrl })),
         });
+        // sendEmail returns null when RESEND_API_KEY is missing. That is a failure, not a sent email.
+        if (!sent) throw new Error('email provider is not configured');
       },
     );
   } catch (err) {

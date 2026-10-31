@@ -95,6 +95,12 @@ export const sendEmailFn = inngest.createFunction(
           });
         }
       }
+      // Every permanent failure is visible in Sentry. No address, subject or body: only the kind and error type.
+      if (!broadcastId && !ticketId) {
+        Sentry.captureException(new Error('email send failed after retries'), {
+          tags: { route: 'inngest-send-email', step: 'send-failed', emailKind: emailKind ?? 'untracked' },
+        });
+      }
       // Rethrow so the missing count is visible instead of silently lost.
       if (broadcastError) throw broadcastError;
     },

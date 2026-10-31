@@ -1884,11 +1884,13 @@ export async function POST(_request: Request, context: Ctx) {
         // The token sits in the fragment so it never reaches a server log or Sentry URL.
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
         const resetUrl = `${baseUrl}/auth/recovery#token_hash=${encodeURIComponent(hashed)}`;
-        await sendEmail({
+        const sent = await sendEmail({
           to: email,
           subject: 'Reset your CXD Canvas password',
           html: await render(PasswordReset({ resetUrl })),
         });
+        // sendEmail returns null when RESEND_API_KEY is missing. That is a failure, not a sent email.
+        if (!sent) throw new Error('email provider is not configured');
       },
     );
   } catch (err) {
@@ -3114,6 +3116,7 @@ SupportReply.PreviewProps = {
 - `priority: { run: 'event.data.broadcastId != null ? 0 : 600' }` in the function options. Priority only reorders runs that are waiting, so other mail gets a 600 second head start over broadcast mail. A negative factor would be a fixed delay, so none is used. It is typed in inngest 4.2.6 (`priority.run`, -600 to 600) and sits beside `throttle`; whether the server applies it together with `throttle` can only be confirmed on a real deployment.
 - The duplicate check reads `email_log` with `.limit(1)`, checks the rows length, and throws on a read error so the step retries instead of treating a failed read as "not sent". The 23505 comment says email_log has no unique constraint. Nothing else on this path changes.
 - The send step passes `idempotencyKey: broadcast-<broadcastId>-<userId>` to `sendEmail` (Resend's `Idempotency-Key`) for broadcast events only, and for a broadcast a `null` result (no `RESEND_API_KEY`) throws instead of counting as sent.
+- `onFailure` also reports every permanent failure of a non-broadcast, non-ticket email to Sentry with the tag `step: send-failed` and the email kind, never the address, subject or body.
 - `onFailure` handles the broadcast branch first and the ticket branch second, each in its own try/catch that reports to Sentry. For a broadcast event it looks in `email_log` for `userId` and `emailKind`: a row means the email was sent, so it records `(1, 0)`, otherwise `(0, 1)`. A broadcast-branch error is rethrown at the end, after the ticket branch has run.
 
 - [ ] **Step 5: Type-check and commit**
@@ -4058,7 +4061,9 @@ AS $$
    WHERE id = p_broadcast;
 $$;
 
--- The fan-out job reports progress here. p_recipient_count, when given, replaces the
+-- The fan-out job reports progress here. p_enqueued is the running total, taken from
+-- fixed chunk positions, so a step that runs twice reports the same number and the
+-- count never moves backwards. p_recipient_count, when given, replaces the
 -- count taken at send time with the count that was actually reachable at fan-out
 -- (someone may have unsubscribed since the preview).
 CREATE OR REPLACE FUNCTION public.admin_record_broadcast_progress(
@@ -4072,7 +4077,7 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
   UPDATE public.broadcasts
-     SET enqueued_count = enqueued_count + p_enqueued,
+     SET enqueued_count = GREATEST(enqueued_count, p_enqueued),
          recipient_count = COALESCE(p_recipient_count, recipient_count)
    WHERE id = p_broadcast;
 $$;
@@ -4921,11 +4926,13 @@ export const broadcastFanoutFn = inngest.createFunction(
     const plan = await step.run('load', async () => {
       const { data: row, error } = await getSupabaseAdmin()
         .from('broadcasts')
-        .select('id, channels, category, audience, subject, body')
+        .select('id, channels, category, audience, subject, body, failure_note')
         .eq('id', broadcastId)
         .maybeSingle();
       if (error) throw new Error(`broadcast read failed: ${error.code ?? 'error'}: ${error.message}`);
       if (!row) throw new NonRetriableError('broadcast not found');
+      // Marked failed (for example the queue send was reported as failed): it must not deliver.
+      if (row.failure_note) return { halted: true as const, subject: '', body: '', category: 'service' as Category, wantsEmail: false, inApp: [] as Target[], email: [] as Target[] };
 
       const audience = audienceSchema.safeParse(row.audience);
       if (!audience.success) throw new NonRetriableError('broadcast audience is not valid');
@@ -4943,6 +4950,7 @@ export const broadcastFanoutFn = inngest.createFunction(
       const inApp: Target[] = wantsInApp ? recipients.inApp.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
       const email: Target[] = wantsEmail ? recipients.email.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
       return {
+        halted: false as const,
         subject: row.subject as string,
         body: row.body as string,
         category,
@@ -4951,6 +4959,8 @@ export const broadcastFanoutFn = inngest.createFunction(
         email,
       };
     });
+
+    if (plan.halted) return { broadcastId, halted: true };
 
     // The count shown in history becomes the number actually reachable now.
     const recipientCount = plan.wantsEmail ? plan.email.length : plan.inApp.length;
@@ -4975,7 +4985,7 @@ export const broadcastFanoutFn = inngest.createFunction(
         const { error } = await admin.from('notifications').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
         if (error) throw new Error(`notification insert failed: ${error.code ?? 'error'}: ${error.message}`);
         // For an in-app only broadcast the notifications are the whole send.
-        if (!plan.wantsEmail) await recordProgress(broadcastId, rows.length);
+        if (!plan.wantsEmail) await recordProgress(broadcastId, Math.min((index + 1) * NOTIFICATION_CHUNK, plan.inApp.length));
       });
     }
 
@@ -5013,7 +5023,8 @@ export const broadcastFanoutFn = inngest.createFunction(
             });
           }),
         );
-        await recordProgress(broadcastId, batch.length);
+        // The running total from this chunk's fixed position, so a re-run reports the same number.
+        await recordProgress(broadcastId, Math.min((index + 1) * EMAIL_CHUNK, plan.email.length));
       });
     }
 
@@ -5364,6 +5375,13 @@ export default async function AdminCommsPage() {
   // A failed query must not read as "Nothing sent yet": throw so the error boundary shows it.
   if (error) throw new Error(`broadcast history query failed: ${error.code ?? 'error'}: ${error.message}`);
   const rows = data ?? [];
+  const now = Date.now();
+  // Queued but nothing done after 15 minutes, and no failure recorded: the job never started.
+  const notStarted = (row: (typeof rows)[number]) =>
+    row.enqueued_count === 0 &&
+    !row.failure_note &&
+    row.recipient_count > 0 &&
+    now - new Date(row.created_at as string).getTime() > 15 * 60 * 1000;
 
   return (
     <div className="space-y-6">
@@ -5392,8 +5410,11 @@ export default async function AdminCommsPage() {
                   {row.failure_note && <p className="text-xs text-rose-400">{row.failure_note}</p>}
                 </TableCell>
                 <TableCell>{(row.channels as string[]).join(', ')}</TableCell>
-                <TableCell>{row.recipient_count}</TableCell>
-                <TableCell>{row.enqueued_count}</TableCell>
+                <TableCell>
+                  {(row.channels as string[]).includes('email') ? `${row.recipient_count} emails` : `${row.recipient_count} in-app`}
+                  {(row.channels as string[]).length > 1 && <p className="text-xs text-white/40">plus in-app, not counted separately</p>}
+                </TableCell>
+                <TableCell>{notStarted(row) ? <span className="text-amber-300">Not started</span> : row.enqueued_count}</TableCell>
                 <TableCell>{row.sent_count}</TableCell>
                 <TableCell>{row.failed_count}</TableCell>
               </TableRow>
