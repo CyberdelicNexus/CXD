@@ -34,7 +34,7 @@ The deployed `supabase-functions-push-notification` function lets anyone on the 
 
 ## Architecture
 
-Roles live in a service-role-only table and are checked on the server for every page and API route. All admin data is read and written through `/api/admin/*` and server components using `getSupabaseAdmin()`. No admin table is exposed to the browser client.
+Roles live in a service-role-only table (`staff_roles` and `admin_audit_log` grant `service_role` less than ALL, as the Access section describes) and are checked on the server for every page and API route. All admin data is read and written through `/api/admin/*` and server components using `getSupabaseAdmin()`. No admin table is exposed to the browser client.
 
 New code lives in:
 
@@ -81,7 +81,7 @@ Because no decision reads an email address, registering or changing to one grant
 - API routes: 401 when signed out, 403 when the role lacks the permission.
 - A failed role lookup denies access.
 
-Every `/api/admin` route calls the gate first. `/api` is outside the middleware matcher, so middleware cannot protect it. The sidebar link appears for staff only, and is cosmetic.
+Every `/api/admin` route calls the gate first. `/api` is outside the middleware matcher, so middleware cannot protect it. The Admin link appears for staff only, in the user menu, and is cosmetic. The admin layout does not protect child pages: Next 14 renders layout and page concurrently, so every page calls `requirePagePermission` itself.
 
 ### `admin_audit_log`
 
