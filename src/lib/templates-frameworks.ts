@@ -195,9 +195,9 @@ const causalLoop: TemplateDefinition = {
 
 const TOC_STEPS: FrameworkStep[] = [
   { title: 'Name the lasting trait', detail: 'The change that should still be there months later. One sentence, in the participant\u2019s life, not in the room.' },
+  { title: 'Work back to the outcomes', detail: 'What changes in behaviour, relationships or decisions in the days and weeks after? These are changes in people, not counts of attendees.' },
   { title: 'Define the states that lead there', detail: 'Which temporary states, felt during the experience, make that trait possible?' },
-  { title: 'List activities that produce the states', detail: 'What you actually do, moment by moment, that reliably evokes each state.' },
-  { title: 'Gather the inputs', detail: 'People, space, time, money, partners, materials each activity depends on.' },
+  { title: 'List activities and their inputs', detail: 'What you actually do, moment by moment, to evoke each state, and the people, space, time and money each one depends on.' },
   { title: 'Write the assumptions', detail: 'Every arrow hides a belief. Say it out loud so it can be tested.' },
 ];
 
@@ -230,7 +230,7 @@ const theoryOfChange: TemplateDefinition = {
       'Leaving assumptions implicit, so the chain cannot fail and cannot be learned from.',
       'Outcomes written as outputs ("40 people attended") instead of changes in people.',
     ],
-    assistantBrief: 'Coach the Theory of Change. The canvas reads right to left: Lasting trait, Outcomes, States, Inputs & activities, with arrows pointing back toward causes. Start at the trait: if it is vague, make the designer write it as a participant describing themselves a year later. Then step leftward one zone at a time asking "what must be true just before this?". Reject outputs dressed as outcomes (counts of people or sessions are outputs). For every arrow, ask for the assumption behind it and suggest recording it on the edge label or a note. Use the Trait Mapping block when present as the source for the trait zone. Finish by asking which assumption is weakest and how they would test it cheaply.',
+    assistantBrief: 'Coach the Theory of Change. The canvas reads right to left: Lasting trait, Outcomes, States, Inputs & activities, with arrows pointing back toward causes. Start at the trait: if it is vague, make the designer write it as a participant describing themselves a year later. Then step leftward one zone at a time asking "what must be true just before this?". Reject outputs dressed as outcomes (counts of people or sessions are outputs). For every arrow, ask for the assumption behind it and record it on the Assumptions to test note. Use the Trait Mapping block when present as the source for the trait zone. Finish by asking which assumption is weakest and how they would test it cheaply.',
   },
   elements: [
     ...fwTitle('fwt', 'Theory of Change', FAM.rose.grad, 'Start on the right with the trait that lasts, then ask what must be true one step earlier. Arrows point back to causes.'),
@@ -242,6 +242,7 @@ const theoryOfChange: TemplateDefinition = {
         note(`fwt-${z.key}-n`, zx + 36, 420, z.noteTitle, z.emoji, z.fill, z.body, `fwt-${z.key}`),
       ];
     }),
+    note('fwt-as', 40, 920, 'Assumptions to test', '🧪', WARM_SUN, 'Every arrow hides a belief. Which is weakest, and how would you test it cheaply?'),
     block('fwt-anchor', 'traitMapping', 'Trait Mapping', 1880, 280),
   ] as CanvasElement[],
   edges: [
