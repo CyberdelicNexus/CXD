@@ -1,0 +1,5600 @@
+# Admin Console Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Ship a role-gated `/admin` console for managing users, support cards, errors, and in-app and email communications.
+
+**Architecture:** Roles live in a service-role-only `staff_roles` table and are checked on the server by a shared gate on every page and API route. Sensitive database changes go through `SECURITY DEFINER` RPCs that write the change and its audit row in one transaction. Pure decision logic lives in `src/lib/admin/` so `__verify__` scripts can test it without a request.
+
+**Tech Stack:** Next.js 14 App Router, Supabase (Postgres, Auth), zod 4, Inngest 4, Resend 6, react-email, Tailwind, Radix/shadcn.
+
+**Spec:** `docs/superpowers/specs/2026-10-31-admin-console-design.md`
+
+---
+
+## Ground rules
+
+- Work only in the worktree `C:\Users\JEMA\Documents\ClaudeCode\CXD\CXD-admin`, branch `feat/admin-console`.
+- Commit as the owner with no trailers: `git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "..."`. Never add `Co-Authored-By`; it blocks Vercel Hobby deploys.
+- The repo has no test runner. Tests are `*.verify.ts` scripts run with `npx tsx <path>`, using the local `check()` helper shown below. `npm run build` is the real gate.
+- `docs/superpowers/` is gitignored but tracked by convention, so plan and spec edits use `git add -f`.
+- **Never apply a migration, deploy an edge function, set an env var, or send a real broadcast while executing this plan.** Migrations are written and committed only. Task 27 lists what the owner must approve.
+- Project ref for any read-only live check is `sstllhsrmcvijyokykwp`. The local `mcp__supabase__*` tools point at a different project (Nexus Core), so use `mcp__claude_ai_Supabase__*`.
+- Import server clients from `@/supabase/server` and `@/supabase/admin`, never root `supabase/server.ts`.
+
+## File map
+
+```
+supabase/migrations/
+  20261031000001_admin_access.sql      staff_roles, audit log, owner seed, set_role
+  20261031000002_admin_users.sql       plan_source 'admin', set_plan, adjust_credits, list_users
+  20261031000003_support_tickets.sql   tickets and events
+  20261031000004_admin_comms.sql       email_preferences, broadcasts, recipients
+src/lib/admin/
+  permissions.ts   pure: roles, matrix, gate decision, suspend rule
+  gate.ts          server: getStaffContext, requirePermission, requirePagePermission
+  audit.ts         server: recordAudit, withAudit
+  http.ts          server: parseBody, rpcError
+  client.ts        browser: adminPost
+  plan-guard.ts    pure: planEditBlock
+  users.ts         server: list and detail reads
+  tickets.ts       pure: ticket types, title and body helpers
+  support.ts       server: ticket reads
+  comms.ts         pure: audience schema, recipient filter, content token
+  broadcast.ts     server: recipients, config checks, unsubscribe links
+  __verify__/      verify scripts
+src/lib/email-unsubscribe.ts           pure: signed tokens
+src/app/admin/                         pages
+src/app/api/admin/                     gated routes
+src/app/api/me/staff-role/route.ts     own role, for the nav link
+src/app/api/email/unsubscribe/route.ts unsubscribe POST
+src/app/unsubscribe/page.tsx           unsubscribe confirmation
+src/components/admin/                  admin UI
+src/components/ui/table.tsx            table primitive
+src/app/auth/recovery/                 admin-sent password reset landing
+emails/support-reply.tsx, emails/broadcast.tsx, emails/password-reset.tsx
+```
+
+---
+
+## Task 0: Prepare the worktree
+
+- [ ] **Step 1: Install dependencies**
+
+```bash
+cd "C:/Users/JEMA/Documents/ClaudeCode/CXD/CXD-admin" && npm ci
+```
+
+Expected: exits 0.
+
+- [ ] **Step 2: Copy env for local builds**
+
+```bash
+cp ../CXD/.env.local .env.local
+```
+
+`.env.local` is gitignored. Do not print its contents.
+
+- [ ] **Step 3: Baseline build**
+
+Run: `npm run build`
+Expected: succeeds. If it fails here, stop and report it, because the failure predates this work.
+
+---
+
+# Phase 1: Access
+
+## Task 1: Permission matrix
+
+**Files:**
+- Create: `src/lib/admin/permissions.ts`
+- Test: `src/lib/admin/__verify__/admin-roles.verify.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+/**
+ * Permission matrix and gate decisions for the admin console.
+ * Run: npx tsx src/lib/admin/__verify__/admin-roles.verify.ts
+ */
+import { PERMISSIONS, can, gateStatus, canSuspend, isBanned, isStaffRole, type Permission, type StaffRole } from '../permissions';
+
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { passed++; console.log('  ✓', name); }
+  else { failed++; console.error('  ✗', name); }
+}
+
+const EXPECTED: Record<StaffRole, Permission[]> = {
+  staff: ['users.view', 'tickets.work', 'errors.view'],
+  admin: ['users.view', 'tickets.work', 'errors.view', 'users.edit', 'comms.send', 'audit.view'],
+  owner: [...PERMISSIONS],
+};
+
+for (const role of Object.keys(EXPECTED) as StaffRole[]) {
+  for (const permission of PERMISSIONS) {
+    const expected = EXPECTED[role].includes(permission);
+    check(`${role} ${expected ? 'has' : 'lacks'} ${permission}`, can(role, permission) === expected);
+  }
+}
+check('no role has nothing', PERMISSIONS.every((p) => !can(null, p)));
+
+check('signed out is 401', gateStatus(false, null, 'users.view') === 401);
+check('member is 403', gateStatus(true, null, 'users.view') === 403);
+check('failed lookup denies', gateStatus(true, undefined, 'users.view') === 403);
+check('staff denied edit', gateStatus(true, 'staff', 'users.edit') === 403);
+check('admin denied roles', gateStatus(true, 'admin', 'roles.assign') === 403);
+check('owner allowed roles', gateStatus(true, 'owner', 'roles.assign') === 200);
+
+check('unknown role rejected', !isStaffRole('superuser'));
+check('known role accepted', isStaffRole('staff'));
+
+const base = { actorId: 'a', actorRole: 'admin' as StaffRole, targetId: 'b', targetRole: null };
+check('admin suspends member', canSuspend(base) === null);
+check('cannot suspend self', canSuspend({ ...base, targetId: 'a' }) === 'self');
+check('cannot suspend owner', canSuspend({ ...base, actorRole: 'owner', targetRole: 'owner' }) === 'owner');
+check('admin cannot suspend staff', canSuspend({ ...base, targetRole: 'staff' }) === 'role_holder');
+check('owner can suspend admin', canSuspend({ ...base, actorRole: 'owner', targetRole: 'admin' }) === null);
+
+const now = new Date('2026-11-01T00:00:00Z');
+check('future ban is banned', isBanned('2030-01-01T00:00:00Z', now));
+check('past ban is not', !isBanned('2020-01-01T00:00:00Z', now));
+check('no ban is not', !isBanned(null, now));
+check('unparsable ban is banned', isBanned('not-a-date', now));
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-roles.verify.ts`
+Expected: FAIL, cannot find module `../permissions`.
+
+- [ ] **Step 3: Implement**
+
+```ts
+/**
+ * Admin roles and permissions. Pure, so it can be verified without a request.
+ * Code checks permissions, never role names.
+ */
+
+export const ROLES = ['staff', 'admin', 'owner'] as const;
+export type StaffRole = (typeof ROLES)[number];
+
+/** Roles the app may grant. Owner rows are migration-only. */
+export const ASSIGNABLE_ROLES = ['staff', 'admin'] as const;
+export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
+
+export const PERMISSIONS = [
+  'users.view',
+  'tickets.work',
+  'errors.view',
+  'users.edit',
+  'comms.send',
+  'audit.view',
+  'roles.assign',
+] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+const ALLOWED: Record<Permission, readonly StaffRole[]> = {
+  'users.view': ['staff', 'admin', 'owner'],
+  'tickets.work': ['staff', 'admin', 'owner'],
+  'errors.view': ['staff', 'admin', 'owner'],
+  'users.edit': ['admin', 'owner'],
+  'comms.send': ['admin', 'owner'],
+  'audit.view': ['admin', 'owner'],
+  'roles.assign': ['owner'],
+};
+
+export function isStaffRole(value: unknown): value is StaffRole {
+  return typeof value === 'string' && (ROLES as readonly string[]).includes(value);
+}
+
+export function can(role: StaffRole | null | undefined, permission: Permission): boolean {
+  return !!role && ALLOWED[permission].includes(role);
+}
+
+export function gateStatus(
+  signedIn: boolean,
+  role: StaffRole | null | undefined,
+  permission: Permission,
+): 200 | 401 | 403 {
+  if (!signedIn) return 401;
+  return can(role, permission) ? 200 : 403;
+}
+
+export function isBanned(bannedUntil: string | null | undefined, now: Date): boolean {
+  if (!bannedUntil) return false;
+  const t = Date.parse(bannedUntil);
+  return !Number.isFinite(t) || t > now.getTime();
+}
+
+export type SuspendBlock = 'self' | 'owner' | 'role_holder';
+
+export const SUSPEND_REFUSED: Record<SuspendBlock, string> = {
+  self: 'You cannot suspend your own account.',
+  owner: 'Owner accounts cannot be suspended.',
+  role_holder: 'Only an Owner can suspend someone who holds a role.',
+};
+
+/** Returns why this suspension is refused, or null when it is allowed. */
+export function canSuspend(input: {
+  actorId: string;
+  actorRole: StaffRole;
+  targetId: string;
+  targetRole: StaffRole | null;
+}): SuspendBlock | null {
+  if (input.actorId === input.targetId) return 'self';
+  if (input.targetRole === 'owner') return 'owner';
+  if (input.targetRole && input.actorRole !== 'owner') return 'role_holder';
+  return null;
+}
+```
+
+- [ ] **Step 4: Run it to confirm it passes**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-roles.verify.ts`
+Expected: all pass, `0 failed`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/admin
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add role and permission matrix"
+```
+
+## Task 2: Access migration
+
+**Files:**
+- Create: `supabase/migrations/20261031000001_admin_access.sql`
+
+- [ ] **Step 1: Write the migration**
+
+```sql
+-- Admin console access (spec 2026-10-31-admin-console-design).
+--
+-- staff_roles decides who can reach /admin. Nothing reads an email address, so
+-- registering or changing to one grants nothing. Owner rows exist only through
+-- migrations: the trigger refuses every other write, so a route bug cannot
+-- remove the Owner. service_role can read this table but never write it; all
+-- writes go through admin_set_role.
+
+CREATE TABLE IF NOT EXISTS public.staff_roles (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('owner', 'admin', 'staff')),
+  granted_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  granted_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION public.staff_roles_protect_owner()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF current_setting('cxd.allow_owner_change', true) = 'on' THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+  IF TG_OP <> 'INSERT' AND OLD.role = 'owner' THEN
+    RAISE EXCEPTION 'owner_protected';
+  END IF;
+  IF TG_OP <> 'DELETE' AND NEW.role = 'owner' THEN
+    RAISE EXCEPTION 'owner_protected';
+  END IF;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS staff_roles_protect_owner ON public.staff_roles;
+CREATE TRIGGER staff_roles_protect_owner
+  BEFORE INSERT OR UPDATE OR DELETE ON public.staff_roles
+  FOR EACH ROW EXECUTE FUNCTION public.staff_roles_protect_owner();
+
+CREATE TABLE IF NOT EXISTS public.admin_audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id uuid NOT NULL,
+  action text NOT NULL,
+  target_type text NOT NULL,
+  target_id text,
+  before jsonb,
+  after jsonb,
+  reason text,
+  outcome text NOT NULL CHECK (outcome IN ('attempted', 'succeeded', 'failed')),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON public.admin_audit_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_target ON public.admin_audit_log (target_type, target_id, created_at DESC);
+
+CREATE OR REPLACE FUNCTION public.admin_audit_log_append_only()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_log_is_append_only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS admin_audit_log_append_only ON public.admin_audit_log;
+CREATE TRIGGER admin_audit_log_append_only
+  BEFORE UPDATE OR DELETE ON public.admin_audit_log
+  FOR EACH ROW EXECUTE FUNCTION public.admin_audit_log_append_only();
+
+DROP TRIGGER IF EXISTS admin_audit_log_no_truncate ON public.admin_audit_log;
+CREATE TRIGGER admin_audit_log_no_truncate
+  BEFORE TRUNCATE ON public.admin_audit_log
+  FOR EACH STATEMENT EXECUTE FUNCTION public.admin_audit_log_append_only();
+
+ALTER TABLE public.staff_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admin_audit_log ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.staff_roles FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.admin_audit_log FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT ON public.staff_roles TO service_role;
+GRANT SELECT, INSERT ON public.admin_audit_log TO service_role;
+
+-- Refuses unless p_actor holds one of p_roles. Routes gate first; this is the
+-- second check, so a route bug cannot act for someone without the role.
+CREATE OR REPLACE FUNCTION public.admin_require_role(p_actor uuid, p_roles text[])
+RETURNS void
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.staff_roles WHERE user_id = p_actor AND role = ANY (p_roles)
+  ) THEN
+    RAISE EXCEPTION 'not_permitted';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_set_role(
+  p_actor uuid,
+  p_target uuid,
+  p_role text,
+  p_reason text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_before text;
+BEGIN
+  PERFORM public.admin_require_role(p_actor, ARRAY['owner']);
+
+  IF p_role IS NOT NULL AND p_role NOT IN ('admin', 'staff') THEN
+    RAISE EXCEPTION 'invalid_role';
+  END IF;
+
+  SELECT role INTO v_before FROM public.staff_roles WHERE user_id = p_target;
+
+  IF p_role IS NULL THEN
+    DELETE FROM public.staff_roles WHERE user_id = p_target;
+  ELSE
+    INSERT INTO public.staff_roles (user_id, role, granted_by)
+    VALUES (p_target, p_role, p_actor)
+    ON CONFLICT (user_id) DO UPDATE
+      SET role = EXCLUDED.role, granted_by = EXCLUDED.granted_by, granted_at = now();
+  END IF;
+
+  INSERT INTO public.admin_audit_log (actor_id, action, target_type, target_id, before, after, reason, outcome)
+  VALUES (
+    p_actor, 'role.set', 'user', p_target::text,
+    jsonb_build_object('role', v_before), jsonb_build_object('role', p_role),
+    p_reason, 'succeeded'
+  );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.admin_require_role(uuid, text[]) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_set_role(uuid, uuid, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_require_role(uuid, text[]) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_set_role(uuid, uuid, text, text) TO service_role;
+
+-- Launch Owner: connect@cyberdelic.nexus. Add an Owner with a new migration in
+-- this same form, after that account exists.
+DO $$
+BEGIN
+  PERFORM set_config('cxd.allow_owner_change', 'on', true);
+  INSERT INTO public.staff_roles (user_id, role)
+  SELECT id, 'owner' FROM auth.users WHERE id = '322d15dd-8477-41ff-8980-f344fda14164'
+  ON CONFLICT (user_id) DO NOTHING;
+  IF NOT EXISTS (SELECT 1 FROM public.staff_roles WHERE role = 'owner') THEN
+    RAISE EXCEPTION 'owner_not_seeded';
+  END IF;
+END $$;
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add supabase/migrations/20261031000001_admin_access.sql
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add staff roles and audit log migration"
+```
+
+## Task 3: Server gate and audit helpers
+
+**Files:**
+- Create: `src/lib/admin/gate.ts`, `src/lib/admin/audit.ts`, `src/lib/admin/http.ts`, `src/lib/admin/client.ts`
+
+- [ ] **Step 1: Write `gate.ts`**
+
+```ts
+import { notFound } from 'next/navigation';
+import { NextResponse } from 'next/server';
+import { createClient } from '@/supabase/server';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { can, gateStatus, isBanned, isStaffRole, type Permission, type StaffRole } from './permissions';
+
+export interface StaffContext {
+  userId: string;
+  email: string;
+  role: StaffRole;
+}
+
+async function resolveSession(): Promise<{ signedIn: boolean; context: StaffContext | null }> {
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return { signedIn: false, context: null };
+  if (isBanned(user.banned_until, new Date())) {
+    return { signedIn: true, context: null };
+  }
+
+  const { data, error: roleError } = await getSupabaseAdmin()
+    .from('staff_roles')
+    .select('role')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  // A failed lookup denies, and so does a missing table before the migration.
+  if (roleError || !isStaffRole(data?.role)) return { signedIn: true, context: null };
+  return { signedIn: true, context: { userId: user.id, email: user.email ?? '', role: data.role } };
+}
+
+export async function getStaffContext(): Promise<StaffContext | null> {
+  return (await resolveSession()).context;
+}
+
+export type GateResult =
+  | { ok: true; staff: StaffContext }
+  | { ok: false; response: NextResponse };
+
+/** First call in every /api/admin handler. /api is outside the middleware matcher. */
+export async function requirePermission(permission: Permission): Promise<GateResult> {
+  const { signedIn, context } = await resolveSession();
+  const status = gateStatus(signedIn, context?.role, permission);
+  if (status === 200 && context) return { ok: true, staff: context };
+  return {
+    ok: false,
+    response: NextResponse.json({ error: status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: status === 401 ? 401 : 403 }),
+  };
+}
+
+/** Pages 404 for everyone without access, so /admin does not reveal itself. */
+export async function requirePagePermission(permission: Permission): Promise<StaffContext> {
+  const context = await getStaffContext();
+  if (!context || !can(context.role, permission)) notFound();
+  return context;
+}
+```
+
+- [ ] **Step 2: Write `audit.ts`**
+
+```ts
+import * as Sentry from '@sentry/nextjs';
+import { getSupabaseAdmin } from '@/supabase/admin';
+
+export interface AuditEntry {
+  actorId: string;
+  action: string;
+  targetType: string;
+  targetId?: string;
+  before?: unknown;
+  after?: unknown;
+  reason?: string;
+}
+
+async function insertAudit(entry: AuditEntry, outcome: 'attempted' | 'succeeded' | 'failed') {
+  const { error } = await getSupabaseAdmin().from('admin_audit_log').insert({
+    actor_id: entry.actorId,
+    action: entry.action,
+    target_type: entry.targetType,
+    target_id: entry.targetId ?? null,
+    before: entry.before ?? null,
+    after: entry.after ?? null,
+    reason: entry.reason ?? null,
+    outcome,
+  });
+  if (error) throw new Error(`audit write failed: ${error.message}`);
+}
+
+function reportAuditFailure(e: unknown, entry: AuditEntry, outcome: 'failed' | 'succeeded') {
+  Sentry.captureException(e, {
+    tags: { route: 'admin-audit', action: entry.action },
+    extra: { targetId: entry.targetId, outcome },
+  });
+}
+
+/**
+ * For actions that call outside services. The attempt is recorded first, and a
+ * failed attempt write aborts the action. Actions inside the database use RPCs,
+ * which audit in their own transaction.
+ */
+export async function withAudit<T>(entry: AuditEntry, action: () => Promise<T>): Promise<T> {
+  await insertAudit(entry, 'attempted');
+  let result: T;
+  try {
+    result = await action();
+  } catch (err) {
+    await insertAudit(entry, 'failed').catch((e) => reportAuditFailure(e, entry, 'failed'));
+    throw err;
+  }
+  await insertAudit(entry, 'succeeded').catch((e) => reportAuditFailure(e, entry, 'succeeded'));
+  return result;
+}
+
+export async function recordAudit(entry: AuditEntry): Promise<void> {
+  await insertAudit(entry, 'succeeded');
+}
+```
+
+- [ ] **Step 3: Write `http.ts`**
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import type { z } from 'zod';
+
+export async function parseBody<S extends z.ZodType>(
+  request: Request,
+  schema: S,
+): Promise<{ ok: true; data: z.infer<S> } | { ok: false; response: NextResponse }> {
+  const parsed = schema.safeParse(await request.json().catch(() => null));
+  if (parsed.success) return { ok: true, data: parsed.data };
+  return { ok: false, response: NextResponse.json({ error: 'Invalid request' }, { status: 400 }) };
+}
+
+const RPC_MESSAGES: Record<string, string> = {
+  not_permitted: 'You do not have permission to do that.',
+  owner_protected: 'Owner accounts cannot be changed here.',
+  invalid_role: 'That role is not valid.',
+  no_subscription: 'This user has no subscription record.',
+  no_change: 'The user is already on that plan.',
+  stripe_managed: 'This plan is managed by Stripe.',
+  nexus_managed: 'This plan is managed by Cyberdelic Nexus.',
+  lifetime_plan: 'Lifetime plans cannot be changed here.',
+  invalid_plan: 'That plan is not valid.',
+  no_credit_record: 'This user has no credit record.',
+  negative_balance: 'That would take the balance below zero.',
+};
+
+/** Maps a RAISE EXCEPTION code from an admin RPC to a readable 409. */
+export function rpcError(error: { message?: string }): NextResponse {
+  const message = RPC_MESSAGES[error.message ?? ''];
+  if (message) return NextResponse.json({ error: message }, { status: 409 });
+  // Unmapped: report the database message (an error code or text, never a payload).
+  Sentry.captureException(new Error(`admin rpc failed: ${error.message ?? 'unknown'}`), {
+    tags: { route: 'admin-rpc' },
+  });
+  return NextResponse.json({ error: 'The action failed. Nothing was changed.' }, { status: 500 });
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID.test(value);
+}
+
+/** The 404 an /api/admin/users/[id] route returns for an id that is not a UUID. */
+export function notFoundResponse(): NextResponse {
+  return NextResponse.json({ error: 'Not found.' }, { status: 404 });
+}
+```
+
+- [ ] **Step 4: Write `client.ts`**
+
+```ts
+/** Thrown for a non-2xx response. `data` is the parsed body, so a caller can read fields like `sent`. */
+export class AdminRequestError extends Error {
+  readonly data: Record<string, unknown>;
+  readonly status: number;
+
+  constructor(message: string, data: Record<string, unknown>, status: number) {
+    super(message);
+    this.name = 'AdminRequestError';
+    this.data = data;
+    this.status = status;
+  }
+}
+
+export async function adminPost<T = unknown>(url: string, body: unknown = {}, method = 'POST'): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new AdminRequestError(
+      typeof data.error === 'string' && data.error ? data.error : 'The action failed.',
+      data && typeof data === 'object' ? data : {},
+      response.status,
+    );
+  }
+  return data as T;
+}
+```
+
+- [ ] **Step 5: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no errors in `src/lib/admin/`.
+
+```bash
+git add src/lib/admin
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add server gate and audit helpers"
+```
+
+## Task 4: Route guard check, console shell and nav link
+
+**Files:**
+- Create: `src/lib/admin/__verify__/admin-routes.verify.ts`, `src/app/api/me/staff-role/route.ts`, `src/app/admin/layout.tsx`, `src/app/admin/page.tsx`, `src/components/admin/admin-nav.tsx`
+- Modify: `src/components/dashboard-navbar.tsx`
+
+- [ ] **Step 1: Write the route guard check**
+
+```ts
+/**
+ * Fails if any route file under /api/admin or /app/admin exports a handler that
+ * does not call the gate first, does not import the real gate, or exports a
+ * handler in a form this check cannot verify. Also fails any page under
+ * /app/admin that does not call requirePagePermission. Next loads route modules
+ * with `import * as userland`, so every export form counts.
+ * Run: npx tsx src/lib/admin/__verify__/admin-routes.verify.ts
+ */
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import ts from 'typescript';
+
+const API = join(process.cwd(), 'src', 'app', 'api');
+const ROOT = join(API, 'admin');
+const APP_ROOT = join(process.cwd(), 'src', 'app', 'admin');
+const GATE_MODULE = '@/lib/admin/gate';
+const PAGE_FILE = /^page\.(ts|tsx|js|jsx)$/;
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+const ROUTE_FILE = /^route\.(ts|tsx|js|jsx)$/;
+const GATE = /^const gate = await requirePermission\('[a-z]+\.[a-z]+'\);$/;
+const GATE_RETURN = 'if (!gate.ok) return gate.response;';
+
+function walk(dir: string, pattern: RegExp): string[] {
+  let found: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) found = found.concat(walk(path, pattern));
+    else if (pattern.test(name)) found.push(path);
+  }
+  return found;
+}
+
+function scriptKind(file: string): ts.ScriptKind {
+  return file.endsWith('x') ? ts.ScriptKind.TSX : file.endsWith('.js') ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+}
+
+/** True when the file imports `name` from the real gate module, without renaming it. */
+function importsFromGate(source: ts.SourceFile, name: string): boolean {
+  return source.statements.some((s) =>
+    ts.isImportDeclaration(s) &&
+    ts.isStringLiteral(s.moduleSpecifier) && s.moduleSpecifier.text === GATE_MODULE &&
+    !s.importClause?.isTypeOnly &&
+    !!s.importClause?.namedBindings && ts.isNamedImports(s.importClause.namedBindings) &&
+    s.importClause.namedBindings.elements.some((e) => !e.isTypeOnly && e.name.text === name && !e.propertyName));
+}
+
+/** True when anything in the file declares `name` itself (function, variable, parameter, class, import alias). */
+function declaresLocally(source: ts.SourceFile, name: string): boolean {
+  let found = false;
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isVariableDeclaration(node) ||
+        ts.isParameter(node) || ts.isImportSpecifier(node) || ts.isImportClause(node) || ts.isNamespaceImport(node)) &&
+      node.name && ts.isIdentifier(node.name) && node.name.text === name
+    ) {
+      // The one allowed binding is the unrenamed import from the gate.
+      const allowed = ts.isImportSpecifier(node) && !node.propertyName &&
+        ts.isStringLiteral(node.parent.parent.parent.moduleSpecifier) &&
+        node.parent.parent.parent.moduleSpecifier.text === GATE_MODULE;
+      if (!allowed) found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+function callsFunction(source: ts.SourceFile, name: string): boolean {
+  let found = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name) found = true;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+function hasExport(node: ts.Node): boolean {
+  return !!ts.canHaveModifiers(node) &&
+    !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+}
+
+function isAsync(node: ts.FunctionDeclaration): boolean {
+  return !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+}
+
+if (!existsSync(API)) {
+  console.error(`  ✗ ${API} does not exist: run this from the repository root`);
+  process.exit(1);
+}
+
+let handlers = 0;
+let pages = 0;
+const failures: string[] = [];
+
+function checkFile(file: string) {
+  const text = readFileSync(file, 'utf8');
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
+  const fail = (message: string) => failures.push(`${file}: ${message}`);
+  let handlesMethod = false;
+
+  for (const statement of source.statements) {
+    if (ts.isExportAssignment(statement)) {
+      fail('`export default` or `export =` is not allowed in a route file');
+    } else if (ts.isExportDeclaration(statement)) {
+      if (!statement.exportClause) {
+        fail('`export *` is not allowed in a route file');
+      } else if (ts.isNamespaceExport(statement.exportClause)) {
+        fail('`export * as` is not allowed in a route file');
+      } else {
+        for (const element of statement.exportClause.elements) {
+          if (METHODS.includes(element.name.text)) handlesMethod = true;
+          if (METHODS.includes(element.name.text)) fail(`${element.name.text} is exported by name; declare it as an exported async function`);
+        }
+      }
+    } else if (ts.isVariableStatement(statement) && hasExport(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) fail('destructured exports are not allowed in a route file');
+        else if (METHODS.includes(declaration.name.text)) handlesMethod = true;
+        if (ts.isIdentifier(declaration.name) && METHODS.includes(declaration.name.text)) fail(`${declaration.name.text} must be an exported async function declaration`);
+      }
+    } else if (hasExport(statement) && ts.getModifiers(statement as ts.HasModifiers)?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+      fail('`export default` is not allowed in a route file');
+    } else if (hasExport(statement)) {
+      const name = (statement as { name?: ts.Identifier }).name?.text;
+      if (ts.isFunctionDeclaration(statement) && name && METHODS.includes(name)) {
+        handlers++;
+        handlesMethod = true;
+        const body = statement.body;
+        const first = body?.statements[0]?.getText(source) ?? '';
+        const second = body?.statements[1]?.getText(source) ?? '';
+        if (statement.parameters.some((p) => p.initializer)) fail(`${name}: parameter initializers are not allowed on a handler`);
+        if (!isAsync(statement)) fail(`${name} must be async`);
+        if (!GATE.test(first)) fail(`${name}: first statement is "${first}", expected the requirePermission gate`);
+        else if (second !== GATE_RETURN) fail(`${name}: second statement is "${second}", expected the gate return`);
+      } else if (name && METHODS.includes(name)) {
+        handlesMethod = true;
+        fail(`${name} must be an exported async function declaration`);
+      }
+    }
+  }
+
+  if (handlesMethod) {
+    if (!importsFromGate(source, 'requirePermission')) fail(`requirePermission is not imported from '${GATE_MODULE}'`);
+    if (declaresLocally(source, 'requirePermission')) fail('requirePermission is declared locally; use the one from the gate module');
+  }
+}
+
+function checkPage(file: string) {
+  const text = readFileSync(file, 'utf8');
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
+  pages++;
+  if (!callsFunction(source, 'requirePagePermission')) failures.push(`${file}: page does not call requirePagePermission`);
+  else {
+    if (!importsFromGate(source, 'requirePagePermission')) failures.push(`${file}: requirePagePermission is not imported from '${GATE_MODULE}'`);
+    if (declaresLocally(source, 'requirePagePermission')) failures.push(`${file}: requirePagePermission is declared locally; use the one from the gate module`);
+  }
+}
+
+const routeFiles = [ROOT, APP_ROOT].flatMap((dir) => (existsSync(dir) ? walk(dir, ROUTE_FILE) : []));
+for (const file of routeFiles) checkFile(file);
+if (existsSync(APP_ROOT)) for (const file of walk(APP_ROOT, PAGE_FILE)) checkPage(file);
+
+console.log(`${handlers} handlers checked, ${pages} pages checked`);
+failures.forEach((f) => console.error('  ✗', f));
+process.exit(failures.length ? 1 : 0);
+```
+
+Run: `npx tsx src/lib/admin/__verify__/admin-routes.verify.ts`
+Expected: `0 handlers checked, 1 pages checked`, exit 0, because no admin API routes exist yet. The script parses each `route.ts/tsx/js/jsx` under `src/app/api/admin` and `src/app/admin` with the TypeScript compiler and exits 1 if `src/app/api` is missing. A file that handles an HTTP method must import `requirePermission` from `@/lib/admin/gate` and must not declare it locally, and handlers may not have parameter initializers. Every `page.tsx` under `src/app/admin` must call `requirePagePermission` (comments do not count). A handler passes only as an exported async function declaration whose first statement is the `requirePermission` gate and whose second is `if (!gate.ok) return gate.response;`. It fails on `export *`, `export default`, destructured exports, and any HTTP method exported by name, as a variable, or via `export { } [from]`. Plain exports such as `export const dynamic = 'force-dynamic'` are allowed. Every later route must pass this script.
+
+
+- [ ] **Step 2: Write the role endpoint**
+
+`src/app/api/me/staff-role/route.ts` returns only the caller's own role, and lives outside `/api/admin` so ordinary members get a clean 200.
+
+```ts
+import { NextResponse } from 'next/server';
+import { getStaffContext } from '@/lib/admin/gate';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  const staff = await getStaffContext();
+  return NextResponse.json({ role: staff?.role ?? null });
+}
+```
+
+- [ ] **Step 3: Write the shell**
+
+`src/components/admin/admin-nav.tsx`:
+
+```tsx
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Activity, LifeBuoy, Megaphone, ScrollText, Users, type LucideIcon } from 'lucide-react';
+import { can, type Permission, type StaffRole } from '@/lib/admin/permissions';
+
+const ITEMS: { href: string; label: string; icon: LucideIcon; permission: Permission }[] = [
+  { href: '/admin/support', label: 'Support', icon: LifeBuoy, permission: 'tickets.work' },
+  { href: '/admin/users', label: 'Users', icon: Users, permission: 'users.view' },
+  { href: '/admin/errors', label: 'Errors', icon: Activity, permission: 'errors.view' },
+  { href: '/admin/comms', label: 'Comms', icon: Megaphone, permission: 'comms.send' },
+  { href: '/admin/audit', label: 'Audit log', icon: ScrollText, permission: 'audit.view' },
+];
+
+export function AdminNav({ role }: { role: StaffRole }) {
+  const pathname = usePathname();
+  return (
+    <nav aria-label="Admin" className="flex md:flex-col gap-1 overflow-x-auto">
+      {ITEMS.filter((item) => can(role, item.permission)).map(({ href, label, icon: Icon }) => {
+        const active = pathname.startsWith(href);
+        return (
+          <Link
+            key={href}
+            href={href}
+            aria-current={active ? 'page' : undefined}
+            className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm whitespace-nowrap transition-colors ${
+              active ? 'bg-violet-500/20 text-violet-100' : 'text-white/60 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+```
+
+`src/app/admin/layout.tsx`:
+
+```tsx
+import type { ReactNode } from 'react';
+import { notFound } from 'next/navigation';
+import DashboardNavbar from '@/components/dashboard-navbar';
+import { AdminNav } from '@/components/admin/admin-nav';
+import { getStaffContext } from '@/lib/admin/gate';
+
+export const metadata = { title: 'Admin', robots: { index: false, follow: false } };
+export const dynamic = 'force-dynamic';
+
+export default async function AdminLayout({ children }: { children: ReactNode }) {
+  const staff = await getStaffContext();
+  if (!staff) notFound();
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <DashboardNavbar />
+      <div className="container mx-auto max-w-7xl px-4 py-6 grid md:grid-cols-[180px_1fr] gap-6">
+        <AdminNav role={staff.role} />
+        <main className="min-w-0">{children}</main>
+      </div>
+    </div>
+  );
+}
+```
+
+`src/app/admin/page.tsx` (Next 14 renders layout and page concurrently, so the layout's `notFound()` does not stop the page; every page gates itself):
+
+```tsx
+import { redirect } from 'next/navigation';
+import { requirePagePermission } from '@/lib/admin/gate';
+
+export default async function AdminHome() {
+  await requirePagePermission('tickets.work');
+  redirect('/admin/support');
+}
+```
+
+- [ ] **Step 4: Add the nav link**
+
+In `src/components/dashboard-navbar.tsx`:
+
+Add `Shield,` to the lucide import list, and `useEffect` to the React import:
+
+```tsx
+import { useEffect, useState } from 'react'
+```
+
+After `const [submitSuccess, setSubmitSuccess] = useState(false)` add:
+
+```tsx
+  const [isStaff, setIsStaff] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/me/staff-role')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setIsStaff(!!data?.role))
+      .catch(() => {})
+  }, [])
+```
+
+In the User Menu, after the Settings `DropdownMenuItem` and before the separator, add:
+
+```tsx
+                {isStaff && (
+                  <DropdownMenuItem onClick={() => router.push('/admin')} className="cursor-pointer hover:bg-white/5">
+                    <Shield className="w-4 h-4 mr-2" />
+                    Admin
+                  </DropdownMenuItem>
+                )}
+```
+
+- [ ] **Step 5: Build and commit**
+
+Run: `npm run build`
+Expected: succeeds, with `/admin` in the route list.
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add console shell, nav link and route guard check"
+```
+
+---
+
+# Phase 2: Users
+
+## Task 5: Plan guard and sync protection
+
+**Files:**
+- Create: `src/lib/admin/plan-guard.ts`, `src/lib/admin/__verify__/admin-plan-guard.verify.ts`
+- Modify: `src/lib/nexus/tier.ts:65-71`, `src/app/api/webhooks/stripe/route.ts:616`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+/**
+ * Which plans the console may edit, and that admin plans survive the Nexus sync.
+ * Run: npx tsx src/lib/admin/__verify__/admin-plan-guard.verify.ts
+ */
+import { planEditBlock, type PlanGuardRow } from '../plan-guard';
+import { decideTierSync } from '../../nexus/tier';
+
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { passed++; console.log('  ✓', name); }
+  else { failed++; console.error('  ✗', name); }
+}
+
+const row = (over: Partial<PlanGuardRow>): PlanGuardRow => ({
+  plan_id: 'free', status: 'active', stripe_subscription_id: null, plan_source: null, ...over,
+});
+
+check('free is editable', planEditBlock(row({})) === null);
+check('admin grant is editable', planEditBlock(row({ plan_id: 'pro', plan_source: 'admin' })) === null);
+check('active Stripe blocked', planEditBlock(row({ plan_id: 'pro', stripe_subscription_id: 'sub_1' })) === 'stripe_managed');
+check('trialing Stripe blocked', planEditBlock(row({ status: 'trialing', stripe_subscription_id: 'sub_1' })) === 'stripe_managed');
+check('past_due Stripe blocked', planEditBlock(row({ status: 'past_due', stripe_subscription_id: 'sub_1' })) === 'stripe_managed');
+check('canceled Stripe editable', planEditBlock(row({ status: 'canceled', stripe_subscription_id: 'sub_1' })) === null);
+check('Nexus blocked', planEditBlock(row({ plan_id: 'pro', plan_source: 'nexus' })) === 'nexus_managed');
+check('lifetime blocked', planEditBlock(row({ plan_id: 'lifetime' })) === 'lifetime_plan');
+
+const now = new Date('2026-11-01T00:00:00Z');
+const adminPro = { plan_id: 'pro', status: 'active', stripe_subscription_id: null, plan_source: 'admin' };
+const lapsed = { ok: true as const, tier: 'hacker' as never, active: false };
+const decision = decideTierSync(adminPro, lapsed, now);
+check('sync leaves an admin plan alone', decision.outcome === 'protected' && decision.planAfter === 'pro');
+check('sync writes only the check time', Object.keys(decision.patch ?? {}).join() === 'nexus_checked_at');
+
+const nexusPro = { ...adminPro, plan_source: 'nexus' };
+check('sync still revokes a Nexus plan', decideTierSync(nexusPro, lapsed, now).outcome === 'revoked_to_free');
+
+const adminFree = { ...adminPro, plan_id: 'free' };
+const active = { ok: true as const, tier: 'hacker' as never, active: true };
+const regranted = decideTierSync(adminFree, active, now);
+check('an admin-source free row is granted pro by an active Nexus tier', regranted.outcome === 'granted_pro' && regranted.planAfter === 'pro');
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-plan-guard.verify.ts`
+Expected: FAIL, cannot find module `../plan-guard`.
+
+- [ ] **Step 3: Implement `plan-guard.ts`**
+
+```ts
+/**
+ * Why the console may not edit a plan. The UI uses this to explain; the
+ * admin_set_plan RPC enforces the same rules. Keep the two in step.
+ */
+
+export interface PlanGuardRow {
+  plan_id: string;
+  status: string;
+  stripe_subscription_id: string | null;
+  plan_source: string | null;
+}
+
+export type PlanBlock = 'stripe_managed' | 'nexus_managed' | 'lifetime_plan';
+
+export const ADMIN_PLANS = ['free', 'pro', 'beta_tester'] as const;
+export type AdminPlan = (typeof ADMIN_PLANS)[number];
+
+const ENDED_STATUSES = ['canceled', 'incomplete_expired'];
+
+export function planEditBlock(row: PlanGuardRow): PlanBlock | null {
+  if (row.plan_id === 'lifetime') return 'lifetime_plan';
+  if (row.stripe_subscription_id && !ENDED_STATUSES.includes(row.status)) return 'stripe_managed';
+  if (row.plan_source === 'nexus') return 'nexus_managed';
+  return null;
+}
+```
+
+- [ ] **Step 4: Protect admin plans in the sync**
+
+In `src/lib/nexus/tier.ts`, replace `isProtected`:
+
+```ts
+function isProtected(row: SubscriptionSyncRow): boolean {
+  const activeStripe =
+    row.stripe_subscription_id != null && (row.status === 'active' || row.status === 'trialing');
+  const ownedPlan =
+    (row.plan_id === 'lifetime' || row.plan_id === 'beta_tester') && row.plan_source !== 'nexus';
+  // cancelSubscriptionAction writes plan_id 'free' and leaves plan_source, so a
+  // free row marked 'admin' is not a grant and must not block the sync.
+  const adminGrant = row.plan_source === 'admin' && row.plan_id !== 'free';
+  return activeStripe || ownedPlan || adminGrant;
+}
+```
+
+- [ ] **Step 5: Protect admin plans in the Stripe webhook**
+
+In `src/app/api/webhooks/stripe/route.ts`, replace lines 616-619:
+
+```ts
+        const planSource = (subscriptionRecord as any)?.plan_source;
+        if (subscriptionRecord && (planSource === 'nexus' || planSource === 'admin')) {
+          // The plan comes from the member's Nexus tier (D182 §5) or an admin
+          // grant, not from this Stripe subscription: forget the subscription,
+          // keep the plan, and leave the credit allowance alone.
+```
+
+Also change the log text a few lines below to `'Failed to detach Stripe subscription from Nexus or admin plan:'`, and update the `TierSyncOutcome` comment in `tier.ts` to read `'protected' // Stripe / lifetime / beta / admin-granted plan: only nexus_checked_at`.
+
+In the same file, in the `customer.subscription.updated` case, select `plan_source` with the file's missing-column fallback and set it to `'stripe'` when an admin grant gains a live Stripe subscription (Nexus rows are left alone):
+
+```ts
+        let { data: row, error: lookupErr } = await supabase
+          .from('subscriptions')
+          .select('user_id, plan_source')
+          .eq('stripe_customer_id', customerId)
+          .single();
+        if (isMissingPlanSourceColumn(lookupErr)) {
+          ({ data: row, error: lookupErr } = await supabase
+            .from('subscriptions')
+            .select('user_id')
+            .eq('stripe_customer_id', customerId)
+            .single());
+        }
+```
+
+and inside the `.update({ ... })` object, after the existing comment:
+
+```ts
+            ...((row as any).plan_source === 'admin' && (sub.status === 'active' || sub.status === 'trialing')
+              ? { plan_source: 'stripe' }
+              : {}),
+```
+
+- [ ] **Step 6: Run it to confirm it passes**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-plan-guard.verify.ts`
+Expected: all pass. If `tier: 'hacker' as never` fails, check the tier names in `src/lib/nexus/handoff.ts`, not the guard.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/lib/admin src/lib/nexus/tier.ts src/app/api/webhooks/stripe/route.ts
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): guard plan edits and protect admin plans from sync"
+```
+
+## Task 6: Users migration
+
+**Files:**
+- Create: `supabase/migrations/20261031000002_admin_users.sql`
+
+- [ ] **Step 1: Write the migration**
+
+```sql
+-- Admin user management. All service-role-only.
+--
+-- plan_id is written only when it changes, because on_subscription_change fires
+-- on any UPDATE OF plan_id and resets monthly_allowance. The edit rules here
+-- must stay in step with src/lib/admin/plan-guard.ts.
+
+ALTER TABLE public.subscriptions DROP CONSTRAINT IF EXISTS subscriptions_plan_source_check;
+ALTER TABLE public.subscriptions
+  ADD CONSTRAINT subscriptions_plan_source_check
+  CHECK (plan_source IN ('stripe', 'nexus', 'admin'));
+
+CREATE OR REPLACE FUNCTION public.admin_set_plan(
+  p_actor uuid,
+  p_target uuid,
+  p_plan text,
+  p_reason text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_row public.subscriptions%ROWTYPE;
+BEGIN
+  PERFORM public.admin_require_role(p_actor, ARRAY['admin', 'owner']);
+
+  IF p_plan NOT IN ('free', 'pro', 'beta_tester') THEN
+    RAISE EXCEPTION 'invalid_plan';
+  END IF;
+
+  SELECT * INTO v_row FROM public.subscriptions WHERE user_id = p_target FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'no_subscription'; END IF;
+
+  IF v_row.plan_id::text = 'lifetime' THEN RAISE EXCEPTION 'lifetime_plan'; END IF;
+  IF v_row.stripe_subscription_id IS NOT NULL
+     AND v_row.status::text NOT IN ('canceled', 'incomplete_expired') THEN
+    RAISE EXCEPTION 'stripe_managed';
+  END IF;
+  IF v_row.plan_source = 'nexus' THEN RAISE EXCEPTION 'nexus_managed'; END IF;
+  IF v_row.plan_id::text = p_plan THEN RAISE EXCEPTION 'no_change'; END IF;
+
+  UPDATE public.subscriptions
+     SET plan_id = p_plan::public.plan_type,
+         status = 'active'::public.subscription_status,
+         plan_source = CASE WHEN p_plan = 'free' THEN NULL ELSE 'admin' END,
+         -- Reachable only when the subscription ended or is absent. Clearing the
+         -- id keeps an ended Stripe subscription from reading as stripe_managed.
+         stripe_subscription_id = NULL
+   WHERE user_id = p_target;
+
+  INSERT INTO public.admin_audit_log (actor_id, action, target_type, target_id, before, after, reason, outcome)
+  VALUES (
+    p_actor, 'plan.set', 'user', p_target::text,
+    jsonb_build_object('plan', v_row.plan_id, 'source', v_row.plan_source, 'stripe_subscription_id', v_row.stripe_subscription_id),
+    jsonb_build_object('plan', p_plan),
+    p_reason, 'succeeded'
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_adjust_credits(
+  p_actor uuid,
+  p_target uuid,
+  p_amount integer,
+  p_reason text
+)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_addon integer;
+  v_allowance integer;
+  v_used integer;
+  v_new integer;
+BEGIN
+  PERFORM public.admin_require_role(p_actor, ARRAY['admin', 'owner']);
+
+  SELECT addon_credits, monthly_allowance, used_this_period
+    INTO v_addon, v_allowance, v_used
+    FROM public.ai_credits WHERE user_id = p_target FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'no_credit_record'; END IF;
+
+  v_new := v_addon + p_amount;
+  IF v_new < 0 THEN RAISE EXCEPTION 'negative_balance'; END IF;
+
+  UPDATE public.ai_credits SET addon_credits = v_new WHERE user_id = p_target;
+
+  -- Members can read their own transaction rows, so the reason written here is
+  -- fixed. The real reason stays in the audit log.
+  INSERT INTO public.ai_credit_transactions (user_id, amount, balance_after, reason, transaction_type)
+  VALUES (p_target, p_amount, v_allowance + v_new - v_used, 'Admin adjustment', 'manual_adjustment');
+
+  INSERT INTO public.admin_audit_log (actor_id, action, target_type, target_id, before, after, reason, outcome)
+  VALUES (
+    p_actor, 'credits.adjust', 'user', p_target::text,
+    jsonb_build_object('addon_credits', v_addon), jsonb_build_object('addon_credits', v_new),
+    p_reason, 'succeeded'
+  );
+
+  RETURN v_new;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_list_users(
+  p_search text DEFAULT NULL,
+  p_plan text DEFAULT NULL,
+  p_role text DEFAULT NULL,
+  p_limit integer DEFAULT 50,
+  p_offset integer DEFAULT 0
+)
+RETURNS TABLE (
+  id uuid,
+  email text,
+  name text,
+  plan_id text,
+  role text,
+  used_this_period integer,
+  monthly_allowance integer,
+  addon_credits integer,
+  last_sign_in_at timestamptz,
+  banned_until timestamptz,
+  created_at timestamptz,
+  total bigint
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT
+    u.id,
+    u.email::text,
+    COALESCE(p.full_name, p.name),
+    COALESCE(s.plan_id::text, 'free'),
+    r.role,
+    c.used_this_period,
+    c.monthly_allowance,
+    c.addon_credits,
+    u.last_sign_in_at,
+    u.banned_until,
+    u.created_at,
+    count(*) OVER ()
+  FROM auth.users u
+  LEFT JOIN public.users p ON p.id = u.id
+  LEFT JOIN public.subscriptions s ON s.user_id = u.id
+  LEFT JOIN public.ai_credits c ON c.user_id = u.id
+  LEFT JOIN public.staff_roles r ON r.user_id = u.id
+  WHERE (
+      p_search IS NULL OR p_search = ''
+      OR position(lower(p_search) IN lower(u.email)) > 0
+      OR position(lower(p_search) IN lower(COALESCE(p.full_name, p.name, ''))) > 0
+    )
+    AND (p_plan IS NULL OR COALESCE(s.plan_id::text, 'free') = p_plan)
+    AND (p_role IS NULL OR r.role = p_role)
+  ORDER BY u.created_at DESC
+  LIMIT p_limit OFFSET p_offset;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.admin_set_plan(uuid, uuid, text, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_adjust_credits(uuid, uuid, integer, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_list_users(text, text, text, integer, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_set_plan(uuid, uuid, text, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_adjust_credits(uuid, uuid, integer, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_list_users(text, text, text, integer, integer) TO service_role;
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add supabase/migrations/20261031000002_admin_users.sql
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add plan, credit and user list RPCs"
+```
+
+## Task 7: User list
+
+**Files:**
+- Create: `src/components/ui/table.tsx`, `src/lib/admin/users.ts`, `src/lib/admin/users-query.ts`, `src/lib/admin/__verify__/admin-users.verify.ts`, `src/app/admin/users/page.tsx`
+
+- [ ] **Step 1: Add the table primitive**
+
+```tsx
+import * as React from 'react';
+import { cn } from '@/lib/utils';
+
+export function Table({ className, ...props }: React.HTMLAttributes<HTMLTableElement>) {
+  return (
+    <div className="relative w-full overflow-x-auto">
+      <table className={cn('w-full caption-bottom text-sm', className)} {...props} />
+    </div>
+  );
+}
+
+export function TableHeader(props: React.HTMLAttributes<HTMLTableSectionElement>) {
+  return <thead {...props} />;
+}
+
+export function TableBody(props: React.HTMLAttributes<HTMLTableSectionElement>) {
+  return <tbody {...props} />;
+}
+
+export function TableRow({ className, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
+  return <tr className={cn('border-b border-white/10 hover:bg-white/[0.03]', className)} {...props} />;
+}
+
+export function TableHead({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
+  return <th className={cn('h-10 px-3 text-left font-medium text-white/50 whitespace-nowrap', className)} {...props} />;
+}
+
+export function TableCell({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
+  return <td className={cn('px-3 py-2.5 align-middle', className)} {...props} />;
+}
+```
+
+- [ ] **Step 2: Write `users.ts`**
+
+```ts
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { isStaffRole, type StaffRole } from './permissions';
+import type { PlanGuardRow } from './plan-guard';
+
+export const USERS_PAGE_SIZE = 50;
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  name: string | null;
+  plan_id: string;
+  role: string | null;
+  used_this_period: number | null;
+  monthly_allowance: number | null;
+  addon_credits: number | null;
+  last_sign_in_at: string | null;
+  banned_until: string | null;
+  created_at: string;
+  total: number;
+}
+
+export async function listUsers(filters: { search?: string; plan?: string; role?: string; page: number }) {
+  const { data, error } = await getSupabaseAdmin().rpc('admin_list_users', {
+    p_search: filters.search || null,
+    p_plan: filters.plan || null,
+    p_role: filters.role || null,
+    p_limit: USERS_PAGE_SIZE,
+    p_offset: (filters.page - 1) * USERS_PAGE_SIZE,
+  });
+  if (error) throw error;
+  const rows = (data ?? []) as AdminUserRow[];
+  return { rows, total: rows[0]?.total ?? 0 };
+}
+
+export interface AdminUserDetail {
+  id: string;
+  email: string;
+  name: string | null;
+  createdAt: string;
+  lastSignInAt: string | null;
+  bannedUntil: string | null;
+  role: StaffRole | null;
+  subscription: (PlanGuardRow & { stripe_customer_id: string | null }) | null;
+  credits: { monthly_allowance: number; used_this_period: number; addon_credits: number; used_today: number } | null;
+  canvasCount: number;
+  nexusMemberId: string | null;
+  audit: { id: string; action: string; outcome: string; reason: string | null; created_at: string }[];
+}
+
+/** `includeAudit` is false for roles without audit.view, so their page never receives the history. */
+export async function getUserDetail(id: string, options: { includeAudit: boolean }): Promise<AdminUserDetail | null> {
+  const admin = getSupabaseAdmin();
+  const { data: authData, error } = await admin.auth.admin.getUserById(id);
+  if (error || !authData.user) return null;
+  const user = authData.user;
+
+  const [profile, subscription, credits, role, nexus, canvases, audit] = await Promise.all([
+    admin.from('users').select('full_name, name').eq('id', id).maybeSingle(),
+    admin
+      .from('subscriptions')
+      .select('plan_id, status, stripe_subscription_id, stripe_customer_id, plan_source')
+      .eq('user_id', id)
+      .maybeSingle(),
+    admin
+      .from('ai_credits')
+      .select('monthly_allowance, used_this_period, addon_credits, used_today')
+      .eq('user_id', id)
+      .maybeSingle(),
+    admin.from('staff_roles').select('role').eq('user_id', id).maybeSingle(),
+    admin.from('nexus_links').select('member_id').eq('user_id', id).maybeSingle(),
+    admin.from('cxd_projects').select('id', { count: 'exact', head: true }).eq('owner_id', id),
+    options.includeAudit
+      ? admin
+          .from('admin_audit_log')
+          .select('id, action, outcome, reason, created_at')
+          .eq('target_type', 'user')
+          .eq('target_id', id)
+          .order('created_at', { ascending: false })
+          .limit(50)
+      : Promise.resolve({ data: [] as AdminUserDetail['audit'] }),
+  ]);
+
+  return {
+    id,
+    email: user.email ?? '',
+    name: profile.data?.full_name ?? profile.data?.name ?? null,
+    createdAt: user.created_at,
+    lastSignInAt: user.last_sign_in_at ?? null,
+    bannedUntil: user.banned_until ?? null,
+    role: isStaffRole(role.data?.role) ? role.data.role : null,
+    subscription: subscription.data ?? null,
+    credits: credits.data ?? null,
+    canvasCount: canvases.count ?? 0,
+    nexusMemberId: nexus.data?.member_id ?? null,
+    audit: audit.data ?? [],
+  };
+}
+
+/** Throws when the lookup fails: callers must treat that as "unknown", never as "no role". */
+export async function getTargetRole(id: string): Promise<StaffRole | null> {
+  const { data, error } = await getSupabaseAdmin().from('staff_roles').select('role').eq('user_id', id).maybeSingle();
+  if (error) throw error;
+  return isStaffRole(data?.role) ? data.role : null;
+}
+
+export function formatDate(value: string | null | undefined): string {
+  return value ? new Date(value).toISOString().slice(0, 10) : '—';
+}
+```
+
+- [ ] **Step 2b: Write the query helpers and their check**
+
+`src/lib/admin/users-query.ts`:
+
+```ts
+export const MAX_PAGE = 1_000_000;
+
+type Param = string | string[] | undefined;
+
+/** A repeated query parameter (`?q=a&q=b`) arrives as an array: take the first. */
+export function singleParam(value: Param): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  return typeof first === 'string' && first !== '' ? first : undefined;
+}
+
+/** An integer from 1 to MAX_PAGE; anything else is page 1. */
+export function parsePage(value: Param): number {
+  const n = Number(singleParam(value));
+  if (!Number.isInteger(n) || n < 1) return 1;
+  return Math.min(n, MAX_PAGE);
+}
+```
+
+`src/lib/admin/__verify__/admin-users.verify.ts` (run it with `npx tsx`; expected: all pass):
+
+```ts
+/**
+ * Pure helpers behind the Users pages and routes.
+ * Run: npx tsx src/lib/admin/__verify__/admin-users.verify.ts
+ */
+import { isUuid } from '../http';
+import { parsePage, singleParam, MAX_PAGE } from '../users-query';
+import { canSuspend, SUSPEND_REFUSED } from '../permissions';
+
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { passed++; console.log('  ✓', name); }
+  else { failed++; console.error('  ✗', name); }
+}
+
+check('a UUID is accepted', isUuid('322d15dd-8477-41ff-8980-f344fda14164'));
+check('uppercase UUID is accepted', isUuid('322D15DD-8477-41FF-8980-F344FDA14164'));
+check('a short id is refused', !isUuid('123'));
+check('a path-like id is refused', !isUuid('../etc'));
+check('an id with a suffix is refused', !isUuid('322d15dd-8477-41ff-8980-f344fda14164x'));
+check('undefined is refused', !isUuid(undefined));
+
+check('page defaults to 1', parsePage(undefined) === 1);
+check('page 3 parses', parsePage('3') === 3);
+check('page 0 becomes 1', parsePage('0') === 1);
+check('negative page becomes 1', parsePage('-4') === 1);
+check('fractional page becomes 1', parsePage('2.5') === 1);
+check('non-numeric page becomes 1', parsePage('abc') === 1);
+check('huge page is capped', parsePage('99999999999') === MAX_PAGE);
+check('repeated page uses the first', parsePage(['2', '9']) === 2);
+check('repeated q uses the first', singleParam(['a', 'b']) === 'a');
+check('empty q is undefined', singleParam('') === undefined);
+
+check('suspending yourself is refused', canSuspend({ actorId: 'a', actorRole: 'owner', targetId: 'a', targetRole: 'owner' }) === 'self');
+check('every refusal has text', (['self', 'owner', 'role_holder'] as const).every((k) => SUSPEND_REFUSED[k].length > 0));
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
+```
+
+- [ ] **Step 3: Write the page**
+
+`src/app/admin/users/page.tsx`:
+
+```tsx
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { requirePagePermission } from '@/lib/admin/gate';
+import { USERS_PAGE_SIZE, formatDate, listUsers } from '@/lib/admin/users';
+import { parsePage, singleParam } from '@/lib/admin/users-query';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
+const FIELD = 'h-9 rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
+
+export default async function AdminUsersPage({
+  searchParams,
+}: {
+  searchParams: { q?: string | string[]; plan?: string | string[]; role?: string | string[]; page?: string | string[] };
+}) {
+  await requirePagePermission('users.view');
+  const q = singleParam(searchParams.q);
+  const plan = singleParam(searchParams.plan);
+  const role = singleParam(searchParams.role);
+  const page = parsePage(searchParams.page);
+  const pageHref = (target: number) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (plan) params.set('plan', plan);
+    if (role) params.set('role', role);
+    params.set('page', String(target));
+    return `/admin/users?${params}`;
+  };
+
+  const { rows, total } = await listUsers({ search: q, plan, role, page });
+  // A page past the end has no rows and so no total: go back to the first page.
+  if (rows.length === 0 && page > 1) redirect(pageHref(1));
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold">Users</h1>
+      <form className="flex flex-wrap gap-2">
+        <input name="q" defaultValue={q} placeholder="Name or email" aria-label="Search" className={`${FIELD} flex-1 min-w-48`} />
+        <select name="plan" defaultValue={plan ?? ''} aria-label="Plan" className={FIELD}>
+          <option value="">All plans</option>
+          <option value="free">Free</option>
+          <option value="pro">Pro</option>
+          <option value="lifetime">Lifetime</option>
+          <option value="beta_tester">Beta tester</option>
+        </select>
+        <select name="role" defaultValue={role ?? ''} aria-label="Role" className={FIELD}>
+          <option value="">All roles</option>
+          <option value="owner">Owner</option>
+          <option value="admin">Admin</option>
+          <option value="staff">Staff</option>
+        </select>
+        <button type="submit" className={`${FIELD} hover:bg-white/10`}>Filter</button>
+      </form>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>User</TableHead>
+            <TableHead>Plan</TableHead>
+            <TableHead>Credits used</TableHead>
+            <TableHead>Last sign-in</TableHead>
+            <TableHead>Role</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((user) => (
+            <TableRow key={user.id}>
+              <TableCell>
+                <Link href={`/admin/users/${user.id}`} className="text-violet-200 hover:underline">
+                  {user.name || user.email}
+                </Link>
+                <div className="text-xs text-white/40">{user.email}</div>
+              </TableCell>
+              <TableCell>{user.plan_id}</TableCell>
+              <TableCell>{user.used_this_period ?? 0} / {user.monthly_allowance ?? 0}</TableCell>
+              <TableCell>{formatDate(user.last_sign_in_at)}</TableCell>
+              <TableCell>{user.role ?? '—'}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      {rows.length === 0 && <p className="text-sm text-white/50">No users match these filters.</p>}
+
+      <div className="flex items-center justify-between text-sm text-white/50">
+        <span>{total} users</span>
+        <div className="flex gap-3">
+          {page > 1 && <Link href={pageHref(page - 1)} className="hover:text-white">Previous</Link>}
+          {page * USERS_PAGE_SIZE < total && <Link href={pageHref(page + 1)} className="hover:text-white">Next</Link>}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 4: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add user list"
+```
+
+## Task 8: User action routes
+
+**Files:**
+- Create: `src/app/api/admin/users/[id]/plan/route.ts`, `.../credits/route.ts`, `.../role/route.ts`, `.../suspend/route.ts`, `.../password-reset/route.ts`, `emails/password-reset.tsx`, `src/app/auth/recovery/page.tsx`, `src/app/auth/recovery/confirm/route.ts`, `src/components/admin/recovery-form.tsx`
+
+- [ ] **Step 1: Write the plan route**
+
+```ts
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { isUuid, notFoundResponse, parseBody, rpcError } from '@/lib/admin/http';
+import { ADMIN_PLANS } from '@/lib/admin/plan-guard';
+
+type Ctx = { params: { id: string } };
+
+const schema = z.object({
+  plan: z.enum(ADMIN_PLANS),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export async function POST(request: Request, context: Ctx) {
+  const gate = await requirePermission('users.edit');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const body = await parseBody(request, schema);
+  if (!body.ok) return body.response;
+
+  const { error } = await getSupabaseAdmin().rpc('admin_set_plan', {
+    p_actor: gate.staff.userId,
+    p_target: context.params.id,
+    p_plan: body.data.plan,
+    p_reason: body.data.reason,
+  });
+  if (error) return rpcError(error);
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 2: Write the credits route**
+
+```ts
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { isUuid, notFoundResponse, parseBody, rpcError } from '@/lib/admin/http';
+
+type Ctx = { params: { id: string } };
+
+const schema = z.object({
+  amount: z.number().int().min(-100000).max(100000).refine((n) => n !== 0),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export async function POST(request: Request, context: Ctx) {
+  const gate = await requirePermission('users.edit');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const body = await parseBody(request, schema);
+  if (!body.ok) return body.response;
+
+  const { data, error } = await getSupabaseAdmin().rpc('admin_adjust_credits', {
+    p_actor: gate.staff.userId,
+    p_target: context.params.id,
+    p_amount: body.data.amount,
+    p_reason: body.data.reason,
+  });
+  if (error) return rpcError(error);
+  return NextResponse.json({ ok: true, addonCredits: data });
+}
+```
+
+- [ ] **Step 3: Write the role route**
+
+```ts
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { isUuid, notFoundResponse, parseBody, rpcError } from '@/lib/admin/http';
+import { ASSIGNABLE_ROLES } from '@/lib/admin/permissions';
+
+type Ctx = { params: { id: string } };
+
+const schema = z.object({
+  role: z.enum(ASSIGNABLE_ROLES).nullable(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export async function POST(request: Request, context: Ctx) {
+  const gate = await requirePermission('roles.assign');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const body = await parseBody(request, schema);
+  if (!body.ok) return body.response;
+
+  const { error } = await getSupabaseAdmin().rpc('admin_set_role', {
+    p_actor: gate.staff.userId,
+    p_target: context.params.id,
+    p_role: body.data.role,
+    p_reason: body.data.reason,
+  });
+  if (error) return rpcError(error);
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 4: Write the suspend route**
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { withAudit } from '@/lib/admin/audit';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
+import { canSuspend, SUSPEND_REFUSED, type StaffRole } from '@/lib/admin/permissions';
+import { getTargetRole } from '@/lib/admin/users';
+
+type Ctx = { params: { id: string } };
+
+// Supabase has no permanent ban; 100 years stands in for one until restored.
+const SUSPENDED = '876000h';
+
+const schema = z.object({
+  suspended: z.boolean(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export async function POST(request: Request, context: Ctx) {
+  const gate = await requirePermission('users.edit');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const body = await parseBody(request, schema);
+  if (!body.ok) return body.response;
+  const targetId = context.params.id;
+
+  // A failed role lookup must never read as "no role", or a suspension could slip through.
+  let targetRole: StaffRole | null;
+  try {
+    targetRole = await getTargetRole(targetId);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-suspend', step: 'role-lookup' } });
+    return NextResponse.json({ error: 'The account was not changed.' }, { status: 500 });
+  }
+
+  const block = canSuspend({
+    actorId: gate.staff.userId,
+    actorRole: gate.staff.role,
+    targetId,
+    targetRole,
+  });
+  if (block) return NextResponse.json({ error: SUSPEND_REFUSED[block] }, { status: 409 });
+
+  try {
+    await withAudit(
+      {
+        actorId: gate.staff.userId,
+        action: body.data.suspended ? 'user.suspend' : 'user.restore',
+        targetType: 'user',
+        targetId,
+        reason: body.data.reason,
+      },
+      async () => {
+        const { error } = await getSupabaseAdmin().auth.admin.updateUserById(targetId, {
+          ban_duration: body.data.suspended ? SUSPENDED : 'none',
+        });
+        if (error) throw error;
+      },
+    );
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-suspend', step: 'update' } });
+    return NextResponse.json({ error: 'The account was not changed.' }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 5: Write the password reset route**
+
+Do not call `supabase.auth.resetPasswordForEmail` here. The app's reset flow is PKCE, so the code verifier would be stored in the admin's browser and the link would fail for the user. Generate a recovery token on the server instead. Send it with `sendEmail` directly, not `enqueueEmail`, so the token is not stored in Inngest's event history.
+
+`src/app/api/admin/users/[id]/password-reset/route.ts`:
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { render } from '@react-email/render';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { withAudit } from '@/lib/admin/audit';
+import { isUuid, notFoundResponse } from '@/lib/admin/http';
+import { getTargetRole } from '@/lib/admin/users';
+import { sendEmail } from '@/lib/email';
+import PasswordReset from '@emails/password-reset';
+
+type Ctx = { params: { id: string } };
+
+export async function POST(_request: Request, context: Ctx) {
+  const gate = await requirePermission('users.edit');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const targetId = context.params.id;
+  const admin = getSupabaseAdmin();
+
+  const { data, error: lookupError } = await admin.auth.admin.getUserById(targetId);
+  if (lookupError && lookupError.status !== 404) {
+    Sentry.captureException(new Error(`password reset lookup failed: ${lookupError.message}`), {
+      tags: { route: 'admin-password-reset', step: 'user-lookup' },
+    });
+    return NextResponse.json({ error: 'The user could not be looked up.' }, { status: 500 });
+  }
+  const email = data?.user?.email;
+  if (!email) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+
+  // Resetting a staff member's password hands over their session, so only an Owner may do it.
+  let targetRole;
+  try {
+    targetRole = await getTargetRole(targetId);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-password-reset', step: 'role-lookup' } });
+    return NextResponse.json({ error: 'The reset email could not be sent.' }, { status: 500 });
+  }
+  if (targetRole && gate.staff.role !== 'owner') {
+    return NextResponse.json({ error: 'Only an Owner can reset the password of someone who holds a role.' }, { status: 409 });
+  }
+
+  try {
+    await withAudit(
+      { actorId: gate.staff.userId, action: 'user.password_reset', targetType: 'user', targetId },
+      async () => {
+        const { data: link, error } = await admin.auth.admin.generateLink({ type: 'recovery', email });
+        const hashed = link?.properties?.hashed_token;
+        if (error || !hashed) throw error ?? new Error('no recovery token');
+        // The token sits in the fragment so it never reaches a server log or Sentry URL.
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design';
+        const resetUrl = `${baseUrl}/auth/recovery#token_hash=${encodeURIComponent(hashed)}`;
+        const sent = await sendEmail({
+          to: email,
+          subject: 'Reset your CXD Canvas password',
+          html: await render(PasswordReset({ resetUrl })),
+        });
+        // sendEmail returns null when RESEND_API_KEY is missing. That is a failure, not a sent email.
+        if (!sent) throw new Error('email provider is not configured');
+      },
+    );
+  } catch (err) {
+    // Message only: the error object may carry request details, and the token must never be reported.
+    Sentry.captureException(new Error(`password reset failed: ${err instanceof Error ? err.message : 'unknown'}`), {
+      tags: { route: 'admin-password-reset', step: 'send' },
+    });
+    return NextResponse.json({ error: 'The reset email could not be sent.' }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
+}
+```
+
+`emails/password-reset.tsx`:
+
+```tsx
+import { Section, Text } from '@react-email/components';
+import * as React from 'react';
+import { EmailLayout } from './_components/email-layout';
+import { EmailButton } from './_components/email-button';
+
+interface PasswordResetProps {
+  resetUrl: string;
+}
+
+export default function PasswordReset({ resetUrl }: PasswordResetProps) {
+  return (
+    <EmailLayout previewText="Reset your CXD Canvas password" showUnsubscribe={false}>
+      <Section style={{ padding: '32px 40px', textAlign: 'center' as const }}>
+        <Text style={{ color: '#edfcfc', fontSize: '15px', lineHeight: '1.7', margin: '0 0 24px' }}>
+          Our support team sent you this link to reset your password. It works once.
+        </Text>
+        <EmailButton href={resetUrl}>Reset password</EmailButton>
+        <Text style={{ color: '#6b6b7b', fontSize: '12px', margin: '24px 0 0' }}>
+          If you did not ask for this, you can ignore this email and your password stays the same.
+        </Text>
+      </Section>
+    </EmailLayout>
+  );
+}
+
+PasswordReset.PreviewProps = {
+  resetUrl: 'https://canvas.cyberdelic.design/auth/recovery#token_hash=abc123',
+} satisfies PasswordResetProps;
+```
+
+The token travels in the URL fragment (`#token_hash=...`), so it never reaches a server log or a Sentry request URL. `src/app/auth/recovery/page.tsx` renders a client component that reads it, stores it in a hidden input and removes it from the address bar. Opening the link changes nothing, because mail scanners open links and would use up the one-time token:
+
+`src/components/admin/recovery-form.tsx`:
+
+```tsx
+'use client';
+
+import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+
+/**
+ * The recovery token arrives in the URL fragment, so it never reaches a server
+ * log or a Sentry request URL. Read it once, keep it in a hidden input, and
+ * take it out of the address bar straight away.
+ */
+export function RecoveryForm() {
+  const [token, setToken] = useState('');
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const value = params.get('token_hash');
+    // React StrictMode runs this twice in dev; the second run finds the fragment
+    // already removed and must leave the stored token alone.
+    if (value) {
+      setToken(value);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    setChecked(true);
+  }, []);
+
+  return (
+    <form action="/auth/recovery/confirm" method="POST" className="max-w-md space-y-4 text-center">
+      <h1 className="text-xl font-semibold">Reset your password</h1>
+      <input type="hidden" name="token_hash" value={token} />
+      {token ? (
+        <Button type="submit">Continue</Button>
+      ) : (
+        checked && <p className="text-sm text-white/60">This link is incomplete. Open it again from your email.</p>
+      )}
+    </form>
+  );
+}
+```
+
+`src/app/auth/recovery/page.tsx`:
+
+```tsx
+import { RecoveryForm } from '@/components/admin/recovery-form';
+
+export const metadata = {
+  title: 'Reset password',
+  robots: { index: false, follow: false },
+};
+
+export default function RecoveryPage() {
+  return (
+    <main className="min-h-screen bg-black text-white flex items-center justify-center p-4">
+      <RecoveryForm />
+    </main>
+  );
+}
+```
+
+`src/app/auth/recovery/confirm/route.ts`:
+
+```ts
+import { NextResponse } from 'next/server';
+import { createClient } from '@/supabase/server';
+
+function redirectTo(request: Request, path: string): NextResponse {
+  // 303 so the browser follows the redirect with GET.
+  const res = NextResponse.redirect(new URL(path, new URL(request.url).origin), 303);
+  res.headers.set('Cache-Control', 'no-store');
+  res.headers.set('Referrer-Policy', 'no-referrer');
+  return res;
+}
+
+/** Only a form posted from this site may spend the token. */
+function isSameOrigin(request: Request): boolean {
+  const site = request.headers.get('sec-fetch-site');
+  if (site) return site === 'same-origin';
+  const origin = request.headers.get('origin');
+  if (!origin) return false;
+  try {
+    return new URL(origin).host === new URL(request.url).host;
+  } catch {
+    return false;
+  }
+}
+
+export async function POST(request: Request) {
+  if (!isSameOrigin(request)) return redirectTo(request, '/forgot-password');
+
+  let tokenHash: FormDataEntryValue | null = null;
+  try {
+    tokenHash = (await request.formData()).get('token_hash');
+  } catch {
+    return redirectTo(request, '/forgot-password');
+  }
+
+  if (typeof tokenHash === 'string' && tokenHash) {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
+    if (!error) return redirectTo(request, '/dashboard/reset-password');
+  }
+  return redirectTo(request, '/forgot-password');
+}
+```
+
+- [ ] **Step 6: Redact the token in Sentry**
+
+In `instrumentation-client.ts`, add this above `if (dsn) {`:
+
+```ts
+// The admin password-reset link carries a one-time token_hash. It travels in the
+// URL fragment, but redact it anywhere it could still appear: request URLs,
+// breadcrumbs, transaction names and span data.
+const TOKEN_HASH = /token_hash([=:]\s*"?)[^&#"\s]+/g;
+
+function scrub<T>(value: T, depth = 0): T {
+  if (depth > 8) return value;
+  if (typeof value === "string") return value.replace(TOKEN_HASH, "token_hash$1[redacted]") as unknown as T;
+  if (Array.isArray(value)) return value.map((item) => scrub(item, depth + 1)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      // SDK internals: copy through so the walk does not enter them.
+      out[key] = depth === 0 && key === "sdkProcessingMetadata" ? item : scrub(item, depth + 1);
+    }
+    return out as T;
+  }
+  return value;
+}
+```
+
+Then add these two options to `Sentry.init`, before `debug: false`:
+
+```ts
+    beforeSend: (event) => scrub(event),
+    beforeSendTransaction: (event) => scrub(event),
+```
+
+And inside `Sentry.replayIntegration({ ... })`, add `beforeAddRecordingEvent: (event) => scrub(event),` so replay payloads are scrubbed too.
+
+- [ ] **Step 7: Check routes and commit**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-routes.verify.ts`
+Expected: `5 handlers checked`, exit 0.
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src emails instrumentation-client.ts
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add user action routes"
+```
+
+## Task 9: User detail page
+
+**Files:**
+- Create: `src/app/admin/users/[id]/page.tsx`, `src/components/admin/user-actions.tsx`
+
+- [ ] **Step 1: Write the actions component**
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { adminPost } from '@/lib/admin/client';
+import { ADMIN_PLANS, type PlanBlock } from '@/lib/admin/plan-guard';
+import { canSuspend, SUSPEND_REFUSED, type StaffRole } from '@/lib/admin/permissions';
+
+const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
+
+const PLAN_BLOCK_TEXT: Record<PlanBlock, string> = {
+  stripe_managed: 'Managed by Stripe. Change it in the Stripe dashboard, or the user keeps being charged and the next webhook overwrites this.',
+  nexus_managed: 'Managed by Cyberdelic Nexus. The tier sync would overwrite a change made here.',
+  lifetime_plan: 'Lifetime plans cannot be changed here.',
+};
+
+interface Props {
+  actor: { id: string; role: StaffRole; canEdit: boolean; canAssign: boolean };
+  target: { id: string; role: StaffRole | null; plan: string; planBlock: PlanBlock | null; suspended: boolean };
+}
+
+export function UserActions({ actor, target }: Props) {
+  const router = useRouter();
+  const [reason, setReason] = useState('');
+  const [plan, setPlan] = useState(target.plan);
+  const [amount, setAmount] = useState('');
+  const [role, setRole] = useState<string>(target.role ?? '');
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function run(url: string, body: unknown, done: string): Promise<boolean> {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await adminPost(url, body);
+      setMessage({ ok: true, text: done });
+      setReason('');
+      router.refresh();
+      return true;
+    } catch (err) {
+      setMessage({ ok: false, text: (err as Error).message });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const base = `/api/admin/users/${target.id}`;
+  const hasReason = reason.trim().length >= 3;
+  const suspendBlock = canSuspend({ actorId: actor.id, actorRole: actor.role, targetId: target.id, targetRole: target.role });
+
+  if (!actor.canEdit && !actor.canAssign) return null;
+
+  return (
+    <section className="space-y-4 rounded-lg border border-white/10 p-4">
+      <h2 className="font-medium">Actions</h2>
+      <div className="space-y-1">
+        <label htmlFor="reason" className="text-sm text-white/60">Reason (required, saved to the audit log)</label>
+        <input id="reason" value={reason} onChange={(e) => setReason(e.target.value)} className={FIELD} />
+      </div>
+
+      {actor.canEdit && (
+        <>
+          <div className="space-y-1">
+            <label htmlFor="plan" className="text-sm text-white/60">Plan</label>
+            {target.planBlock ? (
+              <p className="text-sm text-white/50">{PLAN_BLOCK_TEXT[target.planBlock]}</p>
+            ) : (
+              <div className="flex gap-2">
+                <select id="plan" value={plan} onChange={(e) => setPlan(e.target.value)} className={FIELD}>
+                  {ADMIN_PLANS.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <Button
+                  size="sm"
+                  disabled={busy || !hasReason || plan === target.plan}
+                  onClick={() => run(`${base}/plan`, { plan, reason }, 'Plan changed.')}
+                >
+                  Change
+                </Button>
+              </div>
+            )}
+            {!target.planBlock && <p className="text-xs text-white/40">Changing plan resets the monthly credit allowance to the new plan's amount.</p>}
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="credits" className="text-sm text-white/60">Add or remove credits (use a minus sign to remove)</label>
+            <div className="flex gap-2">
+              <input id="credits" type="number" step={1} value={amount} onChange={(e) => setAmount(e.target.value)} className={FIELD} />
+              <Button
+                size="sm"
+                disabled={busy || !hasReason || !Number(amount)}
+                onClick={async () => {
+                  if (await run(`${base}/credits`, { amount: Number(amount), reason }, 'Credits adjusted.')) setAmount('');
+                }}
+              >
+                Apply
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {(target.role === null || actor.role === 'owner') && (
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => run(`${base}/password-reset`, {}, 'Reset email sent.')}>
+                Send password reset
+              </Button>
+            )}
+            {!suspendBlock && (
+              <Button
+                size="sm"
+                variant={target.suspended ? 'outline' : 'destructive'}
+                disabled={busy || !hasReason}
+                onClick={() => run(`${base}/suspend`, { suspended: !target.suspended, reason }, target.suspended ? 'Account restored.' : 'Account suspended.')}
+              >
+                {target.suspended ? 'Restore account' : 'Suspend account'}
+              </Button>
+            )}
+          </div>
+          {suspendBlock && <p className="text-xs text-white/40">{SUSPEND_REFUSED[suspendBlock]}</p>}
+          {!target.suspended && !suspendBlock && <p className="text-xs text-white/40">Suspending keeps all data and does not cancel Stripe billing.</p>}
+        </>
+      )}
+
+      {actor.canAssign && target.role !== 'owner' && (
+        <div className="space-y-1">
+          <label htmlFor="role" className="text-sm text-white/60">Role</label>
+          <div className="flex gap-2">
+            <select id="role" value={role} onChange={(e) => setRole(e.target.value)} className={FIELD}>
+              <option value="">No role</option>
+              <option value="staff">Staff</option>
+              <option value="admin">Admin</option>
+            </select>
+            <Button
+              size="sm"
+              disabled={busy || !hasReason || role === (target.role ?? '')}
+              onClick={() => run(`${base}/role`, { role: role || null, reason }, 'Role updated.')}
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {message && (
+        <p role="status" className={`text-sm ${message.ok ? 'text-emerald-400' : 'text-rose-400'}`}>{message.text}</p>
+      )}
+    </section>
+  );
+}
+```
+
+- [ ] **Step 2: Write the page**
+
+```tsx
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { requirePagePermission } from '@/lib/admin/gate';
+import { can, isBanned } from '@/lib/admin/permissions';
+import { isUuid } from '@/lib/admin/http';
+import { planEditBlock } from '@/lib/admin/plan-guard';
+import { formatDate, getUserDetail } from '@/lib/admin/users';
+import * as Sentry from '@sentry/nextjs';
+import { listTicketsForUser } from '@/lib/admin/support';
+import { UserActions } from '@/components/admin/user-actions';
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex justify-between gap-4 py-1.5 text-sm border-b border-white/5">
+      <dt className="text-white/50">{label}</dt>
+      <dd className="text-right break-all">{children}</dd>
+    </div>
+  );
+}
+
+export default async function AdminUserPage({ params }: { params: { id: string } }) {
+  const staff = await requirePagePermission('users.view');
+  if (!isUuid(params.id)) notFound();
+  const canSeeAudit = can(staff.role, 'audit.view');
+  const user = await getUserDetail(params.id, { includeAudit: canSeeAudit });
+  if (!user) notFound();
+  // Cards are secondary here: a failed read is reported and the rest of the page still renders.
+  let tickets: Awaited<ReturnType<typeof listTicketsForUser>> | null = null;
+  try {
+    tickets = await listTicketsForUser(user.id);
+  } catch (err) {
+    Sentry.captureException(new Error(`user page ticket list failed: ${(err as { message?: string })?.message ?? 'unknown'}`), {
+      tags: { route: 'admin-user-page', step: 'tickets' },
+    });
+  }
+  const suspended = isBanned(user.bannedUntil, new Date());
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <Link href="/admin/users" className="text-sm text-white/50 hover:text-white">Users</Link>
+        <h1 className="text-xl font-semibold">{user.name || user.email}</h1>
+        {suspended && <p className="text-sm text-rose-400">Suspended</p>}
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        <dl className="rounded-lg border border-white/10 p-4">
+          <Row label="Email">{user.email}</Row>
+          <Row label="Role">{user.role ?? '—'}</Row>
+          <Row label="Joined">{formatDate(user.createdAt)}</Row>
+          <Row label="Last sign-in">{formatDate(user.lastSignInAt)}</Row>
+          <Row label="Canvases">{user.canvasCount}</Row>
+          <Row label="Plan">{user.subscription?.plan_id ?? 'free'}</Row>
+          <Row label="Plan status">{user.subscription?.status ?? '—'}</Row>
+          <Row label="Plan source">{user.subscription?.plan_source ?? '—'}</Row>
+          <Row label="Credits used">{user.credits?.used_this_period ?? 0} / {user.credits?.monthly_allowance ?? 0}</Row>
+          <Row label="Add-on credits">{user.credits?.addon_credits ?? 0}</Row>
+          <Row label="Nexus member">{user.nexusMemberId ?? '—'}</Row>
+          <Row label="Stripe subscription">
+            {user.subscription?.stripe_subscription_id ? (
+              <a
+                href={`https://dashboard.stripe.com/subscriptions/${user.subscription.stripe_subscription_id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-violet-200 hover:underline"
+              >
+                {user.subscription.stripe_subscription_id}
+              </a>
+            ) : '—'}
+          </Row>
+          <Row label="Stripe">
+            {user.subscription?.stripe_customer_id ? (
+              <a
+                href={`https://dashboard.stripe.com/customers/${user.subscription.stripe_customer_id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-violet-200 hover:underline"
+              >
+                Open customer
+              </a>
+            ) : '—'}
+          </Row>
+        </dl>
+
+        <UserActions
+          actor={{
+            id: staff.userId,
+            role: staff.role,
+            canEdit: can(staff.role, 'users.edit'),
+            canAssign: can(staff.role, 'roles.assign'),
+          }}
+          target={{
+            id: user.id,
+            role: user.role,
+            plan: user.subscription?.plan_id ?? 'free',
+            planBlock: user.subscription ? planEditBlock(user.subscription) : null,
+            suspended,
+          }}
+        />
+      </div>
+
+      <section className="space-y-2">
+        <h2 className="font-medium">Support cards</h2>
+        {tickets === null && <p className="text-sm text-white/50">Support cards unavailable.</p>}
+        {tickets?.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
+        {tickets?.map((ticket) => (
+          <Link key={ticket.id} href={`/admin/support/${ticket.id}`} className="block text-sm text-violet-200 hover:underline">
+            {ticket.title} ({ticket.status})
+          </Link>
+        ))}
+      </section>
+
+      {canSeeAudit && (
+        <section className="space-y-2">
+          <h2 className="font-medium">Admin history</h2>
+          {user.audit.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
+          {user.audit.map((entry) => (
+            <p key={entry.id} className="text-sm text-white/70">
+              {formatDate(entry.created_at)} · {entry.action} · {entry.outcome}{entry.reason ? ` · ${entry.reason}` : ''}
+            </p>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+```
+
+This imports `listTicketsForUser` from Task 13. Commit this task, then run the type-check after Task 13. Do not stub it.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add user detail page and actions"
+```
+
+## Task 10: Refuse suspended accounts on the Nexus path
+
+The Nexus callback mints a session with a server-side magic link. Do not rely on `verifyOtp` refusing a banned user.
+
+**Files:**
+- Modify: `src/app/auth/nexus-callback/route.ts:105-107`
+
+- [ ] **Step 1: Add the check**
+
+Add to the imports:
+
+```ts
+import { isBanned } from '@/lib/admin/permissions';
+```
+
+Replace lines 105-107 with:
+
+```ts
+    const { data: userData, error: userError } = await admin.auth.admin.getUserById(userId);
+    const email = userData?.user?.email;
+    if (userError || !email) return fail(request, 'failed');
+    if (isBanned(userData.user.banned_until, new Date())) {
+      return fail(request, 'failed');
+    }
+```
+
+- [ ] **Step 2: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors beyond the pending `listTicketsForUser` import.
+
+```bash
+git add src/app/auth/nexus-callback/route.ts
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "fix(auth): refuse suspended accounts on the Nexus sign-in path"
+```
+
+---
+
+# Phase 3: Support
+
+## Task 11: Ticket helpers
+
+**Files:**
+- Create: `src/lib/admin/tickets.ts`, `src/lib/admin/__verify__/admin-tickets.verify.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+/**
+ * Ticket title and body shaping for /api/support.
+ * Run: npx tsx src/lib/admin/__verify__/admin-tickets.verify.ts
+ */
+import { composeTicketBody, isHttpUrl, parseTicketFilters, replySubject, resolveTicketType, ticketTitle } from '../tickets';
+
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { passed++; console.log('  ✓', name); }
+  else { failed++; console.error('  ✗', name); }
+}
+
+check('explicit type wins', resolveTicketType('feature', 'Bug Report') === 'feature');
+check('legacy bug title', resolveTicketType(undefined, 'Bug Report') === 'bug');
+check('legacy default', resolveTicketType(undefined, 'Support Request') === 'support');
+check('unknown type falls back', resolveTicketType('nonsense', 'Support Request') === 'support');
+
+check('generic title uses description', ticketTitle('Bug Report', 'The canvas froze') === 'The canvas froze');
+check('real title kept', ticketTitle('Export broken', 'Details') === 'Export broken');
+check('long description cut at 80', ticketTitle('Support Request', 'x'.repeat(200)).length === 80);
+check('first line only', ticketTitle('Bug Report', 'First\nSecond') === 'First');
+
+check('body without steps', composeTicketBody('Hello', undefined) === 'Hello');
+check('body with steps', composeTicketBody('Hello', '1. Click').includes('Steps to reproduce:\n1. Click'));
+
+check('title whitespace collapsed', ticketTitle('Export   broken\n\tnow', 'x') === 'Export broken now');
+check('blank real title is Untitled', ticketTitle('   ', 'x') === 'Untitled');
+check('blank description is Untitled', ticketTitle('Bug Report', '   \n  ') === 'Untitled');
+check('description spaces collapsed', ticketTitle('Support Request', 'a   b') === 'a b');
+check('reply subject single line', replySubject('Hello\r\nBcc: x@y.z') === 'Re: Hello Bcc: x@y.z');
+check('reply subject untitled', replySubject('  ') === 'Re: Untitled');
+
+const UID = '123e4567-e89b-12d3-a456-426614174000';
+check('valid filters kept', JSON.stringify(parseTicketFilters({ type: 'bug', priority: 'high', assignee: UID })) === JSON.stringify({ type: 'bug', priority: 'high', assignee: UID }));
+check('invalid type dropped', parseTicketFilters({ type: 'x' }).type === undefined);
+check('invalid priority dropped', parseTicketFilters({ priority: 'urgent' }).priority === undefined);
+check('invalid assignee dropped', parseTicketFilters({ assignee: 'abc,id.eq.1' }).assignee === undefined);
+
+check('https link allowed', isHttpUrl('https://sentry.io/issues/1'));
+check('http link allowed', isHttpUrl('http://example.com'));
+check('javascript link refused', !isHttpUrl('javascript:alert(1)'));
+check('data link refused', !isHttpUrl('data:text/html,hi'));
+check('garbage refused', !isHttpUrl('not a url'));
+check('null refused', !isHttpUrl(null));
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-tickets.verify.ts`
+Expected: FAIL, cannot find module `../tickets`.
+
+- [ ] **Step 3: Implement**
+
+```ts
+export const TICKET_TYPES = ['bug', 'feature', 'support'] as const;
+export type TicketType = (typeof TICKET_TYPES)[number];
+
+export const TICKET_STATUSES = ['new', 'in_progress', 'waiting', 'done'] as const;
+export type TicketStatus = (typeof TICKET_STATUSES)[number];
+
+export const TICKET_PRIORITIES = ['low', 'normal', 'high'] as const;
+export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
+
+export const STATUS_LABELS: Record<TicketStatus, string> = {
+  new: 'New',
+  in_progress: 'In progress',
+  waiting: 'Waiting on user',
+  done: 'Done',
+};
+
+export const TYPE_LABELS: Record<TicketType, string> = {
+  bug: 'Bug',
+  feature: 'Feature request',
+  support: 'Support',
+};
+
+const GENERIC_TITLES = ['Bug Report', 'Support Request', 'Feature Request'];
+const TITLE_LENGTH = 80;
+
+export function resolveTicketType(type: unknown, title: string): TicketType {
+  if ((TICKET_TYPES as readonly unknown[]).includes(type)) return type as TicketType;
+  return title === 'Bug Report' ? 'bug' : 'support';
+}
+
+/** The dialogs send a fixed label as the title, which would make every card look alike. */
+export function ticketTitle(title: string, description: string): string {
+  const source = GENERIC_TITLES.includes(title) ? description.trim().split('\n')[0] : title;
+  return oneLine(source).slice(0, TITLE_LENGTH).trim() || 'Untitled';
+}
+
+/** Collapses every run of whitespace (including line breaks) to one space. */
+export function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+/** The subject of a reply email: single line, so a title with line breaks cannot split the header. */
+export function replySubject(title: string): string {
+  return `Re: ${oneLine(title) || 'Untitled'}`;
+}
+
+export type TicketEventKind = 'note' | 'reply' | 'status' | 'assignment' | 'delivery_failed';
+
+export function composeTicketBody(description: string, stepsToReproduce: string | undefined): string {
+  if (!stepsToReproduce) return description;
+  return `${description}\n\nSteps to reproduce:\n${stepsToReproduce}`;
+}
+
+export interface TicketFilters {
+  type?: TicketType;
+  priority?: TicketPriority;
+  assignee?: string;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Keeps only filter values that are valid; anything else is dropped rather than queried. */
+export function parseTicketFilters(raw: { type?: string; priority?: string; assignee?: string }): TicketFilters {
+  const filters: TicketFilters = {};
+  if ((TICKET_TYPES as readonly unknown[]).includes(raw.type)) filters.type = raw.type as TicketType;
+  if ((TICKET_PRIORITIES as readonly unknown[]).includes(raw.priority)) filters.priority = raw.priority as TicketPriority;
+  if (raw.assignee && UUID.test(raw.assignee)) filters.assignee = raw.assignee;
+  return filters;
+}
+
+/** True only for an http or https URL, so a stored link can never render as javascript: or data:. */
+export function isHttpUrl(value: string | null | undefined): value is string {
+  if (!value) return false;
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+```
+
+- [ ] **Step 4: Run it to confirm it passes**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-tickets.verify.ts`
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/admin
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add ticket helpers"
+```
+
+## Task 12: Support migration
+
+**Files:**
+- Create: `supabase/migrations/20261031000003_support_tickets.sql`
+
+- [ ] **Step 1: Write the migration**
+
+```sql
+-- Support cards. Requests used to exist only as emails, so nothing could be
+-- tracked. Service-role-only: members have no ticket screens.
+
+CREATE TABLE IF NOT EXISTS public.support_tickets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  email text NOT NULL,
+  type text NOT NULL CHECK (type IN ('bug', 'feature', 'support')),
+  title text NOT NULL,
+  description text NOT NULL,
+  status text NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'in_progress', 'waiting', 'done')),
+  priority text NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high')),
+  assignee_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  source_path text,
+  sentry_issue_url text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON public.support_tickets (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON public.support_tickets (user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.support_ticket_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE RESTRICT,
+  actor_id uuid NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('note', 'reply', 'status', 'assignment', 'delivery_failed')),
+  body text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_ticket_events_ticket ON public.support_ticket_events (ticket_id, created_at);
+
+-- History is append-only, like the audit log. Tickets have no DELETE grant, so
+-- RESTRICT above never fires for service_role; it guards against a future grant.
+CREATE OR REPLACE FUNCTION public.support_ticket_events_append_only()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  RAISE EXCEPTION 'ticket_events_are_append_only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS support_ticket_events_append_only ON public.support_ticket_events;
+CREATE TRIGGER support_ticket_events_append_only
+  BEFORE UPDATE OR DELETE ON public.support_ticket_events
+  FOR EACH ROW EXECUTE FUNCTION public.support_ticket_events_append_only();
+
+DROP TRIGGER IF EXISTS support_ticket_events_no_truncate ON public.support_ticket_events;
+CREATE TRIGGER support_ticket_events_no_truncate
+  BEFORE TRUNCATE ON public.support_ticket_events
+  FOR EACH STATEMENT EXECUTE FUNCTION public.support_ticket_events_append_only();
+
+ALTER TABLE public.support_tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.support_ticket_events ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.support_tickets FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.support_ticket_events FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE ON public.support_tickets TO service_role;
+GRANT SELECT, INSERT ON public.support_ticket_events TO service_role;
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add supabase/migrations/20261031000003_support_tickets.sql
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add support ticket tables"
+```
+
+## Task 13: Support reads
+
+**Files:**
+- Create: `src/lib/admin/support.ts`
+
+- [ ] **Step 1: Write it**
+
+```ts
+import { getSupabaseAdmin } from '@/supabase/admin';
+import type { TicketEventKind, TicketFilters, TicketPriority, TicketStatus, TicketType } from './tickets';
+
+export interface Ticket {
+  id: string;
+  user_id: string | null;
+  email: string;
+  type: TicketType;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  assignee_id: string | null;
+  source_path: string | null;
+  sentry_issue_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TicketEvent {
+  id: string;
+  actor_id: string;
+  kind: TicketEventKind;
+  body: string;
+  created_at: string;
+}
+
+export interface StaffMember {
+  id: string;
+  label: string;
+}
+
+export const DONE_LIMIT = 100;
+
+/**
+ * Filters must already be validated (see parseTicketFilters). Open cards are
+ * never capped, so a busy day cannot hide work; done cards show the newest
+ * DONE_LIMIT. A failed read throws.
+ */
+export async function listTickets(filters: TicketFilters): Promise<Ticket[]> {
+  const base = () => {
+    let query = getSupabaseAdmin().from('support_tickets').select('*').order('created_at', { ascending: false });
+    if (filters.type) query = query.eq('type', filters.type);
+    if (filters.assignee) query = query.eq('assignee_id', filters.assignee);
+    if (filters.priority) query = query.eq('priority', filters.priority);
+    return query;
+  };
+  const [open, done] = await Promise.all([base().neq('status', 'done'), base().eq('status', 'done').limit(DONE_LIMIT)]);
+  if (open.error) throw open.error;
+  if (done.error) throw done.error;
+  return [...(open.data ?? []), ...(done.data ?? [])] as Ticket[];
+}
+
+/** True when the user currently holds a staff role. A failed read throws. */
+export async function isStaffMember(userId: string): Promise<boolean> {
+  const { data, error } = await getSupabaseAdmin().from('staff_roles').select('user_id').eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+/** Returns null only when the card does not exist; a failed read throws. */
+export async function getTicket(id: string): Promise<{ ticket: Ticket; events: TicketEvent[] } | null> {
+  const admin = getSupabaseAdmin();
+  const { data: ticket, error } = await admin.from('support_tickets').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!ticket) return null;
+  const { data: events, error: eventsError } = await admin
+    .from('support_ticket_events')
+    .select('id, actor_id, kind, body, created_at')
+    .eq('ticket_id', id)
+    .order('created_at', { ascending: true });
+  if (eventsError) throw eventsError;
+  return { ticket: ticket as Ticket, events: (events ?? []) as TicketEvent[] };
+}
+
+export async function listTicketsForUser(userId: string): Promise<Pick<Ticket, 'id' | 'title' | 'status'>[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('support_tickets')
+    .select('id, title, status')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+  return (data ?? []) as Pick<Ticket, 'id' | 'title' | 'status'>[];
+}
+
+export async function listStaff(): Promise<StaffMember[]> {
+  const admin = getSupabaseAdmin();
+  const { data: roles, error: rolesError } = await admin.from('staff_roles').select('user_id');
+  if (rolesError) throw rolesError;
+  const ids = (roles ?? []).map((row) => row.user_id as string);
+  if (ids.length === 0) return [];
+  const { data: people, error: peopleError } = await admin.from('users').select('id, full_name, email').in('id', ids);
+  if (peopleError) throw peopleError;
+  return (people ?? []).map((person) => ({
+    id: person.id as string,
+    label: (person.full_name as string | null) || (person.email as string) || 'Staff',
+  }));
+}
+```
+
+- [ ] **Step 2: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors, because Task 9's import now resolves.
+
+```bash
+git add src/lib/admin/support.ts
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add support reads"
+```
+
+## Task 14: Save requests and add Feature Request
+
+**Files:**
+- Modify: `src/lib/rate-limiter.ts:5-12`, `src/app/api/support/route.ts`, `src/components/dashboard-navbar.tsx`
+
+- [ ] **Step 1: Add the rate limit**
+
+In `src/lib/rate-limiter.ts`:
+
+```ts
+type EndpointType = 'sign-in' | 'sign-up' | 'forgot-password' | 'checkout' | 'support';
+```
+
+Add to `LIMITS`:
+
+```ts
+  'support': { windowMs: 3_600_000, maxRequests: 10 },       // 10 per hour
+```
+
+- [ ] **Step 2: Update imports and body parsing in `/api/support`**
+
+Replace the import block's end with these additions:
+
+```ts
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { checkRateLimit } from '@/lib/rate-limiter';
+import { composeTicketBody, resolveTicketType, ticketTitle } from '@/lib/admin/tickets';
+```
+
+After the `401` check, add:
+
+```ts
+    const limit = checkRateLimit(user.id, 'support');
+    if (!limit.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 });
+    }
+```
+
+Add `type: requestedType,` and `sourcePath,` to the destructured body fields.
+
+- [ ] **Step 3: Store the ticket and set the type**
+
+Replace lines 67-69:
+
+```ts
+    const ticketType = resolveTicketType(requestedType, title);
+    // The email templates know two types; a feature request reads as support.
+    const type: 'bug' | 'support' = ticketType === 'bug' ? 'bug' : 'support';
+    const subjectPrefix =
+      ticketType === 'bug' ? 'Bug Report' : ticketType === 'feature' ? 'Feature Request' : 'Support Request';
+
+    // Stored first, but a failed insert must not lose the request: the emails
+    // below still go out, and Sentry records the failure.
+    try {
+      const { error: ticketError } = await getSupabaseAdmin().from('support_tickets').insert({
+        user_id: user.id,
+        email: reporterEmail,
+        type: ticketType,
+        title: ticketTitle(title, description),
+        description: composeTicketBody(
+          description,
+          typeof stepsToReproduce === 'string' ? stepsToReproduce.slice(0, 10000) : undefined,
+        ),
+        source_path: typeof sourcePath === 'string' ? sourcePath.slice(0, 500) : null,
+      });
+      if (ticketError) throw new Error(`${ticketError.code ?? 'error'}: ${ticketError.message}`);
+    } catch (ticketErr) {
+      // Code and message only: a constraint error's details can echo the row, which holds the user's text.
+      const reason = ticketErr instanceof Error ? ticketErr.message : 'unknown';
+      console.error('Failed to store support ticket:', reason);
+      Sentry.captureException(new Error(`support ticket insert failed: ${reason}`), {
+        tags: { route: 'support', phase: 'store-ticket' },
+      });
+    }
+```
+
+Change the Sentry tag to `reportType: ticketType`. Add `stepsToReproduce` handling as shown above (only a string, capped at 10,000 characters, reaches the ticket).
+
+- [ ] **Step 4: Update the dialogs**
+
+In `src/components/dashboard-navbar.tsx`:
+
+Add `Lightbulb,` to the lucide imports, then add state after `showSupportModal`:
+
+```tsx
+  const [supportKind, setSupportKind] = useState<'support' | 'feature'>('support')
+```
+
+In `handleSupportSubmit`, replace the JSON body with:
+
+```tsx
+        body: JSON.stringify({
+          type: supportKind,
+          title: supportKind === 'feature' ? 'Feature Request' : 'Support Request',
+          description: supportMessage,
+          sourcePath: pathname,
+          browserInfo,
+        }),
+```
+
+In `handleBugSubmit`, add to the JSON body:
+
+```tsx
+          type: 'bug',
+          sourcePath: pathname,
+```
+
+Replace the Help Menu's Contact Support item and add the new one:
+
+```tsx
+                <DropdownMenuItem
+                  onClick={() => { setSupportKind('support'); setShowSupportModal(true) }}
+                  className="cursor-pointer hover:bg-white/5"
+                >
+                  <MessageCircle className="w-4 h-4 mr-2" />
+                  Contact Support
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => { setSupportKind('feature'); setShowSupportModal(true) }}
+                  className="cursor-pointer hover:bg-white/5"
+                >
+                  <Lightbulb className="w-4 h-4 mr-2" />
+                  Request a Feature
+                </DropdownMenuItem>
+```
+
+In the Support Modal, make the header and label follow the kind:
+
+```tsx
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <MessageCircle className="w-5 h-5 text-violet-400" />
+              {supportKind === 'feature' ? 'Request a Feature' : 'Contact Support'}
+            </DialogTitle>
+            <DialogDescription className="text-white/50">
+              {supportKind === 'feature'
+                ? 'Tell us what would make CXD Canvas more useful.'
+                : "Have a question or need help? We're here to assist you."}
+            </DialogDescription>
+```
+
+- [ ] **Step 4b: Review fixes already applied to `/api/support` and the navbar**
+
+- The rate-limit check runs after the field and length validation, not straight after the 401.
+- `const steps = typeof stepsToReproduce === 'string' && stepsToReproduce.trim() ? stepsToReproduce.slice(0, 10000) : undefined;` is computed once and passed to `composeTicketBody`, the Sentry `extra`, and `BugReportNotification`.
+- `const reporterEmail = user.email || userProfile?.email || 'unknown@example.com';` (the auth-verified address first). The confirmation email goes to the same address. The reporter display name is unchanged.
+- `SupportConfirmation` receives `type: ticketType`; `emails/support-confirmation.tsx` widens its prop to `'bug' | 'feature' | 'support'` and labels feature requests "Feature Request".
+- `dashboard-navbar.tsx`: a module-level `class ServerMessage extends Error {}` and `serverMessageFor(status, error)`, both declared above the `overCover` comment so it stays attached to the component. Only a 429 (message plus "If it keeps happening, email contact@cyberdelic.design") or a 400 with a string `data.error` becomes a `ServerMessage`; the catch shows `error instanceof ServerMessage ? error.message : <the generic text with contact@cyberdelic.design>`, so outages and expired sessions keep the address. The 1500ms success timeout that closes each dialog also clears its text (`supportMessage`; `bugDescription` and `bugSteps`), because closing programmatically skips `onOpenChange`. Opening any of the three dialogs calls `setSubmitSuccess(false)`. The support textarea placeholder is `'Describe the feature you would like...'` when `supportKind === 'feature'`.
+
+- [ ] **Step 5: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(support): store requests and add feature requests"
+```
+
+## Task 15: Email options and reply template
+
+**Files:**
+- Modify: `src/lib/email.ts`, `src/lib/email-queue.ts`, `src/inngest/functions.ts`
+- Create: `emails/support-reply.tsx`
+
+- [ ] **Step 1: Extend `sendEmail`**
+
+```ts
+export async function sendEmail(options: {
+  to: string;
+  subject: string;
+  html: string;
+  from?: string;
+  replyTo?: string;
+  headers?: Record<string, string>;
+}) {
+  const resend = getResend();
+  if (!resend) {
+    console.warn('RESEND_API_KEY not configured, skipping email');
+    return null;
+  }
+
+  const { data, error } = await resend.emails.send({
+    from: options.from || process.env.RESEND_FROM_EMAIL || 'CXD Canvas <noreply@cyberdelic.design>',
+    to: options.to,
+    subject: options.subject,
+    html: options.html,
+    replyTo: options.replyTo,
+    headers: options.headers,
+  });
+```
+
+- [ ] **Step 2: Extend `enqueueEmail`**
+
+Add to `EnqueueEmailOptions`:
+
+```ts
+  replyTo?: string;
+  headers?: Record<string, string>;
+  /** Broadcast sends report their delivery result back to this broadcast. */
+  broadcastId?: string;
+```
+
+Add to the event `data`:
+
+```ts
+        replyTo: opts.replyTo,
+        headers: opts.headers,
+        broadcastId: opts.broadcastId,
+```
+
+Change the fallback call:
+
+```ts
+    await sendEmail({ to: opts.to, subject: opts.subject, html, replyTo: opts.replyTo, headers: opts.headers });
+```
+
+- [ ] **Step 3: Extend the worker**
+
+Add to `EmailSendData`:
+
+```ts
+  replyTo?: string;
+  headers?: Record<string, string>;
+  broadcastId?: string;
+```
+
+Add this helper above `sendEmailFn`:
+
+```ts
+async function recordBroadcastResult(broadcastId: string, sent: number, failed: number) {
+  const { error } = await getSupabaseAdmin().rpc('admin_record_broadcast_result', {
+    p_broadcast: broadcastId,
+    p_sent: sent,
+    p_failed: failed,
+  });
+  if (error) throw error;
+}
+```
+
+Replace the function options:
+
+```ts
+  {
+    id: 'send-email',
+    name: 'Send email (Resend)',
+    retries: 4, // ~4 attempts over ~1 hour with exponential backoff
+    // A broadcast enqueues one event per recipient; stay inside Resend's rate limit.
+    throttle: { limit: 2, period: '1s' },
+    triggers: [{ event: 'email/send' }],
+    onFailure: async ({ event }) => {
+      const { broadcastId } = event.data.event.data as EmailSendData;
+      if (broadcastId) await recordBroadcastResult(broadcastId, 0, 1);
+    },
+  },
+```
+
+Update destructuring:
+
+```ts
+    const { to, subject, html, userId, emailKind, stripeEventId, replyTo, headers, broadcastId } = event.data as EmailSendData;
+```
+
+Update the send step:
+
+```ts
+      await sendEmail({ to, subject, html, replyTo, headers });
+```
+
+Before `return { sent: true, ... }` add:
+
+```ts
+    if (broadcastId) {
+      await step.run('record-broadcast-result', () => recordBroadcastResult(broadcastId, 1, 0));
+    }
+```
+
+- [ ] **Step 4: Write `emails/support-reply.tsx`**
+
+```tsx
+import { Section, Text } from '@react-email/components';
+import * as React from 'react';
+import { EmailLayout } from './_components/email-layout';
+
+interface SupportReplyProps {
+  userName: string;
+  ticketTitle: string;
+  body: string;
+}
+
+export default function SupportReply({ userName, ticketTitle, body }: SupportReplyProps) {
+  return (
+    <EmailLayout previewText={`About your request: ${ticketTitle}`} showUnsubscribe={false}>
+      <Section style={{ padding: '32px 40px' }}>
+        <Text style={{ color: '#a0a0b0', fontSize: '14px', margin: '0 0 16px' }}>Hi {userName},</Text>
+        {body.split(/\n{2,}/).map((paragraph, index) => (
+          <Text key={index} style={{ color: '#edfcfc', fontSize: '15px', lineHeight: '1.7', margin: '0 0 16px', whiteSpace: 'pre-wrap' as const }}>
+            {paragraph}
+          </Text>
+        ))}
+        <Text style={{ color: '#6b6b7b', fontSize: '12px', margin: '16px 0 0' }}>
+          About your request: {ticketTitle}
+        </Text>
+      </Section>
+    </EmailLayout>
+  );
+}
+
+SupportReply.PreviewProps = {
+  userName: 'Alex',
+  ticketTitle: 'The canvas froze on export',
+  body: 'Thanks for reporting this.\n\nWe found the cause and fixed it.',
+} satisfies SupportReplyProps;
+```
+
+- [ ] **Step 4b: Review fixes already applied**
+
+- `EnqueueEmailOptions` also takes `eventId?: string` (passed to `inngest.send` as `id`, only on the Inngest path, so pair it with `fallbackOnMissing: false`), `ticketId?: string` and `actorId?: string`; the last two go into the event data. The worker's `EmailSendData` has them too.
+- `onFailure` first, inside its own try/catch that reports to Sentry and never throws, inserts a `support_ticket_events` row `{ ticket_id, actor_id, kind: 'delivery_failed', body: 'Reply could not be delivered.' }` when `ticketId && actorId`. Then the existing `if (broadcastId) await recordBroadcastResult(broadcastId, 0, 1);` runs unchanged. `functions.ts` imports `* as Sentry from '@sentry/nextjs'`.
+
+- [ ] **Step 4c: Phase 4 worker changes (added with Task 24)**
+
+- `priority: { run: 'event.data.broadcastId != null ? 0 : 600' }` in the function options. Priority only reorders runs that are waiting, so other mail gets a 600 second head start over broadcast mail. A negative factor would be a fixed delay, so none is used. It is typed in inngest 4.2.6 (`priority.run`, -600 to 600) and sits beside `throttle`; whether the server applies it together with `throttle` can only be confirmed on a real deployment.
+- The duplicate check reads `email_log` with `.limit(1)`, checks the rows length, and throws on a read error so the step retries instead of treating a failed read as "not sent". The 23505 comment says email_log has no unique constraint. Nothing else on this path changes.
+- The send step passes `idempotencyKey: broadcast-<broadcastId>-<userId>` to `sendEmail` (Resend's `Idempotency-Key`) for broadcast events only, and for a broadcast a `null` result (no `RESEND_API_KEY`) throws instead of counting as sent.
+- `onFailure` also reports every permanent failure of a non-broadcast, non-ticket email to Sentry with the tag `step: send-failed` and the email kind, never the address, subject or body.
+- `onFailure` handles the broadcast branch first and the ticket branch second, each in its own try/catch that reports to Sentry. For a broadcast event it looks in `email_log` for `userId` and `emailKind`: a row means the email was sent, so it records `(1, 0)`, otherwise `(0, 1)`. A broadcast-branch error is rethrown at the end, after the ticket branch has run.
+
+- [ ] **Step 5: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors. If `replyTo` or `onFailure` typing fails, read the installed `.d.ts`, because the option name is the likely cause.
+
+```bash
+git add src emails
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(email): add reply-to, headers and support reply template"
+```
+
+## Task 16: Support routes
+
+**Files:**
+- Create: `src/app/api/admin/support/[id]/route.ts`, `.../notes/route.ts`, `.../reply/route.ts`
+
+- [ ] **Step 1: Write the update route**
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { isStaffMember } from '@/lib/admin/support';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
+import { recordAudit } from '@/lib/admin/audit';
+import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES, isHttpUrl } from '@/lib/admin/tickets';
+
+type Ctx = { params: { id: string } };
+
+const schema = z
+  .object({
+    status: z.enum(TICKET_STATUSES).optional(),
+    priority: z.enum(TICKET_PRIORITIES).optional(),
+    assigneeId: z.string().uuid().nullable().optional(),
+    // z.string().url() also accepts javascript: and data: URLs, so require http or https.
+    sentryIssueUrl: z.string().max(500).refine(isHttpUrl, 'Must be an http or https link').nullable().optional(),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined), 'Nothing to change');
+
+function reportDbError(error: { code?: string; message: string }, step: string) {
+  // Code and message only: details can echo the row.
+  Sentry.captureException(new Error(`admin support ${step} failed: ${error.code ?? 'error'}: ${error.message}`), {
+    tags: { route: 'admin-support', step },
+  });
+}
+
+export async function PATCH(request: Request, context: Ctx) {
+  const gate = await requirePermission('tickets.work');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const body = await parseBody(request, schema);
+  if (!body.ok) return body.response;
+  const { status, priority, assigneeId, sentryIssueUrl } = body.data;
+  const ticketId = context.params.id;
+  const admin = getSupabaseAdmin();
+
+  const { data: before, error: readError } = await admin
+    .from('support_tickets')
+    .select('status, assignee_id, priority, sentry_issue_url')
+    .eq('id', ticketId)
+    .maybeSingle();
+  if (readError) {
+    reportDbError(readError, 'read');
+    return NextResponse.json({ error: 'The card could not be loaded.' }, { status: 500 });
+  }
+  if (!before) return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
+
+  // Only staff can hold a card. Leaving an existing (former) assignee in place is allowed.
+  if (assigneeId && assigneeId !== before.assignee_id) {
+    let staffMember: boolean;
+    try {
+      staffMember = await isStaffMember(assigneeId);
+    } catch (err) {
+      reportDbError({ message: err instanceof Error ? err.message : (err as { message?: string }).message ?? 'unknown' }, 'assignee-check');
+      return NextResponse.json({ error: 'The assignee could not be checked.' }, { status: 500 });
+    }
+    if (!staffMember) return NextResponse.json({ error: 'That person is not on the staff.' }, { status: 409 });
+  }
+
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (status) patch.status = status;
+  if (priority) patch.priority = priority;
+  if (assigneeId !== undefined) patch.assignee_id = assigneeId;
+  if (sentryIssueUrl !== undefined) patch.sentry_issue_url = sentryIssueUrl;
+
+  const { error } = await admin.from('support_tickets').update(patch).eq('id', ticketId);
+  if (error) {
+    if (error.code === '23503') {
+      return NextResponse.json({ error: 'That assignee does not exist.' }, { status: 409 });
+    }
+    reportDbError(error, 'update');
+    return NextResponse.json({ error: 'The card was not changed.' }, { status: 500 });
+  }
+
+  const events: { ticket_id: string; actor_id: string; kind: string; body: string }[] = [];
+  if (status && status !== before.status) {
+    events.push({ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'status', body: `Moved to ${STATUS_LABELS[status]}` });
+  }
+  if (assigneeId !== undefined && assigneeId !== before.assignee_id) {
+    events.push({ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'assignment', body: assigneeId ? 'Assigned' : 'Unassigned' });
+  }
+  if (events.length) {
+    // The change is already saved; a missing history line is reported but does not fail the request.
+    const { error: eventError } = await admin.from('support_ticket_events').insert(events);
+    if (eventError) reportDbError(eventError, 'event-insert');
+  }
+
+  // The change is already committed, so a failed audit write is reported but does not fail the request.
+  try {
+    await recordAudit({
+      actorId: gate.staff.userId,
+      action: 'ticket.update',
+      targetType: 'ticket',
+      targetId: ticketId,
+      before,
+      after: patch,
+    });
+  } catch (e) {
+    Sentry.captureException(e, {
+      tags: { route: 'admin-audit', action: 'ticket.update' },
+      extra: { targetId: ticketId, outcome: 'succeeded' },
+    });
+  }
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 2: Write the notes route**
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
+
+type Ctx = { params: { id: string } };
+
+const schema = z.object({ body: z.string().trim().min(1).max(10000) });
+
+export async function POST(request: Request, context: Ctx) {
+  const gate = await requirePermission('tickets.work');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const body = await parseBody(request, schema);
+  if (!body.ok) return body.response;
+
+  const { error } = await getSupabaseAdmin().from('support_ticket_events').insert({
+    ticket_id: context.params.id,
+    actor_id: gate.staff.userId,
+    kind: 'note',
+    body: body.data.body,
+  });
+  if (error) {
+    // A missing card breaks the foreign key; anything else is a real failure.
+    if (error.code === '23503') return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
+    // Code and message only: details can echo the note text.
+    Sentry.captureException(new Error(`admin support note failed: ${error.code ?? 'error'}: ${error.message}`), {
+      tags: { route: 'admin-support-note' },
+    });
+    return NextResponse.json({ error: 'The note was not saved.' }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 3: Write the reply route**
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
+import { withAudit } from '@/lib/admin/audit';
+import { enqueueEmail } from '@/lib/email-queue';
+import { STATUS_LABELS, replySubject } from '@/lib/admin/tickets';
+import SupportReply from '@emails/support-reply';
+
+type Ctx = { params: { id: string } };
+
+const SUPPORT_INBOX = 'contact@cyberdelic.design';
+
+const schema = z.object({
+  body: z.string().trim().min(1).max(10000),
+  // One key per draft. It becomes the queue event id, so a retried request cannot send twice.
+  idempotencyKey: z.string().uuid(),
+});
+
+function report(message: string, step: string) {
+  // Messages here come from the database or mail layer, never from the reply text or a token.
+  Sentry.captureException(new Error(`admin support reply ${step} failed: ${message}`), {
+    tags: { route: 'admin-support-reply', step },
+  });
+}
+
+export async function POST(request: Request, context: Ctx) {
+  const gate = await requirePermission('tickets.work');
+  if (!gate.ok) return gate.response;
+  if (!isUuid(context.params.id)) return notFoundResponse();
+  const body = await parseBody(request, schema);
+  if (!body.ok) return body.response;
+  const ticketId = context.params.id;
+  const admin = getSupabaseAdmin();
+
+  const { data: ticket, error: ticketError } = await admin
+    .from('support_tickets')
+    .select('email, title, user_id, status')
+    .eq('id', ticketId)
+    .maybeSingle();
+  if (ticketError) {
+    report(`${ticketError.code ?? 'error'}: ${ticketError.message}`, 'ticket-read');
+    return NextResponse.json({ error: 'The card could not be loaded.' }, { status: 500 });
+  }
+  if (!ticket) return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
+
+  // The name only personalises the greeting, so a failed lookup falls back to "there".
+  let userName = 'there';
+  if (ticket.user_id) {
+    const { data: profile, error: profileError } = await admin
+      .from('users')
+      .select('full_name')
+      .eq('id', ticket.user_id)
+      .maybeSingle();
+    if (profileError) report(`${profileError.code ?? 'error'}: ${profileError.message}`, 'profile-read');
+    else if (profile?.full_name) userName = profile.full_name;
+  }
+
+  try {
+    await withAudit(
+      { actorId: gate.staff.userId, action: 'ticket.reply', targetType: 'ticket', targetId: ticketId },
+      () =>
+        enqueueEmail({
+          to: ticket.email,
+          subject: replySubject(ticket.title),
+          replyTo: SUPPORT_INBOX,
+          eventId: `support-reply-${ticketId}-${body.data.idempotencyKey}`,
+          // The direct-send fallback would bypass the event id, so a queue outage fails the request instead.
+          fallbackOnMissing: false,
+          ticketId,
+          actorId: gate.staff.userId,
+          template: SupportReply({
+            userName,
+            ticketTitle: ticket.title,
+            body: body.data.body,
+          }),
+        }),
+    );
+  } catch (err) {
+    report(err instanceof Error ? err.message : 'unknown', 'send');
+    return NextResponse.json({ error: 'The reply was not sent.' }, { status: 500 });
+  }
+
+  // The email is queued, so from here a failure must not read as "not sent".
+  const events = [{ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'reply', body: body.data.body }];
+  if (ticket.status !== 'waiting') {
+    events.push({ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'status', body: `Moved to ${STATUS_LABELS.waiting}` });
+  }
+  const { error: eventError } = await admin.from('support_ticket_events').insert(events);
+  if (eventError) report(`${eventError.code ?? 'error'}: ${eventError.message}`, 'event-insert');
+
+  const { error: statusError } = await admin
+    .from('support_tickets')
+    .update({ status: 'waiting', updated_at: new Date().toISOString() })
+    .eq('id', ticketId);
+  if (statusError) report(`${statusError.code ?? 'error'}: ${statusError.message}`, 'status-update');
+
+  if (eventError || statusError) {
+    return NextResponse.json(
+      { error: 'The reply was sent, but the card was not fully updated. Do not send it again; reload to check the card.', sent: true },
+      { status: 500 },
+    );
+  }
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 4: Check routes and commit**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-routes.verify.ts`
+Expected: `8 handlers checked`, exit 0 (the check also counts pages).
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add support card routes"
+```
+
+## Task 17: Support board and card pages
+
+**Files:**
+- Create: `src/app/admin/support/page.tsx`, `src/app/admin/support/[id]/page.tsx`, `src/components/admin/ticket-controls.tsx`, `src/components/admin/ticket-compose.tsx`
+
+- [ ] **Step 1: Write the controls**
+
+`src/components/admin/ticket-controls.tsx`:
+
+```tsx
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { adminPost } from '@/lib/admin/client';
+import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES } from '@/lib/admin/tickets';
+import type { StaffMember, Ticket } from '@/lib/admin/support';
+
+const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-2 text-sm text-white';
+
+export function TicketControls({ ticket, staff }: { ticket: Ticket; staff: StaffMember[] }) {
+  const router = useRouter();
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sentry, setSentry] = useState(ticket.sentry_issue_url ?? '');
+
+  // The selects show the saved card (props), so a status change made elsewhere, such
+  // as a reply moving the card to Waiting, appears after the refresh, and a failed
+  // save leaves them on the saved value.
+  useEffect(() => {
+    setSentry(ticket.sentry_issue_url ?? '');
+  }, [ticket.sentry_issue_url]);
+
+  async function update(patch: Record<string, unknown>) {
+    setError('');
+    setBusy(true);
+    try {
+      await adminPost(`/api/admin/support/${ticket.id}`, patch, 'PATCH');
+      router.refresh();
+    } catch (err) {
+      setError((err as Error).message);
+      setSentry(ticket.sentry_issue_url ?? '');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const assigneeKnown = !ticket.assignee_id || staff.some((member) => member.id === ticket.assignee_id);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-white/10 p-4">
+      <div className="space-y-1">
+        <label htmlFor="status" className="text-sm text-white/60">Status</label>
+        <select id="status" className={FIELD} value={ticket.status} disabled={busy} onChange={(e) => update({ status: e.target.value })}>
+          {TICKET_STATUSES.map((value) => <option key={value} value={value}>{STATUS_LABELS[value]}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label htmlFor="priority" className="text-sm text-white/60">Priority</label>
+        <select id="priority" className={FIELD} value={ticket.priority} disabled={busy} onChange={(e) => update({ priority: e.target.value })}>
+          {TICKET_PRIORITIES.map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label htmlFor="assignee" className="text-sm text-white/60">Assignee</label>
+        <select id="assignee" className={FIELD} value={ticket.assignee_id ?? ''} disabled={busy} onChange={(e) => update({ assigneeId: e.target.value || null })}>
+          <option value="">Unassigned</option>
+          {!assigneeKnown && ticket.assignee_id && <option value={ticket.assignee_id}>Former staff</option>}
+          {staff.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label htmlFor="sentry" className="text-sm text-white/60">Sentry issue link</label>
+        <input
+          id="sentry"
+          type="url"
+          className={FIELD}
+          value={sentry}
+          disabled={busy}
+          onChange={(e) => setSentry(e.target.value)}
+          onBlur={() => {
+            const value = sentry.trim() || null;
+            if (value !== ticket.sentry_issue_url) update({ sentryIssueUrl: value });
+          }}
+        />
+      </div>
+      {error && <p role="alert" className="text-sm text-rose-400">{error}</p>}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 2: Write the compose box**
+
+`src/components/admin/ticket-compose.tsx`:
+
+```tsx
+'use client';
+
+import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { AdminRequestError, adminPost } from '@/lib/admin/client';
+
+export function TicketCompose({ ticketId, email }: { ticketId: string; email: string }) {
+  const router = useRouter();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  // One key per draft: a retry of the same text reuses it, so the server sends the email once.
+  const replyKey = useRef<string | null>(null);
+
+  function done() {
+    setText('');
+    replyKey.current = null;
+    router.refresh();
+  }
+
+  async function submit(path: 'notes' | 'reply') {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (path === 'reply') {
+        replyKey.current ??= crypto.randomUUID();
+        await adminPost(`/api/admin/support/${ticketId}/reply`, { body: text, idempotencyKey: replyKey.current });
+      } else {
+        await adminPost(`/api/admin/support/${ticketId}/notes`, { body: text });
+      }
+      done();
+    } catch (err) {
+      if (err instanceof AdminRequestError && err.data.sent === true) {
+        // The email went out; only the card update failed. Treat the draft as sent.
+        done();
+        setNotice(err.message);
+      } else {
+        setError((err as Error).message);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor="compose" className="text-sm text-white/60">Note or reply</label>
+      <Textarea
+        id="compose"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          // Different text is a different reply, so it gets its own key.
+          replyKey.current = null;
+        }}
+        className="bg-white/5 border-white/10 min-h-28"
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={busy || !text.trim()} onClick={() => submit('notes')}>
+          Save internal note
+        </Button>
+        <Button size="sm" disabled={busy || !text.trim()} onClick={() => submit('reply')}>
+          Email reply to {email}
+        </Button>
+      </div>
+      {notice && <p role="status" className="text-sm text-amber-300">{notice}</p>}
+      {error && <p role="alert" className="text-sm text-rose-400">{error}</p>}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Write the board**
+
+`src/app/admin/support/page.tsx`:
+
+```tsx
+import Link from 'next/link';
+import { requirePagePermission } from '@/lib/admin/gate';
+import { listStaff, listTickets } from '@/lib/admin/support';
+import { singleParam } from '@/lib/admin/users-query';
+import {
+  STATUS_LABELS,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  TICKET_TYPES,
+  TYPE_LABELS,
+  parseTicketFilters,
+} from '@/lib/admin/tickets';
+
+const FIELD = 'h-9 rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
+
+type Param = string | string[] | undefined;
+
+export default async function AdminSupportPage({
+  searchParams,
+}: {
+  searchParams: { type?: Param; assignee?: Param; priority?: Param };
+}) {
+  await requirePagePermission('tickets.work');
+  // Invalid filter values are dropped here, so only known types, priorities and UUIDs reach the query.
+  const filters = parseTicketFilters({
+    type: singleParam(searchParams.type),
+    assignee: singleParam(searchParams.assignee),
+    priority: singleParam(searchParams.priority),
+  });
+  const [tickets, staff] = await Promise.all([listTickets(filters), listStaff()]);
+  const staffName = new Map(staff.map((member) => [member.id, member.label]));
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold">Support</h1>
+      <form className="flex flex-wrap gap-2">
+        <select name="type" defaultValue={filters.type ?? ''} aria-label="Type" className={FIELD}>
+          <option value="">All types</option>
+          {TICKET_TYPES.map((value) => <option key={value} value={value}>{TYPE_LABELS[value]}</option>)}
+        </select>
+        <select name="assignee" defaultValue={filters.assignee ?? ''} aria-label="Assignee" className={FIELD}>
+          <option value="">Anyone</option>
+          {staff.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}
+        </select>
+        <select name="priority" defaultValue={filters.priority ?? ''} aria-label="Priority" className={FIELD}>
+          <option value="">Any priority</option>
+          {TICKET_PRIORITIES.map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+        <button type="submit" className={`${FIELD} hover:bg-white/10`}>Filter</button>
+      </form>
+
+      <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {TICKET_STATUSES.map((status) => {
+          const column = tickets.filter((ticket) => ticket.status === status);
+          return (
+            <section key={status} aria-label={STATUS_LABELS[status]} className="space-y-2">
+              <h2 className="text-sm font-medium text-white/60">{STATUS_LABELS[status]} ({column.length})</h2>
+              {column.map((ticket) => (
+                <Link
+                  key={ticket.id}
+                  href={`/admin/support/${ticket.id}`}
+                  className="block rounded-md border border-white/10 bg-white/[0.03] p-3 hover:bg-white/[0.06]"
+                >
+                  <p className="text-sm break-words">{ticket.title}</p>
+                  <p className="mt-1 text-xs text-white/40 break-all">
+                    {TYPE_LABELS[ticket.type]}{ticket.priority === 'high' ? ' · High' : ''} · {ticket.email}
+                    {ticket.assignee_id ? ` · ${staffName.get(ticket.assignee_id) ?? 'Former staff'}` : ''}
+                  </p>
+                </Link>
+              ))}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 4: Write the card page**
+
+`src/app/admin/support/[id]/page.tsx`:
+
+```tsx
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { requirePagePermission } from '@/lib/admin/gate';
+import { isUuid } from '@/lib/admin/http';
+import { getTicket, listStaff } from '@/lib/admin/support';
+import { TYPE_LABELS, isHttpUrl, type TicketEventKind } from '@/lib/admin/tickets';
+import { TicketCompose } from '@/components/admin/ticket-compose';
+import { TicketControls } from '@/components/admin/ticket-controls';
+
+const KIND_LABELS: Record<TicketEventKind, string> = {
+  note: 'Internal note',
+  reply: 'Emailed reply',
+  status: 'Status',
+  assignment: 'Assignment',
+  delivery_failed: 'Delivery failed',
+};
+
+export default async function AdminTicketPage({ params }: { params: { id: string } }) {
+  await requirePagePermission('tickets.work');
+  if (!isUuid(params.id)) notFound();
+  // A failed read throws (500); only a card that does not exist is a 404.
+  const [found, staff] = await Promise.all([getTicket(params.id), listStaff()]);
+  if (!found) notFound();
+  const { ticket, events } = found;
+  const authorName = new Map(staff.map((member) => [member.id, member.label]));
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <Link href="/admin/support" className="text-sm text-white/50 hover:text-white">Support</Link>
+        <h1 className="text-xl font-semibold break-words">{ticket.title}</h1>
+        <p className="text-sm text-white/50 break-all">
+          {TYPE_LABELS[ticket.type]} from{' '}
+          {ticket.user_id ? (
+            <Link href={`/admin/users/${ticket.user_id}`} className="text-violet-200 hover:underline">{ticket.email}</Link>
+          ) : ticket.email}
+          {ticket.source_path ? ` on ${ticket.source_path}` : ''}
+        </p>
+        {/* Only an http(s) link becomes a clickable link; anything else stays out of the page. */}
+        {isHttpUrl(ticket.sentry_issue_url) && (
+          <a href={ticket.sentry_issue_url} target="_blank" rel="noreferrer noopener" className="text-sm text-violet-200 hover:underline">
+            Open in Sentry
+          </a>
+        )}
+      </div>
+
+      <div className="grid lg:grid-cols-[1fr_280px] gap-6">
+        <div className="space-y-4 min-w-0">
+          <p className="whitespace-pre-wrap break-words rounded-lg border border-white/10 p-4 text-sm">{ticket.description}</p>
+          {events.map((event) => (
+            <div key={event.id} className="rounded-md bg-white/[0.03] p-3">
+              <p className="text-xs text-white/40">{KIND_LABELS[event.kind]} · {authorName.get(event.actor_id) ?? 'Former staff'} · {event.created_at.slice(0, 16).replace('T', ' ')}</p>
+              <p className={`mt-1 whitespace-pre-wrap break-words text-sm ${event.kind === 'delivery_failed' ? 'text-rose-300' : ''}`}>{event.body}</p>
+            </div>
+          ))}
+          <TicketCompose ticketId={ticket.id} email={ticket.email} />
+        </div>
+        <TicketControls ticket={ticket} staff={staff} />
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 5: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add support board and card page"
+```
+
+## Task 18: Errors and audit pages
+
+**Files:**
+- Create: `src/app/admin/errors/page.tsx`, `src/app/admin/audit/page.tsx`
+
+- [ ] **Step 1: Write the errors page**
+
+```tsx
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePagePermission } from '@/lib/admin/gate';
+import { formatDate } from '@/lib/admin/users';
+import { isHttpUrl } from '@/lib/admin/tickets';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
+export default async function AdminErrorsPage() {
+  await requirePagePermission('errors.view');
+  const { data, error } = await getSupabaseAdmin()
+    .from('fix_pipeline')
+    .select('id, title, level, status, triage_tier, event_count, user_count, permalink, created_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  // A failed query must not read as "nothing triaged": throw so the error boundary shows it.
+  if (error) throw new Error(`fix_pipeline query failed: ${error.code ?? 'error'}: ${error.message}`);
+  const rows = data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold">Errors</h1>
+        <p className="text-sm text-white/50">Sentry triage, read-only. Acknowledge and snooze in Telegram.</p>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Issue</TableHead>
+            <TableHead>Level</TableHead>
+            <TableHead>Tier</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Events</TableHead>
+            <TableHead>Users</TableHead>
+            <TableHead>Seen</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell className="max-w-96 truncate">
+                {isHttpUrl(row.permalink) ? (
+                  <a href={row.permalink} target="_blank" rel="noreferrer noopener" className="text-violet-200 hover:underline">{row.title}</a>
+                ) : row.title}
+              </TableCell>
+              <TableCell>{row.level ?? '—'}</TableCell>
+              <TableCell>{row.triage_tier ?? '—'}</TableCell>
+              <TableCell>{row.status}</TableCell>
+              <TableCell>{row.event_count ?? 0}</TableCell>
+              <TableCell>{row.user_count ?? 0}</TableCell>
+              <TableCell>{formatDate(row.created_at)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {rows.length === 0 && <p className="text-sm text-white/50">No triaged issues.</p>}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 2: Write the audit page**
+
+```tsx
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePagePermission } from '@/lib/admin/gate';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
+export default async function AdminAuditPage() {
+  await requirePagePermission('audit.view');
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin
+    .from('admin_audit_log')
+    .select('id, actor_id, action, target_type, target_id, reason, outcome, created_at')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  // A failed query must not read as "nothing recorded": throw so the error boundary shows it.
+  if (error) throw new Error(`audit log query failed: ${error.code ?? 'error'}: ${error.message}`);
+  const rows = data ?? [];
+
+  const actorIds = Array.from(new Set(rows.map((row) => row.actor_id as string)));
+  const actors = actorIds.length ? await admin.from('users').select('id, email').in('id', actorIds) : { data: [], error: null };
+  if (actors.error) throw new Error(`audit actor lookup failed: ${actors.error.code ?? 'error'}: ${actors.error.message}`);
+  const actorEmail = new Map((actors.data ?? []).map((actor) => [actor.id as string, actor.email as string]));
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold">Audit log</h1>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>When</TableHead>
+            <TableHead>Who</TableHead>
+            <TableHead>Action</TableHead>
+            <TableHead>Target</TableHead>
+            <TableHead>Outcome</TableHead>
+            <TableHead>Reason</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell className="whitespace-nowrap">{(row.created_at as string).slice(0, 16).replace('T', ' ')}</TableCell>
+              <TableCell>{actorEmail.get(row.actor_id as string) ?? row.actor_id}</TableCell>
+              <TableCell>{row.action}</TableCell>
+              <TableCell>{row.target_type} {row.target_id ? (row.target_id as string).slice(0, 8) : ''}</TableCell>
+              <TableCell>{row.outcome}</TableCell>
+              <TableCell>{row.reason ?? '—'}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {rows.length === 0 && <p className="text-sm text-white/50">Nothing recorded yet.</p>}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add errors and audit pages"
+```
+
+---
+
+# Phase 4: Comms
+
+## Task 19: Unsubscribe tokens
+
+**Files:**
+- Create: `src/lib/email-unsubscribe.ts`, `src/lib/admin/__verify__/unsubscribe-token.verify.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+/**
+ * Signed unsubscribe tokens.
+ * Run: npx tsx src/lib/admin/__verify__/unsubscribe-token.verify.ts
+ */
+import { signUnsubscribeToken, verifyUnsubscribeToken } from '../../email-unsubscribe';
+
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { passed++; console.log('  ✓', name); }
+  else { failed++; console.error('  ✗', name); }
+}
+
+const USER = '322d15dd-8477-41ff-8980-f344fda14164';
+const token = signUnsubscribeToken(USER, 'secret-one');
+
+check('round trip', verifyUnsubscribeToken(token, 'secret-one') === USER);
+check('wrong secret refused', verifyUnsubscribeToken(token, 'secret-two') === null);
+check('tampered signature refused', verifyUnsubscribeToken(`${token.slice(0, -2)}xx`, 'secret-one') === null);
+check('swapped user refused', verifyUnsubscribeToken(`${Buffer.from('other').toString('base64url')}.${token.split('.')[1]}`, 'secret-one') === null);
+check('junk refused', verifyUnsubscribeToken('junk', 'secret-one') === null);
+check('empty refused', verifyUnsubscribeToken('', 'secret-one') === null);
+check('missing secret refused', verifyUnsubscribeToken(token, '') === null);
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npx tsx src/lib/admin/__verify__/unsubscribe-token.verify.ts`
+Expected: FAIL, cannot find module.
+
+- [ ] **Step 3: Implement**
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function sign(payload: string, secret: string): string {
+  return createHmac('sha256', `unsubscribe:${secret}`).update(payload).digest('base64url');
+}
+
+export function signUnsubscribeToken(userId: string, secret: string): string {
+  const payload = Buffer.from(userId).toString('base64url');
+  return `${payload}.${sign(payload, secret)}`;
+}
+
+/** Returns the user id, or null for anything not signed with this secret. */
+export function verifyUnsubscribeToken(token: string, secret: string): string | null {
+  if (!token || !secret) return null;
+  const [payload, signature, extra] = token.split('.');
+  if (!payload || !signature || extra !== undefined) return null;
+  const expected = Buffer.from(sign(payload, secret));
+  const received = Buffer.from(signature);
+  if (expected.length !== received.length || !timingSafeEqual(expected, received)) return null;
+  return Buffer.from(payload, 'base64url').toString();
+}
+```
+
+- [ ] **Step 4: Run it to confirm it passes**
+
+Run: `npx tsx src/lib/admin/__verify__/unsubscribe-token.verify.ts`
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(email): add signed unsubscribe tokens"
+```
+
+## Task 20: Comms migration
+
+**Files:**
+- Create: `supabase/migrations/20261031000004_admin_comms.sql`
+
+- [ ] **Step 1: Write the migration**
+
+```sql
+-- Admin broadcasts and email opt-outs. Service-role-only. Unsubscribing needs
+-- no login, so it is a route using a signed token, not an RLS policy.
+
+CREATE TABLE IF NOT EXISTS public.email_preferences (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  marketing_opt_out boolean NOT NULL DEFAULT false,
+  opted_out_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS public.broadcasts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- The composer makes one key per draft. A double click or a retry hits the
+  -- unique constraint, so the same send cannot go out twice.
+  idempotency_key uuid NOT NULL UNIQUE,
+  sender_id uuid NOT NULL,
+  channels text[] NOT NULL,
+  category text CHECK (category IN ('product', 'service')),
+  audience jsonb NOT NULL,
+  subject text NOT NULL,
+  body text NOT NULL,
+  recipient_count integer NOT NULL DEFAULT 0,
+  -- Emails (or, for in-app only, notifications) handed on by the fan-out job so far.
+  enqueued_count integer NOT NULL DEFAULT 0,
+  sent_count integer NOT NULL DEFAULT 0,
+  failed_count integer NOT NULL DEFAULT 0,
+  -- Set once when the fan-out could not finish, so history shows why there is a shortfall.
+  failure_note text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_broadcasts_created ON public.broadcasts (created_at DESC);
+
+ALTER TABLE public.email_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.broadcasts ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.email_preferences FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.broadcasts FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE ON public.email_preferences TO service_role;
+GRANT SELECT, INSERT ON public.broadcasts TO service_role;
+
+CREATE OR REPLACE FUNCTION public.admin_recipients(
+  p_plan text DEFAULT NULL,
+  p_user_ids uuid[] DEFAULT NULL
+)
+RETURNS TABLE (
+  user_id uuid,
+  email text,
+  name text,
+  email_confirmed boolean,
+  banned boolean,
+  opted_out boolean
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT
+    u.id,
+    u.email::text,
+    COALESCE(p.full_name, p.name),
+    u.email_confirmed_at IS NOT NULL,
+    COALESCE(u.banned_until > now(), false),
+    COALESCE(e.marketing_opt_out, false)
+  FROM auth.users u
+  LEFT JOIN public.users p ON p.id = u.id
+  LEFT JOIN public.subscriptions s ON s.user_id = u.id
+  LEFT JOIN public.email_preferences e ON e.user_id = u.id
+  WHERE (p_plan IS NULL OR COALESCE(s.plan_id::text, 'free') = p_plan)
+    AND (p_user_ids IS NULL OR u.id = ANY (p_user_ids))
+  -- A stable order, so the caller can page past PostgREST's row cap without gaps or repeats.
+  ORDER BY u.id;
+$$;
+
+-- Workers finish in any order, so counts must increment in the database.
+CREATE OR REPLACE FUNCTION public.admin_record_broadcast_result(
+  p_broadcast uuid,
+  p_sent integer,
+  p_failed integer
+)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  UPDATE public.broadcasts
+     SET sent_count = sent_count + p_sent,
+         failed_count = failed_count + p_failed
+   WHERE id = p_broadcast;
+$$;
+
+-- The fan-out job reports progress here. p_enqueued is the running total, taken from
+-- fixed chunk positions, so a step that runs twice reports the same number and the
+-- count never moves backwards. p_recipient_count, when given, replaces the
+-- count taken at send time with the count that was actually reachable at fan-out
+-- (someone may have unsubscribed since the preview).
+CREATE OR REPLACE FUNCTION public.admin_record_broadcast_progress(
+  p_broadcast uuid,
+  p_enqueued integer,
+  p_recipient_count integer DEFAULT NULL
+)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  UPDATE public.broadcasts
+     SET enqueued_count = GREATEST(enqueued_count, p_enqueued),
+         recipient_count = COALESCE(p_recipient_count, recipient_count)
+   WHERE id = p_broadcast;
+$$;
+
+-- The fan-out could not finish: everything not yet enqueued counts as failed.
+-- Runs once per broadcast; a repeat call changes nothing.
+CREATE OR REPLACE FUNCTION public.admin_fail_broadcast(
+  p_broadcast uuid,
+  p_note text
+)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  UPDATE public.broadcasts
+     SET failed_count = failed_count + GREATEST(recipient_count - enqueued_count, 0),
+         failure_note = p_note
+   WHERE id = p_broadcast
+     AND failure_note IS NULL;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.admin_recipients(text, uuid[]) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.admin_record_broadcast_result(uuid, integer, integer) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.admin_record_broadcast_progress(uuid, integer, integer) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.admin_fail_broadcast(uuid, text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.admin_recipients(text, uuid[]) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_record_broadcast_result(uuid, integer, integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_record_broadcast_progress(uuid, integer, integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_fail_broadcast(uuid, text) TO service_role;
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add supabase/migrations/20261031000004_admin_comms.sql
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add email preferences and broadcasts"
+```
+
+## Task 21: Unsubscribe page and route
+
+**Files:**
+- Create: `src/app/api/email/unsubscribe/route.ts`, `src/app/unsubscribe/page.tsx`, `src/components/unsubscribe-button.tsx`
+- Modify: `src/lib/env.ts`, `.env.example`
+
+- [ ] **Step 1: Declare the env vars**
+
+Add `'EMAIL_UNSUBSCRIBE_SECRET'` and `'EMAIL_POSTAL_ADDRESS'` to the `optionalServerVars` array in `src/lib/env.ts`.
+
+Add to `.env.example`:
+
+```bash
+# Signs unsubscribe links. Generate with: openssl rand -base64 32
+# Rotating this breaks every unsubscribe link already delivered in past emails. Do not change it once product updates have been sent.
+EMAIL_UNSUBSCRIBE_SECRET=
+# Physical mailing address shown in product update emails (street or PO box, not an email address)
+EMAIL_POSTAL_ADDRESS=
+```
+
+- [ ] **Step 2: Write the route**
+
+`GET` only forwards to the confirmation page and changes nothing. `POST` handles both the page's button and mailbox one-click `List-Unsubscribe-Post`, so it reads the token from the query and ignores the body.
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { verifyUnsubscribeToken } from '@/lib/email-unsubscribe';
+
+// A link opened in a browser or by a mail scanner changes nothing: it only forwards to the
+// confirmation page, where a person presses the button.
+export async function GET(request: Request) {
+  const token = new URL(request.url).searchParams.get('token') ?? '';
+  const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design').replace(/\/+$/, '');
+  return NextResponse.redirect(`${base}/unsubscribe?token=${encodeURIComponent(token)}`, 303);
+}
+
+// Handles both the page's button and a mailbox's one-click List-Unsubscribe-Post,
+// so it reads the token from the query and ignores the body.
+export async function POST(request: Request) {
+  const token = new URL(request.url).searchParams.get('token') ?? '';
+  const userId = verifyUnsubscribeToken(token, process.env.EMAIL_UNSUBSCRIBE_SECRET ?? '');
+  if (!userId) return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+
+  const { error } = await getSupabaseAdmin().from('email_preferences').upsert({
+    user_id: userId,
+    marketing_opt_out: true,
+    opted_out_at: new Date().toISOString(),
+  });
+  if (error) {
+    // Error code and text only, never the token.
+    Sentry.captureException(new Error(`unsubscribe failed: ${error.code ?? 'error'}: ${error.message}`), {
+      tags: { route: 'email-unsubscribe' },
+    });
+    return NextResponse.json({ error: 'Could not unsubscribe' }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
+}
+```
+
+- [ ] **Step 3: Write the button**
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+
+export function UnsubscribeButton({ token }: { token: string }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
+
+  async function unsubscribe() {
+    setState('busy');
+    const response = await fetch(`/api/email/unsubscribe?token=${encodeURIComponent(token)}`, { method: 'POST' }).catch(() => null);
+    setState(response?.ok ? 'done' : 'error');
+  }
+
+  if (state === 'done') {
+    return <p role="status">You are unsubscribed from product updates. You will still get essential account emails.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <Button disabled={state === 'busy'} onClick={unsubscribe}>Unsubscribe from product updates</Button>
+      {state === 'error' && <p role="alert" className="text-sm text-rose-400">That did not work. Please try again.</p>}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 4: Write the page**
+
+Opening the link changes nothing, because mail scanners open links.
+
+```tsx
+import { UnsubscribeButton } from '@/components/unsubscribe-button';
+import { verifyUnsubscribeToken } from '@/lib/email-unsubscribe';
+
+export const metadata = { title: 'Unsubscribe', robots: { index: false, follow: false } };
+
+// Opening the link changes nothing, because mail scanners open links.
+export default function UnsubscribePage({ searchParams }: { searchParams: { token?: string | string[] } }) {
+  const raw = searchParams.token;
+  const token = typeof raw === 'string' ? raw : '';
+  const valid = verifyUnsubscribeToken(token, process.env.EMAIL_UNSUBSCRIBE_SECRET ?? '') !== null;
+
+  return (
+    <main className="min-h-screen bg-black text-white flex items-center justify-center p-4">
+      <div className="max-w-md space-y-4 text-center">
+        <h1 className="text-xl font-semibold">Email preferences</h1>
+        {valid ? (
+          <UnsubscribeButton token={token} />
+        ) : (
+          <p className="text-white/60">This link is not valid. Email contact@cyberdelic.design and we will unsubscribe you.</p>
+        )}
+      </div>
+    </main>
+  );
+}
+```
+
+- [ ] **Step 5: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src .env.example
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(email): add unsubscribe page and route"
+```
+
+## Task 22: Audience and content rules
+
+**Files:**
+- Create: `src/lib/admin/comms.ts`, `src/lib/admin/__verify__/broadcast-audience.verify.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+/**
+ * Who a broadcast reaches, and that the test send matches the content sent.
+ * Run: npx tsx src/lib/admin/__verify__/broadcast-audience.verify.ts
+ */
+import {
+  IN_APP_BODY_MAX, chunk, collectPages, contentSchema, filterRecipients, inAppBodyFits, notificationId,
+  signContent, verifyContent, type RecipientRow,
+} from '../comms';
+
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean) {
+  if (cond) { passed++; console.log('  ✓', name); }
+  else { failed++; console.error('  ✗', name); }
+}
+
+const rows: RecipientRow[] = [
+  { user_id: 'a', email: 'a@x.co', name: 'A', email_confirmed: true, banned: false, opted_out: false },
+  { user_id: 'b', email: 'b@x.co', name: 'B', email_confirmed: true, banned: false, opted_out: true },
+  { user_id: 'c', email: 'c@x.co', name: 'C', email_confirmed: true, banned: true, opted_out: false },
+  { user_id: 'd', email: 'd@x.co', name: 'D', email_confirmed: false, banned: false, opted_out: false },
+];
+
+const ids = (list: RecipientRow[]) => list.map((r) => r.user_id).join();
+
+const product = filterRecipients(rows, 'product');
+check('product update skips opt-outs', ids(product.email) === 'a');
+const service = filterRecipients(rows, 'service');
+check('service notice reaches opt-outs', ids(service.email) === 'a,b');
+check('suspended get nothing', !ids(product.inApp).includes('c') && !ids(service.email).includes('c'));
+check('unconfirmed get no email', !ids(service.email).includes('d'));
+check('in-app ignores email opt-out', ids(product.inApp) === 'a,b,d');
+
+const content = { subject: 'Hello', body: 'World', category: 'product' as const };
+const token = signContent(content, 'user-1', 'secret');
+check('matching content verifies', verifyContent(token, content, 'user-1', 'secret'));
+check('edited body refused', !verifyContent(token, { ...content, body: 'Changed' }, 'user-1', 'secret'));
+check('edited category refused', !verifyContent(token, { ...content, category: 'service' }, 'user-1', 'secret'));
+check('other sender refused', !verifyContent(token, content, 'user-2', 'secret'));
+check('junk refused', !verifyContent('junk', content, 'user-1', 'secret'));
+
+const longBody = 'x'.repeat(IN_APP_BODY_MAX + 1);
+check('long in-app body refused', !inAppBodyFits({ channels: ['in_app'], body: longBody }));
+check('long email-only body allowed', inAppBodyFits({ channels: ['email'], body: longBody }));
+check('body at the cap allowed', inAppBodyFits({ channels: ['in_app', 'email'], body: 'x'.repeat(IN_APP_BODY_MAX) }));
+const base = { category: 'service', audience: { kind: 'all' }, subject: 'S' };
+check('schema refuses long in-app body', !contentSchema.safeParse({ ...base, channels: ['in_app'], body: longBody }).success);
+check('schema accepts long email body', contentSchema.safeParse({ ...base, channels: ['email'], body: longBody }).success);
+
+const n1 = notificationId('b1', 'u1');
+check('notification id is stable', n1 === notificationId('b1', 'u1'));
+check('notification id differs by user', n1 !== notificationId('b1', 'u2'));
+check('notification id differs by broadcast', n1 !== notificationId('b2', 'u1'));
+check('notification id is a uuid', /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(n1));
+
+check('chunk splits evenly', JSON.stringify(chunk([1, 2, 3, 4, 5], 2)) === '[[1,2],[3,4],[5]]');
+check('chunk of nothing is nothing', chunk([], 3).length === 0);
+
+async function paging() {
+  const source = Array.from({ length: 2500 }, (_, i) => i);
+  const calls: number[] = [];
+  const got = await collectPages(async (from, to) => { calls.push(from); return source.slice(from, to + 1); }, 1000);
+  check('paging reads past the row cap', got.length === 2500 && got[2499] === 2499);
+  check('paging stops on a short page', calls.length === 3);
+  const exactSource = Array.from({ length: 2000 }, (_, i) => i);
+  const exact = await collectPages(async (from, to) => exactSource.slice(from, to + 1), 1000);
+  check('paging an exact multiple ends on an empty page', exact.length === 2000);
+  let threw = false;
+  await collectPages(async () => { throw new Error('boom'); }, 1000).catch(() => { threw = true; });
+  check('a failed page throws', threw);
+}
+
+paging().then(() => {
+  console.log(`
+${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+});
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npx tsx src/lib/admin/__verify__/broadcast-audience.verify.ts`
+Expected: FAIL, cannot find module `../comms`.
+
+- [ ] **Step 3: Implement**
+
+```ts
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { z } from 'zod';
+import { IN_APP_BODY_MAX } from './comms-limits';
+
+export const CATEGORIES = ['product', 'service'] as const;
+export type Category = (typeof CATEGORIES)[number];
+
+export const audienceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('all') }),
+  z.object({ kind: z.literal('plan'), plan: z.enum(['free', 'pro', 'lifetime', 'beta_tester']) }),
+  z.object({ kind: z.literal('users'), userIds: z.array(z.string().uuid()).min(1).max(500) }),
+]);
+export type Audience = z.infer<typeof audienceSchema>;
+
+export { IN_APP_BODY_MAX };
+
+export const contentFields = z.object({
+  channels: z.array(z.enum(['in_app', 'email'])).min(1),
+  category: z.enum(CATEGORIES),
+  audience: audienceSchema,
+  subject: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(10000),
+});
+
+/** True unless the message goes in-app and its body is over the in-app cap. */
+export function inAppBodyFits(content: { channels: string[]; body: string }): boolean {
+  return !content.channels.includes('in_app') || content.body.length <= IN_APP_BODY_MAX;
+}
+
+export const IN_APP_BODY_MESSAGE = `In-app messages are limited to ${IN_APP_BODY_MAX} characters.`;
+
+export const contentSchema = contentFields.refine(inAppBodyFits, { path: ['body'], message: IN_APP_BODY_MESSAGE });
+
+export interface RecipientRow {
+  user_id: string;
+  email: string;
+  name: string | null;
+  email_confirmed: boolean;
+  banned: boolean;
+  opted_out: boolean;
+}
+
+export function filterRecipients(rows: RecipientRow[], category: Category) {
+  const active = rows.filter((row) => !row.banned);
+  return {
+    inApp: active,
+    email: active.filter((row) => row.email_confirmed && (category === 'service' || !row.opted_out)),
+  };
+}
+
+export interface SignedContent {
+  subject: string;
+  body: string;
+  category: Category;
+}
+
+function contentHash(content: SignedContent, senderId: string, secret: string): string {
+  return createHmac('sha256', `test-send:${secret}`)
+    .update(JSON.stringify([senderId, content.category, content.subject, content.body]))
+    .digest('base64url');
+}
+
+/** Proof that this sender test-sent exactly this content. */
+export function signContent(content: SignedContent, senderId: string, secret: string): string {
+  return contentHash(content, senderId, secret);
+}
+
+export function verifyContent(token: string, content: SignedContent, senderId: string, secret: string): boolean {
+  const expected = Buffer.from(contentHash(content, senderId, secret));
+  const received = Buffer.from(token);
+  return expected.length === received.length && timingSafeEqual(expected, received);
+}
+
+export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Reads a paged source until a short page comes back, so nothing past the
+ * server's row cap is dropped. A failed page throws; it is never read as the end.
+ */
+export async function collectPages<T>(
+  fetchPage: (from: number, to: number) => Promise<T[]>,
+  pageSize: number,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const page = await fetchPage(from, from + pageSize - 1);
+    all.push(...page);
+    if (page.length < pageSize) return all;
+  }
+}
+
+/**
+ * A fixed id for one user's copy of one broadcast (a version 5 style UUID), so
+ * inserting it twice is a no-op instead of a second notification.
+ */
+export function notificationId(broadcastId: string, userId: string): string {
+  const hash = createHash('sha1').update(`broadcast-notification:${broadcastId}:${userId}`).digest();
+  hash[6] = (hash[6] & 0x0f) | 0x50;
+  hash[8] = (hash[8] & 0x3f) | 0x80;
+  const hex = hash.subarray(0, 16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+```
+
+- [ ] **Step 4: Run it to confirm it passes**
+
+Run: `npx tsx src/lib/admin/__verify__/broadcast-audience.verify.ts`
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/admin
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add audience filter and test-send proof"
+```
+
+## Task 23: Broadcast email template
+
+**Files:**
+- Modify: `emails/_components/email-layout.tsx`
+- Create: `emails/broadcast.tsx`
+
+- [ ] **Step 1: Add the postal address to the layout**
+
+Add `postalAddress?: string;` to `EmailLayoutProps`, and `postalAddress,` to the destructured props. Directly after the `© ... Cyberdelic Labs` `Text`, add:
+
+```tsx
+            {postalAddress && (
+              <Text style={{ color: '#6b6b7b', fontSize: '12px', fontFamily: FONT_FAMILY, margin: '0 0 8px' }}>
+                {postalAddress}
+              </Text>
+            )}
+```
+
+- [ ] **Step 2: Write `emails/broadcast.tsx`**
+
+```tsx
+import { Heading, Section, Text } from '@react-email/components';
+import * as React from 'react';
+import { EmailLayout } from './_components/email-layout';
+
+interface BroadcastProps {
+  userName: string;
+  subject: string;
+  body: string;
+  /** Product updates only. Service notices have no unsubscribe. */
+  unsubscribeUrl?: string;
+  postalAddress?: string;
+}
+
+export default function Broadcast({ userName, subject, body, unsubscribeUrl, postalAddress }: BroadcastProps) {
+  return (
+    <EmailLayout
+      previewText={subject}
+      showUnsubscribe={!!unsubscribeUrl}
+      unsubscribeUrl={unsubscribeUrl}
+      postalAddress={postalAddress}
+    >
+      <Section style={{ padding: '32px 40px' }}>
+        <Heading style={{ color: '#edfcfc', fontSize: '24px', fontWeight: 600, margin: '0 0 20px' }}>{subject}</Heading>
+        <Text style={{ color: '#a0a0b0', fontSize: '14px', margin: '0 0 16px' }}>Hi {userName},</Text>
+        {body.split(/\n{2,}/).map((paragraph, index) => (
+          <Text key={index} style={{ color: '#edfcfc', fontSize: '15px', lineHeight: '1.7', margin: '0 0 16px', whiteSpace: 'pre-wrap' as const }}>
+            {paragraph}
+          </Text>
+        ))}
+      </Section>
+    </EmailLayout>
+  );
+}
+
+Broadcast.PreviewProps = {
+  userName: 'Alex',
+  subject: 'A better way to share your canvas',
+  body: 'Sharing is now one click.\n\nOpen any canvas to try it.',
+  unsubscribeUrl: 'https://canvas.cyberdelic.design/unsubscribe?token=abc123',
+  postalAddress: '123 Example Street, Example City',
+} satisfies BroadcastProps;
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add emails
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(email): add broadcast template and postal address"
+```
+
+## Task 24: Comms routes
+
+**Files:**
+- Create: `src/lib/admin/broadcast.ts`, `src/app/api/admin/comms/preview/route.ts`, `.../test/route.ts`, `.../send/route.ts`
+
+- [ ] **Step 1: Write the server helpers**
+
+`src/lib/admin/broadcast.ts`:
+
+```ts
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { signUnsubscribeToken } from '@/lib/email-unsubscribe';
+import { collectPages, filterRecipients, type Audience, type Category, type RecipientRow } from './comms';
+
+const PAGE_SIZE = 1000;
+
+/**
+ * Throws when the lookup fails. A failed lookup must never read as "no recipients" or send anything.
+ * PostgREST caps a response at 1000 rows, so this pages in a stable order until a short page returns.
+ */
+export async function resolveRecipients(audience: Audience, category: Category) {
+  const admin = getSupabaseAdmin();
+  const rows = await collectPages<RecipientRow>(async (from, to) => {
+    const { data, error } = await admin
+      .rpc('admin_recipients', {
+        p_plan: audience.kind === 'plan' ? audience.plan : null,
+        p_user_ids: audience.kind === 'users' ? audience.userIds : null,
+      })
+      .range(from, to);
+    if (error) throw new Error(`recipient lookup failed: ${error.code ?? 'error'}: ${error.message}`);
+    return (data ?? []) as RecipientRow[];
+  }, PAGE_SIZE);
+  // One row per user, whatever the joins return.
+  const unique = Array.from(new Map(rows.map((row) => [row.user_id, row])).values());
+  return filterRecipients(unique, category);
+}
+
+/**
+ * The secret that signs test-send proofs, or null when none is configured.
+ * There is no empty fallback: with no secret, nothing can be proven, so email does not go out.
+ */
+export function testSecret(): string | null {
+  return process.env.EMAIL_UNSUBSCRIBE_SECRET || process.env.CRON_SECRET || null;
+}
+
+/** Why email of this category cannot go out, or null when it can. */
+export function emailConfigProblem(category: Category): string | null {
+  if (!testSecret()) return 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.';
+  if (category !== 'product') return null;
+  if (!process.env.EMAIL_UNSUBSCRIBE_SECRET) return 'Product updates need EMAIL_UNSUBSCRIBE_SECRET to be set.';
+  if (!process.env.EMAIL_POSTAL_ADDRESS) return 'Product updates need EMAIL_POSTAL_ADDRESS to be set.';
+  return null;
+}
+
+export function unsubscribeLinks(userId: string) {
+  const token = signUnsubscribeToken(userId, process.env.EMAIL_UNSUBSCRIBE_SECRET ?? '');
+  const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design').replace(/\/+$/, '');
+  return {
+    pageUrl: `${base}/unsubscribe?token=${encodeURIComponent(token)}`,
+    oneClickUrl: `${base}/api/email/unsubscribe?token=${encodeURIComponent(token)}`,
+  };
+}
+```
+
+- [ ] **Step 2: Write the preview route**
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { requirePermission } from '@/lib/admin/gate';
+import { parseBody } from '@/lib/admin/http';
+import { contentSchema } from '@/lib/admin/comms';
+import { emailConfigProblem, resolveRecipients } from '@/lib/admin/broadcast';
+
+export async function POST(request: Request) {
+  const gate = await requirePermission('comms.send');
+  if (!gate.ok) return gate.response;
+  const body = await parseBody(request, contentSchema);
+  if (!body.ok) return body.response;
+
+  let recipients;
+  try {
+    recipients = await resolveRecipients(body.data.audience, body.data.category);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-comms-preview', step: 'recipients' } });
+    return NextResponse.json({ error: 'The recipients could not be loaded. Try again.' }, { status: 500 });
+  }
+
+  const wantsEmail = body.data.channels.includes('email');
+  return NextResponse.json({
+    inAppCount: body.data.channels.includes('in_app') ? recipients.inApp.length : 0,
+    emailCount: wantsEmail ? recipients.email.length : 0,
+    problem: wantsEmail ? emailConfigProblem(body.data.category) : null,
+  });
+}
+```
+
+- [ ] **Step 3: Write the test-send route**
+
+```ts
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { requirePermission } from '@/lib/admin/gate';
+import { parseBody } from '@/lib/admin/http';
+import { contentSchema, signContent } from '@/lib/admin/comms';
+import { emailConfigProblem, testSecret, unsubscribeLinks } from '@/lib/admin/broadcast';
+import { enqueueEmail } from '@/lib/email-queue';
+import Broadcast from '@emails/broadcast';
+
+export async function POST(request: Request) {
+  const gate = await requirePermission('comms.send');
+  if (!gate.ok) return gate.response;
+  const body = await parseBody(request, contentSchema);
+  if (!body.ok) return body.response;
+  const { subject, category } = body.data;
+  const text = body.data.body;
+
+  if (!gate.staff.email) {
+    return NextResponse.json({ error: 'Your account has no email address to send the test to.' }, { status: 409 });
+  }
+
+  // No secret means no proof can be signed, so no token is issued and nothing is sent.
+  const secret = testSecret();
+  const problem = emailConfigProblem(category);
+  if (problem || !secret) {
+    return NextResponse.json({ error: problem ?? 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.' }, { status: 409 });
+  }
+
+  // The same headers and links a real product update carries, so the test shows what recipients get.
+  const links = category === 'product' ? unsubscribeLinks(gate.staff.userId) : null;
+  try {
+    await enqueueEmail({
+      to: gate.staff.email,
+      subject: `[Test] ${subject}`,
+      headers: links
+        ? {
+            'List-Unsubscribe': `<${links.oneClickUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          }
+        : undefined,
+      template: Broadcast({
+        userName: 'there',
+        subject,
+        body: text,
+        unsubscribeUrl: links?.pageUrl,
+        postalAddress: category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined,
+      }),
+    });
+  } catch (err) {
+    // Never the message body or a token.
+    Sentry.captureException(err, { tags: { route: 'admin-comms-test' } });
+    return NextResponse.json({ error: 'The test email could not be sent. Try again.' }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    testToken: signContent({ subject, body: text, category }, gate.staff.userId, secret),
+  });
+}
+```
+
+- [ ] **Step 4: Write the send route**
+
+```ts
+import { randomUUID } from 'node:crypto';
+import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { z } from 'zod';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePermission } from '@/lib/admin/gate';
+import { recordAudit, type AuditEntry } from '@/lib/admin/audit';
+import { parseBody } from '@/lib/admin/http';
+import { contentFields, inAppBodyFits, IN_APP_BODY_MESSAGE, verifyContent } from '@/lib/admin/comms';
+import { emailConfigProblem, resolveRecipients, testSecret } from '@/lib/admin/broadcast';
+import { inngest } from '@/inngest/client';
+
+const schema = contentFields
+  .extend({
+    // One key per draft, made by the composer. A double submit or a retry hits the
+    // unique constraint on broadcasts, so a bulk send can only be queued once.
+    idempotencyKey: z.string().uuid(),
+    confirmCount: z.number().int().optional(),
+    confirmInAppCount: z.number().int().optional(),
+    testToken: z.string().optional(),
+  })
+  .refine(inAppBodyFits, { path: ['body'], message: IN_APP_BODY_MESSAGE });
+
+/** Error code and text only, never the message body or a token. */
+function describe(error: { code?: string; message: string }): string {
+  return `${error.code ?? 'error'}: ${error.message}`;
+}
+
+export async function POST(request: Request) {
+  const gate = await requirePermission('comms.send');
+  if (!gate.ok) return gate.response;
+  const parsed = await parseBody(request, schema);
+  if (!parsed.ok) return parsed.response;
+  const { channels, category, audience, subject, body, idempotencyKey, confirmCount, confirmInAppCount, testToken } = parsed.data;
+
+  const wantsEmail = channels.includes('email');
+  const wantsInApp = channels.includes('in_app');
+
+  // A failed lookup sends nothing and creates no broadcast row.
+  let recipients;
+  try {
+    recipients = await resolveRecipients(audience, category);
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'recipients' } });
+    return NextResponse.json({ error: 'The recipients could not be loaded. Nothing was sent.' }, { status: 500 });
+  }
+
+  const inAppTotal = wantsInApp ? recipients.inApp.length : 0;
+  const emailTotal = wantsEmail ? recipients.email.length : 0;
+  if (inAppTotal + emailTotal === 0) {
+    return NextResponse.json({ error: 'No one matches this audience on the chosen channels. Nothing was sent.' }, { status: 409 });
+  }
+
+  if (wantsInApp && confirmInAppCount !== inAppTotal) {
+    return NextResponse.json({ error: 'The recipient count changed or does not match. Check it and confirm again.' }, { status: 409 });
+  }
+  if (wantsEmail) {
+    const problem = emailConfigProblem(category);
+    const secret = testSecret();
+    if (problem || !secret) {
+      return NextResponse.json({ error: problem ?? 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.' }, { status: 409 });
+    }
+    if (!testToken || !verifyContent(testToken, { subject, body, category }, gate.staff.userId, secret)) {
+      return NextResponse.json({ error: 'Send yourself a test of this exact content first.' }, { status: 409 });
+    }
+    if (confirmCount !== emailTotal) {
+      return NextResponse.json({ error: 'The recipient count changed or does not match. Check it and confirm again.' }, { status: 409 });
+    }
+  }
+
+  const recipientCount = wantsEmail ? emailTotal : inAppTotal;
+  const broadcastId = randomUUID();
+  const entry: AuditEntry = {
+    actorId: gate.staff.userId,
+    action: 'broadcast.send',
+    targetType: 'broadcast',
+    targetId: broadcastId,
+    after: { channels, category, audience, subject, recipientCount },
+  };
+
+  // The attempt is recorded first. If this write fails nothing exists yet, so the key is not used up.
+  try {
+    await recordAudit(entry, 'attempted');
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'audit-attempt' } });
+    return NextResponse.json({ error: 'The audit log could not be written. Nothing was sent.' }, { status: 500 });
+  }
+
+  const admin = getSupabaseAdmin();
+  // The insert is the gate: a second request with this key fails here, before anything is queued.
+  const { error: createError } = await admin.from('broadcasts').insert({
+    id: broadcastId,
+    idempotency_key: idempotencyKey,
+    sender_id: gate.staff.userId,
+    channels,
+    category: wantsEmail ? category : null,
+    audience,
+    subject,
+    body,
+    recipient_count: recipientCount,
+  });
+  if (createError) {
+    const duplicate = createError.code === '23505';
+    if (!duplicate) {
+      Sentry.captureException(new Error(`broadcast insert failed: ${describe(createError)}`), {
+        tags: { route: 'admin-comms-send', step: 'insert' },
+      });
+    }
+    await recordAudit({ ...entry, reason: duplicate ? 'duplicate send refused' : 'broadcast could not be saved' }, 'failed').catch((err) =>
+      Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'audit-failed' } }),
+    );
+    return duplicate
+      ? NextResponse.json({ error: 'This message was already sent. Check the history.', duplicate: true }, { status: 409 })
+      : NextResponse.json({ error: 'Nothing was sent.' }, { status: 500 });
+  }
+
+  try {
+    // A fixed event id means a repeat of this request cannot start a second fan-out.
+    await inngest.send({ id: `broadcast-fanout-${broadcastId}`, name: 'broadcast/fanout', data: { broadcastId } });
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'queue' }, extra: { broadcastId } });
+    // Put the failure on the row so history shows it, and keep the audit trail honest.
+    const { error: failError } = await admin.rpc('admin_fail_broadcast', {
+      p_broadcast: broadcastId,
+      p_note: 'The send could not be queued. Nothing was delivered.',
+    });
+    if (failError) {
+      Sentry.captureException(new Error(`broadcast failure not recorded: ${describe(failError)}`), {
+        tags: { route: 'admin-comms-send', step: 'record-failure' },
+        extra: { broadcastId },
+      });
+    }
+    await recordAudit({ ...entry, reason: 'could not be queued' }, 'failed').catch((auditErr) =>
+      Sentry.captureException(auditErr, { tags: { route: 'admin-comms-send', step: 'audit-failed' } }),
+    );
+    return NextResponse.json(
+      { error: 'The send could not be queued and nothing was delivered. Check the history, then start a new message.', broadcastId },
+      { status: 500 },
+    );
+  }
+
+  // Queued is the outcome this request owns; the job records its own failure.
+  await recordAudit(entry, 'succeeded').catch((err) =>
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'audit-succeeded' } }),
+  );
+  return NextResponse.json({ ok: true, broadcastId, recipientCount });
+}
+```
+
+- [ ] **Step 4b: Write the fan-out job and the helpers it needs**
+
+The route only queues. `src/inngest/broadcast-functions.ts` does the delivery in durable steps:
+
+```ts
+// Durable fan-out for admin broadcasts.
+//
+// The send route validates, records the broadcast and queues one `broadcast/fanout`
+// event. This job does the slow part: it re-resolves recipients (so someone who
+// unsubscribed since the preview is skipped), then writes in-app rows and enqueues
+// emails in chunks. Each chunk is its own step, so a retry never redoes finished
+// chunks, and every write is also safe to repeat: notification ids and email event
+// ids are fixed per recipient.
+
+import { NonRetriableError } from 'inngest';
+import * as Sentry from '@sentry/nextjs';
+import { inngest } from './client';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { recordAudit } from '@/lib/admin/audit';
+import { audienceSchema, chunk, notificationId, type Category } from '@/lib/admin/comms';
+import { emailConfigProblem, resolveRecipients, unsubscribeLinks } from '@/lib/admin/broadcast';
+import { enqueueEmail } from '@/lib/email-queue';
+import Broadcast from '@emails/broadcast';
+
+const NOTIFICATION_CHUNK = 500;
+const EMAIL_CHUNK = 25;
+
+interface FanoutData {
+  broadcastId: string;
+}
+
+interface Target {
+  userId: string;
+  email: string;
+  name: string | null;
+}
+
+async function recordProgress(broadcastId: string, enqueued: number, recipientCount?: number) {
+  const { error } = await getSupabaseAdmin().rpc('admin_record_broadcast_progress', {
+    p_broadcast: broadcastId,
+    p_enqueued: enqueued,
+    p_recipient_count: recipientCount ?? null,
+  });
+  if (error) throw new Error(`progress write failed: ${error.code ?? 'error'}: ${error.message}`);
+}
+
+export const broadcastFanoutFn = inngest.createFunction(
+  {
+    id: 'broadcast-fanout',
+    name: 'Broadcast fan-out',
+    retries: 3,
+    triggers: [{ event: 'broadcast/fanout' }],
+    onFailure: async ({ event, error }) => {
+      const { broadcastId } = event.data.event.data as FanoutData;
+      const note = `Delivery stopped: ${error.message}`.slice(0, 300);
+      const admin = getSupabaseAdmin();
+      try {
+        // Everything not yet enqueued counts as failed, so history shows the shortfall.
+        const { error: failError } = await admin.rpc('admin_fail_broadcast', { p_broadcast: broadcastId, p_note: note });
+        if (failError) throw new Error(`${failError.code ?? 'error'}: ${failError.message}`);
+
+        const { data, error: readError } = await admin.from('broadcasts').select('sender_id').eq('id', broadcastId).maybeSingle();
+        if (readError || !data) throw new Error(`broadcast read failed: ${readError?.code ?? 'missing'}`);
+        await recordAudit(
+          { actorId: data.sender_id as string, action: 'broadcast.fanout', targetType: 'broadcast', targetId: broadcastId, reason: note },
+          'failed',
+        );
+      } catch (err) {
+        Sentry.captureException(err, { tags: { route: 'broadcast-fanout', step: 'on-failure' }, extra: { broadcastId } });
+        throw err;
+      }
+    },
+  },
+  async ({ event, step }) => {
+    const { broadcastId } = event.data as FanoutData;
+
+    const plan = await step.run('load', async () => {
+      const { data: row, error } = await getSupabaseAdmin()
+        .from('broadcasts')
+        .select('id, channels, category, audience, subject, body, failure_note')
+        .eq('id', broadcastId)
+        .maybeSingle();
+      if (error) throw new Error(`broadcast read failed: ${error.code ?? 'error'}: ${error.message}`);
+      if (!row) throw new NonRetriableError('broadcast not found');
+      // Marked failed (for example the queue send was reported as failed): it must not deliver.
+      if (row.failure_note) return { halted: true as const, subject: '', body: '', category: 'service' as Category, wantsEmail: false, inApp: [] as Target[], email: [] as Target[] };
+
+      const audience = audienceSchema.safeParse(row.audience);
+      if (!audience.success) throw new NonRetriableError('broadcast audience is not valid');
+      const channels = row.channels as string[];
+      const wantsEmail = channels.includes('email');
+      const wantsInApp = channels.includes('in_app');
+      const category = (row.category ?? 'service') as Category;
+      if (wantsEmail) {
+        const problem = emailConfigProblem(category);
+        if (problem) throw new NonRetriableError(problem);
+      }
+
+      // Re-resolved now, so an unsubscribe or suspension since the preview is honoured.
+      const recipients = await resolveRecipients(audience.data, category);
+      const inApp: Target[] = wantsInApp ? recipients.inApp.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
+      const email: Target[] = wantsEmail ? recipients.email.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
+      return {
+        halted: false as const,
+        subject: row.subject as string,
+        body: row.body as string,
+        category,
+        wantsEmail,
+        inApp,
+        email,
+      };
+    });
+
+    if (plan.halted) return { broadcastId, halted: true };
+
+    // The count shown in history becomes the number actually reachable now.
+    const recipientCount = plan.wantsEmail ? plan.email.length : plan.inApp.length;
+    await step.run('set-count', () => recordProgress(broadcastId, 0, recipientCount));
+
+    const admin = getSupabaseAdmin();
+
+    const inAppBatches = chunk<Target>(plan.inApp, NOTIFICATION_CHUNK);
+    for (let index = 0; index < inAppBatches.length; index++) {
+      const batch = inAppBatches[index];
+      await step.run(`in-app-${index}`, async () => {
+        const rows = batch.map((target) => ({
+          id: notificationId(broadcastId, target.userId),
+          user_id: target.userId,
+          title: plan.subject,
+          message: plan.body,
+          type: 'announcement',
+          is_global: false,
+          metadata: { broadcastId },
+        }));
+        // A fixed id per recipient makes a repeat of this step a no-op.
+        const { error } = await admin.from('notifications').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+        if (error) throw new Error(`notification insert failed: ${error.code ?? 'error'}: ${error.message}`);
+        // For an in-app only broadcast the notifications are the whole send.
+        if (!plan.wantsEmail) await recordProgress(broadcastId, Math.min((index + 1) * NOTIFICATION_CHUNK, plan.inApp.length));
+      });
+    }
+
+    const postalAddress = plan.category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined;
+    const emailBatches = chunk<Target>(plan.email, EMAIL_CHUNK);
+    for (let index = 0; index < emailBatches.length; index++) {
+      const batch = emailBatches[index];
+      await step.run(`email-${index}`, async () => {
+        await Promise.all(
+          batch.map((target) => {
+            const links = plan.category === 'product' ? unsubscribeLinks(target.userId) : null;
+            return enqueueEmail({
+              to: target.email,
+              subject: plan.subject,
+              userId: target.userId,
+              emailKind: `broadcast-${broadcastId}`,
+              broadcastId,
+              // Inngest drops a second event with this id, so a retried chunk emails no one twice.
+              eventId: `broadcast-${broadcastId}-${target.userId}`,
+              // The direct fallback skips the worker's duplicate check, the event id and the result count.
+              fallbackOnMissing: false,
+              headers: links
+                ? {
+                    'List-Unsubscribe': `<${links.oneClickUrl}>`,
+                    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+                  }
+                : undefined,
+              template: Broadcast({
+                userName: target.name || 'there',
+                subject: plan.subject,
+                body: plan.body,
+                unsubscribeUrl: links?.pageUrl,
+                postalAddress,
+              }),
+            });
+          }),
+        );
+        // The running total from this chunk's fixed position, so a re-run reports the same number.
+        await recordProgress(broadcastId, Math.min((index + 1) * EMAIL_CHUNK, plan.email.length));
+      });
+    }
+
+    return { broadcastId, recipientCount };
+  },
+);
+
+export const broadcastFunctions = [broadcastFanoutFn];
+```
+
+Register it in `src/app/api/inngest/route.ts`: `import { broadcastFunctions } from '@/inngest/broadcast-functions';` and `functions: [...inngestFunctions, ...broadcastFunctions, ...sentryLoopFunctions]`.
+
+Other edits that go with it:
+
+- `src/lib/admin/comms-limits.ts` exports `IN_APP_BODY_MAX = 1000` and nothing else, so the browser composer can import it without pulling in `node:crypto`. `comms.ts` re-exports it.
+- `src/lib/admin/audit.ts`: `recordAudit(entry, outcome = 'succeeded')` takes an optional outcome, so the route can write `attempted` and `failed` rows.
+- `src/lib/email.ts`: `sendEmail` takes an optional `idempotencyKey` and passes it as Resend's second `send` argument only when set.
+- `src/components/cxd/cxd-navbar.tsx` and `src/components/dashboard-navbar.tsx`: the notification message uses `whitespace-pre-wrap break-words` instead of `line-clamp-2` when `notification.metadata?.broadcastId` is set.
+
+- [ ] **Step 5: Check routes and commit**
+
+Run: `npx tsx src/lib/admin/__verify__/admin-routes.verify.ts`
+Expected: `11 handlers checked`, exit 0.
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add broadcast preview, test and send routes"
+```
+
+## Task 25: Composer page
+
+**Files:**
+- Create: `src/components/admin/composer.tsx`, `src/app/admin/comms/page.tsx`
+
+- [ ] **Step 1: Write the composer**
+
+```tsx
+'use client';
+
+import { useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { AdminRequestError, adminPost } from '@/lib/admin/client';
+import { IN_APP_BODY_MAX } from '@/lib/admin/comms-limits';
+
+const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+interface Preview {
+  inAppCount: number;
+  emailCount: number;
+  problem: string | null;
+}
+
+/** True when the request may have reached the server's insert, so the key may be used up. */
+function outcomeUnknown(err: unknown): boolean {
+  if (!(err instanceof AdminRequestError)) return true; // the connection dropped
+  if (typeof err.data.broadcastId === 'string' || err.data.duplicate === true) return true;
+  // A server error with no JSON body says nothing about what happened.
+  return err.status >= 500 && Object.keys(err.data).length === 0;
+}
+
+export function Composer() {
+  const router = useRouter();
+  const [inApp, setInApp] = useState(true);
+  const [email, setEmail] = useState(false);
+  const [category, setCategory] = useState<'product' | 'service'>('product');
+  const [audienceKind, setAudienceKind] = useState<'all' | 'plan' | 'users'>('all');
+  const [plan, setPlan] = useState('free');
+  const [userIds, setUserIds] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [testToken, setTestToken] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  // After a send that failed or may have gone out, the form stays locked. Editing and
+  // pressing Send again would make a second broadcast to the same people.
+  const [locked, setLocked] = useState(false);
+  // One key per draft. It rotates only after a success or a deliberate new message.
+  const sendKey = useRef<string | null>(null);
+  // Stops a double click before the disabled state has rendered.
+  const inFlight = useRef(false);
+
+  const { payload, ignoredIds } = useMemo(() => {
+    const tokens = userIds.split(/[\s,]+/).filter(Boolean);
+    const valid = tokens.filter((value) => UUID.test(value));
+    const ids = Array.from(new Set(valid));
+    const audience =
+      audienceKind === 'plan' ? { kind: 'plan', plan }
+      : audienceKind === 'users' ? { kind: 'users', userIds: ids }
+      : { kind: 'all' };
+    return {
+      ignoredIds: tokens.length - valid.length,
+      payload: {
+        channels: [...(inApp ? ['in_app'] : []), ...(email ? ['email'] : [])],
+        category,
+        audience,
+        subject: subject.trim(),
+        body: body.trim(),
+      },
+    };
+  }, [inApp, email, category, audienceKind, plan, userIds, subject, body]);
+
+  // A response for an older version of the form must not be applied to the current one.
+  const payloadJson = JSON.stringify(payload);
+  const currentPayload = useRef(payloadJson);
+  currentPayload.current = payloadJson;
+
+  function changed() {
+    setPreview(null);
+    setTestToken('');
+    setConfirmText('');
+    setMessage(null);
+  }
+
+  function startNew() {
+    changed();
+    setSubject('');
+    setBody('');
+    setUserIds('');
+    setLocked(false);
+    sendKey.current = null;
+    router.refresh();
+  }
+
+  async function run(action: () => Promise<void>) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await action();
+    } catch (err) {
+      setMessage({ ok: false, text: (err as Error).message });
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function send() {
+    if (inFlight.current || !preview) return;
+    inFlight.current = true;
+    setBusy(true);
+    setMessage(null);
+    sendKey.current ??= crypto.randomUUID();
+    try {
+      await adminPost('/api/admin/comms/send', {
+        ...payload,
+        idempotencyKey: sendKey.current,
+        confirmCount: email ? preview.emailCount : undefined,
+        confirmInAppCount: inApp ? preview.inAppCount : undefined,
+        testToken: testToken || undefined,
+      });
+      changed();
+      setSubject('');
+      setBody('');
+      sendKey.current = null;
+      setMessage({ ok: true, text: 'Queued. Delivery counts update in the history below.' });
+      router.refresh();
+    } catch (err) {
+      if (outcomeUnknown(err)) {
+        // The key is kept and the form locked: another send of the same draft is refused
+        // as "already sent", and an edited draft cannot start a second broadcast.
+        setLocked(true);
+        const known = err instanceof AdminRequestError && typeof err.data.error === 'string';
+        setMessage({
+          ok: false,
+          text: known
+            ? (err as Error).message
+            : 'It is not known whether this went out. Check the history below before doing anything else.',
+        });
+        router.refresh();
+      } else {
+        setMessage({ ok: false, text: (err as Error).message });
+      }
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  const bodyTooLong = inApp && body.trim().length > IN_APP_BODY_MAX;
+  const ready = payload.channels.length > 0 && !!payload.subject && !!payload.body && !bodyTooLong;
+  const count = preview?.emailCount ?? 0;
+  const reach = preview ? preview.inAppCount + preview.emailCount : 0;
+  const canSend =
+    !!preview && !preview.problem && reach > 0 && !locked && (!email || (!!testToken && confirmText === String(count)));
+
+  return (
+    <div className="space-y-4 rounded-lg border border-white/10 p-4">
+      {locked && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-rose-500/10 p-3 text-sm text-rose-300">
+          <span>This message is locked because it may already have gone out. Read the history before writing another.</span>
+          <Button size="sm" variant="outline" onClick={startNew}>Start a new message</Button>
+        </div>
+      )}
+      <fieldset disabled={locked || busy} className="space-y-4 border-0 p-0 m-0 min-w-0">
+        <div className="flex gap-4 text-sm">
+          <span className="text-white/60">Channel</span>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={inApp} onChange={(e) => { setInApp(e.target.checked); changed(); }} /> In-app
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={email} onChange={(e) => { setEmail(e.target.checked); changed(); }} /> Email
+          </label>
+        </div>
+
+        {email && (
+          <div className="space-y-1">
+            <label htmlFor="category" className="text-sm text-white/60">Email category</label>
+            <select id="category" className={FIELD} value={category} onChange={(e) => { setCategory(e.target.value as 'product' | 'service'); changed(); }}>
+              <option value="product">Product update (skips unsubscribed users)</option>
+              <option value="service">Service notice (reaches everyone)</option>
+            </select>
+            {category === 'service' && (
+              <p className="text-xs text-amber-300">Essential messages only, such as an outage or terms change. Never use this to promote anything.</p>
+            )}
+          </div>
+        )}
+
+        <div className="space-y-1">
+          <label htmlFor="audience" className="text-sm text-white/60">Audience</label>
+          <select id="audience" className={FIELD} value={audienceKind} onChange={(e) => { setAudienceKind(e.target.value as 'all' | 'plan' | 'users'); changed(); }}>
+            <option value="all">Everyone</option>
+            <option value="plan">One plan</option>
+            <option value="users">Chosen users</option>
+          </select>
+          {audienceKind === 'plan' && (
+            <select aria-label="Plan" className={FIELD} value={plan} onChange={(e) => { setPlan(e.target.value); changed(); }}>
+              <option value="free">Free</option>
+              <option value="pro">Pro</option>
+              <option value="lifetime">Lifetime</option>
+              <option value="beta_tester">Beta tester</option>
+            </select>
+          )}
+          {audienceKind === 'users' && (
+            <>
+              <Textarea
+                aria-label="User IDs"
+                placeholder="Paste user IDs from their user pages, separated by spaces or commas"
+                value={userIds}
+                onChange={(e) => { setUserIds(e.target.value); changed(); }}
+                className="bg-white/5 border-white/10"
+              />
+              {ignoredIds > 0 && (
+                <p role="alert" className="text-xs text-amber-300">
+                  {ignoredIds} {ignoredIds === 1 ? 'entry is' : 'entries are'} not a valid user ID and will be ignored.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <label htmlFor="subject" className="text-sm text-white/60">Subject</label>
+          <input id="subject" className={FIELD} value={subject} maxLength={200} onChange={(e) => { setSubject(e.target.value); changed(); }} />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="body" className="text-sm text-white/60">Message (blank line starts a new paragraph)</label>
+          <Textarea id="body" className="bg-white/5 border-white/10 min-h-40" value={body} onChange={(e) => { setBody(e.target.value); changed(); }} />
+          {inApp && (
+            <p className={`text-xs ${bodyTooLong ? 'text-rose-400' : 'text-white/40'}`} aria-live="polite">
+              {body.trim().length} / {IN_APP_BODY_MAX} characters for in-app
+            </p>
+          )}
+        </div>
+
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!ready || (audienceKind === 'users' && (payload.audience as { userIds: string[] }).userIds.length === 0)}
+          onClick={() => run(async () => {
+            const sent = payloadJson;
+            const result = await adminPost<Preview>('/api/admin/comms/preview', payload);
+            // The form changed while this was loading, so these counts describe something else.
+            if (currentPayload.current === sent) setPreview(result);
+          })}
+        >
+          Check recipients
+        </Button>
+      </fieldset>
+
+      {preview && (
+        <div className="space-y-3 rounded-md bg-white/[0.03] p-3 text-sm">
+          <p>{inApp ? `${preview.inAppCount} in-app` : ''}{inApp && email ? ' · ' : ''}{email ? `${preview.emailCount} emails` : ''}</p>
+          {reach === 0 && <p role="alert" className="text-amber-300">No one matches this audience on the chosen channels.</p>}
+          {preview.problem && <p role="alert" className="text-rose-400">{preview.problem}</p>}
+          {email && !preview.problem && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || locked}
+                onClick={() => run(async () => {
+                  const sent = payloadJson;
+                  const result = await adminPost<{ testToken: string }>('/api/admin/comms/test', payload);
+                  // A token for older content would be refused at send time; do not keep it.
+                  if (currentPayload.current !== sent) return;
+                  setTestToken(result.testToken);
+                  setMessage({ ok: true, text: 'Test sent to your own email.' });
+                })}
+              >
+                {testToken ? 'Send another test' : 'Send test to myself'}
+              </Button>
+              {testToken && (
+                <div className="space-y-1">
+                  <label htmlFor="confirm" className="text-white/60">Type {count} to confirm. A sent email cannot be recalled.</label>
+                  <input id="confirm" inputMode="numeric" className={FIELD} value={confirmText} disabled={locked} onChange={(e) => setConfirmText(e.target.value)} />
+                </div>
+              )}
+            </>
+          )}
+          <Button size="sm" disabled={busy || !canSend} onClick={send}>
+            Send
+          </Button>
+        </div>
+      )}
+
+      {message && <p role="status" className={`text-sm ${message.ok ? 'text-emerald-400' : 'text-rose-400'}`}>{message.text}</p>}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 2: Write the page**
+
+```tsx
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { requirePagePermission } from '@/lib/admin/gate';
+import { formatDate } from '@/lib/admin/users';
+import { Composer } from '@/components/admin/composer';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+
+export default async function AdminCommsPage() {
+  await requirePagePermission('comms.send');
+  const { data, error } = await getSupabaseAdmin()
+    .from('broadcasts')
+    .select('id, subject, channels, category, recipient_count, enqueued_count, sent_count, failed_count, failure_note, created_at')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  // A failed query must not read as "Nothing sent yet": throw so the error boundary shows it.
+  if (error) throw new Error(`broadcast history query failed: ${error.code ?? 'error'}: ${error.message}`);
+  const rows = data ?? [];
+  const now = Date.now();
+  // Queued but nothing done after 15 minutes, and no failure recorded: the job never started.
+  const notStarted = (row: (typeof rows)[number]) =>
+    row.enqueued_count === 0 &&
+    !row.failure_note &&
+    row.recipient_count > 0 &&
+    now - new Date(row.created_at as string).getTime() > 15 * 60 * 1000;
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold">Comms</h1>
+      <Composer />
+      <section className="space-y-2">
+        <h2 className="font-medium">History</h2>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Sent</TableHead>
+              <TableHead>Subject</TableHead>
+              <TableHead>Channels</TableHead>
+              <TableHead>Recipients</TableHead>
+              <TableHead>Queued</TableHead>
+              <TableHead>Emails delivered</TableHead>
+              <TableHead>Failed</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell>{formatDate(row.created_at)}</TableCell>
+                <TableCell>
+                  {row.subject}
+                  {row.failure_note && <p className="text-xs text-rose-400">{row.failure_note}</p>}
+                </TableCell>
+                <TableCell>{(row.channels as string[]).join(', ')}</TableCell>
+                <TableCell>
+                  {(row.channels as string[]).includes('email') ? `${row.recipient_count} emails` : `${row.recipient_count} in-app`}
+                  {(row.channels as string[]).length > 1 && <p className="text-xs text-white/40">plus in-app, not counted separately</p>}
+                </TableCell>
+                <TableCell>{notStarted(row) ? <span className="text-amber-300">Not started</span> : row.enqueued_count}</TableCell>
+                <TableCell>{row.sent_count}</TableCell>
+                <TableCell>{row.failed_count}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {rows.length === 0 && <p className="text-sm text-white/50">Nothing sent yet.</p>}
+      </section>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add src
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat(admin): add comms composer and history"
+```
+
+## Task 26: Notification cleanup
+
+**Files:**
+- Modify: `src/hooks/use-notifications.ts:35-58`, `src/lib/notifications.ts`, `docs/notifications-guide.md`
+- Keep: `supabase/functions/push-notification/` (owner decision, 2026-10-31)
+
+- [ ] **Step 1: Filter the realtime subscription**
+
+Replace the realtime effect in `use-notifications.ts`, and add `import * as Sentry from '@sentry/nextjs';` and `useId` to the react import and `const instanceId = useId();` as the first line of the hook. The realtime client returns the existing channel for a repeated name, so two mounted hooks (both navbars use it) would share and then tear down one channel; the per-instance name prevents that. The `onAuthStateChange` listener keeps a sign-in after mount subscribed, and the `cancelled` flag stops StrictMode's first effect from leaking a channel:
+
+```ts
+  // Subscribe to realtime updates, only for rows that belong to the signed-in user.
+  // The navbars each mount this hook, and the realtime client returns the existing
+  // channel for a repeated name, so a second hook instance would share, and then
+  // tear down, the first one's channel. A per-instance name keeps them apart.
+  useEffect(() => {
+    const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let subscribedUser: string | null = null;
+    let cancelled = false;
+
+    const unsubscribe = () => {
+      if (channel) void supabase.removeChannel(channel);
+      channel = null;
+      subscribedUser = null;
+    };
+
+    const subscribeFor = (userId: string) => {
+      if (cancelled || userId === subscribedUser) return;
+      unsubscribe();
+      subscribedUser = userId;
+      channel = supabase
+        .channel(`notifications-${userId}-${instanceId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            // Reload notifications when any change occurs
+            loadNotifications();
+          }
+        )
+        .subscribe();
+    };
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) subscribeFor(user.id);
+    }).catch((err) => {
+      // The auth listener below still subscribes once a session is known.
+      Sentry.captureException(err, { tags: { area: 'notifications', step: 'get-user' } });
+    });
+
+    // A sign-in after mount, or a switch of account, moves the subscription to that user.
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      const userId = session?.user?.id;
+      if (!userId) {
+        unsubscribe();
+        return;
+      }
+      if (userId !== subscribedUser) {
+        subscribeFor(userId);
+        // The mount load already covers the session that was there at start.
+        if (event === 'SIGNED_IN') loadNotifications();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      authListener.subscription.unsubscribe();
+      unsubscribe();
+    };
+  }, [loadNotifications, instanceId]);
+```
+
+Postgres changes cannot filter DELETE events, so clearing on one device no longer updates another open device until its next reload. That is acceptable: the clearing device already updates its own state.
+
+- [ ] **Step 2: Remove the broken global path**
+
+Delete `createGlobalAnnouncement` from `src/lib/notifications.ts`, including its doc comment, up to its closing brace. Run `grep -n createGlobalAnnouncement -r src`; expected: no output.
+
+- [ ] **Step 3: Update the guide**
+
+The owner decided on 2026-10-31 to keep the live `supabase-functions-push-notification` function for now, so leave `supabase/functions/push-notification/` and its curl example in place.
+
+In `docs/notifications-guide.md`, replace the section `### 4. Global Announcement (Admin Only)` with a `### 4. Sending announcements` section (a `##` heading would break the numbered examples):
+
+```markdown
+### 4. Sending announcements
+
+Send announcements from the admin console at `/admin/comms`. It writes one notification per recipient, so each user has their own read state. `is_global` rows are not visible under the current RLS policies.
+```
+
+- [ ] **Step 4: Type-check and commit**
+
+Run: `npx tsc --noEmit`
+Expected: no new errors.
+
+```bash
+git add -A src docs/notifications-guide.md
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "fix(notifications): filter realtime by user and remove global path"
+```
+
+---
+
+# Phase 5: Verification
+
+## Task 27: Full verification and handoff
+
+- [ ] **Step 1: Run every verify script**
+
+```bash
+npx tsx src/lib/admin/__verify__/admin-roles.verify.ts
+npx tsx src/lib/admin/__verify__/admin-routes.verify.ts
+npx tsx src/lib/admin/__verify__/admin-plan-guard.verify.ts
+npx tsx src/lib/admin/__verify__/admin-tickets.verify.ts
+npx tsx src/lib/admin/__verify__/unsubscribe-token.verify.ts
+npx tsx src/lib/admin/__verify__/broadcast-audience.verify.ts
+```
+
+Expected: all exit 0, and `admin-routes` reports `11 handlers checked`.
+
+- [ ] **Step 2: Production build**
+
+Run: `npm run build`
+Expected: succeeds, with all `/admin` routes listed.
+
+- [ ] **Step 3: Note the convention in `CLAUDE.md`**
+
+In `CLAUDE.md`, add one line under the working conventions: `Admin console: /admin. Roles in staff_roles; every /api/admin handler starts with requirePermission (checked by src/lib/admin/__verify__/admin-routes.verify.ts).`
+
+```bash
+git add CLAUDE.md
+git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "docs: note admin console conventions"
+```
+
+- [ ] **Step 4: Stop and hand off**
+
+Do not continue past this step without the owner. Report results and this checklist:
+
+1. Remind the owner that the live `supabase-functions-push-notification` edge function is still open, by their decision on 2026-10-31. Do not delete it without a new instruction.
+2. Approve applying the four migrations, in order, to `sstllhsrmcvijyokykwp`. After applying, run this and expect one row with role `owner`: `select user_id, role from public.staff_roles;`
+3. Rollback smoke test of the RPCs, because triggers on `subscriptions` run under an empty `search_path`:
+
+```sql
+BEGIN;
+SELECT public.admin_set_plan(
+  '322d15dd-8477-41ff-8980-f344fda14164',
+  (SELECT user_id FROM public.subscriptions
+    WHERE plan_id = 'free' AND stripe_subscription_id IS NULL AND plan_source IS NULL LIMIT 1),
+  'beta_tester', 'smoke test');
+ROLLBACK;
+```
+
+4. Set `EMAIL_UNSUBSCRIBE_SECRET` in Vercel. Set `EMAIL_POSTAL_ADDRESS` once a physical address is available; until then, product updates are refused and service notices work.
+5. Browser test on a preview deployment as signed-out, member, Staff, Admin and Owner, using test accounts. Confirm non-staff get 404 at `/admin` and 403 on `/api/admin/*`. Confirm a suspended test account: note whether its open session ends at once or at token expiry, and that Nexus sign-in is refused. Confirm an admin-sent password reset works from a different browser than the admin's. Test sends go to the sender only. No broadcast reaches real users during testing.
+6. Merge when the owner approves.

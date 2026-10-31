@@ -10,6 +10,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/supabase/server';
 import { getSupabaseAdmin } from '@/supabase/admin';
+import { isBanned } from '@/lib/admin/permissions';
 import { getHandoffConfig } from '@/lib/nexus/config';
 import { consumeHandoffToken } from '@/lib/nexus/handoff';
 import {
@@ -105,6 +106,9 @@ export async function POST(request: NextRequest) {
     const { data: userData, error: userError } = await admin.auth.admin.getUserById(userId);
     const email = userData?.user?.email;
     if (userError || !email) return fail(request, 'failed');
+    if (isBanned(userData.user.banned_until, new Date())) {
+      return fail(request, 'failed');
+    }
 
     const { data: link, error: linkError } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
     const hashed = link?.properties?.hashed_token;

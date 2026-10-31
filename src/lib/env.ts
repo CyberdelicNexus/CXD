@@ -14,6 +14,8 @@ const optionalServerVars = [
   'GOOGLE_GENERATIVE_AI_API_KEY',
   'MOONSHOT_API_KEY',
   'RESEND_FROM_EMAIL',
+  'EMAIL_UNSUBSCRIBE_SECRET',
+  'EMAIL_POSTAL_ADDRESS',
 ] as const;
 
 export function validateEnv() {

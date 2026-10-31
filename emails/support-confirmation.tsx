@@ -4,7 +4,7 @@ import { EmailLayout } from './_components/email-layout';
 
 interface SupportConfirmationProps {
   userName: string;
-  type: 'bug' | 'support';
+  type: 'bug' | 'feature' | 'support';
   title: string;
   description: string;
 }
@@ -15,8 +15,7 @@ export default function SupportConfirmation({
   title,
   description,
 }: SupportConfirmationProps) {
-  const isBugReport = type === 'bug';
-  const label = isBugReport ? 'Bug Report' : 'Support Request';
+  const label = type === 'bug' ? 'Bug Report' : type === 'feature' ? 'Feature Request' : 'Support Request';
 
   return (
     <EmailLayout previewText={`We received your ${label.toLowerCase()}`} showUnsubscribe={false}>

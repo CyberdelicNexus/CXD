@@ -21,6 +21,7 @@ architecture and the traps that have caused real bugs.
   pre-existing noise, not a regression. `npm run build` is the real gate.
   For standalone logic checks, write a `src/**/__verify__/*.verify.ts` script and
   run it with `npx tsx` (see `src/lib/__verify__/framing-to-canvas.verify.ts`).
+- Admin console: `/admin`. Roles in `staff_roles`; every `/api/admin` handler starts with `requirePermission` (checked by `src/lib/admin/__verify__/admin-routes.verify.ts`).
 
 ## Canvas data model
 

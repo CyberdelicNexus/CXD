@@ -20,6 +20,8 @@ interface EmailLayoutProps {
   children: React.ReactNode;
   showUnsubscribe?: boolean;
   unsubscribeUrl?: string;
+  /** Marketing mail only. Nothing is rendered when this is not passed. */
+  postalAddress?: string;
 }
 
 export function EmailLayout({
@@ -27,6 +29,7 @@ export function EmailLayout({
   children,
   showUnsubscribe = true,
   unsubscribeUrl,
+  postalAddress,
 }: EmailLayoutProps) {
   return (
     <Html lang="en">
@@ -99,6 +102,11 @@ export function EmailLayout({
             >
               &copy; {new Date().getFullYear()} Cyberdelic Labs. All rights reserved.
             </Text>
+            {postalAddress && (
+              <Text style={{ color: '#6b6b7b', fontSize: '12px', fontFamily: FONT_FAMILY, margin: '0 0 8px' }}>
+                {postalAddress}
+              </Text>
+            )}
             {showUnsubscribe && unsubscribeUrl && (
               <Link
                 href={unsubscribeUrl}

@@ -562,11 +562,18 @@ export async function POST(req: Request) {
         const sub = event.data.object as Stripe.Subscription;
         const customerId = sub.customer as string;
 
-        const { data: row, error: lookupErr } = await supabase
+        let { data: row, error: lookupErr } = await supabase
           .from('subscriptions')
-          .select('user_id')
+          .select('user_id, plan_source')
           .eq('stripe_customer_id', customerId)
           .single();
+        if (isMissingPlanSourceColumn(lookupErr)) {
+          ({ data: row, error: lookupErr } = await supabase
+            .from('subscriptions')
+            .select('user_id')
+            .eq('stripe_customer_id', customerId)
+            .single());
+        }
 
         if (lookupErr || !row) {
           console.warn('[webhook] subscription.updated: no subscription row found for', customerId);
@@ -586,6 +593,13 @@ export async function POST(req: Request) {
             canceled_at: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString() : null,
             // plan_id only flips away from 'pro' on subscription.deleted; don't
             // clobber it here.
+            //
+            // An admin grant is replaced when a live Stripe subscription appears
+            // (one created outside Checkout), so a later cancel is handled as a
+            // Stripe plan. Nexus rows are left exactly as they are.
+            ...((row as any).plan_source === 'admin' && (sub.status === 'active' || sub.status === 'trialing')
+              ? { plan_source: 'stripe' }
+              : {}),
           })
           .eq('user_id', row.user_id);
 
@@ -613,16 +627,17 @@ export async function POST(req: Request) {
           fail('Database error');
         }
 
-        if (subscriptionRecord && (subscriptionRecord as any).plan_source === 'nexus') {
-          // The plan comes from the member's Nexus tier (D182 §5), not from
-          // this Stripe subscription: forget the subscription, keep the plan,
-          // and leave the credit allowance to the Nexus tier sync.
+        const planSource = (subscriptionRecord as any)?.plan_source;
+        if (subscriptionRecord && (planSource === 'nexus' || planSource === 'admin')) {
+          // The plan comes from the member's Nexus tier (D182 §5) or an admin
+          // grant, not from this Stripe subscription: forget the subscription,
+          // keep the plan, and leave the credit allowance alone.
           const { error: detachError } = await supabase
             .from('subscriptions')
             .update({ stripe_subscription_id: null, canceled_at: new Date().toISOString() })
             .eq('user_id', subscriptionRecord.user_id);
           if (detachError) {
-            console.error('Failed to detach Stripe subscription from Nexus plan:', detachError);
+            console.error('Failed to detach Stripe subscription from Nexus or admin plan:', detachError);
             fail('Database error');
           }
         } else if (subscriptionRecord) {

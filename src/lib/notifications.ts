@@ -167,45 +167,6 @@ export async function createNotification(
 }
 
 /**
- * Create a global announcement (for all users)
- * This is what you'd call from admin/backend to push announcements
- */
-export async function createGlobalAnnouncement(
-  title: string,
-  message: string,
-  type: NotificationType = 'announcement',
-  metadata: Record<string, any> = {},
-  expiresInDays?: number
-): Promise<boolean> {
-  const supabase = createClient();
-  
-  const { error } = await supabase
-    .from('notifications')
-    .insert({
-      user_id: null,
-      title,
-      message,
-      type,
-      is_global: true,
-      metadata,
-      expires_at: expiresInDays 
-        ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
-        : null,
-    });
-
-  if (error) {
-    const msg = String((error as any)?.message ?? '');
-    const details = String((error as any)?.details ?? '');
-    if (msg.includes('Failed to fetch') || details.includes('Failed to fetch')) {
-      return false;
-    }
-    console.error('Error creating global announcement:', error);
-    return false;
-  }
-  return true;
-}
-
-/**
  * Get unread notification count
  */
 export async function getUnreadCount(): Promise<number> {
