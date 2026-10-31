@@ -67,7 +67,7 @@ function isProtected(row: SubscriptionSyncRow): boolean {
     row.stripe_subscription_id != null && (row.status === 'active' || row.status === 'trialing');
   const ownedPlan =
     (row.plan_id === 'lifetime' || row.plan_id === 'beta_tester') && row.plan_source !== 'nexus';
-  return activeStripe || ownedPlan;
+  return activeStripe || ownedPlan || row.plan_source === 'admin';
 }
 
 /**

@@ -613,10 +613,11 @@ export async function POST(req: Request) {
           fail('Database error');
         }
 
-        if (subscriptionRecord && (subscriptionRecord as any).plan_source === 'nexus') {
-          // The plan comes from the member's Nexus tier (D182 §5), not from
-          // this Stripe subscription: forget the subscription, keep the plan,
-          // and leave the credit allowance to the Nexus tier sync.
+        const planSource = (subscriptionRecord as any)?.plan_source;
+        if (subscriptionRecord && (planSource === 'nexus' || planSource === 'admin')) {
+          // The plan comes from the member's Nexus tier (D182 §5) or an admin
+          // grant, not from this Stripe subscription: forget the subscription,
+          // keep the plan, and leave the credit allowance alone.
           const { error: detachError } = await supabase
             .from('subscriptions')
             .update({ stripe_subscription_id: null, canceled_at: new Date().toISOString() })
