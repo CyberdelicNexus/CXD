@@ -16,7 +16,7 @@ import { TemplateMiniPreview } from '@/components/cxd/template-mini-preview';
 import { FRAMEWORK_STAGE_LABELS } from '@/lib/templates';
 import type { TemplateDefinition } from '@/lib/templates';
 
-export type FrameworkDialogMode = 'create' | 'insert' | 'readonly';
+export type FrameworkDialogMode = 'create' | 'insert';
 
 interface FrameworkDetailDialogProps {
   /** Must have `framework`; the dialog renders nothing otherwise. */
@@ -26,10 +26,18 @@ interface FrameworkDetailDialogProps {
   mode: FrameworkDialogMode;
   /** Pro-gated and the viewer is on the free tier. Explainer stays readable. */
   locked: boolean;
+  /** Radix modal mode: adds the scrim, scroll lock and click blocking. Off by default for the in-canvas picker. */
+  modal?: boolean;
+  /** The primary action can't run yet (async work in flight, plan still loading). */
+  busy?: boolean;
   onCreate?: (projectName: string) => void;
   onInsert?: () => void;
   onUpgrade?: () => void;
 }
+
+/** Touch keyboards shouldn't pop open over the explainer. */
+const hasFinePointer = () =>
+  typeof window !== 'undefined' && window.matchMedia('(pointer: fine)').matches;
 
 function Section({ heading, children }: { heading: string; children: ReactNode }) {
   return (
@@ -41,7 +49,7 @@ function Section({ heading, children }: { heading: string; children: ReactNode }
 }
 
 export function FrameworkDetailDialog({
-  template, open, onClose, mode, locked, onCreate, onInsert, onUpgrade,
+  template, open, onClose, mode, locked, modal = false, busy = false, onCreate, onInsert, onUpgrade,
 }: FrameworkDetailDialogProps) {
   const [projectName, setProjectName] = useState('');
 
@@ -53,27 +61,25 @@ export function FrameworkDetailDialog({
   const fw = template?.framework;
   if (!template || !fw) return null;
 
-  const canSubmit = mode !== 'create' || projectName.trim().length > 0;
+  const canSubmit = !busy && (mode !== 'create' || projectName.trim().length > 0);
 
   const primary = () => {
     if (locked) { onUpgrade?.(); return; }
     if (mode === 'create') onCreate?.(projectName.trim());
-    else if (mode === 'insert') onInsert?.();
-    else onClose();
+    else onInsert?.();
   };
 
   const primaryLabel = locked
     ? 'Upgrade to use'
     : mode === 'create' ? 'Create canvas'
-    : mode === 'insert' ? 'Insert into canvas'
-    : 'Close';
+    : 'Insert into canvas';
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={modal}>
       <DialogContent
-        className="bg-zinc-900/95 border-white/10 text-white sm:max-w-3xl max-h-[88vh] overflow-hidden flex flex-col"
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
+        className="bg-zinc-900/95 border-white/10 text-white sm:max-w-3xl max-h-[88dvh] overflow-hidden flex flex-col"
+        onPointerDownOutside={modal ? undefined : (e) => e.preventDefault()}
+        onInteractOutside={modal ? undefined : (e) => e.preventDefault()}
       >
         <DialogHeader>
           <div className="flex items-start gap-3">
@@ -110,7 +116,12 @@ export function FrameworkDetailDialog({
           </div>
         </DialogHeader>
 
-        <div className="overflow-y-auto flex-1 -mx-1 px-1 py-2">
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label={`About ${template.name}`}
+          className="overflow-y-auto flex-1 -mx-1 px-1 py-2 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-purple-400/40"
+        >
           <div className="grid grid-cols-1 md:grid-cols-[1fr_260px] gap-6">
             <div className="space-y-6">
               <Section heading="What it is">
@@ -151,7 +162,7 @@ export function FrameworkDetailDialog({
               </Section>
             </div>
 
-            <aside className="md:border-l md:border-white/10 md:pl-6">
+            <aside className="order-first md:order-none md:border-l md:border-white/10 md:pl-6">
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-white/40 mb-2">The canvas you get</h3>
               <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                 <TemplateMiniPreview template={template} className="w-full h-28" />
@@ -172,24 +183,22 @@ export function FrameworkDetailDialog({
                 onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) primary(); }}
                 placeholder="Enter project name…"
                 className="bg-white/5 border-white/10 text-white placeholder:text-white/30"
-                autoFocus
+                autoFocus={hasFinePointer()}
               />
             </div>
           )}
           <div className="flex gap-2 justify-end sm:ml-auto">
             <Button variant="ghost" onClick={onClose} className="text-white/60 hover:text-white">
-              {mode === 'readonly' ? 'Done' : 'Cancel'}
+              Cancel
             </Button>
-            {mode !== 'readonly' && (
-              <Button
-                onClick={primary}
-                disabled={!canSubmit}
-                className={locked ? 'bg-amber-500/20 border border-amber-400/40 text-amber-200 hover:bg-amber-500/30' : 'btn-primary-glow'}
-              >
-                {locked ? <Crown className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                {primaryLabel}
-              </Button>
-            )}
+            <Button
+              onClick={primary}
+              disabled={!canSubmit}
+              className={locked ? 'bg-amber-500/20 border border-amber-400/40 text-amber-200 hover:bg-amber-500/30' : 'btn-primary-glow'}
+            >
+              {locked ? <Crown className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+              {primaryLabel}
+            </Button>
           </div>
         </div>
       </DialogContent>

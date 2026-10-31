@@ -106,7 +106,7 @@ frameworkIds?: string[];  // framework template ids this project was built from 
 
 ### 5.2 Framework detail dialog (new `src/components/cxd/framework-detail-dialog.tsx`)
 
-Props: `template: TemplateDefinition` (must have `framework`), `open`, `onClose`, `mode: 'create' | 'insert' | 'readonly'`, `locked: boolean`, `onCreate?(name)`, `onInsert?()`.
+Props: `template: TemplateDefinition` (must have `framework`), `open`, `onClose`, `mode: 'create' | 'insert'`, `locked: boolean`, `modal?: boolean` (default false; the Templates page passes it for the scrim and scroll lock, the picker stays non-modal), `busy?: boolean`, `onCreate?(name)`, `onInsert?()`.
 
 Layout (single column on mobile, two on `md+`):
 
@@ -116,7 +116,6 @@ Layout (single column on mobile, two on `md+`):
 - Footer by mode:
   - `create`: project name input (prefilled with the framework name) + "Create canvas" button. Enter submits.
   - `insert`: "Insert into canvas" button.
-  - `readonly`: "Close".
   - `locked` in any mode: the explainer stays readable; the primary button becomes "Upgrade to use" and opens `UpgradeModal` with `feature="templates"`.
 
 Styling follows the existing dialog (`bg-zinc-900/95 border-white/10`), purple accents, amber for locked.
