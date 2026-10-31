@@ -13,10 +13,10 @@ import {
 // (40,40), caption at (40,80), step rail at y=160, zones from y=280, 20px grid.
 // Content is checked against docs/superpowers/research/2026-10-31-frameworks-research.md.
 
-/** Numbered step cards along the top of the template, 200px pitch. */
-function stepRail(prefix: string, steps: FrameworkStep[], x = 40, y = 160): ShapeElement[] {
+/** Numbered step cards along the top of the template, 200px pitch unless a layout needs its cards over its columns. */
+function stepRail(prefix: string, steps: FrameworkStep[], x = 40, y = 160, pitch = 200): ShapeElement[] {
   return steps.map((s, i) =>
-    shape(`${prefix}-s${i + 1}`, x + i * 200, y, 160, 80, 'rectangle', `${i + 1} · ${s.title}`, stepStyle),
+    shape(`${prefix}-s${i + 1}`, x + i * pitch, y, 160, 80, 'rectangle', `${i + 1} · ${s.title}`, stepStyle),
   );
 }
 
@@ -57,11 +57,6 @@ const variableStyle: ElementStyle = {
   fontSize: 13,
   textAlign: 'center',
 };
-
-// Silence unused-import warnings until the authoring tasks use everything.
-void note; void block; void storyboard; void edge; void zone; void subjectStyle; void variableStyle;
-void NOTE_TEAL; void NOTE_ROSE; void NOTE_VIOLET; void NOTE_EMERALD; void WARM_SUN; void WARM_FIRE;
-type _Fam = Fam;
 
 /** Frameworks insertable on the free tier: one Think, one Ideate, one Plan. */
 export const FREE_FRAMEWORK_IDS: readonly string[] = ['fw-iceberg', 'fw-hmw-crazy8', 'fw-impact-effort'];
@@ -625,7 +620,7 @@ const audienceFit: TemplateDefinition = {
 
 const ARC_STEPS: FrameworkStep[] = [
   { title: 'The hero', detail: 'Your audience, not you. What do they want? One desire, stated simply.' },
-  { title: 'The tension', detail: 'What stands in their way: the outer obstacle, the inner feeling, the bigger wrong.' },
+  { title: 'The tension', detail: 'What stands in their way, and how does it feel to be stuck there?' },
   { title: 'The ally', detail: 'You enter as the one who understands and has a way. Empathy first, then credibility.' },
   { title: 'The path', detail: 'Three steps that make saying yes feel safe. Simple enough to remember.' },
   { title: 'The invitation', detail: 'The direct ask (book, join, come) and the soft one (learn more, follow).' },
@@ -669,7 +664,7 @@ const narrativeArc: TemplateDefinition = {
   // Seven 260px beats on a 340 pitch (80px gutters so the arrows read); the two zones span the row.
   elements: [
     ...fwTitle('fwn', 'Narrative Messaging Arc', FAM.violet.grad, 'Seven beats, left to right. The audience is the hero; you are the ally. Compress it into one line at the end.'),
-    ...stepRail('fwn', ARC_STEPS),
+    ...stepRail('fwn', ARC_STEPS, 80, 160, 340),
     ...ARC_BEATS.map((b, i) => note(`fwn-${b.key}`, 40 + i * 340, 280, b.title, b.emoji, b.fill, 'One or two sentences, in their words.')),
     ...zone('fwn-1', 40, 680, 2300, 480, 'The one-liner', 'sunset',
       'Hero, tension, transformation in one breath. This goes at the top of every page.'),
@@ -683,17 +678,141 @@ const narrativeArc: TemplateDefinition = {
   ),
 };
 
+// ─── 11. Pirate Metrics Funnel — RAIL of five lanes, one metric each
+
+const AARRR_STEPS: FrameworkStep[] = [
+  { title: 'Acquisition', detail: 'How do people first hear of this? One tactic per note, with the number you will watch.' },
+  { title: 'Activation', detail: 'What is the first good moment, and how many who arrive actually reach it?' },
+  { title: 'Retention', detail: 'Who comes back, or stays in touch, and what brings them?' },
+  { title: 'Referral', detail: 'What makes someone bring a friend, and how do you make it easy?' },
+  { title: 'Revenue', detail: 'Where money enters: tickets, memberships, commissions, partners. One metric.' },
+];
+
+const AARRR_LANES: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; emoji: string; fill: string }[] = [
+  { key: 'acq', label: 'Acquisition', fam: 'violet', cap: 'Metric: people who hear of it. Tactics: channels, partners, press, search.', noteTitle: 'Tactic', emoji: '📣', fill: NOTE_VIOLET },
+  { key: 'act', label: 'Activation', fam: 'ocean', cap: 'Metric: share who reach the first good moment. What is that moment?', noteTitle: 'First good moment', emoji: '✨', fill: NOTE_TEAL },
+  { key: 'ret', label: 'Retention', fam: 'emerald', cap: 'Metric: share who return or stay in touch. What brings them back?', noteTitle: 'Return reason', emoji: '🔁', fill: NOTE_EMERALD },
+  { key: 'ref', label: 'Referral', fam: 'sunset', cap: 'Metric: invites per participant. How do you make bringing a friend easy?', noteTitle: 'Share moment', emoji: '🤝', fill: WARM_SUN },
+  { key: 'rev', label: 'Revenue', fam: 'rose', cap: 'Metric: revenue per participant. Tickets, memberships, partners, commissions.', noteTitle: 'Revenue path', emoji: '💰', fill: NOTE_ROSE },
+];
+
+const aarrr: TemplateDefinition = {
+  id: 'fw-aarrr',
+  name: 'Pirate Metrics Funnel',
+  description: 'Acquisition to revenue in five lanes, each with its tactics and the one metric that matters',
+  emoji: '🏴‍☠️',
+  category: 'framework',
+  framework: {
+    stage: 'distribute',
+    origin: 'Dave McClure, "Startup Metrics for Pirates", Ignite Seattle talk, around 2007',
+    sourceUrl: 'https://www.slideshare.net/dmc500hats/startup-metrics-for-pirates-long-version',
+    whatItIs: 'Pirate Metrics (AARRR) breaks how people find, try, keep, share and pay for something into five stages, each with one metric. It replaces vanity numbers with a funnel you can act on: the stage with the worst conversion is where to work next. For experiences, it links distribution to the moments that actually make people come back.',
+    whenToUse: [
+      'You are deciding where to spend limited marketing time.',
+      'Attendance numbers look fine but revenue or return visits do not.',
+      'Planning distribution for a series, a season or a membership.',
+    ],
+    steps: AARRR_STEPS,
+    pitfalls: [
+      'Tracking totals instead of conversion between stages.',
+      'Pouring effort into acquisition while activation leaks.',
+      'Choosing metrics you cannot actually measure with the tools you have.',
+    ],
+    assistantBrief: 'Coach Pirate Metrics. The canvas has five lane zones: Acquisition, Activation, Retention, Referral, Revenue. For each lane help the designer name one measurable metric they can really collect and one or two tactics as notes. Insist on conversion between stages rather than totals: of those who hear, how many come; of those who come, how many reach the first good moment. Ask what the first good moment is and whether the experience design makes it early enough. When all lanes are filled, help them find the leakiest stage and recommend working there before adding acquisition. Tie referral to a specific share-worthy moment in the Experience Flow when present.',
+  },
+  // Five 360px lanes on a 440 pitch: 80px gutters so the arrows read.
+  elements: [
+    ...fwTitle('fwa', 'Pirate Metrics Funnel', FAM.violet.grad, 'Five lanes, left to right. One metric per lane, measured as conversion from the lane before. Fix the leakiest lane first.'),
+    ...stepRail('fwa', AARRR_STEPS),
+    ...AARRR_LANES.flatMap((l, i) => {
+      const zx = 40 + i * 440;
+      return [
+        ...zone(`fwa-${l.key}`, zx, 280, 360, 620, l.label, l.fam, l.cap),
+        note(`fwa-${l.key}-n`, zx + 36, 420, l.noteTitle, l.emoji, l.fill, 'Metric:\nTarget:', `fwa-${l.key}`),
+      ];
+    }),
+  ] as CanvasElement[],
+  edges: [
+    edge('fwa-e1', 'fwa-acq', 'fwa-act', 'violet'),
+    edge('fwa-e2', 'fwa-act', 'fwa-ret', 'ocean'),
+    edge('fwa-e3', 'fwa-ret', 'fwa-ref', 'emerald'),
+    edge('fwa-e4', 'fwa-ref', 'fwa-rev', 'sunset'),
+  ],
+};
+
+// ─── 12. Partner & Channel Ecosystem Map — 2×2 by influence × reach + candidates
+
+const ECO_STEPS: FrameworkStep[] = [
+  { title: 'List every partner and channel', detail: 'Venues, collaborators, platforms, press, communities, gatekeepers, funders. One per note in Candidates.' },
+  { title: 'Rate influence', detail: 'How much can they shape whether this happens or how it is perceived? High or low.' },
+  { title: 'Rate reach', detail: 'How many of your intended audience can they put it in front of? High or low.' },
+  { title: 'Place them', detail: 'Drag each note into its quadrant: Champions, Amplifiers, Gatekeepers, Allies.' },
+  { title: 'Plan the first three asks', detail: 'For the champions and gatekeepers, what exactly do you ask, and what do they get?' },
+];
+
+// Influence is high on the top row, reach grows left to right.
+const ECO_QUADS: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; emoji: string; fill: string; x: number; y: number }[] = [
+  { key: 'ga', label: 'Gatekeepers', fam: 'rose', cap: 'High influence, low reach. Permits, venues, funders. Keep them informed and unsurprised.', noteTitle: 'Gatekeeper', emoji: '🗝️', fill: NOTE_ROSE, x: 40, y: 340 },
+  { key: 'ch', label: 'Champions', fam: 'violet', cap: 'High influence, high reach. Court them personally; they can make the season.', noteTitle: 'Champion', emoji: '👑', fill: NOTE_VIOLET, x: 700, y: 340 },
+  { key: 'al', label: 'Allies', fam: 'emerald', cap: 'Low influence, low reach. Goodwill to maintain with light touch.', noteTitle: 'Ally', emoji: '🌿', fill: NOTE_EMERALD, x: 40, y: 900 },
+  { key: 'am', label: 'Amplifiers', fam: 'ocean', cap: 'Low influence, high reach. Give them something easy to share.', noteTitle: 'Amplifier', emoji: '📡', fill: NOTE_TEAL, x: 700, y: 900 },
+];
+
+const ecosystemMap: TemplateDefinition = {
+  id: 'fw-ecosystem-map',
+  name: 'Partner & Channel Ecosystem Map',
+  description: 'Place venues, collaborators, platforms and gatekeepers by influence and reach, then plan the asks',
+  emoji: '🕸️',
+  category: 'framework',
+  framework: {
+    stage: 'sell',
+    origin: 'Our adaptation of stakeholder power–interest mapping, attributed to Aubrey Mendelow (1991), for partnerships and distribution channels',
+    whatItIs: 'The Partner & Channel Ecosystem Map sorts everyone who could help an experience reach its audience by two questions: how much influence they have over whether it happens, and how many of the right people they can reach. The four quadrants tell you how to treat each one. It turns a vague "we should partner" into three concrete asks.',
+    whenToUse: [
+      'Selling an experience into venues, festivals, institutions or brands.',
+      'You have more potential partners than time to court them.',
+      'A launch depends on permissions or endorsements you do not yet have.',
+    ],
+    steps: ECO_STEPS,
+    pitfalls: [
+      'Mistaking friendliness for influence.',
+      'Spending the courting effort on allies because they are comfortable to talk to.',
+      'Asks with nothing in them for the partner.',
+    ],
+    assistantBrief: 'Coach the Partner & Channel Ecosystem Map. The canvas has four quadrant zones (Champions, Amplifiers, Gatekeepers, Allies) and a Candidates zone. Help the designer list every venue, collaborator, platform, press contact, community and gatekeeper into Candidates first, one per note. Then rate each on influence over whether and how the experience happens, and on reach into the intended audience, challenging ratings that confuse friendliness with influence. Suggest the quadrant for each note. When placed, focus the designer on champions and gatekeepers: for each, draft a specific ask and what the partner gets in return, and recommend the first three asks to make this month. Suggest turning those asks into task cards when the Plan view is in use.',
+  },
+  elements: [
+    ...fwTitle('fwe', 'Partner & Channel Ecosystem Map', FAM.glacier.grad, 'Influence high on the top row. Reach grows left to right. Drag candidates into place, then plan the asks.'),
+    ...stepRail('fwe', ECO_STEPS),
+    ...ECO_QUADS.flatMap((q) => [
+      ...zone(`fwe-${q.key}`, q.x, q.y, 620, 520, q.label, q.fam, q.cap),
+      note(`fwe-${q.key}-n`, q.x + 36, q.y + 140, q.noteTitle, q.emoji, q.fill, 'The ask:\nWhat they get:', `fwe-${q.key}`),
+    ]),
+    ...zone('fwe-c', 1360, 340, 520, 1080, 'Candidates', 'sunset',
+      'Everyone who could help this reach its audience. Rate, then drag into a quadrant.'),
+    note('fwe-c-n', 1396, 480, 'Candidate', '🧩', WARM_SUN, 'Influence: high / low.\nReach: high / low.', 'fwe-c'),
+  ] as CanvasElement[],
+  edges: [],
+};
+
 export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
+  // Think
   iceberg,
   causalLoop,
   theoryOfChange,
+  // Ideate
   hmwCrazy8,
   scamper,
+  // Plan
   impactEffort,
   premortem,
+  // Ship
   workback,
+  // Market
   audienceFit,
   narrativeArc,
+  // Distribute
+  aarrr,
+  // Sell
+  ecosystemMap,
 ];
-
-export { stepRail, fwTitle };
