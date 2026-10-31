@@ -24,13 +24,13 @@ Checked read-only on project `sstllhsrmcvijyokykwp` on 2026-10-31. The local `su
 | `plan_source` allows only `stripe` and `nexus` | Needs an `admin` value |
 | `email_log` has no unique constraint | Deduplication is the worker's check, not a database guarantee |
 | Email layout has an unsubscribe slot but no postal address | Needs a configured address (see Comms) |
-| Edge function `supabase-functions-push-notification` is deployed with `verify_jwt: false`, CORS `*`, and writes with the service role with no auth check | Live security hole (see Prerequisite) |
+| Edge function `supabase-functions-push-notification` is deployed with `verify_jwt: false`, CORS `*`, and writes with the service role with no auth check | Live security hole (see Known risk) |
 
-## Prerequisite: remove the open notification endpoint
+## Known risk: open notification endpoint
 
 The deployed `supabase-functions-push-notification` function lets anyone on the internet insert a notification for any user ID, or a global row, with no login. It has no callers in `src/`. An attacker who has a user's ID can put fake messages in that user's bell.
 
-Delete the deployed function and remove `supabase/functions/push-notification/` and its section in `docs/notifications-guide.md`. The admin composer replaces it. This does not wait for the console release, but deleting it needs the owner's approval because it changes production.
+**Decision (2026-10-31):** the owner chose not to delete it for now. The function, its repo copy and its guide section stay in place, and the risk remains open. The admin composer does not use it.
 
 ## Architecture
 
@@ -237,10 +237,9 @@ Then browser-test on a preview deployment as signed-out, member, Staff, Admin an
 
 ## Rollout
 
-1. Owner approves deleting the open edge function.
-2. Build access, users, support and comms on `feat/admin-console`.
-3. Owner approves the migrations, which are then applied by hand.
-4. Set `EMAIL_UNSUBSCRIBE_SECRET` and `EMAIL_POSTAL_ADDRESS` in Vercel.
-5. Verify on preview, then merge.
+1. Build access, users, support and comms on `feat/admin-console`.
+2. Owner approves the migrations, which are then applied by hand.
+3. Set `EMAIL_UNSUBSCRIBE_SECRET` and `EMAIL_POSTAL_ADDRESS` in Vercel.
+4. Verify on preview, then merge.
 
 Commits must not contain `Co-Authored-By` trailers and must be authored as `Jose <connect@cyberdelic.nexus>`, per `CLAUDE.md`.

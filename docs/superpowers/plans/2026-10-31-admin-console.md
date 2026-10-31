@@ -4158,11 +4158,11 @@ Postgres changes cannot filter DELETE events, so clearing on one device no longe
 
 Delete `createGlobalAnnouncement` from `src/lib/notifications.ts`, including its doc comment, up to its closing brace. Run `grep -n createGlobalAnnouncement -r src`; expected: no output.
 
-- [ ] **Step 3: Remove the repo copy of the open function**
+- [ ] **Step 3: Update the guide**
 
-Delete the folder `supabase/functions/push-notification/`.
+The owner decided on 2026-10-31 to keep the live `supabase-functions-push-notification` function for now, so leave `supabase/functions/push-notification/` and its curl example in place.
 
-In `docs/notifications-guide.md`, delete the sections that show `createGlobalAnnouncement` (around line 268) and the `functions/v1/push-notification` curl example (around line 316). Add in their place:
+In `docs/notifications-guide.md`, delete the section that shows `createGlobalAnnouncement` (around line 268). Add in its place:
 
 ```markdown
 ## Sending announcements
@@ -4176,7 +4176,7 @@ Run: `npx tsc --noEmit`
 Expected: no new errors.
 
 ```bash
-git add -A src docs/notifications-guide.md supabase/functions
+git add -A src docs/notifications-guide.md
 git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "fix(notifications): filter realtime by user and remove global path"
 ```
 
@@ -4217,7 +4217,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "docs
 
 Do not continue past this step without the owner. Report results and this checklist:
 
-1. Approve deleting the live `supabase-functions-push-notification` edge function. This can happen before the release.
+1. Remind the owner that the live `supabase-functions-push-notification` edge function is still open, by their decision on 2026-10-31. Do not delete it without a new instruction.
 2. Approve applying the four migrations, in order, to `sstllhsrmcvijyokykwp`. After applying, run this and expect one row with role `owner`: `select user_id, role from public.staff_roles;`
 3. Rollback smoke test of the RPCs, because triggers on `subscriptions` run under an empty `search_path`:
 
