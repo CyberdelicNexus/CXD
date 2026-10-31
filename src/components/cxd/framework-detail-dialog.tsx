@@ -77,11 +77,11 @@ export function FrameworkDetailDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={modal}>
       <DialogContent
-        className="bg-zinc-900/95 border-white/10 text-white sm:max-w-3xl max-h-[88dvh] overflow-hidden flex flex-col"
+        className={`${modal ? 'bg-zinc-900/95' : 'bg-zinc-900'} border-white/10 text-white sm:max-w-3xl max-h-[88dvh] overflow-hidden flex flex-col`}
         onPointerDownOutside={modal ? undefined : (e) => e.preventDefault()}
         onInteractOutside={modal ? undefined : (e) => e.preventDefault()}
       >
-        <DialogHeader>
+        <DialogHeader className="text-left pr-8">
           <div className="flex items-start gap-3">
             <span className="text-3xl leading-none shrink-0">{template.emoji}</span>
             <div className="min-w-0">

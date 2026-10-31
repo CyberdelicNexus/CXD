@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Crown, Info } from 'lucide-react';
 import { useCXDStore } from '@/store/cxd-store';
 import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds, isTemplateFree, FRAMEWORK_STAGE_LABELS } from '@/lib/templates';
@@ -45,6 +46,14 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
   useEffect(() => {
     if (!open) setDetailTemplate(null);
   }, [open]);
+  // UpgradeModal has no Escape handling of its own; while it is up, Escape
+  // closes it (and only it: the picker's onEscapeKeyDown is suppressed below).
+  useEffect(() => {
+    if (!showUpgrade) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowUpgrade(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showUpgrade]);
   // 'quickstart' (free) or 'full' — the whole catalog stays visible either
   // way; free users just get Pro badges on non-quickstart templates.
   const { templateAccess } = useSubscription();
@@ -94,7 +103,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
   const frameworkTemplates = filtered.filter((t) => t.category === 'framework');
 
   const renderGrid = (list: TemplateDefinition[]) => (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {list.map((tpl) => {
         const locked = isLocked(tpl.id);
         return (
@@ -129,7 +138,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
               <div className="flex items-start gap-3 w-full">
                 <span className="text-xl shrink-0">{tpl.emoji}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors flex items-center gap-1.5 min-w-0">
+                  <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors flex items-center flex-wrap gap-x-1.5 gap-y-1 min-w-0">
                     <span className="truncate">{tpl.name}</span>
                     {tpl.framework && (
                       <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-[9px] font-semibold text-purple-200 uppercase tracking-wide">
@@ -160,6 +169,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
         className="bg-zinc-900/95 border-white/10 text-white sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => { if (showUpgrade) e.preventDefault(); }}
       >
         <DialogHeader>
           <DialogTitle>Add a Template</DialogTitle>
@@ -214,11 +224,17 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
         onUpgrade={() => { setDetailTemplate(null); setShowUpgrade(true); }}
       />
 
-      <UpgradeModal
-        isOpen={showUpgrade}
-        onClose={() => setShowUpgrade(false)}
-        feature="templates"
-      />
+      {/* Portaled to body so it lands after the picker's own portal in the DOM;
+          both are z-50, so DOM order decides which paints on top. */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <UpgradeModal
+            isOpen={showUpgrade}
+            onClose={() => setShowUpgrade(false)}
+            feature="templates"
+          />,
+          document.body,
+        )}
     </Dialog>
   );
 }

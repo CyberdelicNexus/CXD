@@ -50,7 +50,7 @@ export const PLANS = {
     trialDays: 14,
     features: [
       'Unlimited Canvases & unlimited objects',
-      'Full template catalog (22) + AI Composer',
+      'Full template and framework catalog + AI Composer',
       'Premium AI Models (Claude Sonnet, Gemini Pro, Kimi)',
       '500 AI Credits/month',
       'Calendar sync (Google, Apple, Outlook)',
