@@ -128,6 +128,7 @@ export function getFullProjectContext(
     canvas: buildCanvasContext(elements, edges, project),
     map: buildMapContext(project, elements),
     plan: buildPlanContext(elements),
+    frameworkIds: project.frameworkIds?.length ? [...project.frameworkIds] : undefined,
   };
 }
 

@@ -13,6 +13,8 @@ export interface AIProjectContext {
   canvas: CanvasContext;
   map: MapContext;
   plan: PlanContext;
+  /** Framework template ids the project was built from; resolved to briefs server-side. */
+  frameworkIds?: string[];
 }
 
 export interface FramingContext {

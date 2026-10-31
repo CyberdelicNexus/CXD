@@ -2,6 +2,7 @@
 // Builds tailored system prompts for each face, Core, and General assistant.
 
 import type { AIProjectContext, FaceContext } from "@/types/ai-types";
+import { getFrameworkTemplate } from "@/lib/templates";
 
 // ============================================================
 // Base System Prompt (prepended to ALL interactions)
@@ -335,6 +336,32 @@ You are docked inside the Canvas view. Beyond conversation, the app can turn you
 - Refer to canvas elements by their visible titles.
 - When the content has a shape, name it: a process is a flow, a cycle is a loop, staged explanations are a spine, a central idea is a mind map, a comparison is a table, a positioning is quadrants. Say which form fits and list its nodes, so the canvas gets a diagram rather than a stack of note cards. Reserve note cards for long-form writing.
 - Keep replies focused on the canvas composition, the inbox, and the plan.${selectionBlock}`;
+}
+
+export const MAX_ACTIVE_FRAMEWORK_BRIEFS = 3;
+
+/**
+ * Coaching briefs for the most recent frameworks on a project. Ids come from
+ * the client; the briefs are resolved here from the static catalog so no
+ * method text is ever trusted from the request. Unknown ids are ignored.
+ * The parameter is `unknown` because the route's cast is unchecked: anything
+ * that is not an array of strings is treated as "no frameworks".
+ */
+export function getActiveFrameworksBlock(frameworkIds: unknown): string {
+  if (!Array.isArray(frameworkIds) || frameworkIds.length === 0) return '';
+  const frameworks = frameworkIds
+    .filter((id): id is string => typeof id === 'string')
+    .map((id) => getFrameworkTemplate(id))
+    .filter((t): t is NonNullable<ReturnType<typeof getFrameworkTemplate>> => !!t)
+    .slice(-MAX_ACTIVE_FRAMEWORK_BRIEFS);
+  if (frameworks.length === 0) return '';
+  const sections = frameworks
+    .map((t) => `### ${t.name} (${t.framework!.origin})\n${t.framework!.assistantBrief}`)
+    .join('\n\n');
+  return `## Active frameworks
+The designer built this canvas with the following framework(s). Coach within them: use their vocabulary, keep the steps in order, and when the canvas shows which step they are on, name it and suggest the next one.
+
+${sections}`;
 }
 
 /**

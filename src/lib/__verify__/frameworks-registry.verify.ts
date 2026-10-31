@@ -7,6 +7,7 @@ import {
   getFrameworkTemplate, getFrameworkBrief, frameworkTemplatesByStage,
 } from '../templates';
 import { FRAMEWORK_TEMPLATES, FREE_FRAMEWORK_IDS } from '../templates-frameworks';
+import { getActiveFrameworksBlock, MAX_ACTIVE_FRAMEWORK_BRIEFS } from '../ai/system-prompts';
 import { checkLayout } from '../canvas-layout-rules';
 import { resolveEdgePoints } from '../maps/connector-geometry';
 
@@ -92,6 +93,20 @@ for (const t of FRAMEWORK_TEMPLATES) {
   }), explicit.map((e) => e.id).join(','));
   check('every edge endpoint resolves', (t.edges ?? []).every((e) => ids.has(e.fromNodeId) && ids.has(e.toNodeId)));
 }
+
+console.log('\nAssistant block');
+check('empty for undefined', getActiveFrameworksBlock(undefined) === '');
+check('empty for no known ids', getActiveFrameworksBlock(['nope', 'lean-canvas']) === '');
+const one = getActiveFrameworksBlock(['fw-premortem']);
+check('names the framework and origin', one.includes('### Pre-mortem (') && one.includes('Gary Klein'));
+check('contains the brief', one.includes(getFrameworkBrief('fw-premortem')!));
+check('starts with the heading', one.startsWith('## Active frameworks'));
+const many = getActiveFrameworksBlock(EXPECTED_IDS);
+check(`caps at ${MAX_ACTIVE_FRAMEWORK_BRIEFS} briefs`, (many.match(/^### /gm) ?? []).length === MAX_ACTIVE_FRAMEWORK_BRIEFS);
+check('keeps the most recent, in insertion order', !many.includes('### Iceberg Model') && many.indexOf('### Narrative Messaging Arc') < many.indexOf('### Pirate Metrics Funnel') && many.includes('### Partner & Channel Ecosystem Map'));
+check('unknown ids do not take a slot', getActiveFrameworksBlock(['fw-premortem', 'nope', 'nope2', 'nope3']).includes('### Pre-mortem'));
+check('safe for non-array input', [null, 'fw-premortem', 42, {}, { length: 1, 0: 'fw-premortem' }].every((v) => getActiveFrameworksBlock(v) === ''));
+check('ignores non-string entries', getActiveFrameworksBlock([null, 7, {}, ['fw-premortem'], 'fw-premortem']).includes('### Pre-mortem'));
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);
