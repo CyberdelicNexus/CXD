@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardNavbar from '@/components/dashboard-navbar';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
@@ -29,6 +29,7 @@ import { TemplateMiniPreview } from '@/components/cxd/template-mini-preview';
 import { useCXDStore } from '@/store/cxd-store';
 import { useSubscription } from '@/hooks/use-subscription';
 import { UpgradeModal } from '@/components/upgrade-modal';
+import { createClient } from '@/supabase/client';
 
 type FilterTab = 'all' | TemplateCategory;
 
@@ -86,9 +87,16 @@ export default function TemplatesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | null>(null);
   const [projectName, setProjectName] = useState('');
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [upgradeFeature, setUpgradeFeature] = useState<'templates' | 'unlimitedCanvases' | null>(null);
   const [detailTemplate, setDetailTemplate] = useState<TemplateDefinition | null>(null);
-  const { templateAccess } = useSubscription();
+  const [creating, setCreating] = useState(false);
+  // The ref is the synchronous double-submit lock; `creating` only drives the UI.
+  const creatingRef = useRef(false);
+  // Set when the user backs out mid-create, so a resolved create doesn't teleport them to /cxd.
+  const createDismissedRef = useRef(false);
+  const { templateAccess, canCreateCanvas, isLoading: subscriptionLoading } = useSubscription();
+
+  useEffect(() => () => { createDismissedRef.current = true; }, []);
 
   const isLocked = (templateId: string) =>
     templateAccess !== 'full' && !isTemplateFree(templateId);
@@ -113,36 +121,82 @@ export default function TemplatesPage() {
       .filter((g) => g.templates.length > 0);
   }, [filtered, activeFilter]);
 
-  const createFromTemplate = (tpl: TemplateDefinition, name: string) => {
-    if (!name.trim()) return;
+  const closeCreateDialog = () => {
+    createDismissedRef.current = true;
+    setDialogOpen(false);
+    setProjectName('');
+    setSelectedTemplate(null);
+  };
+
+  const closeDetailDialog = () => {
+    createDismissedRef.current = true;
+    setDetailTemplate(null);
+  };
+
+  const createFromTemplate = async (tpl: TemplateDefinition, name: string) => {
+    const trimmedName = name.trim();
+    // The plan reads as free until useSubscription settles; the submit buttons
+    // stay disabled until then so Pro users never hit a false wall.
+    if (!trimmedName || creatingRef.current || subscriptionLoading) return;
     if (isLocked(tpl.id)) {
-      setShowUpgrade(true);
+      setUpgradeFeature('templates');
       return;
     }
 
-    const { elements: freshElements, edges: freshEdges } = instantiateTemplate(tpl);
+    creatingRef.current = true;
+    createDismissedRef.current = false;
+    setCreating(true);
+    try {
+      // `projects` isn't persisted and this page never loads them, so the owner
+      // and the canvas count both have to come from the server. insertProject
+      // and saveProject silently skip an invalid owner, so never guess one here.
+      const supabase = createClient();
+      const user = await supabase.auth.getUser().then((res) => res.data.user).catch(() => null);
+      if (createDismissedRef.current) return;
+      if (!user) {
+        router.replace('/sign-in');
+        return;
+      }
 
-    // createProject requires an ownerId; use a placeholder that the server sync
-    // resolves. Dashboard pages are protected so the user is authed.
-    const userId = useCXDStore.getState().projects[0]?.ownerId ?? 'pending';
+      const { count, error } = await supabase
+        .from('cxd_projects')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', user.id);
+      if (createDismissedRef.current) return;
 
-    createProject(
-      name.trim(),
-      userId,
-      freshElements,
-      freshEdges,
-      tpl.framework ? { frameworkIds: [tpl.id] } : undefined,
-    );
-    setProjectName('');
-    setSelectedTemplate(null);
-    setDialogOpen(false);
-    setDetailTemplate(null);
-    router.push('/cxd');
+      // Fail open like the dashboard, whose count falls back to 0 when the list
+      // fetch errors: a flaky read shouldn't wall off a paying user.
+      if (error) {
+        console.error('[templates] Failed to count owned canvases:', error);
+      } else if (!canCreateCanvas(count ?? 0)) {
+        setDialogOpen(false);
+        setDetailTemplate(null);
+        setUpgradeFeature('unlimitedCanvases');
+        return;
+      }
+
+      const { elements: freshElements, edges: freshEdges } = instantiateTemplate(tpl);
+      createProject(
+        trimmedName,
+        user.id,
+        freshElements,
+        freshEdges,
+        tpl.framework ? { frameworkIds: [tpl.id] } : undefined,
+      );
+      setProjectName('');
+      setSelectedTemplate(null);
+      setDialogOpen(false);
+      setDetailTemplate(null);
+      router.push('/cxd');
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
+    }
   };
 
   const handleCreate = () => {
     if (!selectedTemplate) return;
-    createFromTemplate(selectedTemplate, projectName);
+    void createFromTemplate(selectedTemplate, projectName);
   };
 
   return (
@@ -203,7 +257,7 @@ export default function TemplatesPage() {
                         return;
                       }
                       if (locked) {
-                        setShowUpgrade(true);
+                        setUpgradeFeature('templates');
                         return;
                       }
                       setSelectedTemplate(tpl);
@@ -266,11 +320,8 @@ export default function TemplatesPage() {
       <Dialog
         open={dialogOpen}
         onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) {
-            setProjectName('');
-            setSelectedTemplate(null);
-          }
+          if (open) setDialogOpen(true);
+          else closeCreateDialog();
         }}
       >
         <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
@@ -300,7 +351,7 @@ export default function TemplatesPage() {
             <div className="flex gap-3 justify-end">
               <Button
                 variant="ghost"
-                onClick={() => setDialogOpen(false)}
+                onClick={closeCreateDialog}
                 className="text-white/60 hover:text-white"
               >
                 Cancel
@@ -308,7 +359,7 @@ export default function TemplatesPage() {
               <Button
                 onClick={handleCreate}
                 className="btn-primary-glow"
-                disabled={!projectName.trim()}
+                disabled={!projectName.trim() || creating || subscriptionLoading}
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Create Canvas
@@ -321,17 +372,19 @@ export default function TemplatesPage() {
       <FrameworkDetailDialog
         template={detailTemplate}
         open={detailTemplate !== null}
-        onClose={() => setDetailTemplate(null)}
+        onClose={closeDetailDialog}
         mode="create"
+        modal
+        busy={creating || subscriptionLoading}
         locked={detailTemplate ? isLocked(detailTemplate.id) : false}
-        onCreate={(name) => detailTemplate && createFromTemplate(detailTemplate, name)}
-        onUpgrade={() => { setDetailTemplate(null); setShowUpgrade(true); }}
+        onCreate={(name) => { if (detailTemplate) void createFromTemplate(detailTemplate, name); }}
+        onUpgrade={() => { setDetailTemplate(null); setUpgradeFeature('templates'); }}
       />
 
       <UpgradeModal
-        isOpen={showUpgrade}
-        onClose={() => setShowUpgrade(false)}
-        feature="templates"
+        isOpen={upgradeFeature !== null}
+        onClose={() => setUpgradeFeature(null)}
+        feature={upgradeFeature ?? undefined}
       />
     </div>
   );
