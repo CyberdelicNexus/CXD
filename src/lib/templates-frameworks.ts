@@ -511,20 +511,10 @@ const WORKBACK_STEPS: FrameworkStep[] = [
 ];
 
 const WORKBACK_ZONES: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; body: string; emoji: string; fill: string }[] = [
-  { key: 'now', label: 'Today', fam: 'glacier', cap: 'What is already true, decided or booked. Start from reality.', noteTitle: 'Already in place', body: 'Owner:
-Due:
-Depends on:', emoji: '📍', fill: NOTE_TEAL },
-  { key: 'm3', label: 'T − 3 months', fam: 'ocean', cap: 'The long-lead items: venue, partners, funding, permits, key people.', noteTitle: 'Long-lead milestone', body: 'Owner:
-Due:
-Depends on:
-Buffer:', emoji: '🏗️', fill: NOTE_TEAL },
-  { key: 'm1', label: 'T − 1 month', fam: 'violet', cap: 'Content locked, materials ordered, rehearsals scheduled, comms drafted.', noteTitle: 'Lock milestone', body: 'Owner:
-Due:
-Depends on:
-Buffer:', emoji: '🔒', fill: NOTE_VIOLET },
-  { key: 'live', label: 'Live date', fam: 'sunset', cap: 'The date that does not move. Doors open. Everything else is derived from this.', noteTitle: 'Doors open', body: 'Date:
-Owner:
-What must be true before doors open:', emoji: '🎬', fill: WARM_SUN },
+  { key: 'now', label: 'Today', fam: 'glacier', cap: 'What is already true, decided or booked. Start from reality.', noteTitle: 'Already in place', body: 'Owner:\nDue:\nDepends on:', emoji: '📍', fill: NOTE_TEAL },
+  { key: 'm3', label: 'T − 3 months', fam: 'ocean', cap: 'The long-lead items: venue, partners, funding, permits, key people.', noteTitle: 'Long-lead milestone', body: 'Owner:\nDue:\nDepends on:\nBuffer:', emoji: '🏗️', fill: NOTE_TEAL },
+  { key: 'm1', label: 'T − 1 month', fam: 'violet', cap: 'Content locked, materials ordered, rehearsals scheduled, comms drafted.', noteTitle: 'Lock milestone', body: 'Owner:\nDue:\nDepends on:\nBuffer:', emoji: '🔒', fill: NOTE_VIOLET },
+  { key: 'live', label: 'Live date', fam: 'sunset', cap: 'The date that does not move. Doors open. Everything else is derived from this.', noteTitle: 'Doors open', body: 'Date:\nOwner:\nWhat must be true before doors open:', emoji: '🎬', fill: WARM_SUN },
 ];
 
 const workback: TemplateDefinition = {
