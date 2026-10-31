@@ -436,6 +436,129 @@ const impactEffort: TemplateDefinition = {
   edges: [],
 };
 
+// ─── 7. Pre-mortem — RAIL: failure → causes → safeguards → owners
+
+const PREMORTEM_STEPS: FrameworkStep[] = [
+  { title: 'Set the scene', detail: 'It is the day after the experience. It failed badly. Everyone agrees this is fact, not a risk.' },
+  { title: 'Imagine the failure', detail: 'Each person writes, alone and in two minutes, what the failure looked like.' },
+  { title: 'List every cause', detail: 'Go round the room, one cause each, until the list is exhausted. No debating, no fixing.' },
+  { title: 'Rank the causes', detail: 'Which are likely and severe? Mark the top five.' },
+  { title: 'Convert to safeguards with owners', detail: 'For each top cause, one concrete safeguard, one owner, one date.' },
+];
+
+const premortem: TemplateDefinition = {
+  id: 'fw-premortem',
+  name: 'Pre-mortem',
+  description: 'Assume the launch failed, list why, and turn the causes into safeguards',
+  emoji: '🪦',
+  category: 'framework',
+  framework: {
+    stage: 'plan',
+    origin: 'Gary Klein, "Performing a Project Premortem", Harvard Business Review, 2007',
+    sourceUrl: 'https://hbr.org/2007/09/performing-a-project-premortem',
+    whatItIs: 'A pre-mortem imagines that the project has already failed and asks the team to explain why. Because the failure is treated as fact, people name risks they would otherwise keep quiet about. Research on prospective hindsight (Mitchell, Russo and Pennington, 1989) found that imagining an event has already happened helped people generate about 30 percent more reasons for it.',
+    whenToUse: [
+      'A plan is set and the team is confident; that is exactly when blind spots hide.',
+      'Before a launch, a premiere or an opening night.',
+      'When one strong voice has shaped the plan and others have gone quiet.',
+    ],
+    steps: PREMORTEM_STEPS,
+    pitfalls: [
+      'Letting people defend the plan during the causes round; defence comes later or never.',
+      'Writing vague causes ("bad luck", "low turnout") instead of mechanisms.',
+      'Ending with a list of worries and no owners or dates.',
+    ],
+    assistantBrief: 'Coach the Pre-mortem. The canvas is a rail: The launch failed, Causes, Safeguards, Owners & dates. Hold the frame: the failure has happened, it is not a possibility. If the designer slips into defending the plan or fixing things early, bring them back to listing causes. Push every cause toward a mechanism: who did or did not do what, and why. Help them rank by likelihood and severity and pick about five. Then, cause by cause, demand one concrete safeguard, a named owner and a date; a safeguard without an owner is a wish. If the project has tasks on the Plan view, suggest turning safeguards into task cards.',
+  },
+  // Four zones on a 520/760/760/520 rail, every gutter 80px so the arrows read.
+  elements: [
+    ...fwTitle('fwp', 'Pre-mortem', FAM.rose.grad, 'It is the morning after and it went badly. Explain why, then make sure it cannot.'),
+    ...stepRail('fwp', PREMORTEM_STEPS),
+
+    ...zone('fwp-f', 40, 280, 520, 560, 'The launch failed', 'rose',
+      'Describe the failure as if it has already happened. What did people see and say?'),
+    note('fwp-f-n', 76, 420, 'It flopped because…', '🪦', NOTE_ROSE, 'Write it in the past tense.', 'fwp-f'),
+
+    ...zone('fwp-c', 640, 280, 760, 560, 'Causes', 'sunset',
+      'One cause per note, mechanism not blame. Keep going until the room is empty, then mark the five likeliest and most severe.'),
+    note('fwp-c-n1', 676, 420, 'Cause', '⚠️', WARM_FIRE, 'Who did or did not do what, and why?', 'fwp-c'),
+    note('fwp-c-n2', 976, 420, 'Cause', '⚠️', WARM_SUN, 'What did the plan assume that turned out false?', 'fwp-c'),
+
+    ...zone('fwp-s', 1480, 280, 760, 560, 'Safeguards', 'emerald',
+      'For each top cause, the concrete thing that prevents or catches it.'),
+    note('fwp-s-n1', 1516, 420, 'Safeguard', '🛡️', NOTE_EMERALD, 'Prevents or catches which cause?', 'fwp-s'),
+    note('fwp-s-n2', 1816, 420, 'Safeguard', '🛡️', NOTE_TEAL, 'If prevention fails, what would catch it early?', 'fwp-s'),
+
+    ...zone('fwp-o', 2320, 280, 520, 560, 'Owners & dates', 'violet',
+      'A safeguard without an owner is a wish. Name and date each one.'),
+    note('fwp-o-n', 2356, 420, 'Owner · date', '📅', NOTE_VIOLET, 'Which safeguard, who owns it, and by what date?', 'fwp-o'),
+  ] as CanvasElement[],
+  edges: [
+    edge('fwp-e1', 'fwp-f', 'fwp-c', 'rose'),
+    edge('fwp-e2', 'fwp-c', 'fwp-s', 'sunset'),
+    edge('fwp-e3', 'fwp-s', 'fwp-o', 'emerald'),
+  ],
+};
+
+// ─── 8. Work-back Plan — RAIL from today to the live date
+
+const WORKBACK_STEPS: FrameworkStep[] = [
+  { title: 'Fix the live date', detail: 'The one date that does not move. Everything else is derived from it.' },
+  { title: 'Name the non-negotiable milestones', detail: 'Venue confirmed, cast locked, tech rehearsal, doors open. The few that everything hangs on.' },
+  { title: 'Work back the dependencies', detail: 'For each milestone, what must be finished before it, and how long does that take?' },
+  { title: 'Assign owners', detail: 'One name per milestone. Shared ownership is no ownership.' },
+  { title: 'Add buffer', detail: 'Put slack before the milestones that cannot slip. Novel work usually takes longer than planned.' },
+];
+
+const WORKBACK_ZONES: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; body: string; emoji: string; fill: string }[] = [
+  { key: 'now', label: 'Today', fam: 'glacier', cap: 'What is already true, decided or booked. Start from reality.', noteTitle: 'Already in place', body: 'Owner: · Due: · Depends on:', emoji: '📍', fill: NOTE_TEAL },
+  { key: 'm3', label: 'T − 3 months', fam: 'ocean', cap: 'The long-lead items: venue, partners, funding, permits, key people.', noteTitle: 'Long-lead milestone', body: 'Owner: · Due: · Depends on: · Buffer:', emoji: '🏗️', fill: NOTE_TEAL },
+  { key: 'm1', label: 'T − 1 month', fam: 'violet', cap: 'Content locked, materials ordered, rehearsals scheduled, comms drafted.', noteTitle: 'Lock milestone', body: 'Owner: · Due: · Depends on: · Buffer:', emoji: '🔒', fill: NOTE_VIOLET },
+  { key: 'live', label: 'Live date', fam: 'sunset', cap: 'The date that does not move. Doors open. Everything else is derived from this.', noteTitle: 'Doors open', body: 'Date: · Owner: · What must be true before doors open:', emoji: '🎬', fill: WARM_SUN },
+];
+
+const workback: TemplateDefinition = {
+  id: 'fw-workback',
+  name: 'Work-back Plan',
+  description: 'Schedule backwards from the live date: milestones, dependencies, owners, buffer',
+  emoji: '⏳',
+  category: 'framework',
+  framework: {
+    stage: 'ship',
+    origin: 'Event production and project-management practice; backward scheduling from a fixed deadline',
+    whatItIs: 'A work-back plan starts from the date that cannot move and walks backwards, placing every milestone where it must land for the next one to be possible. It exposes long-lead items early and shows where slack has to live. Production teams use it because the opening night does not negotiate.',
+    whenToUse: [
+      'There is a fixed date: an opening, a festival slot, a premiere, a launch.',
+      'Several workstreams must converge and nobody can see the whole picture.',
+      'A plan keeps slipping and you need to find where the buffer should have been.',
+    ],
+    steps: WORKBACK_STEPS,
+    pitfalls: [
+      'Planning forward from today and discovering the long-lead items too late.',
+      'Milestones without a single owner.',
+      'No buffer before the milestones that cannot slip; buffer at the end is useless.',
+    ],
+    assistantBrief: 'Coach the Work-back Plan. The canvas is a timeline rail: Today, T − 3 months, T − 1 month, Live date. Begin at the Live date and make sure it is fixed and written. Then ask, column by column moving left, what must already be finished for the next column to be possible, and how long each item takes. Flag long-lead items (venues, permits, partners, key people) and push them into the earliest column. Insist on one named owner per milestone. Before finishing, ask where buffer lives and suggest adding it before the milestones that cannot slip. If the project uses the Plan view, offer to turn milestones into task cards with due dates.',
+  },
+  // Zones are 380 wide on a 460 pitch: 80px gutters so the arrows read.
+  elements: [
+    ...fwTitle('fww', 'Work-back Plan', FAM.sunset.grad, 'Start from the right. The live date does not move; everything to its left is what must already be true.'),
+    ...stepRail('fww', WORKBACK_STEPS),
+    ...WORKBACK_ZONES.flatMap((z, i) => {
+      const zx = 40 + i * 460;
+      return [
+        ...zone(`fww-${z.key}`, zx, 280, 380, 600, z.label, z.fam, z.cap),
+        note(`fww-${z.key}-n`, zx + 36, 420, z.noteTitle, z.emoji, z.fill, z.body, `fww-${z.key}`),
+      ];
+    }),
+  ] as CanvasElement[],
+  edges: [
+    edge('fww-e1', 'fww-now', 'fww-m3', 'glacier'),
+    edge('fww-e2', 'fww-m3', 'fww-m1', 'ocean'),
+    edge('fww-e3', 'fww-m1', 'fww-live', 'violet'),
+  ],
+};
+
 export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
   iceberg,
   causalLoop,
@@ -443,6 +566,8 @@ export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
   hmwCrazy8,
   scamper,
   impactEffort,
+  premortem,
+  workback,
 ];
 
 export { stepRail, fwTitle };
