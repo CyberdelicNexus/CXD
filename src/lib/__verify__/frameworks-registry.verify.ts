@@ -8,6 +8,7 @@ import {
 } from '../templates';
 import { FRAMEWORK_TEMPLATES, FREE_FRAMEWORK_IDS } from '../templates-frameworks';
 import { checkLayout } from '../canvas-layout-rules';
+import { resolveEdgePoints } from '../maps/connector-geometry';
 
 const EXPECTED_IDS = [
   'fw-iceberg', 'fw-causal-loop', 'fw-theory-of-change',
@@ -76,11 +77,19 @@ for (const t of FRAMEWORK_TEMPLATES) {
   // Layout: element count (all elements, including board interiors), grid, overlaps, dangling refs.
   const roots = t.elements.filter((el) => !el.boardId);
   check('18–32 elements', t.elements.length >= 18 && t.elements.length <= 32, `got ${t.elements.length}`);
-  check('coordinates on the 20px grid', roots.filter((el) => el.type !== 'line' && !el.containerId).every((el) => el.x % 20 === 0 && el.y % 20 === 0));
+  check('coordinates on the 20px grid', roots.filter((el) => el.type !== 'line' && (!el.containerId || el.type === 'shape')).every((el) => el.x % 20 === 0 && el.y % 20 === 0));
   const violations = checkLayout(t.elements, t.edges ?? []);
   const errors = violations.filter((v) => v.severity === 'error');
   check('no layout errors', errors.length === 0, errors.map((e) => e.message).join('; '));
   const ids = new Set(t.elements.map((el) => el.id));
+  const byId = new Map(t.elements.map((el) => [el.id, el]));
+  const explicit = (t.edges ?? []).filter((e) => e.fromAnchor !== 'right' || e.toAnchor !== 'left');
+  check('edges with explicit anchors are pinned and honoured', explicit.every((e) => {
+    const a = byId.get(e.fromNodeId); const b = byId.get(e.toNodeId);
+    if (!a || !b || e.fromAutoAnchor !== false || e.toAutoAnchor !== false) return false;
+    const r = resolveEdgePoints(e, a, b);
+    return r.fromSide === e.fromAnchor && r.toSide === e.toAnchor;
+  }), explicit.map((e) => e.id).join(','));
   check('every edge endpoint resolves', (t.edges ?? []).every((e) => ids.has(e.fromNodeId) && ids.has(e.toNodeId)));
 }
 

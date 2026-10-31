@@ -1,4 +1,4 @@
-import type { CanvasElement, ElementStyle, ShapeElement } from '@/types/canvas-elements';
+import type { CanvasElement, CanvasEdge, ElementStyle, ShapeElement } from '@/types/canvas-elements';
 import type { FrameworkStep, TemplateDefinition } from './templates';
 import {
   title, caption, note, block, shape, storyboard, edge, zone, stepStyle, FAM, type Fam,
@@ -16,8 +16,13 @@ import {
 /** Numbered step cards along the top of the template, 200px pitch. */
 function stepRail(prefix: string, steps: FrameworkStep[], x = 40, y = 160): ShapeElement[] {
   return steps.map((s, i) =>
-    shape(`${prefix}-s${i + 1}`, x + i * 200, y, 160, 70, 'rectangle', `${i + 1} · ${s.title}`, stepStyle),
+    shape(`${prefix}-s${i + 1}`, x + i * 200, y, 160, 80, 'rectangle', `${i + 1} · ${s.title}`, stepStyle),
   );
+}
+
+/** edge() marks anchors auto, so the canvas ignores authored sides; pin any non-default (right to left) edge. */
+function pinned(e: CanvasEdge): CanvasEdge {
+  return { ...e, fromAutoAnchor: false, toAutoAnchor: false };
 }
 
 /** Page title + caption pair every framework opens with. */
@@ -71,11 +76,11 @@ const ICEBERG_STEPS: FrameworkStep[] = [
   { title: 'Choose the leverage point', detail: 'Pick the deepest layer you can realistically change. Deeper layers move more with less force.' },
 ];
 
-const ICEBERG_LAYERS: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; emoji: string; fill: string }[] = [
-  { key: 'ev', label: 'Event', fam: 'glacier', cap: 'What happened? One visible moment, stated plainly.', noteTitle: 'The Event', emoji: '👁️', fill: NOTE_TEAL },
-  { key: 'pa', label: 'Pattern', fam: 'ocean', cap: 'What keeps happening over time? Trends across sessions, audiences, seasons.', noteTitle: 'The Trend', emoji: '📈', fill: NOTE_TEAL },
-  { key: 'st', label: 'Structure', fam: 'violet', cap: 'What produces the pattern? Space, schedule, roles, rules, incentives, tech.', noteTitle: 'The Mechanism', emoji: '⚙️', fill: NOTE_VIOLET },
-  { key: 'mm', label: 'Mental model', fam: 'rose', cap: 'What beliefs hold the structure in place? Yours, the team\u2019s, the audience\u2019s.', noteTitle: 'The Belief', emoji: '🧠', fill: NOTE_ROSE },
+const ICEBERG_LAYERS: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; body: string; emoji: string; fill: string }[] = [
+  { key: 'ev', label: 'Event', fam: 'glacier', cap: 'What happened? One visible moment, stated plainly.', noteTitle: 'The Event', body: 'What exactly happened, and who saw it? One sentence, no explanation yet.', emoji: '👁️', fill: NOTE_TEAL },
+  { key: 'pa', label: 'Pattern', fam: 'ocean', cap: 'What keeps happening over time? Trends across sessions, audiences, seasons.', noteTitle: 'The Trend', body: 'When has this happened before? Note the rhythm: every run, one audience, one hour.', emoji: '📈', fill: NOTE_TEAL },
+  { key: 'st', label: 'Structure', fam: 'violet', cap: 'What produces the pattern? Space, schedule, roles, rules, incentives, tech.', noteTitle: 'The Mechanism', body: 'What in the setup makes this likely? Name a rule, a space, a schedule or a role.', emoji: '⚙️', fill: NOTE_VIOLET },
+  { key: 'mm', label: 'Mental model', fam: 'rose', cap: 'What beliefs hold the structure in place? Yours, the team\u2019s, the audience\u2019s.', noteTitle: 'The Belief', body: 'What must someone believe for this setup to feel normal or right?', emoji: '🧠', fill: NOTE_ROSE },
 ];
 
 const iceberg: TemplateDefinition = {
@@ -109,16 +114,16 @@ const iceberg: TemplateDefinition = {
       const zy = 280 + i * 520;
       return [
         ...zone(`fwi-${l.key}`, 40, zy, 1000, 480, l.label, l.fam, l.cap),
-        note(`fwi-${l.key}-n`, 76, zy + 140, l.noteTitle, l.emoji, l.fill, '', `fwi-${l.key}`),
+        note(`fwi-${l.key}-n`, 76, zy + 140, l.noteTitle, l.emoji, l.fill, l.body, `fwi-${l.key}`),
       ];
     }),
     block('fwi-anchor', 'desiredChange', 'Desired Change', 1120, 280),
   ] as CanvasElement[],
   edges: [
-    edge('fwi-e1', 'fwi-ev', 'fwi-pa', 'glacier', 'bottom', 'top'),
-    edge('fwi-e2', 'fwi-pa', 'fwi-st', 'ocean', 'bottom', 'top'),
-    edge('fwi-e3', 'fwi-st', 'fwi-mm', 'violet', 'bottom', 'top'),
-    edge('fwi-e4', 'fwi-anchor', 'fwi-mm', 'rose', 'left', 'right'),
+    pinned(edge('fwi-e1', 'fwi-ev', 'fwi-pa', 'glacier', 'bottom', 'top')),
+    pinned(edge('fwi-e2', 'fwi-pa', 'fwi-st', 'ocean', 'bottom', 'top')),
+    pinned(edge('fwi-e3', 'fwi-st', 'fwi-mm', 'violet', 'bottom', 'top')),
+    pinned(edge('fwi-e4', 'fwi-anchor', 'fwi-mm', 'rose', 'left', 'right')),
   ],
 };
 
@@ -177,12 +182,12 @@ const causalLoop: TemplateDefinition = {
     note('fwc-lv-n', 76, 1080, 'Intervention', '🎯', NOTE_EMERALD, 'Which loop does this weaken or strengthen? How long until it shows?', 'fwc-lv'),
   ] as CanvasElement[],
   edges: [
-    { ...edge('fwc-e1', 'fwc-r1', 'fwc-r2', 'ocean'), label: { text: '+' } },
-    { ...edge('fwc-e2', 'fwc-r2', 'fwc-r3', 'ocean', 'bottom', 'right'), label: { text: '+' } },
-    { ...edge('fwc-e3', 'fwc-r3', 'fwc-r1', 'ocean', 'left', 'bottom'), label: { text: '+' } },
-    { ...edge('fwc-e4', 'fwc-b1', 'fwc-b2', 'rose'), label: { text: '+' } },
-    { ...edge('fwc-e5', 'fwc-b2', 'fwc-b3', 'rose', 'bottom', 'right'), label: { text: '−' } },
-    { ...edge('fwc-e6', 'fwc-b3', 'fwc-b1', 'rose', 'left', 'bottom'), label: { text: '+' } },
+    { ...edge('fwc-e1', 'fwc-r1', 'fwc-r2', 'ocean'), label: { text: '+', fontSize: 18 } },
+    { ...pinned(edge('fwc-e2', 'fwc-r2', 'fwc-r3', 'ocean', 'bottom', 'right')), label: { text: '+', fontSize: 18 } },
+    { ...pinned(edge('fwc-e3', 'fwc-r3', 'fwc-r1', 'ocean', 'left', 'bottom')), label: { text: '+', fontSize: 18 } },
+    { ...edge('fwc-e4', 'fwc-b1', 'fwc-b2', 'rose'), label: { text: '+', fontSize: 18 } },
+    { ...pinned(edge('fwc-e5', 'fwc-b2', 'fwc-b3', 'rose', 'bottom', 'right')), label: { text: '−', fontSize: 18 } },
+    { ...pinned(edge('fwc-e6', 'fwc-b3', 'fwc-b1', 'rose', 'left', 'bottom')), label: { text: '+', fontSize: 18 } },
   ],
 };
 

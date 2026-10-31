@@ -112,7 +112,7 @@ templates aren't dead diagrams, they hang off live project data.
 1. Spine chosen and stated in a comment.
 2. Zones tinted in rotation, each with title + caption + divider + seed.
 3. All connections are gradient edges; waypoints punctuate branches.
-4. At least one portal (hexagon board), placed per §5.
+4. At least one portal (hexagon board), placed per §5. Framework templates (category 'framework') are exempt: their depth comes from the method and its explainer.
 5. Anchor block wired in when a matching framing section exists.
 6. Coordinates on the 20px grid; run the layout math (no overlaps, gutters per §8).
 7. Element count 15–30; every element either teaches, seeds, or connects.
