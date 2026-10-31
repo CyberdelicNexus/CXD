@@ -24,6 +24,18 @@ interface EmailSendData {
   // Optional Stripe event id for webhook-driven sends. Adds an extra
   // dedupe path: same event id won't fire twice across email kinds.
   stripeEventId?: string;
+  replyTo?: string;
+  headers?: Record<string, string>;
+  broadcastId?: string;
+}
+
+async function recordBroadcastResult(broadcastId: string, sent: number, failed: number) {
+  const { error } = await getSupabaseAdmin().rpc('admin_record_broadcast_result', {
+    p_broadcast: broadcastId,
+    p_sent: sent,
+    p_failed: failed,
+  });
+  if (error) throw error;
 }
 
 export const sendEmailFn = inngest.createFunction(
@@ -31,10 +43,16 @@ export const sendEmailFn = inngest.createFunction(
     id: 'send-email',
     name: 'Send email (Resend)',
     retries: 4, // ~4 attempts over ~1 hour with exponential backoff
+    // A broadcast enqueues one event per recipient; stay inside Resend's rate limit.
+    throttle: { limit: 2, period: '1s' },
     triggers: [{ event: 'email/send' }],
+    onFailure: async ({ event }) => {
+      const { broadcastId } = event.data.event.data as EmailSendData;
+      if (broadcastId) await recordBroadcastResult(broadcastId, 0, 1);
+    },
   },
   async ({ event, step }) => {
-    const { to, subject, html, userId, emailKind, stripeEventId } = event.data as EmailSendData;
+    const { to, subject, html, userId, emailKind, stripeEventId, replyTo, headers, broadcastId } = event.data as EmailSendData;
 
     if (!to || !subject || !html) {
       return { skipped: true, reason: 'missing required fields' };
@@ -64,7 +82,7 @@ export const sendEmailFn = inngest.createFunction(
     // Send via Resend. step.run gives this its own retry boundary so a
     // Resend hiccup doesn't re-trigger the dedupe check above.
     await step.run('send-via-resend', async () => {
-      await sendEmail({ to, subject, html });
+      await sendEmail({ to, subject, html, replyTo, headers });
     });
 
     // Log after successful send (kind-tracked sends only). If the log
@@ -83,6 +101,10 @@ export const sendEmailFn = inngest.createFunction(
           throw error;
         }
       });
+    }
+
+    if (broadcastId) {
+      await step.run('record-broadcast-result', () => recordBroadcastResult(broadcastId, 1, 0));
     }
 
     return { sent: true, to, subject, emailKind };

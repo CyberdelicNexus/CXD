@@ -15,6 +15,8 @@ export async function sendEmail(options: {
   subject: string;
   html: string;
   from?: string;
+  replyTo?: string;
+  headers?: Record<string, string>;
 }) {
   const resend = getResend();
   if (!resend) {
@@ -27,6 +29,8 @@ export async function sendEmail(options: {
     to: options.to,
     subject: options.subject,
     html: options.html,
+    replyTo: options.replyTo,
+    headers: options.headers,
   });
 
   if (error) {

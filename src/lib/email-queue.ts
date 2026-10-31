@@ -23,6 +23,10 @@ interface EnqueueEmailOptions {
   emailKind?: string;
   /** Optional Stripe event id for webhook-driven sends — second dedupe path. */
   stripeEventId?: string;
+  replyTo?: string;
+  headers?: Record<string, string>;
+  /** Broadcast sends report their delivery result back to this broadcast. */
+  broadcastId?: string;
   /**
    * If true, fall back to direct Resend send when Inngest isn't configured
    * (no INNGEST_EVENT_KEY in dev/local without the dev CLI). Defaults true.
@@ -47,6 +51,9 @@ export async function enqueueEmail(opts: EnqueueEmailOptions): Promise<void> {
         userId: opts.userId,
         emailKind: opts.emailKind,
         stripeEventId: opts.stripeEventId,
+        replyTo: opts.replyTo,
+        headers: opts.headers,
+        broadcastId: opts.broadcastId,
       },
     });
   } catch (err) {
@@ -61,6 +68,6 @@ export async function enqueueEmail(opts: EnqueueEmailOptions): Promise<void> {
 
     // Direct send doesn't enforce email_log idempotency — but at this
     // point we've already lost durable retry, so accept the trade.
-    await sendEmail({ to: opts.to, subject: opts.subject, html });
+    await sendEmail({ to: opts.to, subject: opts.subject, html, replyTo: opts.replyTo, headers: opts.headers });
   }
 }
