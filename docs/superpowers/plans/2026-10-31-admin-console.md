@@ -3971,6 +3971,9 @@ CREATE TABLE IF NOT EXISTS public.email_preferences (
 
 CREATE TABLE IF NOT EXISTS public.broadcasts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- The composer makes one key per draft. A double click or a retry hits the
+  -- unique constraint, so the same send cannot go out twice.
+  idempotency_key uuid NOT NULL UNIQUE,
   sender_id uuid NOT NULL,
   channels text[] NOT NULL,
   category text CHECK (category IN ('product', 'service')),
@@ -3988,10 +3991,10 @@ CREATE INDEX IF NOT EXISTS idx_broadcasts_created ON public.broadcasts (created_
 ALTER TABLE public.email_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.broadcasts ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON public.email_preferences FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.broadcasts FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.email_preferences FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.broadcasts FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE ON public.email_preferences TO service_role;
-GRANT SELECT, INSERT, UPDATE ON public.broadcasts TO service_role;
+GRANT SELECT, INSERT ON public.broadcasts TO service_role;
 
 CREATE OR REPLACE FUNCTION public.admin_recipients(
   p_plan text DEFAULT NULL,
@@ -4042,8 +4045,8 @@ AS $$
    WHERE id = p_broadcast;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.admin_recipients(text, uuid[]) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.admin_record_broadcast_result(uuid, integer, integer) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.admin_recipients(text, uuid[]) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.admin_record_broadcast_result(uuid, integer, integer) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_recipients(text, uuid[]) TO service_role;
 GRANT EXECUTE ON FUNCTION public.admin_record_broadcast_result(uuid, integer, integer) TO service_role;
 ```
