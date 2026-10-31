@@ -94,7 +94,7 @@ export default function TemplatesPage() {
   const creatingRef = useRef(false);
   // Set when the user backs out mid-create, so a resolved create doesn't teleport them to /cxd.
   const createDismissedRef = useRef(false);
-  const { templateAccess, canCreateCanvas, isLoading: subscriptionLoading } = useSubscription();
+  const { templateAccess, canCreateCanvas, isLoading: subscriptionLoading, error: subscriptionError } = useSubscription();
 
   useEffect(() => () => { createDismissedRef.current = true; }, []);
 
@@ -165,10 +165,10 @@ export default function TemplatesPage() {
       if (createDismissedRef.current) return;
 
       // Fail open like the dashboard, whose count falls back to 0 when the list
-      // fetch errors: a flaky read shouldn't wall off a paying user.
+      // fetch errors: a flaky read, of the count or the plan, shouldn't wall off a paying user.
       if (error) {
         console.error('[templates] Failed to count owned canvases:', error);
-      } else if (!canCreateCanvas(count ?? 0)) {
+      } else if (!subscriptionError && !canCreateCanvas(count ?? 0)) {
         setDialogOpen(false);
         setDetailTemplate(null);
         setUpgradeFeature('unlimitedCanvases');
