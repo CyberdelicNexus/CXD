@@ -191,9 +191,131 @@ const causalLoop: TemplateDefinition = {
   ],
 };
 
+// ─── 3. Theory of Change — RAIL read backwards: trait ← outcomes ← states ← inputs
+
+const TOC_STEPS: FrameworkStep[] = [
+  { title: 'Name the lasting trait', detail: 'The change that should still be there months later. One sentence, in the participant\u2019s life, not in the room.' },
+  { title: 'Define the states that lead there', detail: 'Which temporary states, felt during the experience, make that trait possible?' },
+  { title: 'List activities that produce the states', detail: 'What you actually do, moment by moment, that reliably evokes each state.' },
+  { title: 'Gather the inputs', detail: 'People, space, time, money, partners, materials each activity depends on.' },
+  { title: 'Write the assumptions', detail: 'Every arrow hides a belief. Say it out loud so it can be tested.' },
+];
+
+const TOC_ZONES: { key: string; label: string; fam: Fam; cap: string; noteTitle: string; body: string; emoji: string; fill: string }[] = [
+  { key: 'in', label: 'Inputs & activities', fam: 'emerald', cap: 'What you bring and what you do. Pair each activity with the resources it needs.', noteTitle: 'Activity', body: 'Which activity, and what does it need? One line each.', emoji: '🛠️', fill: NOTE_EMERALD },
+  { key: 'st', label: 'States', fam: 'ocean', cap: 'What participants feel or notice during the experience because of those activities.', noteTitle: 'State evoked', body: 'What should someone feel or notice at this moment?', emoji: '🌊', fill: NOTE_TEAL },
+  { key: 'ou', label: 'Outcomes', fam: 'violet', cap: 'What changes in the days and weeks after. Behaviour, relationships, decisions.', noteTitle: 'Outcome', body: 'What will they do differently a few weeks on?', emoji: '🌱', fill: NOTE_VIOLET },
+  { key: 'tr', label: 'Lasting trait', fam: 'rose', cap: 'The change that stays. Write it as the participant would describe themselves a year on.', noteTitle: 'Trait', body: 'A year on, I am someone who\u2026', emoji: '💎', fill: NOTE_ROSE },
+];
+
+const theoryOfChange: TemplateDefinition = {
+  id: 'fw-theory-of-change',
+  name: 'Theory of Change',
+  description: 'Work backwards from the lasting trait to the states, activities and inputs that produce it',
+  emoji: '🧭',
+  category: 'framework',
+  framework: {
+    stage: 'think',
+    origin: 'Popularised by Carol Weiss (1995) through the Aspen Institute Roundtable on Community Change',
+    sourceUrl: 'https://www.theoryofchange.org/what-is-theory-of-change/toc-background/toc-origins/',
+    whatItIs: 'A Theory of Change is an explicit chain from the long-term change you want back to what you will do to cause it, with every assumption written down. It starts at the end, with the lasting trait, and asks what must be true one step earlier, and earlier again. The result is a map you can test rather than a hope.',
+    whenToUse: [
+      'An experience claims transformation and you want to show how, not just that.',
+      'Funders, partners or collaborators ask why this design will work.',
+      'States and traits are set in Framing and you want the activities to earn them.',
+    ],
+    steps: TOC_STEPS,
+    pitfalls: [
+      'Starting with activities you already love and reverse-engineering a trait to justify them.',
+      'Leaving assumptions implicit, so the chain cannot fail and cannot be learned from.',
+      'Outcomes written as outputs ("40 people attended") instead of changes in people.',
+    ],
+    assistantBrief: 'Coach the Theory of Change. The canvas reads right to left: Lasting trait, Outcomes, States, Inputs & activities, with arrows pointing back toward causes. Start at the trait: if it is vague, make the designer write it as a participant describing themselves a year later. Then step leftward one zone at a time asking "what must be true just before this?". Reject outputs dressed as outcomes (counts of people or sessions are outputs). For every arrow, ask for the assumption behind it and suggest recording it on the edge label or a note. Use the Trait Mapping block when present as the source for the trait zone. Finish by asking which assumption is weakest and how they would test it cheaply.',
+  },
+  elements: [
+    ...fwTitle('fwt', 'Theory of Change', FAM.rose.grad, 'Start on the right with the trait that lasts, then ask what must be true one step earlier. Arrows point back to causes.'),
+    ...stepRail('fwt', TOC_STEPS),
+    ...TOC_ZONES.flatMap((z, i) => {
+      const zx = 40 + i * 460;
+      return [
+        ...zone(`fwt-${z.key}`, zx, 280, 420, 600, z.label, z.fam, z.cap),
+        note(`fwt-${z.key}-n`, zx + 36, 420, z.noteTitle, z.emoji, z.fill, z.body, `fwt-${z.key}`),
+      ];
+    }),
+    block('fwt-anchor', 'traitMapping', 'Trait Mapping', 1880, 280),
+  ] as CanvasElement[],
+  edges: [
+    pinned(edge('fwt-e1', 'fwt-tr', 'fwt-ou', 'rose', 'left', 'right')),
+    pinned(edge('fwt-e2', 'fwt-ou', 'fwt-st', 'violet', 'left', 'right')),
+    pinned(edge('fwt-e3', 'fwt-st', 'fwt-in', 'ocean', 'left', 'right')),
+    pinned(edge('fwt-e4', 'fwt-anchor', 'fwt-tr', 'rose', 'left', 'right')),
+  ],
+};
+
+// ─── 4. How Might We + Crazy 8s — RAIL: questions → eight sketches → pick
+
+const HMW_STEPS: FrameworkStep[] = [
+  { title: 'Frame the challenge', detail: 'One sentence on what is hard, for whom, and why it matters. No solutions yet.' },
+  { title: 'Write How Might We questions', detail: 'Turn the challenge into open questions. Several angles: amplify the good, remove the bad, flip the assumption.' },
+  { title: 'Pick one question', detail: 'Choose the one that is neither so broad it says nothing nor so narrow it hides the answer.' },
+  { title: 'Sketch eight ideas in eight minutes', detail: 'One frame per minute. Ugly is fine. Quantity now, judgement later.' },
+  { title: 'Vote and develop', detail: 'Dot-vote the frames, then take the winner into a fuller sketch or storyboard.' },
+];
+
+const hmwCrazy8: TemplateDefinition = {
+  id: 'fw-hmw-crazy8',
+  name: 'How Might We + Crazy 8s',
+  description: 'Reframe the challenge into open questions, then sketch eight answers in eight minutes',
+  emoji: '✏️',
+  category: 'framework',
+  framework: {
+    stage: 'ideate',
+    origin: 'How Might We: coined by Min Basadur at Procter & Gamble in the 1970s, popularised by IDEO and the d.school. Crazy 8s: the Google Ventures Design Sprint (Jake Knapp)',
+    sourceUrl: 'https://designsprintkit.withgoogle.com/methodology/phase3-sketch/crazy-8s',
+    whatItIs: 'How Might We turns a problem statement into open, optimistic questions that invite many answers. Crazy 8s then forces eight rough sketches in eight minutes, so the first obvious idea does not win by default. Together they move a team from a stuck problem to a spread of candidate ideas in under an hour.',
+    whenToUse: [
+      'The team keeps circling the same one or two ideas.',
+      'A framing is clear but no one has proposed what the experience actually does.',
+      'You need many options fast before committing a storyboard.',
+    ],
+    steps: HMW_STEPS,
+    pitfalls: [
+      'Questions that contain the answer ("How might we add a VR headset?").',
+      'Judging sketches during the eight minutes; the timer is the point.',
+      'Voting on drawing quality rather than on the idea.',
+    ],
+    assistantBrief: 'Coach How Might We and Crazy 8s. The canvas has a How Might We zone with question notes, a Crazy 8s zone with eight storyboard frames, and a Pick & develop zone. First check the challenge is stated without a solution inside it. Help the designer generate several How Might We questions from different angles (amplify, remove, flip, break into pieces) and rewrite any that smuggle in an answer or are too broad. Encourage picking one question before sketching. During sketching, do not evaluate; remind them one frame per minute and that words count as sketches. After eight frames, help them vote on ideas not drawings, and move the winner into the Pick & develop zone with what it would need next.',
+  },
+  elements: [
+    ...fwTitle('fwh', 'How Might We + Crazy 8s', FAM.sunset.grad, 'Open the problem into questions, then outrun your first idea with eight quick frames.'),
+    ...stepRail('fwh', HMW_STEPS),
+
+    ...zone('fwh-q', 40, 280, 1320, 480, 'How Might We…', 'sunset',
+      'One question per note. Try several angles: amplify the good, remove the bad, flip an assumption, split it up.'),
+    note('fwh-q1', 76, 410, 'How might we…', '❓', WARM_SUN, '…so that participants feel…', 'fwh-q'),
+    note('fwh-q2', 376, 410, 'How might we…', '🔄', WARM_FIRE, '…without…', 'fwh-q'),
+
+    ...zone('fwh-8', 40, 800, 1320, 620, 'Crazy 8s', 'violet',
+      'Eight frames, eight minutes, one idea each. Drop a photo of your sketch or draw with words.'),
+    ...Array.from({ length: 8 }, (_, i) =>
+      ({ ...storyboard(`fwh-f${i + 1}`, 76 + (i % 4) * 320, i < 4 ? 930 : 1170, 280, 220), containerId: 'fwh-8' }),
+    ),
+
+    ...zone('fwh-p', 1400, 280, 520, 1140, 'Pick & develop', 'emerald',
+      'The frame that won the vote, and what it needs to become a storyboard.'),
+    note('fwh-p-n', 1436, 410, 'Winner', '⭐', NOTE_EMERALD, 'Why this one? What does it need next?', 'fwh-p'),
+  ] as CanvasElement[],
+  edges: [
+    pinned(edge('fwh-e1', 'fwh-q', 'fwh-8', 'sunset', 'bottom', 'top')),
+    edge('fwh-e2', 'fwh-8', 'fwh-p', 'violet'),
+  ],
+};
+
 export const FRAMEWORK_TEMPLATES: TemplateDefinition[] = [
   iceberg,
   causalLoop,
+  theoryOfChange,
+  hmwCrazy8,
 ];
 
 export { stepRail, fwTitle };
