@@ -38,3 +38,31 @@ export function composeTicketBody(description: string, stepsToReproduce: string 
   if (!stepsToReproduce) return description;
   return `${description}\n\nSteps to reproduce:\n${stepsToReproduce}`;
 }
+
+export interface TicketFilters {
+  type?: TicketType;
+  priority?: TicketPriority;
+  assignee?: string;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Keeps only filter values that are valid; anything else is dropped rather than queried. */
+export function parseTicketFilters(raw: { type?: string; priority?: string; assignee?: string }): TicketFilters {
+  const filters: TicketFilters = {};
+  if ((TICKET_TYPES as readonly unknown[]).includes(raw.type)) filters.type = raw.type as TicketType;
+  if ((TICKET_PRIORITIES as readonly unknown[]).includes(raw.priority)) filters.priority = raw.priority as TicketPriority;
+  if (raw.assignee && UUID.test(raw.assignee)) filters.assignee = raw.assignee;
+  return filters;
+}
+
+/** True only for an http or https URL, so a stored link can never render as javascript: or data:. */
+export function isHttpUrl(value: string | null | undefined): value is string {
+  if (!value) return false;
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
