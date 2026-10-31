@@ -238,11 +238,11 @@ const theoryOfChange: TemplateDefinition = {
     ...TOC_ZONES.flatMap((z, i) => {
       const zx = 40 + i * 460;
       return [
-        ...zone(`fwt-${z.key}`, zx, 280, 420, 600, z.label, z.fam, z.cap),
+        ...zone(`fwt-${z.key}`, zx, 280, 380, 600, z.label, z.fam, z.cap),
         note(`fwt-${z.key}-n`, zx + 36, 420, z.noteTitle, z.emoji, z.fill, z.body, `fwt-${z.key}`),
       ];
     }),
-    note('fwt-as', 40, 920, 'Assumptions to test', '🧪', WARM_SUN, 'Every arrow hides a belief. Which is weakest, and how would you test it cheaply?'),
+    note('fwt-as', 800, 960, 'Assumptions to test', '🧪', WARM_SUN, 'Every arrow hides a belief. Which is weakest, and how would you test it cheaply?'),
     block('fwt-anchor', 'traitMapping', 'Trait Mapping', 1880, 280),
   ] as CanvasElement[],
   edges: [
@@ -285,7 +285,7 @@ const hmwCrazy8: TemplateDefinition = {
       'Judging sketches during the eight minutes; the timer is the point.',
       'Voting on drawing quality rather than on the idea.',
     ],
-    assistantBrief: 'Coach How Might We and Crazy 8s. The canvas has a How Might We zone with question notes, a Crazy 8s zone with eight storyboard frames, and a Pick & develop zone. First check the challenge is stated without a solution inside it. Help the designer generate several How Might We questions from different angles (amplify, remove, flip, break into pieces) and rewrite any that smuggle in an answer or are too broad. Encourage picking one question before sketching. During sketching, do not evaluate; remind them one frame per minute and that words count as sketches. After eight frames, help them vote on ideas not drawings, and move the winner into the Pick & develop zone with what it would need next.',
+    assistantBrief: 'Coach How Might We and Crazy 8s. The canvas has a How Might We zone with question notes, a Crazy 8s zone with eight storyboard frames, and a Pick & develop zone. First check the challenge is stated without a solution inside it. Help the designer generate several How Might We questions from different angles (amplify, remove, flip, break into pieces) and rewrite any that smuggle in an answer or are too broad. Encourage picking one question before sketching. During sketching, do not evaluate; remind them one frame per minute and that sketching happens on paper first, then they upload a photo of each frame and caption it. After eight frames, help them vote on ideas not drawings, and move the winner into the Pick & develop zone with what it would need next.',
   },
   elements: [
     ...fwTitle('fwh', 'How Might We + Crazy 8s', FAM.sunset.grad, 'Open the problem into questions, then outrun your first idea with eight quick frames.'),
@@ -297,7 +297,7 @@ const hmwCrazy8: TemplateDefinition = {
     note('fwh-q2', 376, 410, 'How might we…', '🔄', WARM_FIRE, '…without…', 'fwh-q'),
 
     ...zone('fwh-8', 40, 800, 1320, 620, 'Crazy 8s', 'violet',
-      'Eight frames, eight minutes, one idea each. Drop a photo of your sketch or draw with words.'),
+      'Eight frames, eight minutes, one idea each. Sketch on paper, then upload a photo of each and caption it.'),
     ...Array.from({ length: 8 }, (_, i) =>
       ({ ...storyboard(`fwh-f${i + 1}`, 76 + (i % 4) * 320, i < 4 ? 930 : 1170, 280, 220), containerId: 'fwh-8' }),
     ),
