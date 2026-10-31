@@ -481,7 +481,7 @@ const PROTECTED_META_FIELDS = new Set(['id', 'name', 'ownerId', 'createdAt', 'sc
  * absent from meta) ride along from the base — so new CXDProject fields keep
  * persisting without touching this code.
  */
-function mergeProjectWithDoc(base: CXDProject, fromDoc: CXDProject, savedAt: string): CXDProject {
+export function mergeProjectWithDoc(base: CXDProject, fromDoc: CXDProject, savedAt: string): CXDProject {
   const merged: Record<string, unknown> = { ...(base as unknown as Record<string, unknown>) };
 
   for (const [key, value] of Object.entries(fromDoc as unknown as Record<string, unknown>)) {

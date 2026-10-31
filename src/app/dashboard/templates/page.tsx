@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardNavbar from '@/components/dashboard-navbar';
 import { ShimmerGrid } from '@/components/ui/shimmer-grid';
@@ -18,13 +18,18 @@ import { Plus, Crown } from 'lucide-react';
 import {
   TEMPLATES,
   TEMPLATE_CATEGORY_LABELS,
+  FRAMEWORK_STAGE_LABELS,
+  frameworkTemplatesByStage,
   instantiateTemplate,
   isTemplateFree,
 } from '@/lib/templates';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
+import { FrameworkDetailDialog } from '@/components/cxd/framework-detail-dialog';
+import { TemplateMiniPreview } from '@/components/cxd/template-mini-preview';
 import { useCXDStore } from '@/store/cxd-store';
 import { useSubscription } from '@/hooks/use-subscription';
 import { UpgradeModal } from '@/components/upgrade-modal';
+import { createClient } from '@/supabase/client';
 
 type FilterTab = 'all' | TemplateCategory;
 
@@ -33,6 +38,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'experience', label: 'Experience Design' },
   { key: 'product-brand', label: 'Product & Brand' },
   { key: 'creative', label: 'Creative & General' },
+  { key: 'framework', label: 'Frameworks' },
 ];
 
 /** SVG mini-preview of the template layout */
@@ -81,8 +87,16 @@ export default function TemplatesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | null>(null);
   const [projectName, setProjectName] = useState('');
-  const [showUpgrade, setShowUpgrade] = useState(false);
-  const { templateAccess } = useSubscription();
+  const [upgradeFeature, setUpgradeFeature] = useState<'templates' | 'unlimitedCanvases' | null>(null);
+  const [detailTemplate, setDetailTemplate] = useState<TemplateDefinition | null>(null);
+  const [creating, setCreating] = useState(false);
+  // The ref is the synchronous double-submit lock; `creating` only drives the UI.
+  const creatingRef = useRef(false);
+  // Set when the user backs out mid-create, so a resolved create doesn't teleport them to /cxd.
+  const createDismissedRef = useRef(false);
+  const { templateAccess, canCreateCanvas, isLoading: subscriptionLoading, error: subscriptionError } = useSubscription();
+
+  useEffect(() => () => { createDismissedRef.current = true; }, []);
 
   const isLocked = (templateId: string) =>
     templateAccess !== 'full' && !isTemplateFree(templateId);
@@ -92,37 +106,97 @@ export default function TemplatesPage() {
     return TEMPLATES.filter((t) => t.category === activeFilter);
   }, [activeFilter]);
 
-  const grouped = useMemo(() => {
-    const cats: TemplateCategory[] = ['experience', 'product-brand', 'creative'];
+  type Group = { key: string; label: string; templates: TemplateDefinition[] };
+  const grouped = useMemo<Group[]>(() => {
+    if (activeFilter === 'framework') {
+      return frameworkTemplatesByStage().map((g) => ({ key: `stage-${g.stage}`, label: g.label, templates: g.templates }));
+    }
+    const cats: TemplateCategory[] = ['experience', 'product-brand', 'creative', 'framework'];
     return cats
       .map((cat) => ({
-        category: cat,
+        key: cat,
         label: TEMPLATE_CATEGORY_LABELS[cat],
         templates: filtered.filter((t) => t.category === cat),
       }))
       .filter((g) => g.templates.length > 0);
-  }, [filtered]);
+  }, [filtered, activeFilter]);
 
-  const handleCreate = async () => {
-    if (!selectedTemplate || !projectName.trim()) return;
-    if (isLocked(selectedTemplate.id)) {
-      setShowUpgrade(true);
+  const closeCreateDialog = () => {
+    createDismissedRef.current = true;
+    setDialogOpen(false);
+    setProjectName('');
+    setSelectedTemplate(null);
+  };
+
+  const closeDetailDialog = () => {
+    createDismissedRef.current = true;
+    setDetailTemplate(null);
+  };
+
+  const createFromTemplate = async (tpl: TemplateDefinition, name: string) => {
+    const trimmedName = name.trim();
+    // The plan reads as free until useSubscription settles; the submit buttons
+    // stay disabled until then so Pro users never hit a false wall.
+    if (!trimmedName || creatingRef.current || subscriptionLoading) return;
+    if (isLocked(tpl.id)) {
+      setUpgradeFeature('templates');
       return;
     }
 
-    const { elements: freshElements, edges: freshEdges } = instantiateTemplate(selectedTemplate);
+    creatingRef.current = true;
+    createDismissedRef.current = false;
+    setCreating(true);
+    try {
+      // `projects` isn't persisted and this page never loads them, so the owner
+      // and the canvas count both have to come from the server. insertProject
+      // and saveProject silently skip an invalid owner, so never guess one here.
+      const supabase = createClient();
+      const user = await supabase.auth.getUser().then((res) => res.data.user).catch(() => null);
+      if (createDismissedRef.current) return;
+      if (!user) {
+        router.replace('/sign-in');
+        return;
+      }
 
-    // We need a userId — get from supabase auth state via the store or fallback
-    // The createProject store action requires ownerId; use a placeholder that
-    // the server sync will resolve. Dashboard pages are protected so user is authed.
-    const userId =
-      useCXDStore.getState().projects[0]?.ownerId ?? 'pending';
+      const { count, error } = await supabase
+        .from('cxd_projects')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', user.id);
+      if (createDismissedRef.current) return;
 
-    createProject(projectName.trim(), userId, freshElements, freshEdges);
-    setProjectName('');
-    setSelectedTemplate(null);
-    setDialogOpen(false);
-    router.push('/cxd');
+      // Fail open like the dashboard, whose count falls back to 0 when the list
+      // fetch errors: a flaky read, of the count or the plan, shouldn't wall off a paying user.
+      if (error) {
+        console.error('[templates] Failed to count owned canvases:', error);
+      } else if (!subscriptionError && !canCreateCanvas(count ?? 0)) {
+        setDialogOpen(false);
+        setDetailTemplate(null);
+        setUpgradeFeature('unlimitedCanvases');
+        return;
+      }
+
+      const { elements: freshElements, edges: freshEdges } = instantiateTemplate(tpl);
+      createProject(
+        trimmedName,
+        user.id,
+        freshElements,
+        freshEdges,
+        tpl.framework ? { frameworkIds: [tpl.id] } : undefined,
+      );
+      setProjectName('');
+      setSelectedTemplate(null);
+      setDialogOpen(false);
+      setDetailTemplate(null);
+      router.push('/cxd');
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
+    }
+  };
+
+  const handleCreate = () => {
+    if (!selectedTemplate) return;
+    void createFromTemplate(selectedTemplate, projectName);
   };
 
   return (
@@ -166,7 +240,7 @@ export default function TemplatesPage() {
 
         {/* Template grid by category */}
         {grouped.map((group) => (
-          <div key={group.category} className="mb-10">
+          <div key={group.key} className="mb-10">
             <h2 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-4">
               {group.label}
             </h2>
@@ -178,8 +252,12 @@ export default function TemplatesPage() {
                     key={tpl.id}
                     type="button"
                     onClick={() => {
+                      if (tpl.framework) {
+                        setDetailTemplate(tpl);
+                        return;
+                      }
                       if (locked) {
-                        setShowUpgrade(true);
+                        setUpgradeFeature('templates');
                         return;
                       }
                       setSelectedTemplate(tpl);
@@ -198,12 +276,21 @@ export default function TemplatesPage() {
                         Pro
                       </span>
                     )}
-                    <TemplatePreview template={tpl} />
+                    {tpl.framework ? (
+                      <TemplateMiniPreview template={tpl} className="w-full h-32 mb-3" />
+                    ) : (
+                      <TemplatePreview template={tpl} />
+                    )}
                     <div className="flex items-start gap-3">
                       <span className="text-2xl shrink-0">{tpl.emoji}</span>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white group-hover:text-purple-200 transition-colors">
+                        <p className="text-sm font-semibold text-white group-hover:text-purple-200 transition-colors flex items-center gap-2 flex-wrap">
                           {tpl.name}
+                          {tpl.framework && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-[10px] font-semibold text-purple-200 uppercase tracking-wide">
+                              {FRAMEWORK_STAGE_LABELS[tpl.framework.stage]}
+                            </span>
+                          )}
                         </p>
                         <p className="text-xs text-white/50 mt-1 line-clamp-2">
                           {tpl.description}
@@ -216,7 +303,9 @@ export default function TemplatesPage() {
                           ? 'text-amber-400/80 group-hover:text-amber-300'
                           : 'text-purple-400 group-hover:text-purple-300'
                       }`}>
-                        {locked ? 'Upgrade to use' : 'Use template →'}
+                        {tpl.framework
+                          ? (locked ? 'Learn more →' : 'Learn & use →')
+                          : (locked ? 'Upgrade to use' : 'Use template →')}
                       </span>
                     </div>
                   </button>
@@ -231,11 +320,8 @@ export default function TemplatesPage() {
       <Dialog
         open={dialogOpen}
         onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) {
-            setProjectName('');
-            setSelectedTemplate(null);
-          }
+          if (open) setDialogOpen(true);
+          else closeCreateDialog();
         }}
       >
         <DialogContent className="bg-zinc-900/95 border-white/10 text-white">
@@ -265,7 +351,7 @@ export default function TemplatesPage() {
             <div className="flex gap-3 justify-end">
               <Button
                 variant="ghost"
-                onClick={() => setDialogOpen(false)}
+                onClick={closeCreateDialog}
                 className="text-white/60 hover:text-white"
               >
                 Cancel
@@ -273,7 +359,7 @@ export default function TemplatesPage() {
               <Button
                 onClick={handleCreate}
                 className="btn-primary-glow"
-                disabled={!projectName.trim()}
+                disabled={!projectName.trim() || creating || subscriptionLoading}
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Create Canvas
@@ -283,10 +369,22 @@ export default function TemplatesPage() {
         </DialogContent>
       </Dialog>
 
+      <FrameworkDetailDialog
+        template={detailTemplate}
+        open={detailTemplate !== null}
+        onClose={closeDetailDialog}
+        mode="create"
+        modal
+        busy={creating || subscriptionLoading}
+        locked={detailTemplate ? isLocked(detailTemplate.id) : false}
+        onCreate={(name) => { if (detailTemplate) void createFromTemplate(detailTemplate, name); }}
+        onUpgrade={() => { setDetailTemplate(null); setUpgradeFeature('templates'); }}
+      />
+
       <UpgradeModal
-        isOpen={showUpgrade}
-        onClose={() => setShowUpgrade(false)}
-        feature="templates"
+        isOpen={upgradeFeature !== null}
+        onClose={() => setUpgradeFeature(null)}
+        feature={upgradeFeature ?? undefined}
       />
     </div>
   );
