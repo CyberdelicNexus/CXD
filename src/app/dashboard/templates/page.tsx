@@ -18,10 +18,14 @@ import { Plus, Crown } from 'lucide-react';
 import {
   TEMPLATES,
   TEMPLATE_CATEGORY_LABELS,
+  FRAMEWORK_STAGE_LABELS,
+  frameworkTemplatesByStage,
   instantiateTemplate,
   isTemplateFree,
 } from '@/lib/templates';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
+import { FrameworkDetailDialog } from '@/components/cxd/framework-detail-dialog';
+import { TemplateMiniPreview } from '@/components/cxd/template-mini-preview';
 import { useCXDStore } from '@/store/cxd-store';
 import { useSubscription } from '@/hooks/use-subscription';
 import { UpgradeModal } from '@/components/upgrade-modal';
@@ -33,6 +37,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'experience', label: 'Experience Design' },
   { key: 'product-brand', label: 'Product & Brand' },
   { key: 'creative', label: 'Creative & General' },
+  { key: 'framework', label: 'Frameworks' },
 ];
 
 /** SVG mini-preview of the template layout */
@@ -82,6 +87,7 @@ export default function TemplatesPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | null>(null);
   const [projectName, setProjectName] = useState('');
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [detailTemplate, setDetailTemplate] = useState<TemplateDefinition | null>(null);
   const { templateAccess } = useSubscription();
 
   const isLocked = (templateId: string) =>
@@ -92,43 +98,51 @@ export default function TemplatesPage() {
     return TEMPLATES.filter((t) => t.category === activeFilter);
   }, [activeFilter]);
 
-  const grouped = useMemo(() => {
-    const cats: TemplateCategory[] = ['experience', 'product-brand', 'creative'];
+  type Group = { key: string; label: string; templates: TemplateDefinition[] };
+  const grouped = useMemo<Group[]>(() => {
+    if (activeFilter === 'framework') {
+      return frameworkTemplatesByStage().map((g) => ({ key: `stage-${g.stage}`, label: g.label, templates: g.templates }));
+    }
+    const cats: TemplateCategory[] = ['experience', 'product-brand', 'creative', 'framework'];
     return cats
       .map((cat) => ({
-        category: cat,
+        key: cat,
         label: TEMPLATE_CATEGORY_LABELS[cat],
         templates: filtered.filter((t) => t.category === cat),
       }))
       .filter((g) => g.templates.length > 0);
-  }, [filtered]);
+  }, [filtered, activeFilter]);
 
-  const handleCreate = async () => {
-    if (!selectedTemplate || !projectName.trim()) return;
-    if (isLocked(selectedTemplate.id)) {
+  const createFromTemplate = (tpl: TemplateDefinition, name: string) => {
+    if (!name.trim()) return;
+    if (isLocked(tpl.id)) {
       setShowUpgrade(true);
       return;
     }
 
-    const { elements: freshElements, edges: freshEdges } = instantiateTemplate(selectedTemplate);
+    const { elements: freshElements, edges: freshEdges } = instantiateTemplate(tpl);
 
-    // We need a userId — get from supabase auth state via the store or fallback
-    // The createProject store action requires ownerId; use a placeholder that
-    // the server sync will resolve. Dashboard pages are protected so user is authed.
-    const userId =
-      useCXDStore.getState().projects[0]?.ownerId ?? 'pending';
+    // createProject requires an ownerId; use a placeholder that the server sync
+    // resolves. Dashboard pages are protected so the user is authed.
+    const userId = useCXDStore.getState().projects[0]?.ownerId ?? 'pending';
 
     createProject(
-      projectName.trim(),
+      name.trim(),
       userId,
       freshElements,
       freshEdges,
-      selectedTemplate.framework ? { frameworkIds: [selectedTemplate.id] } : undefined,
+      tpl.framework ? { frameworkIds: [tpl.id] } : undefined,
     );
     setProjectName('');
     setSelectedTemplate(null);
     setDialogOpen(false);
+    setDetailTemplate(null);
     router.push('/cxd');
+  };
+
+  const handleCreate = () => {
+    if (!selectedTemplate) return;
+    createFromTemplate(selectedTemplate, projectName);
   };
 
   return (
@@ -172,7 +186,7 @@ export default function TemplatesPage() {
 
         {/* Template grid by category */}
         {grouped.map((group) => (
-          <div key={group.category} className="mb-10">
+          <div key={group.key} className="mb-10">
             <h2 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-4">
               {group.label}
             </h2>
@@ -184,6 +198,10 @@ export default function TemplatesPage() {
                     key={tpl.id}
                     type="button"
                     onClick={() => {
+                      if (tpl.framework) {
+                        setDetailTemplate(tpl);
+                        return;
+                      }
                       if (locked) {
                         setShowUpgrade(true);
                         return;
@@ -204,12 +222,21 @@ export default function TemplatesPage() {
                         Pro
                       </span>
                     )}
-                    <TemplatePreview template={tpl} />
+                    {tpl.framework ? (
+                      <TemplateMiniPreview template={tpl} className="w-full h-32 mb-3" />
+                    ) : (
+                      <TemplatePreview template={tpl} />
+                    )}
                     <div className="flex items-start gap-3">
                       <span className="text-2xl shrink-0">{tpl.emoji}</span>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white group-hover:text-purple-200 transition-colors">
+                        <p className="text-sm font-semibold text-white group-hover:text-purple-200 transition-colors flex items-center gap-2 flex-wrap">
                           {tpl.name}
+                          {tpl.framework && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-[10px] font-semibold text-purple-200 uppercase tracking-wide">
+                              {FRAMEWORK_STAGE_LABELS[tpl.framework.stage]}
+                            </span>
+                          )}
                         </p>
                         <p className="text-xs text-white/50 mt-1 line-clamp-2">
                           {tpl.description}
@@ -222,7 +249,9 @@ export default function TemplatesPage() {
                           ? 'text-amber-400/80 group-hover:text-amber-300'
                           : 'text-purple-400 group-hover:text-purple-300'
                       }`}>
-                        {locked ? 'Upgrade to use' : 'Use template →'}
+                        {tpl.framework
+                          ? (locked ? 'Learn more →' : 'Learn & use →')
+                          : (locked ? 'Upgrade to use' : 'Use template →')}
                       </span>
                     </div>
                   </button>
@@ -288,6 +317,16 @@ export default function TemplatesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <FrameworkDetailDialog
+        template={detailTemplate}
+        open={detailTemplate !== null}
+        onClose={() => setDetailTemplate(null)}
+        mode="create"
+        locked={detailTemplate ? isLocked(detailTemplate.id) : false}
+        onCreate={(name) => detailTemplate && createFromTemplate(detailTemplate, name)}
+        onUpgrade={() => { setDetailTemplate(null); setShowUpgrade(true); }}
+      />
 
       <UpgradeModal
         isOpen={showUpgrade}
