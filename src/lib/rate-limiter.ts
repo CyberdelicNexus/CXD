@@ -2,13 +2,14 @@
 // Tracks request timestamps per key per endpoint type.
 // Can be upgraded to Redis for multi-instance deployments.
 
-type EndpointType = 'sign-in' | 'sign-up' | 'forgot-password' | 'checkout';
+type EndpointType = 'sign-in' | 'sign-up' | 'forgot-password' | 'checkout' | 'support';
 
 const LIMITS: Record<EndpointType, { windowMs: number; maxRequests: number }> = {
   'sign-in': { windowMs: 900_000, maxRequests: 5 },          // 5 per 15 min
   'sign-up': { windowMs: 3_600_000, maxRequests: 3 },        // 3 per hour
   'forgot-password': { windowMs: 3_600_000, maxRequests: 3 }, // 3 per hour
   'checkout': { windowMs: 3_600_000, maxRequests: 10 },      // 10 per hour
+  'support': { windowMs: 3_600_000, maxRequests: 10 },       // 10 per hour
 };
 
 const requestLog = new Map<string, number[]>();

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@/supabase/server';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { checkRateLimit } from '@/lib/rate-limiter';
+import { composeTicketBody, resolveTicketType, ticketTitle } from '@/lib/admin/tickets';
 import { enqueueEmail } from '@/lib/email-queue';
 import { getPlan } from '@/lib/plans';
 import BugReportNotification from '@emails/bug-report-notification';
@@ -19,9 +22,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const limit = checkRateLimit(user.id, 'support');
+    if (!limit.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 });
+    }
+
     // Parse request body
     const body = await request.json();
     const {
+      type: requestedType,
+      sourcePath,
       title,
       description,
       stepsToReproduce,
@@ -64,9 +74,35 @@ export async function POST(request: Request) {
     const reporterName = userProfile?.full_name || user.email?.split('@')[0] || 'Unknown';
     const reporterEmail = userProfile?.email || user.email || 'unknown@example.com';
 
-    // Determine type based on title
-    const type: 'bug' | 'support' = title === 'Bug Report' ? 'bug' : 'support';
-    const subjectPrefix = type === 'bug' ? 'Bug Report' : 'Support Request';
+    const ticketType = resolveTicketType(requestedType, title);
+    // The email templates know two types; a feature request reads as support.
+    const type: 'bug' | 'support' = ticketType === 'bug' ? 'bug' : 'support';
+    const subjectPrefix =
+      ticketType === 'bug' ? 'Bug Report' : ticketType === 'feature' ? 'Feature Request' : 'Support Request';
+
+    // Stored first, but a failed insert must not lose the request: the emails
+    // below still go out, and Sentry records the failure.
+    try {
+      const { error: ticketError } = await getSupabaseAdmin().from('support_tickets').insert({
+        user_id: user.id,
+        email: reporterEmail,
+        type: ticketType,
+        title: ticketTitle(title, description),
+        description: composeTicketBody(
+          description,
+          typeof stepsToReproduce === 'string' ? stepsToReproduce.slice(0, 10000) : undefined,
+        ),
+        source_path: typeof sourcePath === 'string' ? sourcePath.slice(0, 500) : null,
+      });
+      if (ticketError) throw new Error(`${ticketError.code ?? 'error'}: ${ticketError.message}`);
+    } catch (ticketErr) {
+      // Code and message only: a constraint error's details can echo the row, which holds the user's text.
+      const reason = ticketErr instanceof Error ? ticketErr.message : 'unknown';
+      console.error('Failed to store support ticket:', reason);
+      Sentry.captureException(new Error(`support ticket insert failed: ${reason}`), {
+        tags: { route: 'support', phase: 'store-ticket' },
+      });
+    }
 
     // Log every user report to Sentry so it can be correlated with crash
     // events (same user, same timeframe) instead of living only in email.
@@ -74,7 +110,7 @@ export async function POST(request: Request) {
     try {
       sentryEventId = Sentry.captureMessage(`${subjectPrefix}: ${title}`, {
         level: type === 'bug' ? 'warning' : 'info',
-        tags: { source: 'user-report', reportType: type, plan: plan.name },
+        tags: { source: 'user-report', reportType: ticketType, plan: plan.name },
         user: { id: user.id, email: reporterEmail },
         extra: {
           description,

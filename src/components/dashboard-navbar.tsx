@@ -52,6 +52,7 @@ import {
   ClipboardList,
   Lock,
   Newspaper,
+  Lightbulb,
   type LucideIcon
 } from 'lucide-react'
 import { useRouter, usePathname } from 'next/navigation'
@@ -112,6 +113,7 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
   const nexusReturnUrl = useNexusReturnLink()
   const [acceptingInvite, setAcceptingInvite] = useState<string | null>(null)
   const [showSupportModal, setShowSupportModal] = useState(false)
+  const [supportKind, setSupportKind] = useState<'support' | 'feature'>('support')
   const [showMasterPlanUpgrade, setShowMasterPlanUpgrade] = useState(false)
   const [showBugModal, setShowBugModal] = useState(false)
   const [supportMessage, setSupportMessage] = useState('')
@@ -140,8 +142,10 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: 'Support Request',
+          type: supportKind,
+          title: supportKind === 'feature' ? 'Feature Request' : 'Support Request',
           description: supportMessage,
+          sourcePath: pathname,
           browserInfo,
         }),
       })
@@ -177,6 +181,8 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          type: 'bug',
+          sourcePath: pathname,
           title: 'Bug Report',
           description: bugDescription,
           stepsToReproduce: bugSteps || undefined,
@@ -468,11 +474,18 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
                 <DropdownMenuItem
-                  onClick={() => setShowSupportModal(true)}
+                  onClick={() => { setSupportKind('support'); setShowSupportModal(true) }}
                   className="cursor-pointer hover:bg-white/5"
                 >
                   <MessageCircle className="w-4 h-4 mr-2" />
                   Contact Support
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => { setSupportKind('feature'); setShowSupportModal(true) }}
+                  className="cursor-pointer hover:bg-white/5"
+                >
+                  <Lightbulb className="w-4 h-4 mr-2" />
+                  Request a Feature
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setShowBugModal(true)}
@@ -539,10 +552,12 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl">
               <MessageCircle className="w-5 h-5 text-violet-400" />
-              Contact Support
+              {supportKind === 'feature' ? 'Request a Feature' : 'Contact Support'}
             </DialogTitle>
             <DialogDescription className="text-white/50">
-              Have a question or need help? We're here to assist you.
+              {supportKind === 'feature'
+                ? 'Tell us what would make CXD Canvas more useful.'
+                : "Have a question or need help? We're here to assist you."}
             </DialogDescription>
           </DialogHeader>
 
