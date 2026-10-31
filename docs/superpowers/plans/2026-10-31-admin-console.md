@@ -4083,9 +4083,12 @@ This handles both the page's button and mailbox one-click `List-Unsubscribe-Post
 
 ```ts
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { verifyUnsubscribeToken } from '@/lib/email-unsubscribe';
 
+// Handles both the page's button and a mailbox's one-click List-Unsubscribe-Post,
+// so it reads the token from the query and ignores the body.
 export async function POST(request: Request) {
   const token = new URL(request.url).searchParams.get('token') ?? '';
   const userId = verifyUnsubscribeToken(token, process.env.EMAIL_UNSUBSCRIBE_SECRET ?? '');
@@ -4096,7 +4099,13 @@ export async function POST(request: Request) {
     marketing_opt_out: true,
     opted_out_at: new Date().toISOString(),
   });
-  if (error) return NextResponse.json({ error: 'Could not unsubscribe' }, { status: 500 });
+  if (error) {
+    // Error code and text only, never the token.
+    Sentry.captureException(new Error(`unsubscribe failed: ${error.code ?? 'error'}: ${error.message}`), {
+      tags: { route: 'email-unsubscribe' },
+    });
+    return NextResponse.json({ error: 'Could not unsubscribe' }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }
 ```
@@ -4140,8 +4149,10 @@ import { verifyUnsubscribeToken } from '@/lib/email-unsubscribe';
 
 export const metadata = { title: 'Unsubscribe', robots: { index: false, follow: false } };
 
-export default function UnsubscribePage({ searchParams }: { searchParams: { token?: string } }) {
-  const token = searchParams.token ?? '';
+// Opening the link changes nothing, because mail scanners open links.
+export default function UnsubscribePage({ searchParams }: { searchParams: { token?: string | string[] } }) {
+  const raw = searchParams.token;
+  const token = typeof raw === 'string' ? raw : '';
   const valid = verifyUnsubscribeToken(token, process.env.EMAIL_UNSUBSCRIBE_SECRET ?? '') !== null;
 
   return (
