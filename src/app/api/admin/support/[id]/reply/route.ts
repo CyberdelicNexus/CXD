@@ -6,13 +6,18 @@ import { requirePermission } from '@/lib/admin/gate';
 import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
 import { withAudit } from '@/lib/admin/audit';
 import { enqueueEmail } from '@/lib/email-queue';
+import { STATUS_LABELS, replySubject } from '@/lib/admin/tickets';
 import SupportReply from '@emails/support-reply';
 
 type Ctx = { params: { id: string } };
 
 const SUPPORT_INBOX = 'contact@cyberdelic.design';
 
-const schema = z.object({ body: z.string().trim().min(1).max(10000) });
+const schema = z.object({
+  body: z.string().trim().min(1).max(10000),
+  // One key per draft. It becomes the queue event id, so a retried request cannot send twice.
+  idempotencyKey: z.string().uuid(),
+});
 
 function report(message: string, step: string) {
   // Messages here come from the database or mail layer, never from the reply text or a token.
@@ -32,7 +37,7 @@ export async function POST(request: Request, context: Ctx) {
 
   const { data: ticket, error: ticketError } = await admin
     .from('support_tickets')
-    .select('email, title, user_id')
+    .select('email, title, user_id, status')
     .eq('id', ticketId)
     .maybeSingle();
   if (ticketError) {
@@ -59,8 +64,13 @@ export async function POST(request: Request, context: Ctx) {
       () =>
         enqueueEmail({
           to: ticket.email,
-          subject: `Re: ${ticket.title}`,
+          subject: replySubject(ticket.title),
           replyTo: SUPPORT_INBOX,
+          eventId: `support-reply-${ticketId}-${body.data.idempotencyKey}`,
+          // The direct-send fallback would bypass the event id, so a queue outage fails the request instead.
+          fallbackOnMissing: false,
+          ticketId,
+          actorId: gate.staff.userId,
           template: SupportReply({
             userName,
             ticketTitle: ticket.title,
@@ -74,12 +84,11 @@ export async function POST(request: Request, context: Ctx) {
   }
 
   // The email is queued, so from here a failure must not read as "not sent".
-  const { error: eventError } = await admin.from('support_ticket_events').insert({
-    ticket_id: ticketId,
-    actor_id: gate.staff.userId,
-    kind: 'reply',
-    body: body.data.body,
-  });
+  const events = [{ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'reply', body: body.data.body }];
+  if (ticket.status !== 'waiting') {
+    events.push({ ticket_id: ticketId, actor_id: gate.staff.userId, kind: 'status', body: `Moved to ${STATUS_LABELS.waiting}` });
+  }
+  const { error: eventError } = await admin.from('support_ticket_events').insert(events);
   if (eventError) report(`${eventError.code ?? 'error'}: ${eventError.message}`, 'event-insert');
 
   const { error: statusError } = await admin

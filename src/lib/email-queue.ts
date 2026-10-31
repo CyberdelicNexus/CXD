@@ -28,6 +28,14 @@ interface EnqueueEmailOptions {
   /** Broadcast sends report their delivery result back to this broadcast. */
   broadcastId?: string;
   /**
+   * Inngest drops a second event with the same id, which makes a retried enqueue
+   * safe. Only the Inngest path honours it; pair it with fallbackOnMissing: false.
+   */
+  eventId?: string;
+  /** Support replies: a permanent delivery failure is written to this card's history, as this staff member. */
+  ticketId?: string;
+  actorId?: string;
+  /**
    * If true, fall back to direct Resend send when Inngest isn't configured
    * (no INNGEST_EVENT_KEY in dev/local without the dev CLI). Defaults true.
    */
@@ -43,6 +51,7 @@ export async function enqueueEmail(opts: EnqueueEmailOptions): Promise<void> {
 
   try {
     await inngest.send({
+      ...(opts.eventId ? { id: opts.eventId } : {}),
       name: 'email/send',
       data: {
         to: opts.to,
@@ -54,6 +63,8 @@ export async function enqueueEmail(opts: EnqueueEmailOptions): Promise<void> {
         replyTo: opts.replyTo,
         headers: opts.headers,
         broadcastId: opts.broadcastId,
+        ticketId: opts.ticketId,
+        actorId: opts.actorId,
       },
     });
   } catch (err) {

@@ -3,11 +3,17 @@ import { notFound } from 'next/navigation';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { isUuid } from '@/lib/admin/http';
 import { getTicket, listStaff } from '@/lib/admin/support';
-import { TYPE_LABELS, isHttpUrl } from '@/lib/admin/tickets';
+import { TYPE_LABELS, isHttpUrl, type TicketEventKind } from '@/lib/admin/tickets';
 import { TicketCompose } from '@/components/admin/ticket-compose';
 import { TicketControls } from '@/components/admin/ticket-controls';
 
-const KIND_LABELS = { note: 'Internal note', reply: 'Emailed reply', status: 'Status', assignment: 'Assignment' };
+const KIND_LABELS: Record<TicketEventKind, string> = {
+  note: 'Internal note',
+  reply: 'Emailed reply',
+  status: 'Status',
+  assignment: 'Assignment',
+  delivery_failed: 'Delivery failed',
+};
 
 export default async function AdminTicketPage({ params }: { params: { id: string } }) {
   await requirePagePermission('tickets.work');
@@ -16,6 +22,7 @@ export default async function AdminTicketPage({ params }: { params: { id: string
   const [found, staff] = await Promise.all([getTicket(params.id), listStaff()]);
   if (!found) notFound();
   const { ticket, events } = found;
+  const authorName = new Map(staff.map((member) => [member.id, member.label]));
 
   return (
     <div className="space-y-4">
@@ -42,8 +49,8 @@ export default async function AdminTicketPage({ params }: { params: { id: string
           <p className="whitespace-pre-wrap break-words rounded-lg border border-white/10 p-4 text-sm">{ticket.description}</p>
           {events.map((event) => (
             <div key={event.id} className="rounded-md bg-white/[0.03] p-3">
-              <p className="text-xs text-white/40">{KIND_LABELS[event.kind]} · {event.created_at.slice(0, 16).replace('T', ' ')}</p>
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm">{event.body}</p>
+              <p className="text-xs text-white/40">{KIND_LABELS[event.kind]} · {authorName.get(event.actor_id) ?? 'Former staff'} · {event.created_at.slice(0, 16).replace('T', ' ')}</p>
+              <p className={`mt-1 whitespace-pre-wrap break-words text-sm ${event.kind === 'delivery_failed' ? 'text-rose-300' : ''}`}>{event.body}</p>
             </div>
           ))}
           <TicketCompose ticketId={ticket.id} email={ticket.email} />

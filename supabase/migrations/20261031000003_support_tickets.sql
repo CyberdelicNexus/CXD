@@ -22,19 +22,41 @@ CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON public.support_tickets (u
 
 CREATE TABLE IF NOT EXISTS public.support_ticket_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE CASCADE,
+  ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE RESTRICT,
   actor_id uuid NOT NULL,
-  kind text NOT NULL CHECK (kind IN ('note', 'reply', 'status', 'assignment')),
+  kind text NOT NULL CHECK (kind IN ('note', 'reply', 'status', 'assignment', 'delivery_failed')),
   body text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_support_ticket_events_ticket ON public.support_ticket_events (ticket_id, created_at);
 
+-- History is append-only, like the audit log. Tickets have no DELETE grant, so
+-- RESTRICT above never fires for service_role; it guards against a future grant.
+CREATE OR REPLACE FUNCTION public.support_ticket_events_append_only()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  RAISE EXCEPTION 'ticket_events_are_append_only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS support_ticket_events_append_only ON public.support_ticket_events;
+CREATE TRIGGER support_ticket_events_append_only
+  BEFORE UPDATE OR DELETE ON public.support_ticket_events
+  FOR EACH ROW EXECUTE FUNCTION public.support_ticket_events_append_only();
+
+DROP TRIGGER IF EXISTS support_ticket_events_no_truncate ON public.support_ticket_events;
+CREATE TRIGGER support_ticket_events_no_truncate
+  BEFORE TRUNCATE ON public.support_ticket_events
+  FOR EACH STATEMENT EXECUTE FUNCTION public.support_ticket_events_append_only();
+
 ALTER TABLE public.support_tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.support_ticket_events ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON public.support_tickets FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON public.support_ticket_events FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.support_tickets FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON public.support_ticket_events FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE ON public.support_tickets TO service_role;
 GRANT SELECT, INSERT ON public.support_ticket_events TO service_role;

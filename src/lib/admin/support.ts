@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from '@/supabase/admin';
-import type { TicketFilters, TicketPriority, TicketStatus, TicketType } from './tickets';
+import type { TicketEventKind, TicketFilters, TicketPriority, TicketStatus, TicketType } from './tickets';
 
 export interface Ticket {
   id: string;
@@ -20,7 +20,7 @@ export interface Ticket {
 export interface TicketEvent {
   id: string;
   actor_id: string;
-  kind: 'note' | 'reply' | 'status' | 'assignment';
+  kind: TicketEventKind;
   body: string;
   created_at: string;
 }
@@ -30,19 +30,32 @@ export interface StaffMember {
   label: string;
 }
 
-/** Filters must already be validated (see parseTicketFilters). A failed read throws. */
+export const DONE_LIMIT = 100;
+
+/**
+ * Filters must already be validated (see parseTicketFilters). Open cards are
+ * never capped, so a busy day cannot hide work; done cards show the newest
+ * DONE_LIMIT. A failed read throws.
+ */
 export async function listTickets(filters: TicketFilters): Promise<Ticket[]> {
-  let query = getSupabaseAdmin()
-    .from('support_tickets')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(300);
-  if (filters.type) query = query.eq('type', filters.type);
-  if (filters.assignee) query = query.eq('assignee_id', filters.assignee);
-  if (filters.priority) query = query.eq('priority', filters.priority);
-  const { data, error } = await query;
+  const base = () => {
+    let query = getSupabaseAdmin().from('support_tickets').select('*').order('created_at', { ascending: false });
+    if (filters.type) query = query.eq('type', filters.type);
+    if (filters.assignee) query = query.eq('assignee_id', filters.assignee);
+    if (filters.priority) query = query.eq('priority', filters.priority);
+    return query;
+  };
+  const [open, done] = await Promise.all([base().neq('status', 'done'), base().eq('status', 'done').limit(DONE_LIMIT)]);
+  if (open.error) throw open.error;
+  if (done.error) throw done.error;
+  return [...(open.data ?? []), ...(done.data ?? [])] as Ticket[];
+}
+
+/** True when the user currently holds a staff role. A failed read throws. */
+export async function isStaffMember(userId: string): Promise<boolean> {
+  const { data, error } = await getSupabaseAdmin().from('staff_roles').select('user_id').eq('user_id', userId).maybeSingle();
   if (error) throw error;
-  return (data ?? []) as Ticket[];
+  return !!data;
 }
 
 /** Returns null only when the card does not exist; a failed read throws. */

@@ -2,7 +2,7 @@
  * Ticket title and body shaping for /api/support.
  * Run: npx tsx src/lib/admin/__verify__/admin-tickets.verify.ts
  */
-import { composeTicketBody, isHttpUrl, parseTicketFilters, resolveTicketType, ticketTitle } from '../tickets';
+import { composeTicketBody, isHttpUrl, parseTicketFilters, replySubject, resolveTicketType, ticketTitle } from '../tickets';
 
 let passed = 0;
 let failed = 0;
@@ -23,6 +23,13 @@ check('first line only', ticketTitle('Bug Report', 'First\nSecond') === 'First')
 
 check('body without steps', composeTicketBody('Hello', undefined) === 'Hello');
 check('body with steps', composeTicketBody('Hello', '1. Click').includes('Steps to reproduce:\n1. Click'));
+
+check('title whitespace collapsed', ticketTitle('Export   broken\n\tnow', 'x') === 'Export broken now');
+check('blank real title is Untitled', ticketTitle('   ', 'x') === 'Untitled');
+check('blank description is Untitled', ticketTitle('Bug Report', '   \n  ') === 'Untitled');
+check('description spaces collapsed', ticketTitle('Support Request', 'a   b') === 'a b');
+check('reply subject single line', replySubject('Hello\r\nBcc: x@y.z') === 'Re: Hello Bcc: x@y.z');
+check('reply subject untitled', replySubject('  ') === 'Re: Untitled');
 
 const UID = '123e4567-e89b-12d3-a456-426614174000';
 check('valid filters kept', JSON.stringify(parseTicketFilters({ type: 'bug', priority: 'high', assignee: UID })) === JSON.stringify({ type: 'bug', priority: 'high', assignee: UID }));

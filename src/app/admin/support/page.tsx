@@ -28,6 +28,7 @@ export default async function AdminSupportPage({
     priority: singleParam(searchParams.priority),
   });
   const [tickets, staff] = await Promise.all([listTickets(filters), listStaff()]);
+  const staffName = new Map(staff.map((member) => [member.id, member.label]));
 
   return (
     <div className="space-y-4">
@@ -63,6 +64,7 @@ export default async function AdminSupportPage({
                   <p className="text-sm break-words">{ticket.title}</p>
                   <p className="mt-1 text-xs text-white/40 break-all">
                     {TYPE_LABELS[ticket.type]}{ticket.priority === 'high' ? ' · High' : ''} · {ticket.email}
+                    {ticket.assignee_id ? ` · ${staffName.get(ticket.assignee_id) ?? 'Former staff'}` : ''}
                   </p>
                 </Link>
               ))}

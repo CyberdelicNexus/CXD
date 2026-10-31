@@ -8,7 +8,7 @@ export default async function AdminErrorsPage() {
   await requirePagePermission('errors.view');
   const { data, error } = await getSupabaseAdmin()
     .from('fix_pipeline')
-    .select('id, title, level, status, triage_tier, triage_action, event_count, user_count, permalink, created_at')
+    .select('id, title, level, status, triage_tier, event_count, user_count, permalink, created_at')
     .order('created_at', { ascending: false })
     .limit(100);
   // A failed query must not read as "nothing triaged": throw so the error boundary shows it.

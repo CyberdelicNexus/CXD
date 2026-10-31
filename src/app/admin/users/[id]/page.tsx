@@ -5,6 +5,7 @@ import { can, isBanned } from '@/lib/admin/permissions';
 import { isUuid } from '@/lib/admin/http';
 import { planEditBlock } from '@/lib/admin/plan-guard';
 import { formatDate, getUserDetail } from '@/lib/admin/users';
+import * as Sentry from '@sentry/nextjs';
 import { listTicketsForUser } from '@/lib/admin/support';
 import { UserActions } from '@/components/admin/user-actions';
 
@@ -23,7 +24,15 @@ export default async function AdminUserPage({ params }: { params: { id: string }
   const canSeeAudit = can(staff.role, 'audit.view');
   const user = await getUserDetail(params.id, { includeAudit: canSeeAudit });
   if (!user) notFound();
-  const tickets = await listTicketsForUser(user.id);
+  // Cards are secondary here: a failed read is reported and the rest of the page still renders.
+  let tickets: Awaited<ReturnType<typeof listTicketsForUser>> | null = null;
+  try {
+    tickets = await listTicketsForUser(user.id);
+  } catch (err) {
+    Sentry.captureException(new Error(`user page ticket list failed: ${(err as { message?: string })?.message ?? 'unknown'}`), {
+      tags: { route: 'admin-user-page', step: 'tickets' },
+    });
+  }
   const suspended = isBanned(user.bannedUntil, new Date());
 
   return (
@@ -92,8 +101,9 @@ export default async function AdminUserPage({ params }: { params: { id: string }
 
       <section className="space-y-2">
         <h2 className="font-medium">Support cards</h2>
-        {tickets.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
-        {tickets.map((ticket) => (
+        {tickets === null && <p className="text-sm text-white/50">Support cards unavailable.</p>}
+        {tickets?.length === 0 && <p className="text-sm text-white/50">None yet.</p>}
+        {tickets?.map((ticket) => (
           <Link key={ticket.id} href={`/admin/support/${ticket.id}`} className="block text-sm text-violet-200 hover:underline">
             {ticket.title} ({ticket.status})
           </Link>

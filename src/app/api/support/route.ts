@@ -22,11 +22,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const limit = checkRateLimit(user.id, 'support');
-    if (!limit.allowed) {
-      return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 });
-    }
-
     // Parse request body
     const body = await request.json();
     const {
@@ -56,6 +51,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Description must be under 10,000 characters' }, { status: 400 });
     }
 
+    // Rate-limit after validation, so a malformed request does not use up the allowance.
+    const limit = checkRateLimit(user.id, 'support');
+    if (!limit.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please try again later.' }, { status: 429 });
+    }
+
+    // Steps are optional free text: keep a string (capped) or nothing, once, for the ticket and the email.
+    const steps: string | undefined =
+      typeof stepsToReproduce === 'string' && stepsToReproduce.trim() ? stepsToReproduce.slice(0, 10000) : undefined;
+
     // Get user profile info
     const { data: userProfile } = await supabase
       .from('users')
@@ -72,7 +77,8 @@ export async function POST(request: Request) {
 
     const plan = getPlan(subscription?.plan_id || 'free');
     const reporterName = userProfile?.full_name || user.email?.split('@')[0] || 'Unknown';
-    const reporterEmail = userProfile?.email || user.email || 'unknown@example.com';
+    // The auth-verified address comes first; the profile row is only a fallback.
+    const reporterEmail = user.email || userProfile?.email || 'unknown@example.com';
 
     const ticketType = resolveTicketType(requestedType, title);
     // The email templates know two types; a feature request reads as support.
@@ -88,10 +94,7 @@ export async function POST(request: Request) {
         email: reporterEmail,
         type: ticketType,
         title: ticketTitle(title, description),
-        description: composeTicketBody(
-          description,
-          typeof stepsToReproduce === 'string' ? stepsToReproduce.slice(0, 10000) : undefined,
-        ),
+        description: composeTicketBody(description, steps),
         source_path: typeof sourcePath === 'string' ? sourcePath.slice(0, 500) : null,
       });
       if (ticketError) throw new Error(`${ticketError.code ?? 'error'}: ${ticketError.message}`);
@@ -114,7 +117,7 @@ export async function POST(request: Request) {
         user: { id: user.id, email: reporterEmail },
         extra: {
           description,
-          stepsToReproduce,
+          stepsToReproduce: steps,
           expectedBehavior,
           actualBehavior,
           browserInfo,
@@ -138,7 +141,7 @@ export async function POST(request: Request) {
             reporterPlan: plan.name,
             bugTitle: title,
             bugDescription: description,
-            stepsToReproduce,
+            stepsToReproduce: steps,
             expectedBehavior,
             actualBehavior,
             browserInfo,
@@ -152,7 +155,7 @@ export async function POST(request: Request) {
           subject: `We received your ${subjectPrefix.toLowerCase()}`,
           template: SupportConfirmation({
             userName: reporterName,
-            type,
+            type: ticketType,
             title,
             description,
           }),

@@ -30,9 +30,21 @@ export function resolveTicketType(type: unknown, title: string): TicketType {
 
 /** The dialogs send a fixed label as the title, which would make every card look alike. */
 export function ticketTitle(title: string, description: string): string {
-  if (!GENERIC_TITLES.includes(title)) return title.slice(0, TITLE_LENGTH);
-  return description.trim().split('\n')[0].slice(0, TITLE_LENGTH);
+  const source = GENERIC_TITLES.includes(title) ? description.trim().split('\n')[0] : title;
+  return oneLine(source).slice(0, TITLE_LENGTH).trim() || 'Untitled';
 }
+
+/** Collapses every run of whitespace (including line breaks) to one space. */
+export function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+/** The subject of a reply email: single line, so a title with line breaks cannot split the header. */
+export function replySubject(title: string): string {
+  return `Re: ${oneLine(title) || 'Untitled'}`;
+}
+
+export type TicketEventKind = 'note' | 'reply' | 'status' | 'assignment' | 'delivery_failed';
 
 export function composeTicketBody(description: string, stepsToReproduce: string | undefined): string {
   if (!stepsToReproduce) return description;

@@ -3,19 +3,22 @@ import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
+import { isStaffMember } from '@/lib/admin/support';
 import { isUuid, notFoundResponse, parseBody } from '@/lib/admin/http';
 import { recordAudit } from '@/lib/admin/audit';
 import { STATUS_LABELS, TICKET_PRIORITIES, TICKET_STATUSES, isHttpUrl } from '@/lib/admin/tickets';
 
 type Ctx = { params: { id: string } };
 
-const schema = z.object({
-  status: z.enum(TICKET_STATUSES).optional(),
-  priority: z.enum(TICKET_PRIORITIES).optional(),
-  assigneeId: z.string().uuid().nullable().optional(),
-  // z.string().url() also accepts javascript: and data: URLs, so require http or https.
-  sentryIssueUrl: z.string().max(500).refine(isHttpUrl, 'Must be an http or https link').nullable().optional(),
-});
+const schema = z
+  .object({
+    status: z.enum(TICKET_STATUSES).optional(),
+    priority: z.enum(TICKET_PRIORITIES).optional(),
+    assigneeId: z.string().uuid().nullable().optional(),
+    // z.string().url() also accepts javascript: and data: URLs, so require http or https.
+    sentryIssueUrl: z.string().max(500).refine(isHttpUrl, 'Must be an http or https link').nullable().optional(),
+  })
+  .refine((value) => Object.values(value).some((field) => field !== undefined), 'Nothing to change');
 
 function reportDbError(error: { code?: string; message: string }, step: string) {
   // Code and message only: details can echo the row.
@@ -36,7 +39,7 @@ export async function PATCH(request: Request, context: Ctx) {
 
   const { data: before, error: readError } = await admin
     .from('support_tickets')
-    .select('status, assignee_id, priority')
+    .select('status, assignee_id, priority, sentry_issue_url')
     .eq('id', ticketId)
     .maybeSingle();
   if (readError) {
@@ -44,6 +47,18 @@ export async function PATCH(request: Request, context: Ctx) {
     return NextResponse.json({ error: 'The card could not be loaded.' }, { status: 500 });
   }
   if (!before) return NextResponse.json({ error: 'Card not found.' }, { status: 404 });
+
+  // Only staff can hold a card. Leaving an existing (former) assignee in place is allowed.
+  if (assigneeId && assigneeId !== before.assignee_id) {
+    let staffMember: boolean;
+    try {
+      staffMember = await isStaffMember(assigneeId);
+    } catch (err) {
+      reportDbError({ message: err instanceof Error ? err.message : (err as { message?: string }).message ?? 'unknown' }, 'assignee-check');
+      return NextResponse.json({ error: 'The assignee could not be checked.' }, { status: 500 });
+    }
+    if (!staffMember) return NextResponse.json({ error: 'That person is not on the staff.' }, { status: 409 });
+  }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (status) patch.status = status;

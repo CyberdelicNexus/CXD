@@ -10,6 +10,7 @@
 
 import { inngest } from './client';
 import { sendEmail } from '@/lib/email';
+import * as Sentry from '@sentry/nextjs';
 import { getSupabaseAdmin } from '@/supabase/admin';
 
 interface EmailSendData {
@@ -27,6 +28,8 @@ interface EmailSendData {
   replyTo?: string;
   headers?: Record<string, string>;
   broadcastId?: string;
+  ticketId?: string;
+  actorId?: string;
 }
 
 async function recordBroadcastResult(broadcastId: string, sent: number, failed: number) {
@@ -47,7 +50,23 @@ export const sendEmailFn = inngest.createFunction(
     throttle: { limit: 2, period: '1s' },
     triggers: [{ event: 'email/send' }],
     onFailure: async ({ event }) => {
-      const { broadcastId } = event.data.event.data as EmailSendData;
+      const { broadcastId, ticketId, actorId } = event.data.event.data as EmailSendData;
+      // Staff must see that a reply never arrived. This write cannot throw, so it never blocks the broadcast path below.
+      if (ticketId && actorId) {
+        try {
+          const { error } = await getSupabaseAdmin().from('support_ticket_events').insert({
+            ticket_id: ticketId,
+            actor_id: actorId,
+            kind: 'delivery_failed',
+            body: 'Reply could not be delivered.',
+          });
+          if (error) throw new Error(`${error.code ?? 'error'}: ${error.message}`);
+        } catch (err) {
+          Sentry.captureException(new Error(`delivery failure not recorded: ${err instanceof Error ? err.message : 'unknown'}`), {
+            tags: { route: 'inngest-send-email', step: 'delivery-failed-event' },
+          });
+        }
+      }
       if (broadcastId) await recordBroadcastResult(broadcastId, 0, 1);
     },
   },

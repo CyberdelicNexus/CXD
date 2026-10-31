@@ -104,6 +104,9 @@ function formatTimeAgo(dateString: string): string {
 
 // `overCover`: the dashboard's cover image runs behind the navbar, so the bar goes
 // lighter and blurrier there instead of hiding the image.
+/** A message the server wrote for the user (a rate limit, a validation error): shown as is. */
+class ServerMessage extends Error {}
+
 export default function DashboardNavbar({ overCover = false }: { overCover?: boolean }) {
   const supabase = createClient()
   const router = useRouter()
@@ -159,11 +162,11 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
           setShowSupportModal(false)
         }, 1500)
       } else {
-        throw new Error(data.error || 'Failed to submit support request')
+        throw data.error ? new ServerMessage(data.error) : new Error('Failed to submit support request')
       }
     } catch (error) {
       console.error('Support submission error:', error)
-      alert('Failed to submit support request. Please try again or email contact@cyberdelic.design')
+      alert(error instanceof ServerMessage ? error.message : 'Failed to submit support request. Please try again or email contact@cyberdelic.design')
     } finally {
       setIsSubmitting(false)
     }
@@ -199,11 +202,11 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
           setShowBugModal(false)
         }, 1500)
       } else {
-        throw new Error(data.error || 'Failed to submit bug report')
+        throw data.error ? new ServerMessage(data.error) : new Error('Failed to submit bug report')
       }
     } catch (error) {
       console.error('Bug report submission error:', error)
-      alert('Failed to submit bug report. Please try again or email contact@cyberdelic.design')
+      alert(error instanceof ServerMessage ? error.message : 'Failed to submit bug report. Please try again or email contact@cyberdelic.design')
     } finally {
       setIsSubmitting(false)
     }
@@ -474,21 +477,21 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
                 <DropdownMenuItem
-                  onClick={() => { setSupportKind('support'); setShowSupportModal(true) }}
+                  onClick={() => { setSupportKind('support'); setSubmitSuccess(false); setShowSupportModal(true) }}
                   className="cursor-pointer hover:bg-white/5"
                 >
                   <MessageCircle className="w-4 h-4 mr-2" />
                   Contact Support
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => { setSupportKind('feature'); setShowSupportModal(true) }}
+                  onClick={() => { setSupportKind('feature'); setSubmitSuccess(false); setShowSupportModal(true) }}
                   className="cursor-pointer hover:bg-white/5"
                 >
                   <Lightbulb className="w-4 h-4 mr-2" />
                   Request a Feature
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => setShowBugModal(true)}
+                  onClick={() => { setSubmitSuccess(false); setShowBugModal(true) }}
                   className="cursor-pointer hover:bg-white/5"
                 >
                   <Bug className="w-4 h-4 mr-2" />
@@ -575,7 +578,7 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
                 <Label htmlFor="support-message" className="text-white/70">Your Message</Label>
                 <Textarea
                   id="support-message"
-                  placeholder="Describe your question or issue..."
+                  placeholder={supportKind === 'feature' ? 'Describe the feature you would like...' : 'Describe your question or issue...'}
                   value={supportMessage}
                   onChange={(e) => setSupportMessage(e.target.value)}
                   className="bg-white/5 border-white/10 text-white placeholder:text-white/30 min-h-[120px] focus:border-violet-500/50"
