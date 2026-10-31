@@ -73,13 +73,16 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     // then add elements after dialog unmount completes
     onClose();
     requestAnimationFrame(() => {
-      addCanvasElements(elements);
-      if (edges.length > 0) addCanvasEdges(edges);
-      if (tpl.framework) addProjectFramework(tpl.id);
-      // Auto-frame the inserted template so the user sees it land instead of
-      // hunting for it (consumed once by the canvas's pending-fit effect).
-      const bbox = templateBounds(elements);
-      if (bbox) setPendingCanvasFitBounds(bbox);
+      // Blocked by the quota cap: nothing landed, so don't record the framework
+      // or the assistant would coach something that isn't on the canvas.
+      if (addCanvasElements(elements)) {
+        if (edges.length > 0) addCanvasEdges(edges);
+        if (tpl.framework) addProjectFramework(tpl.id);
+        // Auto-frame the inserted template so the user sees it land instead of
+        // hunting for it (consumed once by the canvas's pending-fit effect).
+        const bbox = templateBounds(elements);
+        if (bbox) setPendingCanvasFitBounds(bbox);
+      }
       // Safety: ensure Radix didn't leave pointer-events: none on body
       document.body.style.pointerEvents = '';
     });

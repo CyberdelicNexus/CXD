@@ -273,7 +273,8 @@ interface CXDState {
 
   // Actions - Canvas Elements
   addCanvasElement: (element: CanvasElement) => void;
-  addCanvasElements: (elements: CanvasElement[]) => void;
+  /** Returns false when nothing was inserted (no open project, or the all-or-nothing quota cap blocked it). */
+  addCanvasElements: (elements: CanvasElement[]) => boolean;
   /** Canvas Assistant: apply one confirmed AI batch (creates/updates/deletes)
    *  as ONE Zustand set + ONE 'ai-apply' Y.Doc transaction (= one Ctrl+Z step).
    *  Returns false when the free-tier quota wall blocks the creates. */
@@ -1641,7 +1642,7 @@ export const useCXDStore = create<CXDState>()(
 
       addCanvasElements: (elements) => {
         const currentProject = get().getCurrentProject();
-        if (!currentProject) return;
+        if (!currentProject) return false;
 
         // Free-tier quota: a batch (template insert, AI draft) is all-or-
         // nothing — inserting half a template is worse than inserting none.
@@ -1651,7 +1652,7 @@ export const useCXDStore = create<CXDState>()(
           const incoming = countQuotaObjects(elements);
           if (incoming > 0 && used + incoming > quota) {
             set({ quotaWallOpen: true });
-            return;
+            return false;
           }
         }
 
@@ -1690,6 +1691,7 @@ export const useCXDStore = create<CXDState>()(
             });
           }, 'template-batch');
         }
+        return true;
       },
 
       addCanvasEdges: (edges) => {
