@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId } from 'react';
+import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@/supabase/client';
 import { 
   fetchNotifications, 
@@ -73,6 +74,9 @@ export function useNotifications() {
 
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) subscribeFor(user.id);
+    }).catch((err) => {
+      // The auth listener below still subscribes once a session is known.
+      Sentry.captureException(err, { tags: { area: 'notifications', step: 'get-user' } });
     });
 
     // A sign-in after mount, or a switch of account, moves the subscription to that user.

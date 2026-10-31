@@ -3111,7 +3111,9 @@ SupportReply.PreviewProps = {
 
 - [ ] **Step 4c: Phase 4 worker changes (added with Task 24)**
 
-- `priority: { run: 'event.data.broadcastId != null ? -600 : 0' }` in the function options, so broadcast events run after other email and a bulk send cannot delay a password reset or receipt. It is typed in inngest 4.2.6 (`priority.run`, a number from -600 to 600) and sits beside `throttle`. Whether the Inngest server applies it together with `throttle` can only be confirmed against a real deployment.
+- `priority: { run: 'event.data.broadcastId != null ? 0 : 600' }` in the function options. Priority only reorders runs that are waiting, so other mail gets a 600 second head start over broadcast mail. A negative factor would be a fixed delay, so none is used. It is typed in inngest 4.2.6 (`priority.run`, -600 to 600) and sits beside `throttle`; whether the server applies it together with `throttle` can only be confirmed on a real deployment.
+- The duplicate check reads `email_log` with `.limit(1)`, checks the rows length, and throws on a read error so the step retries instead of treating a failed read as "not sent". The 23505 comment says email_log has no unique constraint. Nothing else on this path changes.
+- The send step passes `idempotencyKey: broadcast-<broadcastId>-<userId>` to `sendEmail` (Resend's `Idempotency-Key`) for broadcast events only, and for a broadcast a `null` result (no `RESEND_API_KEY`) throws instead of counting as sent.
 - `onFailure` handles the broadcast branch first and the ticket branch second, each in its own try/catch that reports to Sentry. For a broadcast event it looks in `email_log` for `userId` and `emailKind`: a row means the email was sent, so it records `(1, 0)`, otherwise `(0, 1)`. A broadcast-branch error is rethrown at the end, after the ticket branch has run.
 
 - [ ] **Step 5: Type-check and commit**
@@ -3986,8 +3988,12 @@ CREATE TABLE IF NOT EXISTS public.broadcasts (
   subject text NOT NULL,
   body text NOT NULL,
   recipient_count integer NOT NULL DEFAULT 0,
+  -- Emails (or, for in-app only, notifications) handed on by the fan-out job so far.
+  enqueued_count integer NOT NULL DEFAULT 0,
   sent_count integer NOT NULL DEFAULT 0,
   failed_count integer NOT NULL DEFAULT 0,
+  -- Set once when the fan-out could not finish, so history shows why there is a shortfall.
+  failure_note text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -4030,7 +4036,9 @@ AS $$
   LEFT JOIN public.subscriptions s ON s.user_id = u.id
   LEFT JOIN public.email_preferences e ON e.user_id = u.id
   WHERE (p_plan IS NULL OR COALESCE(s.plan_id::text, 'free') = p_plan)
-    AND (p_user_ids IS NULL OR u.id = ANY (p_user_ids));
+    AND (p_user_ids IS NULL OR u.id = ANY (p_user_ids))
+  -- A stable order, so the caller can page past PostgREST's row cap without gaps or repeats.
+  ORDER BY u.id;
 $$;
 
 -- Workers finish in any order, so counts must increment in the database.
@@ -4050,10 +4058,51 @@ AS $$
    WHERE id = p_broadcast;
 $$;
 
+-- The fan-out job reports progress here. p_recipient_count, when given, replaces the
+-- count taken at send time with the count that was actually reachable at fan-out
+-- (someone may have unsubscribed since the preview).
+CREATE OR REPLACE FUNCTION public.admin_record_broadcast_progress(
+  p_broadcast uuid,
+  p_enqueued integer,
+  p_recipient_count integer DEFAULT NULL
+)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  UPDATE public.broadcasts
+     SET enqueued_count = enqueued_count + p_enqueued,
+         recipient_count = COALESCE(p_recipient_count, recipient_count)
+   WHERE id = p_broadcast;
+$$;
+
+-- The fan-out could not finish: everything not yet enqueued counts as failed.
+-- Runs once per broadcast; a repeat call changes nothing.
+CREATE OR REPLACE FUNCTION public.admin_fail_broadcast(
+  p_broadcast uuid,
+  p_note text
+)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  UPDATE public.broadcasts
+     SET failed_count = failed_count + GREATEST(recipient_count - enqueued_count, 0),
+         failure_note = p_note
+   WHERE id = p_broadcast
+     AND failure_note IS NULL;
+$$;
+
 REVOKE EXECUTE ON FUNCTION public.admin_recipients(text, uuid[]) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.admin_record_broadcast_result(uuid, integer, integer) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.admin_record_broadcast_progress(uuid, integer, integer) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.admin_fail_broadcast(uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.admin_recipients(text, uuid[]) TO service_role;
 GRANT EXECUTE ON FUNCTION public.admin_record_broadcast_result(uuid, integer, integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_record_broadcast_progress(uuid, integer, integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.admin_fail_broadcast(uuid, text) TO service_role;
 ```
 
 - [ ] **Step 2: Commit**
@@ -4077,6 +4126,7 @@ Add to `.env.example`:
 
 ```bash
 # Signs unsubscribe links. Generate with: openssl rand -base64 32
+# Rotating this breaks every unsubscribe link already delivered in past emails. Do not change it once product updates have been sent.
 EMAIL_UNSUBSCRIBE_SECRET=
 # Physical mailing address shown in product update emails (street or PO box, not an email address)
 EMAIL_POSTAL_ADDRESS=
@@ -4084,13 +4134,21 @@ EMAIL_POSTAL_ADDRESS=
 
 - [ ] **Step 2: Write the route**
 
-This handles both the page's button and mailbox one-click `List-Unsubscribe-Post`, so it reads the token from the query and ignores the body.
+`GET` only forwards to the confirmation page and changes nothing. `POST` handles both the page's button and mailbox one-click `List-Unsubscribe-Post`, so it reads the token from the query and ignores the body.
 
 ```ts
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { verifyUnsubscribeToken } from '@/lib/email-unsubscribe';
+
+// A link opened in a browser or by a mail scanner changes nothing: it only forwards to the
+// confirmation page, where a person presses the button.
+export async function GET(request: Request) {
+  const token = new URL(request.url).searchParams.get('token') ?? '';
+  const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design').replace(/\/+$/, '');
+  return NextResponse.redirect(`${base}/unsubscribe?token=${encodeURIComponent(token)}`, 303);
+}
 
 // Handles both the page's button and a mailbox's one-click List-Unsubscribe-Post,
 // so it reads the token from the query and ignores the body.
@@ -4197,7 +4255,10 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
  * Who a broadcast reaches, and that the test send matches the content sent.
  * Run: npx tsx src/lib/admin/__verify__/broadcast-audience.verify.ts
  */
-import { filterRecipients, signContent, verifyContent, type RecipientRow } from '../comms';
+import {
+  IN_APP_BODY_MAX, chunk, collectPages, contentSchema, filterRecipients, inAppBodyFits, notificationId,
+  signContent, verifyContent, type RecipientRow,
+} from '../comms';
 
 let passed = 0;
 let failed = 0;
@@ -4231,8 +4292,42 @@ check('edited category refused', !verifyContent(token, { ...content, category: '
 check('other sender refused', !verifyContent(token, content, 'user-2', 'secret'));
 check('junk refused', !verifyContent('junk', content, 'user-1', 'secret'));
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+const longBody = 'x'.repeat(IN_APP_BODY_MAX + 1);
+check('long in-app body refused', !inAppBodyFits({ channels: ['in_app'], body: longBody }));
+check('long email-only body allowed', inAppBodyFits({ channels: ['email'], body: longBody }));
+check('body at the cap allowed', inAppBodyFits({ channels: ['in_app', 'email'], body: 'x'.repeat(IN_APP_BODY_MAX) }));
+const base = { category: 'service', audience: { kind: 'all' }, subject: 'S' };
+check('schema refuses long in-app body', !contentSchema.safeParse({ ...base, channels: ['in_app'], body: longBody }).success);
+check('schema accepts long email body', contentSchema.safeParse({ ...base, channels: ['email'], body: longBody }).success);
+
+const n1 = notificationId('b1', 'u1');
+check('notification id is stable', n1 === notificationId('b1', 'u1'));
+check('notification id differs by user', n1 !== notificationId('b1', 'u2'));
+check('notification id differs by broadcast', n1 !== notificationId('b2', 'u1'));
+check('notification id is a uuid', /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(n1));
+
+check('chunk splits evenly', JSON.stringify(chunk([1, 2, 3, 4, 5], 2)) === '[[1,2],[3,4],[5]]');
+check('chunk of nothing is nothing', chunk([], 3).length === 0);
+
+async function paging() {
+  const source = Array.from({ length: 2500 }, (_, i) => i);
+  const calls: number[] = [];
+  const got = await collectPages(async (from, to) => { calls.push(from); return source.slice(from, to + 1); }, 1000);
+  check('paging reads past the row cap', got.length === 2500 && got[2499] === 2499);
+  check('paging stops on a short page', calls.length === 3);
+  const exactSource = Array.from({ length: 2000 }, (_, i) => i);
+  const exact = await collectPages(async (from, to) => exactSource.slice(from, to + 1), 1000);
+  check('paging an exact multiple ends on an empty page', exact.length === 2000);
+  let threw = false;
+  await collectPages(async () => { throw new Error('boom'); }, 1000).catch(() => { threw = true; });
+  check('a failed page throws', threw);
+}
+
+paging().then(() => {
+  console.log(`
+${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+});
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
@@ -4243,8 +4338,9 @@ Expected: FAIL, cannot find module `../comms`.
 - [ ] **Step 3: Implement**
 
 ```ts
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import { IN_APP_BODY_MAX } from './comms-limits';
 
 export const CATEGORIES = ['product', 'service'] as const;
 export type Category = (typeof CATEGORIES)[number];
@@ -4256,13 +4352,24 @@ export const audienceSchema = z.discriminatedUnion('kind', [
 ]);
 export type Audience = z.infer<typeof audienceSchema>;
 
-export const contentSchema = z.object({
+export { IN_APP_BODY_MAX };
+
+export const contentFields = z.object({
   channels: z.array(z.enum(['in_app', 'email'])).min(1),
   category: z.enum(CATEGORIES),
   audience: audienceSchema,
   subject: z.string().trim().min(1).max(200),
   body: z.string().trim().min(1).max(10000),
 });
+
+/** True unless the message goes in-app and its body is over the in-app cap. */
+export function inAppBodyFits(content: { channels: string[]; body: string }): boolean {
+  return !content.channels.includes('in_app') || content.body.length <= IN_APP_BODY_MAX;
+}
+
+export const IN_APP_BODY_MESSAGE = `In-app messages are limited to ${IN_APP_BODY_MAX} characters.`;
+
+export const contentSchema = contentFields.refine(inAppBodyFits, { path: ['body'], message: IN_APP_BODY_MESSAGE });
 
 export interface RecipientRow {
   user_id: string;
@@ -4302,6 +4409,40 @@ export function verifyContent(token: string, content: SignedContent, senderId: s
   const expected = Buffer.from(contentHash(content, senderId, secret));
   const received = Buffer.from(token);
   return expected.length === received.length && timingSafeEqual(expected, received);
+}
+
+export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Reads a paged source until a short page comes back, so nothing past the
+ * server's row cap is dropped. A failed page throws; it is never read as the end.
+ */
+export async function collectPages<T>(
+  fetchPage: (from: number, to: number) => Promise<T[]>,
+  pageSize: number,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const page = await fetchPage(from, from + pageSize - 1);
+    all.push(...page);
+    if (page.length < pageSize) return all;
+  }
+}
+
+/**
+ * A fixed id for one user's copy of one broadcast (a version 5 style UUID), so
+ * inserting it twice is a no-op instead of a second notification.
+ */
+export function notificationId(broadcastId: string, userId: string): string {
+  const hash = createHash('sha1').update(`broadcast-notification:${broadcastId}:${userId}`).digest();
+  hash[6] = (hash[6] & 0x0f) | 0x50;
+  hash[8] = (hash[8] & 0x3f) | 0x80;
+  const hex = hash.subarray(0, 16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 ```
 
@@ -4400,16 +4541,29 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 ```ts
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { signUnsubscribeToken } from '@/lib/email-unsubscribe';
-import { filterRecipients, type Audience, type Category, type RecipientRow } from './comms';
+import { collectPages, filterRecipients, type Audience, type Category, type RecipientRow } from './comms';
 
-/** Throws when the lookup fails. A failed lookup must never read as "no recipients" or send anything. */
+const PAGE_SIZE = 1000;
+
+/**
+ * Throws when the lookup fails. A failed lookup must never read as "no recipients" or send anything.
+ * PostgREST caps a response at 1000 rows, so this pages in a stable order until a short page returns.
+ */
 export async function resolveRecipients(audience: Audience, category: Category) {
-  const { data, error } = await getSupabaseAdmin().rpc('admin_recipients', {
-    p_plan: audience.kind === 'plan' ? audience.plan : null,
-    p_user_ids: audience.kind === 'users' ? audience.userIds : null,
-  });
-  if (error) throw new Error(`recipient lookup failed: ${error.code ?? 'error'}: ${error.message}`);
-  return filterRecipients((data ?? []) as RecipientRow[], category);
+  const admin = getSupabaseAdmin();
+  const rows = await collectPages<RecipientRow>(async (from, to) => {
+    const { data, error } = await admin
+      .rpc('admin_recipients', {
+        p_plan: audience.kind === 'plan' ? audience.plan : null,
+        p_user_ids: audience.kind === 'users' ? audience.userIds : null,
+      })
+      .range(from, to);
+    if (error) throw new Error(`recipient lookup failed: ${error.code ?? 'error'}: ${error.message}`);
+    return (data ?? []) as RecipientRow[];
+  }, PAGE_SIZE);
+  // One row per user, whatever the joins return.
+  const unique = Array.from(new Map(rows.map((row) => [row.user_id, row])).values());
+  return filterRecipients(unique, category);
 }
 
 /**
@@ -4503,15 +4657,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: problem ?? 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.' }, { status: 409 });
   }
 
+  // The same headers and links a real product update carries, so the test shows what recipients get.
+  const links = category === 'product' ? unsubscribeLinks(gate.staff.userId) : null;
   try {
     await enqueueEmail({
       to: gate.staff.email,
       subject: `[Test] ${subject}`,
+      headers: links
+        ? {
+            'List-Unsubscribe': `<${links.oneClickUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          }
+        : undefined,
       template: Broadcast({
         userName: 'there',
         subject,
         body: text,
-        unsubscribeUrl: category === 'product' ? unsubscribeLinks(gate.staff.userId).pageUrl : undefined,
+        unsubscribeUrl: links?.pageUrl,
         postalAddress: category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined,
       }),
     });
@@ -4531,35 +4693,40 @@ export async function POST(request: Request) {
 - [ ] **Step 4: Write the send route**
 
 ```ts
+import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { requirePermission } from '@/lib/admin/gate';
-import { withAudit } from '@/lib/admin/audit';
+import { recordAudit, type AuditEntry } from '@/lib/admin/audit';
 import { parseBody } from '@/lib/admin/http';
-import { contentSchema, verifyContent } from '@/lib/admin/comms';
-import { emailConfigProblem, resolveRecipients, testSecret, unsubscribeLinks } from '@/lib/admin/broadcast';
-import { enqueueEmail } from '@/lib/email-queue';
-import Broadcast from '@emails/broadcast';
+import { contentFields, inAppBodyFits, IN_APP_BODY_MESSAGE, verifyContent } from '@/lib/admin/comms';
+import { emailConfigProblem, resolveRecipients, testSecret } from '@/lib/admin/broadcast';
+import { inngest } from '@/inngest/client';
 
-const NOTIFICATION_CHUNK = 500;
-const EMAIL_CHUNK = 25;
+const schema = contentFields
+  .extend({
+    // One key per draft, made by the composer. A double submit or a retry hits the
+    // unique constraint on broadcasts, so a bulk send can only be queued once.
+    idempotencyKey: z.string().uuid(),
+    confirmCount: z.number().int().optional(),
+    confirmInAppCount: z.number().int().optional(),
+    testToken: z.string().optional(),
+  })
+  .refine(inAppBodyFits, { path: ['body'], message: IN_APP_BODY_MESSAGE });
 
-const schema = contentSchema.extend({
-  // One key per draft, made by the composer. A double submit or a retry hits the
-  // unique constraint on broadcasts, so a bulk send can only go out once.
-  idempotencyKey: z.string().uuid(),
-  confirmCount: z.number().int().optional(),
-  testToken: z.string().optional(),
-});
+/** Error code and text only, never the message body or a token. */
+function describe(error: { code?: string; message: string }): string {
+  return `${error.code ?? 'error'}: ${error.message}`;
+}
 
 export async function POST(request: Request) {
   const gate = await requirePermission('comms.send');
   if (!gate.ok) return gate.response;
   const parsed = await parseBody(request, schema);
   if (!parsed.ok) return parsed.response;
-  const { channels, category, audience, subject, body, idempotencyKey, confirmCount, testToken } = parsed.data;
+  const { channels, category, audience, subject, body, idempotencyKey, confirmCount, confirmInAppCount, testToken } = parsed.data;
 
   const wantsEmail = channels.includes('email');
   const wantsInApp = channels.includes('in_app');
@@ -4579,6 +4746,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No one matches this audience on the chosen channels. Nothing was sent.' }, { status: 409 });
   }
 
+  if (wantsInApp && confirmInAppCount !== inAppTotal) {
+    return NextResponse.json({ error: 'The recipient count changed or does not match. Check it and confirm again.' }, { status: 409 });
+  }
   if (wantsEmail) {
     const problem = emailConfigProblem(category);
     const secret = testSecret();
@@ -4593,110 +4763,275 @@ export async function POST(request: Request) {
     }
   }
 
-  const admin = getSupabaseAdmin();
   const recipientCount = wantsEmail ? emailTotal : inAppTotal;
-  // The insert is the gate: a second request with this key fails here, before anything is sent.
-  const { data: broadcast, error: createError } = await admin
-    .from('broadcasts')
-    .insert({
-      idempotency_key: idempotencyKey,
-      sender_id: gate.staff.userId,
-      channels,
-      category: wantsEmail ? category : null,
-      audience,
-      subject,
-      body,
-      recipient_count: recipientCount,
-    })
-    .select('id')
-    .single();
-  if (createError?.code === '23505') {
-    return NextResponse.json({ error: 'This message was already sent. Check the history.' }, { status: 409 });
+  const broadcastId = randomUUID();
+  const entry: AuditEntry = {
+    actorId: gate.staff.userId,
+    action: 'broadcast.send',
+    targetType: 'broadcast',
+    targetId: broadcastId,
+    after: { channels, category, audience, subject, recipientCount },
+  };
+
+  // The attempt is recorded first. If this write fails nothing exists yet, so the key is not used up.
+  try {
+    await recordAudit(entry, 'attempted');
+  } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'audit-attempt' } });
+    return NextResponse.json({ error: 'The audit log could not be written. Nothing was sent.' }, { status: 500 });
   }
-  if (createError || !broadcast) {
-    Sentry.captureException(new Error(`broadcast insert failed: ${createError?.code ?? 'error'}: ${createError?.message ?? 'no row'}`), {
-      tags: { route: 'admin-comms-send', step: 'insert' },
-    });
-    return NextResponse.json({ error: 'Nothing was sent.' }, { status: 500 });
+
+  const admin = getSupabaseAdmin();
+  // The insert is the gate: a second request with this key fails here, before anything is queued.
+  const { error: createError } = await admin.from('broadcasts').insert({
+    id: broadcastId,
+    idempotency_key: idempotencyKey,
+    sender_id: gate.staff.userId,
+    channels,
+    category: wantsEmail ? category : null,
+    audience,
+    subject,
+    body,
+    recipient_count: recipientCount,
+  });
+  if (createError) {
+    const duplicate = createError.code === '23505';
+    if (!duplicate) {
+      Sentry.captureException(new Error(`broadcast insert failed: ${describe(createError)}`), {
+        tags: { route: 'admin-comms-send', step: 'insert' },
+      });
+    }
+    await recordAudit({ ...entry, reason: duplicate ? 'duplicate send refused' : 'broadcast could not be saved' }, 'failed').catch((err) =>
+      Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'audit-failed' } }),
+    );
+    return duplicate
+      ? NextResponse.json({ error: 'This message was already sent. Check the history.', duplicate: true }, { status: 409 })
+      : NextResponse.json({ error: 'Nothing was sent.' }, { status: 500 });
   }
-  const broadcastId = broadcast.id as string;
 
   try {
-    await withAudit(
-      {
-        actorId: gate.staff.userId,
-        action: 'broadcast.send',
-        targetType: 'broadcast',
-        targetId: broadcastId,
-        after: { channels, category, audience, subject, recipientCount },
-      },
-      async () => {
-        if (wantsInApp) {
-          for (let i = 0; i < recipients.inApp.length; i += NOTIFICATION_CHUNK) {
-            const rows = recipients.inApp.slice(i, i + NOTIFICATION_CHUNK).map((row) => ({
-              user_id: row.user_id,
-              title: subject,
-              message: body,
-              type: 'announcement',
-              is_global: false,
-              metadata: { broadcastId },
-            }));
-            const { error } = await admin.from('notifications').insert(rows);
-            if (error) throw new Error(`notification insert failed: ${error.code ?? 'error'}: ${error.message}`);
-          }
-        }
-
-        if (wantsEmail) {
-          const postalAddress = category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined;
-          for (let i = 0; i < recipients.email.length; i += EMAIL_CHUNK) {
-            await Promise.all(
-              recipients.email.slice(i, i + EMAIL_CHUNK).map((row) => {
-                const links = category === 'product' ? unsubscribeLinks(row.user_id) : null;
-                return enqueueEmail({
-                  to: row.email,
-                  subject,
-                  userId: row.user_id,
-                  emailKind: `broadcast-${broadcastId}`,
-                  broadcastId,
-                  // Inngest drops a second event with this id, so a retried enqueue emails no one twice.
-                  eventId: `broadcast-${broadcastId}-${row.user_id}`,
-                  // The direct fallback skips the worker's duplicate check, the event id and the result count.
-                  fallbackOnMissing: false,
-                  headers: links
-                    ? {
-                        'List-Unsubscribe': `<${links.oneClickUrl}>`,
-                        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-                      }
-                    : undefined,
-                  template: Broadcast({
-                    userName: row.name || 'there',
-                    subject,
-                    body,
-                    unsubscribeUrl: links?.pageUrl,
-                    postalAddress,
-                  }),
-                });
-              }),
-            );
-          }
-        }
-      },
-    );
+    // A fixed event id means a repeat of this request cannot start a second fan-out.
+    await inngest.send({ id: `broadcast-fanout-${broadcastId}`, name: 'broadcast/fanout', data: { broadcastId } });
   } catch (err) {
-    // Tagged with the broadcast id only, never the message body or a token.
-    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'deliver' }, extra: { broadcastId } });
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'queue' }, extra: { broadcastId } });
+    // Put the failure on the row so history shows it, and keep the audit trail honest.
+    const { error: failError } = await admin.rpc('admin_fail_broadcast', {
+      p_broadcast: broadcastId,
+      p_note: 'The send could not be queued. Nothing was delivered.',
+    });
+    if (failError) {
+      Sentry.captureException(new Error(`broadcast failure not recorded: ${describe(failError)}`), {
+        tags: { route: 'admin-comms-send', step: 'record-failure' },
+        extra: { broadcastId },
+      });
+    }
+    await recordAudit({ ...entry, reason: 'could not be queued' }, 'failed').catch((auditErr) =>
+      Sentry.captureException(auditErr, { tags: { route: 'admin-comms-send', step: 'audit-failed' } }),
+    );
     return NextResponse.json(
-      {
-        error: 'The send stopped partway and some people may already have it. Do not send it again. Check the history.',
-        broadcastId,
-      },
+      { error: 'The send could not be queued and nothing was delivered. Check the history, then start a new message.', broadcastId },
       { status: 500 },
     );
   }
 
+  // Queued is the outcome this request owns; the job records its own failure.
+  await recordAudit(entry, 'succeeded').catch((err) =>
+    Sentry.captureException(err, { tags: { route: 'admin-comms-send', step: 'audit-succeeded' } }),
+  );
   return NextResponse.json({ ok: true, broadcastId, recipientCount });
 }
 ```
+
+- [ ] **Step 4b: Write the fan-out job and the helpers it needs**
+
+The route only queues. `src/inngest/broadcast-functions.ts` does the delivery in durable steps:
+
+```ts
+// Durable fan-out for admin broadcasts.
+//
+// The send route validates, records the broadcast and queues one `broadcast/fanout`
+// event. This job does the slow part: it re-resolves recipients (so someone who
+// unsubscribed since the preview is skipped), then writes in-app rows and enqueues
+// emails in chunks. Each chunk is its own step, so a retry never redoes finished
+// chunks, and every write is also safe to repeat: notification ids and email event
+// ids are fixed per recipient.
+
+import { NonRetriableError } from 'inngest';
+import * as Sentry from '@sentry/nextjs';
+import { inngest } from './client';
+import { getSupabaseAdmin } from '@/supabase/admin';
+import { recordAudit } from '@/lib/admin/audit';
+import { audienceSchema, chunk, notificationId, type Category } from '@/lib/admin/comms';
+import { emailConfigProblem, resolveRecipients, unsubscribeLinks } from '@/lib/admin/broadcast';
+import { enqueueEmail } from '@/lib/email-queue';
+import Broadcast from '@emails/broadcast';
+
+const NOTIFICATION_CHUNK = 500;
+const EMAIL_CHUNK = 25;
+
+interface FanoutData {
+  broadcastId: string;
+}
+
+interface Target {
+  userId: string;
+  email: string;
+  name: string | null;
+}
+
+async function recordProgress(broadcastId: string, enqueued: number, recipientCount?: number) {
+  const { error } = await getSupabaseAdmin().rpc('admin_record_broadcast_progress', {
+    p_broadcast: broadcastId,
+    p_enqueued: enqueued,
+    p_recipient_count: recipientCount ?? null,
+  });
+  if (error) throw new Error(`progress write failed: ${error.code ?? 'error'}: ${error.message}`);
+}
+
+export const broadcastFanoutFn = inngest.createFunction(
+  {
+    id: 'broadcast-fanout',
+    name: 'Broadcast fan-out',
+    retries: 3,
+    triggers: [{ event: 'broadcast/fanout' }],
+    onFailure: async ({ event, error }) => {
+      const { broadcastId } = event.data.event.data as FanoutData;
+      const note = `Delivery stopped: ${error.message}`.slice(0, 300);
+      const admin = getSupabaseAdmin();
+      try {
+        // Everything not yet enqueued counts as failed, so history shows the shortfall.
+        const { error: failError } = await admin.rpc('admin_fail_broadcast', { p_broadcast: broadcastId, p_note: note });
+        if (failError) throw new Error(`${failError.code ?? 'error'}: ${failError.message}`);
+
+        const { data, error: readError } = await admin.from('broadcasts').select('sender_id').eq('id', broadcastId).maybeSingle();
+        if (readError || !data) throw new Error(`broadcast read failed: ${readError?.code ?? 'missing'}`);
+        await recordAudit(
+          { actorId: data.sender_id as string, action: 'broadcast.fanout', targetType: 'broadcast', targetId: broadcastId, reason: note },
+          'failed',
+        );
+      } catch (err) {
+        Sentry.captureException(err, { tags: { route: 'broadcast-fanout', step: 'on-failure' }, extra: { broadcastId } });
+        throw err;
+      }
+    },
+  },
+  async ({ event, step }) => {
+    const { broadcastId } = event.data as FanoutData;
+
+    const plan = await step.run('load', async () => {
+      const { data: row, error } = await getSupabaseAdmin()
+        .from('broadcasts')
+        .select('id, channels, category, audience, subject, body')
+        .eq('id', broadcastId)
+        .maybeSingle();
+      if (error) throw new Error(`broadcast read failed: ${error.code ?? 'error'}: ${error.message}`);
+      if (!row) throw new NonRetriableError('broadcast not found');
+
+      const audience = audienceSchema.safeParse(row.audience);
+      if (!audience.success) throw new NonRetriableError('broadcast audience is not valid');
+      const channels = row.channels as string[];
+      const wantsEmail = channels.includes('email');
+      const wantsInApp = channels.includes('in_app');
+      const category = (row.category ?? 'service') as Category;
+      if (wantsEmail) {
+        const problem = emailConfigProblem(category);
+        if (problem) throw new NonRetriableError(problem);
+      }
+
+      // Re-resolved now, so an unsubscribe or suspension since the preview is honoured.
+      const recipients = await resolveRecipients(audience.data, category);
+      const inApp: Target[] = wantsInApp ? recipients.inApp.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
+      const email: Target[] = wantsEmail ? recipients.email.map((r) => ({ userId: r.user_id, email: r.email, name: r.name })) : [];
+      return {
+        subject: row.subject as string,
+        body: row.body as string,
+        category,
+        wantsEmail,
+        inApp,
+        email,
+      };
+    });
+
+    // The count shown in history becomes the number actually reachable now.
+    const recipientCount = plan.wantsEmail ? plan.email.length : plan.inApp.length;
+    await step.run('set-count', () => recordProgress(broadcastId, 0, recipientCount));
+
+    const admin = getSupabaseAdmin();
+
+    const inAppBatches = chunk<Target>(plan.inApp, NOTIFICATION_CHUNK);
+    for (let index = 0; index < inAppBatches.length; index++) {
+      const batch = inAppBatches[index];
+      await step.run(`in-app-${index}`, async () => {
+        const rows = batch.map((target) => ({
+          id: notificationId(broadcastId, target.userId),
+          user_id: target.userId,
+          title: plan.subject,
+          message: plan.body,
+          type: 'announcement',
+          is_global: false,
+          metadata: { broadcastId },
+        }));
+        // A fixed id per recipient makes a repeat of this step a no-op.
+        const { error } = await admin.from('notifications').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+        if (error) throw new Error(`notification insert failed: ${error.code ?? 'error'}: ${error.message}`);
+        // For an in-app only broadcast the notifications are the whole send.
+        if (!plan.wantsEmail) await recordProgress(broadcastId, rows.length);
+      });
+    }
+
+    const postalAddress = plan.category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined;
+    const emailBatches = chunk<Target>(plan.email, EMAIL_CHUNK);
+    for (let index = 0; index < emailBatches.length; index++) {
+      const batch = emailBatches[index];
+      await step.run(`email-${index}`, async () => {
+        await Promise.all(
+          batch.map((target) => {
+            const links = plan.category === 'product' ? unsubscribeLinks(target.userId) : null;
+            return enqueueEmail({
+              to: target.email,
+              subject: plan.subject,
+              userId: target.userId,
+              emailKind: `broadcast-${broadcastId}`,
+              broadcastId,
+              // Inngest drops a second event with this id, so a retried chunk emails no one twice.
+              eventId: `broadcast-${broadcastId}-${target.userId}`,
+              // The direct fallback skips the worker's duplicate check, the event id and the result count.
+              fallbackOnMissing: false,
+              headers: links
+                ? {
+                    'List-Unsubscribe': `<${links.oneClickUrl}>`,
+                    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+                  }
+                : undefined,
+              template: Broadcast({
+                userName: target.name || 'there',
+                subject: plan.subject,
+                body: plan.body,
+                unsubscribeUrl: links?.pageUrl,
+                postalAddress,
+              }),
+            });
+          }),
+        );
+        await recordProgress(broadcastId, batch.length);
+      });
+    }
+
+    return { broadcastId, recipientCount };
+  },
+);
+
+export const broadcastFunctions = [broadcastFanoutFn];
+```
+
+Register it in `src/app/api/inngest/route.ts`: `import { broadcastFunctions } from '@/inngest/broadcast-functions';` and `functions: [...inngestFunctions, ...broadcastFunctions, ...sentryLoopFunctions]`.
+
+Other edits that go with it:
+
+- `src/lib/admin/comms-limits.ts` exports `IN_APP_BODY_MAX = 1000` and nothing else, so the browser composer can import it without pulling in `node:crypto`. `comms.ts` re-exports it.
+- `src/lib/admin/audit.ts`: `recordAudit(entry, outcome = 'succeeded')` takes an optional outcome, so the route can write `attempted` and `failed` rows.
+- `src/lib/email.ts`: `sendEmail` takes an optional `idempotencyKey` and passes it as Resend's second `send` argument only when set.
+- `src/components/cxd/cxd-navbar.tsx` and `src/components/dashboard-navbar.tsx`: the notification message uses `whitespace-pre-wrap break-words` instead of `line-clamp-2` when `notification.metadata?.broadcastId` is set.
 
 - [ ] **Step 5: Check routes and commit**
 
@@ -4726,6 +5061,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { AdminRequestError, adminPost } from '@/lib/admin/client';
+import { IN_APP_BODY_MAX } from '@/lib/admin/comms-limits';
 
 const FIELD = 'h-9 w-full rounded-md bg-white/5 border border-white/10 px-3 text-sm text-white';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -4734,6 +5070,14 @@ interface Preview {
   inAppCount: number;
   emailCount: number;
   problem: string | null;
+}
+
+/** True when the request may have reached the server's insert, so the key may be used up. */
+function outcomeUnknown(err: unknown): boolean {
+  if (!(err instanceof AdminRequestError)) return true; // the connection dropped
+  if (typeof err.data.broadcastId === 'string' || err.data.duplicate === true) return true;
+  // A server error with no JSON body says nothing about what happened.
+  return err.status >= 500 && Object.keys(err.data).length === 0;
 }
 
 export function Composer() {
@@ -4751,22 +5095,24 @@ export function Composer() {
   const [confirmText, setConfirmText] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  // One key per draft. A retry or a second click reuses it, so the server sends the
-  // broadcast once and answers the repeat with "already sent". It rotates only after a
-  // success or when the content changes. A failed or unknown send keeps it.
+  // After a send that failed or may have gone out, the form stays locked. Editing and
+  // pressing Send again would make a second broadcast to the same people.
+  const [locked, setLocked] = useState(false);
+  // One key per draft. It rotates only after a success or a deliberate new message.
   const sendKey = useRef<string | null>(null);
   // Stops a double click before the disabled state has rendered.
   const inFlight = useRef(false);
 
   const { payload, ignoredIds } = useMemo(() => {
     const tokens = userIds.split(/[\s,]+/).filter(Boolean);
-    const ids = Array.from(new Set(tokens.filter((value) => UUID.test(value))));
+    const valid = tokens.filter((value) => UUID.test(value));
+    const ids = Array.from(new Set(valid));
     const audience =
       audienceKind === 'plan' ? { kind: 'plan', plan }
       : audienceKind === 'users' ? { kind: 'users', userIds: ids }
       : { kind: 'all' };
     return {
-      ignoredIds: tokens.length - tokens.filter((value) => UUID.test(value)).length,
+      ignoredIds: tokens.length - valid.length,
       payload: {
         channels: [...(inApp ? ['in_app'] : []), ...(email ? ['email'] : [])],
         category,
@@ -4777,13 +5123,26 @@ export function Composer() {
     };
   }, [inApp, email, category, audienceKind, plan, userIds, subject, body]);
 
+  // A response for an older version of the form must not be applied to the current one.
+  const payloadJson = JSON.stringify(payload);
+  const currentPayload = useRef(payloadJson);
+  currentPayload.current = payloadJson;
+
   function changed() {
     setPreview(null);
     setTestToken('');
     setConfirmText('');
     setMessage(null);
-    // Different content is a different broadcast, so it gets its own key.
+  }
+
+  function startNew() {
+    changed();
+    setSubject('');
+    setBody('');
+    setUserIds('');
+    setLocked(false);
     sendKey.current = null;
+    router.refresh();
   }
 
   async function run(action: () => Promise<void>) {
@@ -4802,7 +5161,7 @@ export function Composer() {
   }
 
   async function send() {
-    if (inFlight.current) return;
+    if (inFlight.current || !preview) return;
     inFlight.current = true;
     setBusy(true);
     setMessage(null);
@@ -4811,25 +5170,31 @@ export function Composer() {
       await adminPost('/api/admin/comms/send', {
         ...payload,
         idempotencyKey: sendKey.current,
-        confirmCount: email ? count : undefined,
+        confirmCount: email ? preview.emailCount : undefined,
+        confirmInAppCount: inApp ? preview.inAppCount : undefined,
         testToken: testToken || undefined,
       });
       changed();
       setSubject('');
       setBody('');
-      setMessage({ ok: true, text: 'Sent. Delivery counts update in the history below.' });
+      sendKey.current = null;
+      setMessage({ ok: true, text: 'Queued. Delivery counts update in the history below.' });
       router.refresh();
     } catch (err) {
-      // The key is kept on purpose: another click returns "already sent" instead of sending twice.
-      if (err instanceof AdminRequestError) {
-        setMessage({ ok: false, text: err.message });
-        // A partial send has a history row; show it.
-        if (typeof err.data.broadcastId === 'string') router.refresh();
-      } else {
+      if (outcomeUnknown(err)) {
+        // The key is kept and the form locked: another send of the same draft is refused
+        // as "already sent", and an edited draft cannot start a second broadcast.
+        setLocked(true);
+        const known = err instanceof AdminRequestError && typeof err.data.error === 'string';
         setMessage({
           ok: false,
-          text: 'The connection dropped, so it is not known whether this went out. Check the history below before sending again.',
+          text: known
+            ? (err as Error).message
+            : 'It is not known whether this went out. Check the history below before doing anything else.',
         });
+        router.refresh();
+      } else {
+        setMessage({ ok: false, text: (err as Error).message });
       }
     } finally {
       inFlight.current = false;
@@ -4837,87 +5202,106 @@ export function Composer() {
     }
   }
 
-  const ready = payload.channels.length > 0 && !!payload.subject && !!payload.body;
+  const bodyTooLong = inApp && body.trim().length > IN_APP_BODY_MAX;
+  const ready = payload.channels.length > 0 && !!payload.subject && !!payload.body && !bodyTooLong;
   const count = preview?.emailCount ?? 0;
   const reach = preview ? preview.inAppCount + preview.emailCount : 0;
   const canSend =
-    !!preview && !preview.problem && reach > 0 && (!email || (!!testToken && confirmText === String(count)));
+    !!preview && !preview.problem && reach > 0 && !locked && (!email || (!!testToken && confirmText === String(count)));
 
   return (
     <div className="space-y-4 rounded-lg border border-white/10 p-4">
-      <fieldset className="flex gap-4 text-sm">
-        <legend className="mb-1 text-white/60">Channel</legend>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={inApp} onChange={(e) => { setInApp(e.target.checked); changed(); }} /> In-app
-        </label>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={email} onChange={(e) => { setEmail(e.target.checked); changed(); }} /> Email
-        </label>
-      </fieldset>
-
-      {email && (
-        <div className="space-y-1">
-          <label htmlFor="category" className="text-sm text-white/60">Email category</label>
-          <select id="category" className={FIELD} value={category} onChange={(e) => { setCategory(e.target.value as 'product' | 'service'); changed(); }}>
-            <option value="product">Product update (skips unsubscribed users)</option>
-            <option value="service">Service notice (reaches everyone)</option>
-          </select>
-          {category === 'service' && (
-            <p className="text-xs text-amber-300">Essential messages only, such as an outage or terms change. Never use this to promote anything.</p>
-          )}
+      {locked && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-rose-500/10 p-3 text-sm text-rose-300">
+          <span>This message is locked because it may already have gone out. Read the history before writing another.</span>
+          <Button size="sm" variant="outline" onClick={startNew}>Start a new message</Button>
         </div>
       )}
+      <fieldset disabled={locked || busy} className="space-y-4 border-0 p-0 m-0 min-w-0">
+        <div className="flex gap-4 text-sm">
+          <span className="text-white/60">Channel</span>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={inApp} onChange={(e) => { setInApp(e.target.checked); changed(); }} /> In-app
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={email} onChange={(e) => { setEmail(e.target.checked); changed(); }} /> Email
+          </label>
+        </div>
 
-      <div className="space-y-1">
-        <label htmlFor="audience" className="text-sm text-white/60">Audience</label>
-        <select id="audience" className={FIELD} value={audienceKind} onChange={(e) => { setAudienceKind(e.target.value as 'all' | 'plan' | 'users'); changed(); }}>
-          <option value="all">Everyone</option>
-          <option value="plan">One plan</option>
-          <option value="users">Chosen users</option>
-        </select>
-        {audienceKind === 'plan' && (
-          <select aria-label="Plan" className={FIELD} value={plan} onChange={(e) => { setPlan(e.target.value); changed(); }}>
-            <option value="free">Free</option>
-            <option value="pro">Pro</option>
-            <option value="lifetime">Lifetime</option>
-            <option value="beta_tester">Beta tester</option>
-          </select>
-        )}
-        {audienceKind === 'users' && (
-          <>
-            <Textarea
-              aria-label="User IDs"
-              placeholder="Paste user IDs from their user pages, separated by spaces or commas"
-              value={userIds}
-              onChange={(e) => { setUserIds(e.target.value); changed(); }}
-              className="bg-white/5 border-white/10"
-            />
-            {ignoredIds > 0 && (
-              <p role="alert" className="text-xs text-amber-300">
-                {ignoredIds} {ignoredIds === 1 ? 'entry is' : 'entries are'} not a valid user ID and will be ignored.
-              </p>
+        {email && (
+          <div className="space-y-1">
+            <label htmlFor="category" className="text-sm text-white/60">Email category</label>
+            <select id="category" className={FIELD} value={category} onChange={(e) => { setCategory(e.target.value as 'product' | 'service'); changed(); }}>
+              <option value="product">Product update (skips unsubscribed users)</option>
+              <option value="service">Service notice (reaches everyone)</option>
+            </select>
+            {category === 'service' && (
+              <p className="text-xs text-amber-300">Essential messages only, such as an outage or terms change. Never use this to promote anything.</p>
             )}
-          </>
+          </div>
         )}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="subject" className="text-sm text-white/60">Subject</label>
-        <input id="subject" className={FIELD} value={subject} onChange={(e) => { setSubject(e.target.value); changed(); }} />
-      </div>
-      <div className="space-y-1">
-        <label htmlFor="body" className="text-sm text-white/60">Message (blank line starts a new paragraph)</label>
-        <Textarea id="body" className="bg-white/5 border-white/10 min-h-40" value={body} onChange={(e) => { setBody(e.target.value); changed(); }} />
-      </div>
+        <div className="space-y-1">
+          <label htmlFor="audience" className="text-sm text-white/60">Audience</label>
+          <select id="audience" className={FIELD} value={audienceKind} onChange={(e) => { setAudienceKind(e.target.value as 'all' | 'plan' | 'users'); changed(); }}>
+            <option value="all">Everyone</option>
+            <option value="plan">One plan</option>
+            <option value="users">Chosen users</option>
+          </select>
+          {audienceKind === 'plan' && (
+            <select aria-label="Plan" className={FIELD} value={plan} onChange={(e) => { setPlan(e.target.value); changed(); }}>
+              <option value="free">Free</option>
+              <option value="pro">Pro</option>
+              <option value="lifetime">Lifetime</option>
+              <option value="beta_tester">Beta tester</option>
+            </select>
+          )}
+          {audienceKind === 'users' && (
+            <>
+              <Textarea
+                aria-label="User IDs"
+                placeholder="Paste user IDs from their user pages, separated by spaces or commas"
+                value={userIds}
+                onChange={(e) => { setUserIds(e.target.value); changed(); }}
+                className="bg-white/5 border-white/10"
+              />
+              {ignoredIds > 0 && (
+                <p role="alert" className="text-xs text-amber-300">
+                  {ignoredIds} {ignoredIds === 1 ? 'entry is' : 'entries are'} not a valid user ID and will be ignored.
+                </p>
+              )}
+            </>
+          )}
+        </div>
 
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={busy || !ready || (audienceKind === 'users' && (payload.audience as { userIds: string[] }).userIds.length === 0)}
-        onClick={() => run(async () => setPreview(await adminPost<Preview>('/api/admin/comms/preview', payload)))}
-      >
-        Check recipients
-      </Button>
+        <div className="space-y-1">
+          <label htmlFor="subject" className="text-sm text-white/60">Subject</label>
+          <input id="subject" className={FIELD} value={subject} maxLength={200} onChange={(e) => { setSubject(e.target.value); changed(); }} />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="body" className="text-sm text-white/60">Message (blank line starts a new paragraph)</label>
+          <Textarea id="body" className="bg-white/5 border-white/10 min-h-40" value={body} onChange={(e) => { setBody(e.target.value); changed(); }} />
+          {inApp && (
+            <p className={`text-xs ${bodyTooLong ? 'text-rose-400' : 'text-white/40'}`} aria-live="polite">
+              {body.trim().length} / {IN_APP_BODY_MAX} characters for in-app
+            </p>
+          )}
+        </div>
+
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!ready || (audienceKind === 'users' && (payload.audience as { userIds: string[] }).userIds.length === 0)}
+          onClick={() => run(async () => {
+            const sent = payloadJson;
+            const result = await adminPost<Preview>('/api/admin/comms/preview', payload);
+            // The form changed while this was loading, so these counts describe something else.
+            if (currentPayload.current === sent) setPreview(result);
+          })}
+        >
+          Check recipients
+        </Button>
+      </fieldset>
 
       {preview && (
         <div className="space-y-3 rounded-md bg-white/[0.03] p-3 text-sm">
@@ -4929,9 +5313,12 @@ export function Composer() {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy}
+                disabled={busy || locked}
                 onClick={() => run(async () => {
+                  const sent = payloadJson;
                   const result = await adminPost<{ testToken: string }>('/api/admin/comms/test', payload);
+                  // A token for older content would be refused at send time; do not keep it.
+                  if (currentPayload.current !== sent) return;
                   setTestToken(result.testToken);
                   setMessage({ ok: true, text: 'Test sent to your own email.' });
                 })}
@@ -4941,7 +5328,7 @@ export function Composer() {
               {testToken && (
                 <div className="space-y-1">
                   <label htmlFor="confirm" className="text-white/60">Type {count} to confirm. A sent email cannot be recalled.</label>
-                  <input id="confirm" inputMode="numeric" className={FIELD} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+                  <input id="confirm" inputMode="numeric" className={FIELD} value={confirmText} disabled={locked} onChange={(e) => setConfirmText(e.target.value)} />
                 </div>
               )}
             </>
@@ -4971,7 +5358,7 @@ export default async function AdminCommsPage() {
   await requirePagePermission('comms.send');
   const { data, error } = await getSupabaseAdmin()
     .from('broadcasts')
-    .select('id, subject, channels, category, recipient_count, sent_count, failed_count, created_at')
+    .select('id, subject, channels, category, recipient_count, enqueued_count, sent_count, failed_count, failure_note, created_at')
     .order('created_at', { ascending: false })
     .limit(50);
   // A failed query must not read as "Nothing sent yet": throw so the error boundary shows it.
@@ -4991,6 +5378,7 @@ export default async function AdminCommsPage() {
               <TableHead>Subject</TableHead>
               <TableHead>Channels</TableHead>
               <TableHead>Recipients</TableHead>
+              <TableHead>Queued</TableHead>
               <TableHead>Emails delivered</TableHead>
               <TableHead>Failed</TableHead>
             </TableRow>
@@ -4999,9 +5387,13 @@ export default async function AdminCommsPage() {
             {rows.map((row) => (
               <TableRow key={row.id}>
                 <TableCell>{formatDate(row.created_at)}</TableCell>
-                <TableCell>{row.subject}</TableCell>
+                <TableCell>
+                  {row.subject}
+                  {row.failure_note && <p className="text-xs text-rose-400">{row.failure_note}</p>}
+                </TableCell>
                 <TableCell>{(row.channels as string[]).join(', ')}</TableCell>
                 <TableCell>{row.recipient_count}</TableCell>
+                <TableCell>{row.enqueued_count}</TableCell>
                 <TableCell>{row.sent_count}</TableCell>
                 <TableCell>{row.failed_count}</TableCell>
               </TableRow>
@@ -5033,7 +5425,7 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 
 - [ ] **Step 1: Filter the realtime subscription**
 
-Replace the realtime effect in `use-notifications.ts`, and add `useId` to the react import and `const instanceId = useId();` as the first line of the hook. The realtime client returns the existing channel for a repeated name, so two mounted hooks (both navbars use it) would share and then tear down one channel; the per-instance name prevents that. The `onAuthStateChange` listener keeps a sign-in after mount subscribed, and the `cancelled` flag stops StrictMode's first effect from leaking a channel:
+Replace the realtime effect in `use-notifications.ts`, and add `import * as Sentry from '@sentry/nextjs';` and `useId` to the react import and `const instanceId = useId();` as the first line of the hook. The realtime client returns the existing channel for a repeated name, so two mounted hooks (both navbars use it) would share and then tear down one channel; the per-instance name prevents that. The `onAuthStateChange` listener keeps a sign-in after mount subscribed, and the `cancelled` flag stops StrictMode's first effect from leaking a channel:
 
 ```ts
   // Subscribe to realtime updates, only for rows that belong to the signed-in user.
@@ -5076,6 +5468,9 @@ Replace the realtime effect in `use-notifications.ts`, and add `useId` to the re
 
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) subscribeFor(user.id);
+    }).catch((err) => {
+      // The auth listener below still subscribes once a session is known.
+      Sentry.captureException(err, { tags: { area: 'notifications', step: 'get-user' } });
     });
 
     // A sign-in after mount, or a switch of account, moves the subscription to that user.

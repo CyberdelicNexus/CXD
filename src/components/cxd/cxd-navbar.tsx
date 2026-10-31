@@ -972,7 +972,7 @@ export function CXDNavbar() {
                                   <div className="w-2 h-2 bg-violet-500 rounded-full flex-shrink-0 mt-1 shadow-[0_0_8px_rgba(139,92,246,0.8)]" />
                                 )}
                               </div>
-                              <p className="text-xs text-white/50 line-clamp-2 mb-2 leading-relaxed">
+                              <p className={`text-xs text-white/50 mb-2 leading-relaxed ${notification.metadata?.broadcastId ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}`}>
                                 {notification.message}
                               </p>
                               <div className="flex items-center justify-between">

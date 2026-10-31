@@ -420,7 +420,7 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                                <p className={`text-xs text-muted-foreground mt-0.5 ${notification.metadata?.broadcastId ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}`}>
                                   {notification.message}
                                 </p>
                                 <span className="text-[10px] text-muted-foreground/70 mt-1 block">

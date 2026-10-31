@@ -3,6 +3,14 @@ import * as Sentry from '@sentry/nextjs';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { verifyUnsubscribeToken } from '@/lib/email-unsubscribe';
 
+// A link opened in a browser or by a mail scanner changes nothing: it only forwards to the
+// confirmation page, where a person presses the button.
+export async function GET(request: Request) {
+  const token = new URL(request.url).searchParams.get('token') ?? '';
+  const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://canvas.cyberdelic.design').replace(/\/+$/, '');
+  return NextResponse.redirect(`${base}/unsubscribe?token=${encodeURIComponent(token)}`, 303);
+}
+
 // Handles both the page's button and a mailbox's one-click List-Unsubscribe-Post,
 // so it reads the token from the query and ignores the body.
 export async function POST(request: Request) {

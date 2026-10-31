@@ -50,6 +50,6 @@ export async function withAudit<T>(entry: AuditEntry, action: () => Promise<T>):
   return result;
 }
 
-export async function recordAudit(entry: AuditEntry): Promise<void> {
-  await insertAudit(entry, 'succeeded');
+export async function recordAudit(entry: AuditEntry, outcome: 'attempted' | 'succeeded' | 'failed' = 'succeeded'): Promise<void> {
+  await insertAudit(entry, outcome);
 }

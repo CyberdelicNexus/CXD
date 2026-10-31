@@ -1,15 +1,28 @@
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { signUnsubscribeToken } from '@/lib/email-unsubscribe';
-import { filterRecipients, type Audience, type Category, type RecipientRow } from './comms';
+import { collectPages, filterRecipients, type Audience, type Category, type RecipientRow } from './comms';
 
-/** Throws when the lookup fails. A failed lookup must never read as "no recipients" or send anything. */
+const PAGE_SIZE = 1000;
+
+/**
+ * Throws when the lookup fails. A failed lookup must never read as "no recipients" or send anything.
+ * PostgREST caps a response at 1000 rows, so this pages in a stable order until a short page returns.
+ */
 export async function resolveRecipients(audience: Audience, category: Category) {
-  const { data, error } = await getSupabaseAdmin().rpc('admin_recipients', {
-    p_plan: audience.kind === 'plan' ? audience.plan : null,
-    p_user_ids: audience.kind === 'users' ? audience.userIds : null,
-  });
-  if (error) throw new Error(`recipient lookup failed: ${error.code ?? 'error'}: ${error.message}`);
-  return filterRecipients((data ?? []) as RecipientRow[], category);
+  const admin = getSupabaseAdmin();
+  const rows = await collectPages<RecipientRow>(async (from, to) => {
+    const { data, error } = await admin
+      .rpc('admin_recipients', {
+        p_plan: audience.kind === 'plan' ? audience.plan : null,
+        p_user_ids: audience.kind === 'users' ? audience.userIds : null,
+      })
+      .range(from, to);
+    if (error) throw new Error(`recipient lookup failed: ${error.code ?? 'error'}: ${error.message}`);
+    return (data ?? []) as RecipientRow[];
+  }, PAGE_SIZE);
+  // One row per user, whatever the joins return.
+  const unique = Array.from(new Map(rows.map((row) => [row.user_id, row])).values());
+  return filterRecipients(unique, category);
 }
 
 /**

@@ -48,10 +48,11 @@ export const sendEmailFn = inngest.createFunction(
     retries: 4, // ~4 attempts over ~1 hour with exponential backoff
     // A broadcast enqueues one event per recipient; stay inside Resend's rate limit.
     throttle: { limit: 2, period: '1s' },
-    // Broadcast events run after everything else, so a bulk send cannot hold up
-    // a password reset, receipt or support reply queued behind it. A broadcast
-    // run is treated as enqueued 600 seconds later than it was.
-    priority: { run: 'event.data.broadcastId != null ? -600 : 0' },
+    // Everything that is not a broadcast gets a 600 second head start in the queue,
+    // so a bulk send cannot hold up a password reset, receipt or support reply.
+    // Priority only reorders runs that are waiting; a negative value would be a
+    // fixed delay, so broadcasts stay at 0 and the rest are raised.
+    priority: { run: 'event.data.broadcastId != null ? 0 : 600' },
     triggers: [{ event: 'email/send' }],
     onFailure: async ({ event }) => {
       const { broadcastId, ticketId, actorId, userId, emailKind } = event.data.event.data as EmailSendData;
@@ -109,7 +110,7 @@ export const sendEmailFn = inngest.createFunction(
     if (userId && emailKind) {
       const isDuplicate = await step.run('check-email-log', async () => {
         const supabase = getSupabaseAdmin();
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('email_log')
           .select('id')
           .or(
@@ -117,8 +118,10 @@ export const sendEmailFn = inngest.createFunction(
               ? `and(user_id.eq.${userId},email_kind.eq.${emailKind}),stripe_event_id.eq.${stripeEventId}`
               : `and(user_id.eq.${userId},email_kind.eq.${emailKind})`,
           )
-          .maybeSingle();
-        return !!data;
+          .limit(1);
+        // A failed read is not "not sent": throw so the step retries.
+        if (error) throw new Error(`email_log read failed: ${error.code ?? 'error'}: ${error.message}`);
+        return (data?.length ?? 0) > 0;
       });
 
       if (isDuplicate) {
@@ -129,7 +132,17 @@ export const sendEmailFn = inngest.createFunction(
     // Send via Resend. step.run gives this its own retry boundary so a
     // Resend hiccup doesn't re-trigger the dedupe check above.
     await step.run('send-via-resend', async () => {
-      await sendEmail({ to, subject, html, replyTo, headers });
+      const result = await sendEmail({
+        to,
+        subject,
+        html,
+        replyTo,
+        headers,
+        // Resend drops a repeat of this send, so a retry after a lost response emails no one twice.
+        idempotencyKey: broadcastId && userId ? `broadcast-${broadcastId}-${userId}` : undefined,
+      });
+      // sendEmail returns null when RESEND_API_KEY is missing. A broadcast must not count that as sent.
+      if (broadcastId && result === null) throw new Error('email provider is not configured');
     });
 
     // Log after successful send (kind-tracked sends only). If the log
@@ -144,7 +157,8 @@ export const sendEmailFn = inngest.createFunction(
           stripe_event_id: stripeEventId ?? null,
         });
         if (error && error.code !== '23505') {
-          // 23505 = unique violation = race with parallel send; benign.
+          // 23505 cannot happen today: email_log has no unique constraint on these columns.
+          // Kept in case one is added, where it would mean a parallel send logged first.
           throw error;
         }
       });

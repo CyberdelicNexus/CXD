@@ -206,9 +206,15 @@ Requires `comms.send`.
 
 ### Sending
 
-`broadcasts`: `id`, `sender_id`, `channels`, `category`, `audience`, `subject`, `body`, `recipient_count`, `sent_count`, `failed_count`, `created_at`. Service-role-only.
+`broadcasts`: `id`, `idempotency_key` (unique), `sender_id`, `channels`, `category`, `audience`, `subject`, `body`, `recipient_count`, `enqueued_count`, `sent_count`, `failed_count`, `failure_note`, `created_at`. Service-role-only.
 
-The route resolves recipients, then enqueues one Inngest event per email and returns. It calls `enqueueEmail` with `emailKind = 'broadcast:<id>'` so the worker's `email_log` check prevents duplicates per user, and with `fallbackOnMissing: false`, because the direct-send fallback skips that check and the headers. The worker throttles to Resend's rate limit and updates the broadcast's counts.
+The send route validates, resolves recipients, compares the previewed counts, writes the `attempted` audit row, inserts the `broadcasts` row (the unique idempotency key means a double submit or a retry is refused with "already sent"), sends one `broadcast/fanout` Inngest event with the fixed id `broadcast-fanout-<broadcastId>`, and returns "queued". If the event cannot be sent, the failure is written on the row and the audit row is `failed`.
+
+The `broadcast-fanout` job (`src/inngest/broadcast-functions.ts`) reads the row and re-resolves recipients, so someone who unsubscribed since the preview is skipped and `recipient_count` becomes the number actually reachable. It then works in durable steps, one per chunk: in-app rows use a fixed notification id per recipient, and emails go through `enqueueEmail` with `emailKind = 'broadcast-<id>'`, the event id `broadcast-<id>-<userId>` and `fallbackOnMissing: false`, because the direct-send fallback skips the duplicate check, the event id and the result count. The send worker also passes the same value as Resend's idempotency key. Each chunk adds to `enqueued_count`. If the job gives up, `onFailure` counts everything not yet enqueued as failed, stores a `failure_note` and writes a `failed` audit row.
+
+The send worker gives other mail a +600 priority over broadcast mail (a negative value would be a fixed delay) and throttles to Resend's rate limit. It adds to `sent_count`, or to `failed_count` when an email was not sent; a broadcast email that was logged as sent is not counted as failed. A broadcast send never counts a missing email provider key as sent.
+
+The composer keeps one idempotency key per draft. After a failed or unknown send it locks the form and offers "Start a new message", so an edit cannot create a second broadcast to the same people. In-app bodies are limited to 1000 characters.
 
 ### Out of scope
 

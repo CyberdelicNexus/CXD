@@ -2,7 +2,10 @@
  * Who a broadcast reaches, and that the test send matches the content sent.
  * Run: npx tsx src/lib/admin/__verify__/broadcast-audience.verify.ts
  */
-import { filterRecipients, signContent, verifyContent, type RecipientRow } from '../comms';
+import {
+  IN_APP_BODY_MAX, chunk, collectPages, contentSchema, filterRecipients, inAppBodyFits, notificationId,
+  signContent, verifyContent, type RecipientRow,
+} from '../comms';
 
 let passed = 0;
 let failed = 0;
@@ -36,5 +39,39 @@ check('edited category refused', !verifyContent(token, { ...content, category: '
 check('other sender refused', !verifyContent(token, content, 'user-2', 'secret'));
 check('junk refused', !verifyContent('junk', content, 'user-1', 'secret'));
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+const longBody = 'x'.repeat(IN_APP_BODY_MAX + 1);
+check('long in-app body refused', !inAppBodyFits({ channels: ['in_app'], body: longBody }));
+check('long email-only body allowed', inAppBodyFits({ channels: ['email'], body: longBody }));
+check('body at the cap allowed', inAppBodyFits({ channels: ['in_app', 'email'], body: 'x'.repeat(IN_APP_BODY_MAX) }));
+const base = { category: 'service', audience: { kind: 'all' }, subject: 'S' };
+check('schema refuses long in-app body', !contentSchema.safeParse({ ...base, channels: ['in_app'], body: longBody }).success);
+check('schema accepts long email body', contentSchema.safeParse({ ...base, channels: ['email'], body: longBody }).success);
+
+const n1 = notificationId('b1', 'u1');
+check('notification id is stable', n1 === notificationId('b1', 'u1'));
+check('notification id differs by user', n1 !== notificationId('b1', 'u2'));
+check('notification id differs by broadcast', n1 !== notificationId('b2', 'u1'));
+check('notification id is a uuid', /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(n1));
+
+check('chunk splits evenly', JSON.stringify(chunk([1, 2, 3, 4, 5], 2)) === '[[1,2],[3,4],[5]]');
+check('chunk of nothing is nothing', chunk([], 3).length === 0);
+
+async function paging() {
+  const source = Array.from({ length: 2500 }, (_, i) => i);
+  const calls: number[] = [];
+  const got = await collectPages(async (from, to) => { calls.push(from); return source.slice(from, to + 1); }, 1000);
+  check('paging reads past the row cap', got.length === 2500 && got[2499] === 2499);
+  check('paging stops on a short page', calls.length === 3);
+  const exactSource = Array.from({ length: 2000 }, (_, i) => i);
+  const exact = await collectPages(async (from, to) => exactSource.slice(from, to + 1), 1000);
+  check('paging an exact multiple ends on an empty page', exact.length === 2000);
+  let threw = false;
+  await collectPages(async () => { throw new Error('boom'); }, 1000).catch(() => { threw = true; });
+  check('a failed page throws', threw);
+}
+
+paging().then(() => {
+  console.log(`
+${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+});

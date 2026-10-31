@@ -8,7 +8,7 @@ export default async function AdminCommsPage() {
   await requirePagePermission('comms.send');
   const { data, error } = await getSupabaseAdmin()
     .from('broadcasts')
-    .select('id, subject, channels, category, recipient_count, sent_count, failed_count, created_at')
+    .select('id, subject, channels, category, recipient_count, enqueued_count, sent_count, failed_count, failure_note, created_at')
     .order('created_at', { ascending: false })
     .limit(50);
   // A failed query must not read as "Nothing sent yet": throw so the error boundary shows it.
@@ -28,6 +28,7 @@ export default async function AdminCommsPage() {
               <TableHead>Subject</TableHead>
               <TableHead>Channels</TableHead>
               <TableHead>Recipients</TableHead>
+              <TableHead>Queued</TableHead>
               <TableHead>Emails delivered</TableHead>
               <TableHead>Failed</TableHead>
             </TableRow>
@@ -36,9 +37,13 @@ export default async function AdminCommsPage() {
             {rows.map((row) => (
               <TableRow key={row.id}>
                 <TableCell>{formatDate(row.created_at)}</TableCell>
-                <TableCell>{row.subject}</TableCell>
+                <TableCell>
+                  {row.subject}
+                  {row.failure_note && <p className="text-xs text-rose-400">{row.failure_note}</p>}
+                </TableCell>
                 <TableCell>{(row.channels as string[]).join(', ')}</TableCell>
                 <TableCell>{row.recipient_count}</TableCell>
+                <TableCell>{row.enqueued_count}</TableCell>
                 <TableCell>{row.sent_count}</TableCell>
                 <TableCell>{row.failed_count}</TableCell>
               </TableRow>

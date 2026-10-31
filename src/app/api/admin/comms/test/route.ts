@@ -26,15 +26,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: problem ?? 'Email needs EMAIL_UNSUBSCRIBE_SECRET (or CRON_SECRET) to be set.' }, { status: 409 });
   }
 
+  // The same headers and links a real product update carries, so the test shows what recipients get.
+  const links = category === 'product' ? unsubscribeLinks(gate.staff.userId) : null;
   try {
     await enqueueEmail({
       to: gate.staff.email,
       subject: `[Test] ${subject}`,
+      headers: links
+        ? {
+            'List-Unsubscribe': `<${links.oneClickUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          }
+        : undefined,
       template: Broadcast({
         userName: 'there',
         subject,
         body: text,
-        unsubscribeUrl: category === 'product' ? unsubscribeLinks(gate.staff.userId).pageUrl : undefined,
+        unsubscribeUrl: links?.pageUrl,
         postalAddress: category === 'product' ? process.env.EMAIL_POSTAL_ADDRESS : undefined,
       }),
     });
