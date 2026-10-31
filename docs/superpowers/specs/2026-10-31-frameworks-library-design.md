@@ -85,7 +85,7 @@ export interface TemplateDefinition {
 ### 4.3 Project (`src/types/cxd-schema.ts`)
 
 ```ts
-frameworkIds?: string[];  // framework template ids this project was built from or had inserted; deduped, max 5, insertion order
+frameworkIds?: string[];  // framework template ids this project was built from or had inserted; deduped, max 5, most recent last
 ```
 
 - `createProject(name, ownerId, initialElements?, initialEdges?, options?: { frameworkIds?: string[] })`: the new fifth argument is optional so existing callers are untouched. `createDefaultProject` takes the same optional field.
@@ -134,7 +134,7 @@ The templates page's `handleCreate` passes `{ frameworkIds: [tpl.id] }` when the
 ## 6. Assistant integration
 
 - `AIProjectContext` (`src/types/ai-types.ts`) gains `frameworkIds?: string[]`. `getFullProjectContext` in `src/utils/ai-context-aggregator.ts` copies it from the project.
-- The chat route (`src/app/api/ai/chat/route.ts`) resolves briefs **server-side** with `getFrameworkBrief` and appends a block to the system prompt in general, core and canvas modes. Client text is never trusted as a brief. At most three briefs, in insertion order.
+- The chat route (`src/app/api/ai/chat/route.ts`) resolves briefs **server-side** with `getFrameworkBrief` and appends a block to the system prompt in general, core and canvas modes. Client text is never trusted as a brief. At most three briefs: the three most recent, in insertion order. Re-inserting a framework makes it the most recent.
 
 ```
 ## Active frameworks

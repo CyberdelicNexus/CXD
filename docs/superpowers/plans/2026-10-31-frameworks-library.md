@@ -1533,7 +1533,8 @@ check('contains the brief', one.includes(getFrameworkBrief('fw-premortem')!));
 check('starts with the heading', one.startsWith('## Active frameworks'));
 const many = getActiveFrameworksBlock(EXPECTED_IDS);
 check(`caps at ${MAX_ACTIVE_FRAMEWORK_BRIEFS} briefs`, (many.match(/^### /gm) ?? []).length === MAX_ACTIVE_FRAMEWORK_BRIEFS);
-check('keeps insertion order', many.indexOf('### Iceberg Model') < many.indexOf('### Causal Loop Map'));
+check('keeps the most recent, in insertion order', !many.includes('### Iceberg Model') && many.indexOf('### Narrative Messaging Arc') < many.indexOf('### Pirate Metrics Funnel') && many.includes('### Partner & Channel Ecosystem Map'));
+check('unknown ids do not take a slot', getActiveFrameworksBlock(['fw-premortem', 'nope', 'nope2', 'nope3']).includes('### Pre-mortem'));
 ```
 
 Run: `npx tsx src/lib/__verify__/frameworks-registry.verify.ts`
@@ -1568,7 +1569,7 @@ Add after `getCanvasSystemPrompt`:
 export const MAX_ACTIVE_FRAMEWORK_BRIEFS = 3;
 
 /**
- * Coaching briefs for the frameworks a project was built from. Ids come from
+ * Coaching briefs for the most recent frameworks on a project. Ids come from
  * the client; the briefs are resolved here from the static catalog so no
  * method text is ever trusted from the request. Unknown ids are ignored.
  */
@@ -1577,7 +1578,7 @@ export function getActiveFrameworksBlock(frameworkIds: readonly string[] | undef
   const frameworks = frameworkIds
     .map((id) => getFrameworkTemplate(id))
     .filter((t): t is NonNullable<ReturnType<typeof getFrameworkTemplate>> => !!t)
-    .slice(0, MAX_ACTIVE_FRAMEWORK_BRIEFS);
+    .slice(-MAX_ACTIVE_FRAMEWORK_BRIEFS);
   if (frameworks.length === 0) return '';
   const sections = frameworks
     .map((t) => `### ${t.name} (${t.framework!.origin})\n${t.framework!.assistantBrief}`)
