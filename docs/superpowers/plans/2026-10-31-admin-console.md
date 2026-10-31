@@ -5029,30 +5029,42 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 
 **Files:**
 - Modify: `src/hooks/use-notifications.ts:35-58`, `src/lib/notifications.ts`, `docs/notifications-guide.md`
-- Delete: `supabase/functions/push-notification/`
+- Keep: `supabase/functions/push-notification/` (owner decision, 2026-10-31)
 
 - [ ] **Step 1: Filter the realtime subscription**
 
-Replace the realtime effect in `use-notifications.ts`:
+Replace the realtime effect in `use-notifications.ts`, and add `useId` to the react import and `const instanceId = useId();` as the first line of the hook. The realtime client returns the existing channel for a repeated name, so two mounted hooks (both navbars use it) would share and then tear down one channel; the per-instance name prevents that. The `onAuthStateChange` listener keeps a sign-in after mount subscribed, and the `cancelled` flag stops StrictMode's first effect from leaking a channel:
 
 ```ts
-  // Subscribe to realtime updates
+  // Subscribe to realtime updates, only for rows that belong to the signed-in user.
+  // The navbars each mount this hook, and the realtime client returns the existing
+  // channel for a repeated name, so a second hook instance would share, and then
+  // tear down, the first one's channel. A per-instance name keeps them apart.
   useEffect(() => {
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let subscribedUser: string | null = null;
     let cancelled = false;
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (cancelled || !user) return;
+    const unsubscribe = () => {
+      if (channel) void supabase.removeChannel(channel);
+      channel = null;
+      subscribedUser = null;
+    };
+
+    const subscribeFor = (userId: string) => {
+      if (cancelled || userId === subscribedUser) return;
+      unsubscribe();
+      subscribedUser = userId;
       channel = supabase
-        .channel(`notifications-${user.id}`)
+        .channel(`notifications-${userId}-${instanceId}`)
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'notifications',
-            filter: `user_id=eq.${user.id}`,
+            filter: `user_id=eq.${userId}`,
           },
           () => {
             // Reload notifications when any change occurs
@@ -5060,13 +5072,32 @@ Replace the realtime effect in `use-notifications.ts`:
           }
         )
         .subscribe();
+    };
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) subscribeFor(user.id);
+    });
+
+    // A sign-in after mount, or a switch of account, moves the subscription to that user.
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      const userId = session?.user?.id;
+      if (!userId) {
+        unsubscribe();
+        return;
+      }
+      if (userId !== subscribedUser) {
+        subscribeFor(userId);
+        // The mount load already covers the session that was there at start.
+        if (event === 'SIGNED_IN') loadNotifications();
+      }
     });
 
     return () => {
       cancelled = true;
-      if (channel) supabase.removeChannel(channel);
+      authListener.subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [loadNotifications]);
+  }, [loadNotifications, instanceId]);
 ```
 
 Postgres changes cannot filter DELETE events, so clearing on one device no longer updates another open device until its next reload. That is acceptable: the clearing device already updates its own state.
@@ -5079,10 +5110,10 @@ Delete `createGlobalAnnouncement` from `src/lib/notifications.ts`, including its
 
 The owner decided on 2026-10-31 to keep the live `supabase-functions-push-notification` function for now, so leave `supabase/functions/push-notification/` and its curl example in place.
 
-In `docs/notifications-guide.md`, delete the section that shows `createGlobalAnnouncement` (around line 268). Add in its place:
+In `docs/notifications-guide.md`, replace the section `### 4. Global Announcement (Admin Only)` with a `### 4. Sending announcements` section (a `##` heading would break the numbered examples):
 
 ```markdown
-## Sending announcements
+### 4. Sending announcements
 
 Send announcements from the admin console at `/admin/comms`. It writes one notification per recipient, so each user has their own read state. `is_global` rows are not visible under the current RLS policies.
 ```
