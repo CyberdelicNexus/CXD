@@ -51,7 +51,7 @@ export function gateStatus(
 export function isBanned(bannedUntil: string | null | undefined, now: Date): boolean {
   if (!bannedUntil) return false;
   const t = Date.parse(bannedUntil);
-  return Number.isFinite(t) && t > now.getTime();
+  return !Number.isFinite(t) || t > now.getTime();
 }
 
 export type SuspendBlock = 'self' | 'owner' | 'role_holder';

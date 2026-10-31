@@ -46,6 +46,7 @@ const now = new Date('2026-11-01T00:00:00Z');
 check('future ban is banned', isBanned('2030-01-01T00:00:00Z', now));
 check('past ban is not', !isBanned('2020-01-01T00:00:00Z', now));
 check('no ban is not', !isBanned(null, now));
+check('unparsable ban is banned', isBanned('not-a-date', now));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

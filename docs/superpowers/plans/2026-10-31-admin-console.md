@@ -141,6 +141,7 @@ const now = new Date('2026-11-01T00:00:00Z');
 check('future ban is banned', isBanned('2030-01-01T00:00:00Z', now));
 check('past ban is not', !isBanned('2020-01-01T00:00:00Z', now));
 check('no ban is not', !isBanned(null, now));
+check('unparsable ban is banned', isBanned('not-a-date', now));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
@@ -207,7 +208,7 @@ export function gateStatus(
 export function isBanned(bannedUntil: string | null | undefined, now: Date): boolean {
   if (!bannedUntil) return false;
   const t = Date.parse(bannedUntil);
-  return Number.isFinite(t) && t > now.getTime();
+  return !Number.isFinite(t) || t > now.getTime();
 }
 
 export type SuspendBlock = 'self' | 'owner' | 'role_holder';
@@ -595,22 +596,19 @@ git -c user.name="Jose" -c user.email="connect@cyberdelic.nexus" commit -m "feat
 
 ```ts
 /**
- * Fails if any /api/admin handler does not call the gate first, so a new route
- * cannot ship unprotected.
+ * Fails if any /api/admin route file exports a handler that does not call the
+ * gate first, or exports a handler in a form this check cannot verify. Next
+ * loads route modules with `import * as userland`, so every export form counts.
  * Run: npx tsx src/lib/admin/__verify__/admin-routes.verify.ts
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 
 const API = join(process.cwd(), 'src', 'app', 'api');
 const ROOT = join(API, 'admin');
-const METHODS = 'GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS';
-const ASYNC_HANDLER = new RegExp(String.raw`^export async function (${METHODS})\b[^{]*\{[ \t]*$`);
-const ANY_EXPORT = [
-  new RegExp(String.raw`export\s+(?:async\s+)?function\s+(${METHODS})\b`, 'g'),
-  new RegExp(String.raw`export\s+(?:const|let|var)\s+(${METHODS})\b`, 'g'),
-];
-const REEXPORT = /export\s*(?:type\s*)?\{([^}]*)\}/g;
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+const ROUTE_FILE = /^route\.(ts|tsx|js|jsx)$/;
 const GATE = /^const gate = await requirePermission\('[a-z]+\.[a-z]+'\);$/;
 const GATE_RETURN = 'if (!gate.ok) return gate.response;';
 
@@ -619,9 +617,18 @@ function routes(dir: string): string[] {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) found = found.concat(routes(path));
-    else if (name === 'route.ts' || name === 'route.tsx') found.push(path);
+    else if (ROUTE_FILE.test(name)) found.push(path);
   }
   return found;
+}
+
+function hasExport(node: ts.Node): boolean {
+  return !!ts.canHaveModifiers(node) &&
+    !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+}
+
+function isAsync(node: ts.FunctionDeclaration): boolean {
+  return !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
 }
 
 if (!existsSync(API)) {
@@ -631,39 +638,51 @@ if (!existsSync(API)) {
 
 let handlers = 0;
 const failures: string[] = [];
-for (const file of existsSync(ROOT) ? routes(ROOT) : []) {
-  const source = readFileSync(file, 'utf8');
-  const lines = source.split(/\r?\n/);
 
-  // Any export form other than `export async function X` is refused.
-  const exported = new Set<string>();
-  for (const re of ANY_EXPORT) for (const m of Array.from(source.matchAll(re))) exported.add(m[1]);
-  for (const m of Array.from(source.matchAll(REEXPORT))) {
-    for (const part of m[1].split(',')) {
-      const name = part.trim().split(/\s+as\s+/).pop()!.trim();
-      if (new RegExp(`^(${METHODS})$`).test(name)) exported.add(name);
+function checkFile(file: string) {
+  const text = readFileSync(file, 'utf8');
+  const kind = file.endsWith('x') ? ts.ScriptKind.TSX : file.endsWith('.js') ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  const fail = (message: string) => failures.push(`${file}: ${message}`);
+
+  for (const statement of source.statements) {
+    if (ts.isExportAssignment(statement)) {
+      fail('`export default` or `export =` is not allowed in a route file');
+    } else if (ts.isExportDeclaration(statement)) {
+      if (!statement.exportClause) {
+        fail('`export *` is not allowed in a route file');
+      } else if (ts.isNamespaceExport(statement.exportClause)) {
+        fail('`export * as` is not allowed in a route file');
+      } else {
+        for (const element of statement.exportClause.elements) {
+          if (METHODS.includes(element.name.text)) fail(`${element.name.text} is exported by name; declare it as an exported async function`);
+        }
+      }
+    } else if (ts.isVariableStatement(statement) && hasExport(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) fail('destructured exports are not allowed in a route file');
+        else if (METHODS.includes(declaration.name.text)) fail(`${declaration.name.text} must be an exported async function declaration`);
+      }
+    } else if (hasExport(statement) && ts.getModifiers(statement as ts.HasModifiers)?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+      fail('`export default` is not allowed in a route file');
+    } else if (hasExport(statement)) {
+      const name = (statement as { name?: ts.Identifier }).name?.text;
+      if (ts.isFunctionDeclaration(statement) && name && METHODS.includes(name)) {
+        handlers++;
+        const body = statement.body;
+        const first = body?.statements[0]?.getText(source) ?? '';
+        const second = body?.statements[1]?.getText(source) ?? '';
+        if (!isAsync(statement)) fail(`${name} must be async`);
+        if (!GATE.test(first)) fail(`${name}: first statement is "${first}", expected the requirePermission gate`);
+        else if (second !== GATE_RETURN) fail(`${name}: second statement is "${second}", expected the gate return`);
+      } else if (name && METHODS.includes(name)) {
+        fail(`${name} must be an exported async function declaration`);
+      }
     }
   }
-
-  const checked = new Set<string>();
-  lines.forEach((line, i) => {
-    const m = ASYNC_HANDLER.exec(line);
-    if (!m) return;
-    handlers++;
-    checked.add(m[1]);
-    const rest = lines.slice(i + 1);
-    const first = rest.findIndex((l) => l.trim() !== '');
-    const second = first < 0 ? -1 : rest.slice(first + 1).findIndex((l) => l.trim() !== '');
-    const a = first < 0 ? '' : rest[first].trim();
-    const b = second < 0 ? '' : rest.slice(first + 1)[second].trim();
-    if (!GATE.test(a)) failures.push(`${file} ${m[1]}: first statement is "${a}"`);
-    else if (b !== GATE_RETURN) failures.push(`${file} ${m[1]}: next line is "${b}", expected the gate return`);
-  });
-
-  for (const name of Array.from(exported)) {
-    if (!checked.has(name)) failures.push(`${file} ${name}: exported in a form other than "export async function ${name}(...) {"`);
-  }
 }
+
+for (const file of existsSync(ROOT) ? routes(ROOT) : []) checkFile(file);
 
 console.log(`${handlers} handlers checked`);
 failures.forEach((f) => console.error('  ✗', f));
@@ -671,9 +690,8 @@ process.exit(failures.length ? 1 : 0);
 ```
 
 Run: `npx tsx src/lib/admin/__verify__/admin-routes.verify.ts`
-Expected: `0 handlers checked`, exit 0, because no admin routes exist yet. It exits 1 if `src/app/api` is missing (wrong directory). It checks every handler in `route.ts` and `route.tsx`: the first statement must be the gate line, the next must be `if (!gate.ok) return gate.response;`, and any export form other than `export async function X` fails. Every later route must pass this script.
+Expected: `0 handlers checked`, exit 0, because no admin routes exist yet. The script parses each `route.ts/tsx/js/jsx` with the TypeScript compiler and exits 1 if `src/app/api` is missing. A handler passes only as an exported async function declaration whose first statement is the `requirePermission` gate and whose second is `if (!gate.ok) return gate.response;`. It fails on `export *`, `export default`, destructured exports, and any HTTP method exported by name, as a variable, or via `export { } [from]`. Plain exports such as `export const dynamic = 'force-dynamic'` are allowed. Every later route must pass this script.
 
-Handler signatures in `src/app/api/admin/` must not contain `{` before the body. Write them as `export async function POST(request: Request, context: Ctx)`, with `type Ctx = { params: { id: string } }` at the top of the file.
 
 - [ ] **Step 2: Write the role endpoint**
 
