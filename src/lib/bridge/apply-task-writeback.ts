@@ -261,10 +261,10 @@ async function broadcastUpdate(projectId: string, update: Uint8Array): Promise<v
 // ─── project_data derivation ────────────────────────────────────────────────
 
 /**
- * Mirrors `mergeProjectWithDoc` in src/lib/yjs/supabase-persistence.ts (not
- * exported there — re-implemented here rather than modifying that shared
- * file, since C2 §5 restricts this workstream to its own designated bridge
- * files). Keep in sync if that logic changes.
+ * Mirrors `mergeProjectWithDoc` in src/lib/yjs/supabase-persistence.ts.
+ * Re-implemented here while that function was private, since C2 §5 restricted
+ * this workstream to its own designated bridge files; it is exported now but
+ * this copy has not been swapped for it. Keep in sync if that logic changes.
  *
  * The Y.Doc is authoritative for everything it stores; fields that live only
  * in the base project_data JSON (comments/versions/okrs already round-trip

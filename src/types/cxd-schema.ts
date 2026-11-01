@@ -325,10 +325,39 @@ export interface CXDProject {
   currentWizardStep: number;
   framingCanvasPopulated?: boolean; // true once framingToCanvas seeded the canvas (populate-once guard)
   framingType?: string; // FramingTypeId from framing-types.ts; undefined = not chosen yet (defaults to 'experience')
+  /** Framework template ids this project was created from or had inserted.
+   *  Deduped, insertion order, capped at MAX_PROJECT_FRAMEWORKS. The chat
+   *  route turns these into coaching briefs. */
+  frameworkIds?: string[];
+}
+
+export const MAX_PROJECT_FRAMEWORKS = 5;
+
+export interface CreateProjectOptions {
+  frameworkIds?: string[];
+}
+
+/** Dedupe (first occurrence wins position), drop blanks, keep the last MAX_PROJECT_FRAMEWORKS. */
+export function normalizeFrameworkIds(ids: readonly string[] | undefined): string[] | undefined {
+  if (!ids || ids.length === 0) return undefined;
+  const unique = Array.from(new Set(ids.filter((id) => typeof id === 'string' && id.length > 0)));
+  return unique.length ? unique.slice(-MAX_PROJECT_FRAMEWORKS) : undefined;
+}
+
+/** Append id as the most recent framework: any earlier occurrence is removed first. */
+export function appendFrameworkId(ids: readonly string[] | undefined, id: string): string[] | undefined {
+  return normalizeFrameworkIds([...(ids ?? []).filter((existing) => existing !== id), id]);
 }
 
 // Default project factory
-export function createDefaultProject(id: string, name: string, ownerId: string, initialElements?: import('./canvas-elements').CanvasElement[], initialEdges?: import('./canvas-elements').CanvasEdge[]): CXDProject {
+export function createDefaultProject(
+  id: string,
+  name: string,
+  ownerId: string,
+  initialElements?: import('./canvas-elements').CanvasElement[],
+  initialEdges?: import('./canvas-elements').CanvasEdge[],
+  options?: CreateProjectOptions,
+): CXDProject {
   return {
     id,
     name,
@@ -337,6 +366,7 @@ export function createDefaultProject(id: string, name: string, ownerId: string, 
     updatedAt: new Date().toISOString(),
     schemaVersion: CXD_SCHEMA_VERSION,
     ownerId,
+    frameworkIds: normalizeFrameworkIds(options?.frameworkIds),
 
     // New wizard sections
     intentionCore: {

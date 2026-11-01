@@ -1001,7 +1001,7 @@ export function LandingPage() {
               </div>
               <p className="text-white/60 text-sm mb-6">Perfect for exploring and designing your first experience.</p>
               <ul className="space-y-3 mb-8">
-                {['1 canvas · 100 objects, unlimited structure', 'Project Management Tools', '4 Quickstart templates (18 more with Pro)', '25 AI credits/month + 50 to start', 'Public share links'].map((f, i) => (
+                {['1 canvas · 100 objects, unlimited structure', 'Project Management Tools', 'Quickstart templates and 3 free frameworks', '25 AI credits/month + 50 to start', 'Public share links'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
                     <Check className="w-4 h-4 text-white/50" />
                     <span className="text-white/70">{f}</span>
@@ -1034,7 +1034,7 @@ export function LandingPage() {
                 <span>Included in your Reality Weaver · Cyberdelic Nexus Membership</span>
               </a>
               <ul className="space-y-3 mb-8">
-                {['Unlimited canvases & objects', 'All 22 templates + AI Composer', 'Premium AI models · 500 credits/mo', 'Calendar sync', 'Team collaboration (5)', 'Priority support'].map((f, i) => (
+                {['Unlimited canvases & objects', 'Full template and framework catalog + AI Composer', 'Premium AI models · 500 credits/mo', 'Calendar sync', 'Team collaboration (5)', 'Priority support'].map((f, i) => (
                   <li key={i} className="flex items-center gap-3 text-sm">
                     <Check className="w-4 h-4 text-violet-400" />
                     <span className="text-white/70">{f}</span>

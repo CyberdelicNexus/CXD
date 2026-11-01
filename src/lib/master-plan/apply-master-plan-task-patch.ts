@@ -268,8 +268,8 @@ async function broadcastUpdate(projectId: string, update: Uint8Array): Promise<v
 }
 
 // Mirrors mergeProjectionOverBase in bridge/apply-task-writeback.ts — same
-// shape, independently maintained per that module's own note about not
-// sharing the private mergeProjectWithDoc in supabase-persistence.ts.
+// shape, independently maintained per that module's own note about its copy
+// of mergeProjectWithDoc in supabase-persistence.ts.
 const PROTECTED_META_FIELDS = new Set(['id', 'name', 'ownerId', 'createdAt', 'schemaVersion']);
 
 function mergeProjectionOverBase(base: CXDProject | null, fromDoc: CXDProject, savedAt: string): CXDProject {

@@ -235,7 +235,13 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
 
     const { elements: freshElements, edges: freshEdges } = instantiateTemplate(selectedTemplate);
 
-    const projectId = createProject(templateProjectName.trim(), userId, freshElements, freshEdges);
+    const projectId = createProject(
+      templateProjectName.trim(),
+      userId,
+      freshElements,
+      freshEdges,
+      selectedTemplate.framework ? { frameworkIds: [selectedTemplate.id] } : undefined,
+    );
     setTemplateProjectName('');
     setSelectedTemplate(null);
     setTemplateDialogOpen(false);

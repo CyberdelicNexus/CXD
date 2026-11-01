@@ -305,7 +305,7 @@ export function TemplatesShowcase() {
           transition={{ duration: 0.6 }}
           className="text-center text-white/60 text-sm md:text-base mb-12 max-w-2xl mx-auto"
         >
-          22 templates, one for every part of the framework. Not empty boxes — tinted zones with guidance,
+          Templates for every part of the framework, plus a library of proven methods. Not empty boxes — tinted zones with guidance,
           connected flows, and cards already styled for you to edit.
         </motion.p>
 

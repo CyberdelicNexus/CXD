@@ -4,7 +4,7 @@ import * as Sentry from "@sentry/nextjs";
 import { createClient } from "@/supabase/server";
 import { getSupabaseAdmin } from "@/supabase/admin";
 import { getModelConfig, getModelInstance, getModelInstanceByModelId, MODEL_ID_MAP } from "@/lib/ai/provider-registry";
-import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt, getCanvasSystemPrompt } from "@/lib/ai/system-prompts";
+import { getFaceSystemPrompt, getCoreSystemPrompt, getGeneralSystemPrompt, getCanvasSystemPrompt, getActiveFrameworksBlock } from "@/lib/ai/system-prompts";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { canBringOwnKeys, creditCostFor, resolveSelectedModel, type ModelId } from "@/lib/ai-credit-config";
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
@@ -250,6 +250,12 @@ export async function POST(request: Request) {
       systemPrompt = getFaceSystemPrompt(faceKey, faceContext, projectContext);
     } else {
       systemPrompt = getGeneralSystemPrompt(projectContext);
+    }
+
+    // Frameworks the project was built from: coaching briefs, resolved server-side.
+    const frameworksBlock = getActiveFrameworksBlock(projectContext.frameworkIds);
+    if (frameworksBlock) {
+      systemPrompt += '\n\n' + frameworksBlock;
     }
 
     // Append knowledge context if available

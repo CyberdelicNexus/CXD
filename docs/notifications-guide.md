@@ -262,25 +262,9 @@ function validateStateTraitAlignment(states: any, traits: any) {
 }
 ```
 
-### 4. Global Announcement (Admin Only)
+### 4. Sending announcements
 
-```typescript
-import { createGlobalAnnouncement } from '@/lib/notifications';
-
-// Only admins should call this
-async function announceNewFeature() {
-  await createGlobalAnnouncement(
-    'New Feature: Real-time Collaboration',
-    'You can now collaborate with team members in real-time on the same canvas',
-    'update',
-    { 
-      featureLink: '/docs/collaboration',
-      releaseDate: '2024-02-01' 
-    },
-    30 // 30 days
-  );
-}
-```
+Send announcements from the admin console at `/admin/comms`. It writes one notification per recipient, so each user has their own read state. `is_global` rows are not visible under the current RLS policies.
 
 ### 5. Share Link Generated
 

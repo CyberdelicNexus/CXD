@@ -4,6 +4,26 @@ import * as Sentry from "@sentry/nextjs";
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
+// The admin password-reset link carries a one-time token_hash. It travels in the
+// URL fragment, but redact it anywhere it could still appear: request URLs,
+// breadcrumbs, transaction names and span data.
+const TOKEN_HASH = /token_hash([=:]\s*"?)[^&#"\s]+/g;
+
+function scrub<T>(value: T, depth = 0): T {
+  if (depth > 8) return value;
+  if (typeof value === "string") return value.replace(TOKEN_HASH, "token_hash$1[redacted]") as unknown as T;
+  if (Array.isArray(value)) return value.map((item) => scrub(item, depth + 1)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      // SDK internals: copy through so the walk does not enter them.
+      out[key] = depth === 0 && key === "sdkProcessingMetadata" ? item : scrub(item, depth + 1);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 if (dsn) {
   Sentry.init({
     dsn,
@@ -21,8 +41,13 @@ if (dsn) {
       Sentry.replayIntegration({
         maskAllText: true,
         blockAllMedia: true,
+        // Replay payloads can carry URLs too: scrub them the same way.
+        beforeAddRecordingEvent: (event) => scrub(event),
       }),
     ],
+
+    beforeSend: (event) => scrub(event),
+    beforeSendTransaction: (event) => scrub(event),
 
     // Dev console noise off.
     debug: false,

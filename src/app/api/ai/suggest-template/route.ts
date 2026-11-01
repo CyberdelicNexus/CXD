@@ -7,7 +7,7 @@ import { getSupabaseAdmin } from "@/supabase/admin";
 import { getModelInstance, getModelConfig } from "@/lib/ai/provider-registry";
 import { checkRateLimit, recordRequest, acquireConcurrencySlot, releaseConcurrencySlot } from "@/lib/ai/rate-limiter";
 import { getDailyCreditCap } from "@/lib/ai/cost-tracking";
-import { TEMPLATES, FREE_TEMPLATE_IDS } from "@/lib/templates";
+import { COMPOSER_TEMPLATES, FREE_TEMPLATE_IDS } from "@/lib/templates";
 import { getTemplateAccess } from "@/lib/plans";
 import type { AIProviderKey } from "@/types/ai-types";
 import { CREDIT_COSTS } from "@/types/ai-types";
@@ -122,8 +122,8 @@ export async function POST(request: Request) {
     // must never recommend a template the caller can't insert.
     const availableTemplates =
       getTemplateAccess(callerPlan) === "full"
-        ? TEMPLATES
-        : TEMPLATES.filter((t) => FREE_TEMPLATE_IDS.has(t.id));
+        ? COMPOSER_TEMPLATES
+        : COMPOSER_TEMPLATES.filter((t) => FREE_TEMPLATE_IDS.has(t.id));
     const catalog = availableTemplates.map(
       (t) => `- id: ${t.id} | ${t.name} (${t.category}) — ${t.description}`,
     ).join("\n");

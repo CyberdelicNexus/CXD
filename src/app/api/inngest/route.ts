@@ -5,9 +5,10 @@
 import { serve } from 'inngest/next';
 import { inngest } from '@/inngest/client';
 import { inngestFunctions } from '@/inngest/functions';
+import { broadcastFunctions } from '@/inngest/broadcast-functions';
 import { sentryLoopFunctions } from '@/inngest/sentry-functions';
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [...inngestFunctions, ...sentryLoopFunctions],
+  functions: [...inngestFunctions, ...broadcastFunctions, ...sentryLoopFunctions],
 });

@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
-import { Crown } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Crown, Info } from 'lucide-react';
 import { useCXDStore } from '@/store/cxd-store';
-import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds, isTemplateFree } from '@/lib/templates';
+import { TEMPLATES, TEMPLATE_CATEGORY_LABELS, instantiateTemplate, templateBounds, templateInsertSurface, templateInsertOffset, offsetTemplateElements, isTemplateFree, FRAMEWORK_STAGE_LABELS } from '@/lib/templates';
+import { FrameworkDetailDialog } from '@/components/cxd/framework-detail-dialog';
 import type { TemplateCategory, TemplateDefinition } from '@/lib/templates';
 import { useSubscription } from '@/hooks/use-subscription';
 import { UpgradeModal } from '@/components/upgrade-modal';
+import { TemplateMiniPreview } from '@/components/cxd/template-mini-preview';
 import {
   Dialog,
   DialogContent,
@@ -27,84 +30,8 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'experience', label: 'Experience Design' },
   { key: 'product-brand', label: 'Product & Brand' },
   { key: 'creative', label: 'Creative & General' },
+  { key: 'framework', label: 'Frameworks' },
 ];
-
-/** Per-element-type preview colors — makes each template's shape legible at a glance. */
-const PREVIEW_STYLE: Record<string, { fill: string; stroke: string }> = {
-  container: { fill: 'rgba(139,92,246,0.12)', stroke: 'rgba(139,92,246,0.40)' },
-  board: { fill: 'rgba(236,72,153,0.30)', stroke: 'rgba(236,72,153,0.55)' },
-  image: { fill: 'rgba(34,211,238,0.22)', stroke: 'rgba(34,211,238,0.50)' },
-  freeform: { fill: 'rgba(167,139,250,0.25)', stroke: 'rgba(167,139,250,0.45)' },
-  shape: { fill: 'rgba(52,211,153,0.25)', stroke: 'rgba(52,211,153,0.50)' },
-  experienceBlock: { fill: 'rgba(96,165,250,0.30)', stroke: 'rgba(96,165,250,0.60)' },
-  table: { fill: 'rgba(249,115,22,0.22)', stroke: 'rgba(249,115,22,0.50)' },
-  text: { fill: 'rgba(255,255,255,0.10)', stroke: 'rgba(255,255,255,0.18)' },
-};
-
-/**
- * Miniature of the template's ROOT layout. Draws every box-like element (not
- * just containers — several templates are pure node graphs with none) plus its
- * edges, so each entry previews its actual composition. Interior elements
- * (pre-seeded board contents) are excluded; they live in another board's space.
- */
-function TemplateMiniPreview({ template }: { template: TemplateDefinition }) {
-  const boxes = template.elements.filter(
-    (el) => !el.boardId && el.type !== 'line' && el.type !== 'connector' && el.width > 0 && el.height > 0,
-  );
-  if (boxes.length === 0) return null;
-
-  const minX = Math.min(...boxes.map((c) => c.x));
-  const minY = Math.min(...boxes.map((c) => c.y));
-  const maxX = Math.max(...boxes.map((c) => c.x + c.width));
-  const maxY = Math.max(...boxes.map((c) => c.y + c.height));
-  const bw = maxX - minX || 1;
-  const bh = maxY - minY || 1;
-  const unit = Math.max(bw, bh);
-
-  const byId = new Map(boxes.map((b) => [b.id, b]));
-  const center = (id: string) => {
-    const b = byId.get(id);
-    return b ? { x: b.x - minX + b.width / 2, y: b.y - minY + b.height / 2 } : null;
-  };
-
-  return (
-    <svg viewBox={`0 0 ${bw} ${bh}`} className="w-full h-20 mb-2" preserveAspectRatio="xMidYMid meet">
-      {(template.edges ?? []).map((e) => {
-        if (e.boardId) return null;
-        const a = center(e.fromNodeId);
-        const b = center(e.toNodeId);
-        if (!a || !b) return null;
-        return (
-          <line
-            key={e.id}
-            x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-            stroke="rgba(167,139,250,0.35)"
-            strokeWidth={unit * 0.005}
-          />
-        );
-      })}
-      {boxes.map((c) => {
-        const s = PREVIEW_STYLE[c.type] ?? PREVIEW_STYLE.text;
-        return (
-          <rect
-            key={c.id}
-            x={c.x - minX}
-            y={c.y - minY}
-            width={c.width}
-            height={c.height}
-            rx={unit * 0.012}
-            fill={s.fill}
-            stroke={s.stroke}
-            strokeWidth={unit * 0.005}
-            {...(c.type === 'container'
-              ? { strokeDasharray: `${unit * 0.015} ${unit * 0.01}` }
-              : {})}
-          />
-        );
-      })}
-    </svg>
-  );
-}
 
 export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps) {
   const addCanvasElements = useCXDStore((s) => s.addCanvasElements);
@@ -112,6 +39,21 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
   const setPendingCanvasFitBounds = useCXDStore((s) => s.setPendingCanvasFitBounds);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [detailTemplate, setDetailTemplate] = useState<TemplateDefinition | null>(null);
+  const addProjectFramework = useCXDStore((s) => s.addProjectFramework);
+
+  // Don't let a detail dialog left open when the picker closes reappear on reopen.
+  useEffect(() => {
+    if (!open) setDetailTemplate(null);
+  }, [open]);
+  // UpgradeModal has no Escape handling of its own; while it is up, Escape
+  // closes it (and only it: the picker's onEscapeKeyDown is suppressed below).
+  useEffect(() => {
+    if (!showUpgrade) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowUpgrade(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showUpgrade]);
   // 'quickstart' (free) or 'full' — the whole catalog stays visible either
   // way; free users just get Pro badges on non-quickstart templates.
   const { templateAccess } = useSubscription();
@@ -127,6 +69,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
   const handleSelectTemplate = (templateId: string) => {
     const tpl = TEMPLATES.find((t) => t.id === templateId);
     if (!tpl) return;
+    setDetailTemplate(null);
 
     if (isLocked(templateId)) {
       setShowUpgrade(true);
@@ -139,16 +82,93 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
     // then add elements after dialog unmount completes
     onClose();
     requestAnimationFrame(() => {
-      addCanvasElements(elements);
-      if (edges.length > 0) addCanvasEdges(edges);
-      // Auto-frame the inserted template so the user sees it land instead of
-      // hunting for it (consumed once by the canvas's pending-fit effect).
-      const bbox = templateBounds(elements);
-      if (bbox) setPendingCanvasFitBounds(bbox);
+      // Templates use fixed coordinates: read the surface now, so a canvas that
+      // already has content gets the template beside it rather than on top.
+      const { getCurrentProject, activeBoardId } = useCXDStore.getState();
+      const existing = templateInsertSurface(getCurrentProject()?.canvasLayout?.elements ?? [], activeBoardId);
+      const { dx, dy } = templateInsertOffset(existing, elements);
+      const placed = offsetTemplateElements(elements, dx, dy);
+
+      // Blocked by the quota cap: nothing landed, so don't record the framework
+      // or the assistant would coach something that isn't on the canvas.
+      if (addCanvasElements(placed)) {
+        if (edges.length > 0) addCanvasEdges(edges);
+        if (tpl.framework) addProjectFramework(tpl.id);
+        // Auto-frame the inserted template so the user sees it land instead of
+        // hunting for it (consumed once by the canvas's pending-fit effect).
+        const bbox = templateBounds(placed);
+        if (bbox) setPendingCanvasFitBounds(bbox);
+      }
       // Safety: ensure Radix didn't leave pointer-events: none on body
       document.body.style.pointerEvents = '';
     });
   };
+
+  // Frameworks sit under one header in the All view; stage shows as a pill on
+  // each card, no sub-grouping, to keep the picker compact.
+  const plainTemplates = filtered.filter((t) => t.category !== 'framework');
+  const frameworkTemplates = filtered.filter((t) => t.category === 'framework');
+
+  const renderGrid = (list: TemplateDefinition[]) => (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {list.map((tpl) => {
+        const locked = isLocked(tpl.id);
+        return (
+          <div key={tpl.id} className="relative">
+            {tpl.framework && (
+              <button
+                type="button"
+                aria-label={`About ${tpl.name}`}
+                title="How this framework works"
+                onClick={(e) => { e.stopPropagation(); setDetailTemplate(tpl); }}
+                className="absolute top-3 left-3 z-10 w-6 h-6 rounded-full bg-black/60 border border-white/15 text-white/60 hover:text-purple-200 hover:border-purple-400/40 flex items-center justify-center"
+              >
+                <Info className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => handleSelectTemplate(tpl.id)}
+              className={`relative w-full flex flex-col rounded-xl border p-4 text-left transition-all group ${
+                locked
+                  ? 'border-white/10 bg-white/[0.02] hover:border-amber-400/40 hover:bg-amber-500/5'
+                  : 'border-white/10 bg-white/[0.02] hover:border-purple-500/40 hover:bg-purple-500/5'
+              }`}
+            >
+              {locked && (
+                <span className="absolute top-3 right-3 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
+                  <Crown className="w-3 h-3" />
+                  Pro
+                </span>
+              )}
+              <TemplateMiniPreview template={tpl} />
+              <div className="flex items-start gap-3 w-full">
+                <span className="text-xl shrink-0">{tpl.emoji}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors flex items-center flex-wrap gap-x-1.5 gap-y-1 min-w-0">
+                    <span className="truncate">{tpl.name}</span>
+                    {tpl.framework && (
+                      <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/30 text-[9px] font-semibold text-purple-200 uppercase tracking-wide">
+                        {FRAMEWORK_STAGE_LABELS[tpl.framework.stage]}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{tpl.description}</p>
+                </div>
+              </div>
+              <span className={`mt-2 text-xs transition-colors self-end ${
+                locked
+                  ? 'text-amber-400/80 group-hover:text-amber-300'
+                  : 'text-purple-400 group-hover:text-purple-300'
+              }`}>
+                {locked ? 'Upgrade to add' : 'Add →'}
+              </span>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }} modal={false}>
@@ -156,6 +176,7 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
         className="bg-zinc-900/95 border-white/10 text-white sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => { if (showUpgrade) e.preventDefault(); }}
       >
         <DialogHeader>
           <DialogTitle>Add a Template</DialogTitle>
@@ -184,55 +205,43 @@ export function TemplatePickerModal({ open, onClose }: TemplatePickerModalProps)
 
         {/* Template grid */}
         <div className="overflow-y-auto flex-1 -mx-1 px-1 pb-2">
-          <div className="grid grid-cols-2 gap-3">
-            {filtered.map((tpl) => {
-              const locked = isLocked(tpl.id);
-              return (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  onClick={() => handleSelectTemplate(tpl.id)}
-                  className={`relative flex flex-col rounded-xl border p-4 text-left transition-all group ${
-                    locked
-                      ? 'border-white/10 bg-white/[0.02] hover:border-amber-400/40 hover:bg-amber-500/5'
-                      : 'border-white/10 bg-white/[0.02] hover:border-purple-500/40 hover:bg-purple-500/5'
-                  }`}
-                >
-                  {locked && (
-                    <span className="absolute top-3 right-3 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
-                      <Crown className="w-3 h-3" />
-                      Pro
-                    </span>
-                  )}
-                  <TemplateMiniPreview template={tpl} />
-                  <div className="flex items-start gap-3 w-full">
-                    <span className="text-xl shrink-0">{tpl.emoji}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-white group-hover:text-purple-200 transition-colors truncate">
-                        {tpl.name}
-                      </p>
-                      <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{tpl.description}</p>
-                    </div>
-                  </div>
-                  <span className={`mt-2 text-xs transition-colors self-end ${
-                    locked
-                      ? 'text-amber-400/80 group-hover:text-amber-300'
-                      : 'text-purple-400 group-hover:text-purple-300'
-                  }`}>
-                    {locked ? 'Upgrade to add' : 'Add →'}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          {plainTemplates.length > 0 && renderGrid(plainTemplates)}
+          {frameworkTemplates.length > 0 && (
+            <>
+              {activeFilter === 'all' && (
+                <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mt-5 mb-3">
+                  {TEMPLATE_CATEGORY_LABELS.framework}
+                </h3>
+              )}
+              {renderGrid(frameworkTemplates)}
+            </>
+          )}
         </div>
       </DialogContent>
 
-      <UpgradeModal
-        isOpen={showUpgrade}
-        onClose={() => setShowUpgrade(false)}
-        feature="templates"
+      {/* `open && …` unmounts the detail dialog's content whenever the picker
+          closes (Esc/X), so it can never be orphaned on screen. */}
+      <FrameworkDetailDialog
+        template={detailTemplate}
+        open={open && detailTemplate !== null}
+        onClose={() => setDetailTemplate(null)}
+        mode="insert"
+        locked={detailTemplate ? isLocked(detailTemplate.id) : false}
+        onInsert={() => detailTemplate && handleSelectTemplate(detailTemplate.id)}
+        onUpgrade={() => { setDetailTemplate(null); setShowUpgrade(true); }}
       />
+
+      {/* Portaled to body so it lands after the picker's own portal in the DOM;
+          both are z-50, so DOM order decides which paints on top. */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <UpgradeModal
+            isOpen={showUpgrade}
+            onClose={() => setShowUpgrade(false)}
+            feature="templates"
+          />,
+          document.body,
+        )}
     </Dialog>
   );
 }

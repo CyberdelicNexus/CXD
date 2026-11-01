@@ -15,6 +15,10 @@ export async function sendEmail(options: {
   subject: string;
   html: string;
   from?: string;
+  replyTo?: string;
+  headers?: Record<string, string>;
+  /** Resend drops a repeat send with the same key, so a retried request cannot email twice. */
+  idempotencyKey?: string;
 }) {
   const resend = getResend();
   if (!resend) {
@@ -27,7 +31,9 @@ export async function sendEmail(options: {
     to: options.to,
     subject: options.subject,
     html: options.html,
-  });
+    replyTo: options.replyTo,
+    headers: options.headers,
+  }, options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : undefined);
 
   if (error) {
     console.error('Failed to send email:', error);

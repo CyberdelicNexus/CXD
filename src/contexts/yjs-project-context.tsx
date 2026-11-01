@@ -552,6 +552,9 @@ function createBridgeCallbacks(projectId: string): BridgeCallbacks {
         if (field === 'currentWizardStep') return { ...p, currentWizardStep: value as number };
         if (field === 'framingCanvasPopulated') return { ...p, framingCanvasPopulated: value as boolean };
         if (field === 'framingType') return { ...p, framingType: value as string };
+        if (field === 'frameworkIds') {
+          return { ...p, frameworkIds: Array.isArray(value) ? (value as string[]) : undefined };
+        }
         if (field === 'shareToken') return { ...p, shareToken: value as string };
         return p;
       });
