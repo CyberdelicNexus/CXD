@@ -74,7 +74,8 @@ const mix = classifyUsers(
 );
 check('paying counts live Stripe and owned lifetime', mix.paying === 3);
 check('no trialing in this mix', mix.trialing === 0);
-check('comped never counts as paying', mix.comped === 29);
+check('comped never counts as paying', mix.comped === 28);
+check('a canceled Stripe row is not comped', mix.comped === 28);
 const mix2 = classifyUsers(
   [
     row('lifetime', 'active', false, 'stripe', 2),
@@ -91,7 +92,20 @@ check('trialing counted apart', mix2.trialing === 3);
 check('trialing is not comped', mix2.comped === 0);
 check('free excludes trialing', mix2.free === 13);
 
-check('free includes users with no subscription row', mix.free === 13);
+check('free includes users with no subscription row', mix.free === 14);
+
+const mix3 = classifyUsers(
+  [
+    row('pro', 'unpaid', true, 'stripe', 2),
+    row('pro', 'paused', true, 'stripe', 1),
+    row('pro', 'incomplete', true, null, 1),
+    row('pro', 'active', false, 'admin', 1),
+    row('pro', 'active', false, 'nexus', 1),
+  ],
+  10,
+);
+check('unpaid and paused are not comped', mix3.comped === 2);
+check('lapsed Stripe customers fall into free', mix3.paying === 0 && mix3.free === 8);
 
 const clear = { openTickets: 0, highPriorityTickets: 0, unresolvedErrors: 0, failedPayments: 0, failedEmails: 0 };
 check('all zero is clear', isAllClear({ ok: true, data: clear }));

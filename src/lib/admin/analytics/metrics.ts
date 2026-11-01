@@ -85,12 +85,19 @@ function isPaying(row: PlanRow): boolean {
   return row.plan_id === 'lifetime' && (row.plan_source === null || row.plan_source === 'stripe');
 }
 
+/** Comped: a non-free plan granted without Stripe, or by Nexus or an admin. A lapsed Stripe customer is neither paying nor comped. */
+function isComped(row: PlanRow): boolean {
+  if (row.plan_id === 'free') return false;
+  return !row.has_stripe_subscription || row.plan_source === 'nexus' || row.plan_source === 'admin';
+}
+
 function isTrialing(row: PlanRow): boolean {
   return row.has_stripe_subscription && row.status === 'trialing';
 }
 
 /**
- * Comped is any non-free plan nobody pays for, so beta testers never read as revenue.
+ * Comped is a non-free plan nobody pays for by design, so beta testers never read as revenue.
+ * Lapsed Stripe customers (canceled, unpaid, paused, incomplete) fall into the free remainder.
  * Trialing Stripe subscriptions are counted apart: not yet paying, and not comped.
  */
 export function classifyUsers(rows: PlanRow[], totalUsers: number) {
@@ -100,7 +107,7 @@ export function classifyUsers(rows: PlanRow[], totalUsers: number) {
   for (const row of rows) {
     if (isPaying(row)) paying += row.n;
     else if (isTrialing(row)) trialing += row.n;
-    else if (row.plan_id !== 'free') comped += row.n;
+    else if (isComped(row)) comped += row.n;
   }
   return { paying, trialing, comped, free: Math.max(totalUsers - paying - trialing - comped, 0) };
 }

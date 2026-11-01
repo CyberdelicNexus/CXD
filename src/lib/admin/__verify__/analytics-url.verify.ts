@@ -17,6 +17,8 @@ check('share token with query', redactAnalyticsUrl(`${base}/cxd/share/abc123?x=1
 check('share trailing slash keeps shape', redactAnalyticsUrl(`${base}/cxd/share/abc/`) === `${base}/cxd/share/[token]/`);
 check('relative share path', redactAnalyticsUrl('/cxd/share/abc') === '/cxd/share/[token]');
 check('overview id replaced', redactAnalyticsUrl(`${base}/cxd/overview/proj-1`) === `${base}/cxd/overview/[id]`);
+check("admin user id replaced", redactAnalyticsUrl(`${base}/admin/users/8f2c-uuid?tab=x`) === `${base}/admin/users/[id]`);
+check("admin support id replaced", redactAnalyticsUrl(`${base}/admin/support/123`) === `${base}/admin/support/[id]`);
 check('invite query stripped', redactAnalyticsUrl(`${base}/invite?token=SECRET`) === `${base}/invite`);
 check('unsubscribe query stripped', redactAnalyticsUrl(`${base}/unsubscribe?t=SECRET&e=a@b.c`) === `${base}/unsubscribe`);
 check('fragment stripped', redactAnalyticsUrl(`${base}/dashboard#access_token=SECRET`) === `${base}/dashboard`);

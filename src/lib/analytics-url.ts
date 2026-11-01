@@ -9,6 +9,8 @@ const REDACTED_PATHS: { pattern: RegExp; replacement: string }[] = [
   { pattern: /^(\/cxd\/share\/)[^/]+/i, replacement: '$1[token]' },
   // Project ids identify a customer's canvas.
   { pattern: /^(\/cxd\/overview\/)[^/]+/i, replacement: '$1[id]' },
+  // Admin pages for one user or ticket: the id is another person's record.
+  { pattern: /^(\/admin\/(?:users|support)\/)[^/]+/i, replacement: '$1[id]' },
 ];
 
 export function redactAnalyticsUrl(url: string): string {

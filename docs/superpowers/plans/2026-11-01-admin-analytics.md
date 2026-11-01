@@ -144,7 +144,8 @@ const mix = classifyUsers(
 );
 check('paying counts live Stripe and owned lifetime', mix.paying === 3);
 check('no trialing in this mix', mix.trialing === 0);
-check('comped never counts as paying', mix.comped === 29);
+check('comped never counts as paying', mix.comped === 28);
+check('a canceled Stripe row is not comped', mix.comped === 28);
 const mix2 = classifyUsers(
   [
     row('lifetime', 'active', false, 'stripe', 2),
@@ -161,7 +162,20 @@ check('trialing counted apart', mix2.trialing === 3);
 check('trialing is not comped', mix2.comped === 0);
 check('free excludes trialing', mix2.free === 13);
 
-check('free includes users with no subscription row', mix.free === 13);
+check('free includes users with no subscription row', mix.free === 14);
+
+const mix3 = classifyUsers(
+  [
+    row('pro', 'unpaid', true, 'stripe', 2),
+    row('pro', 'paused', true, 'stripe', 1),
+    row('pro', 'incomplete', true, null, 1),
+    row('pro', 'active', false, 'admin', 1),
+    row('pro', 'active', false, 'nexus', 1),
+  ],
+  10,
+);
+check('unpaid and paused are not comped', mix3.comped === 2);
+check('lapsed Stripe customers fall into free', mix3.paying === 0 && mix3.free === 8);
 
 const clear = { openTickets: 0, highPriorityTickets: 0, unresolvedErrors: 0, failedPayments: 0, failedEmails: 0 };
 check('all zero is clear', isAllClear({ ok: true, data: clear }));
@@ -287,12 +301,19 @@ function isPaying(row: PlanRow): boolean {
   return row.plan_id === 'lifetime' && (row.plan_source === null || row.plan_source === 'stripe');
 }
 
+/** Comped: a non-free plan granted without Stripe, or by Nexus or an admin. A lapsed Stripe customer is neither paying nor comped. */
+function isComped(row: PlanRow): boolean {
+  if (row.plan_id === 'free') return false;
+  return !row.has_stripe_subscription || row.plan_source === 'nexus' || row.plan_source === 'admin';
+}
+
 function isTrialing(row: PlanRow): boolean {
   return row.has_stripe_subscription && row.status === 'trialing';
 }
 
 /**
- * Comped is any non-free plan nobody pays for, so beta testers never read as revenue.
+ * Comped is a non-free plan nobody pays for by design, so beta testers never read as revenue.
+ * Lapsed Stripe customers (canceled, unpaid, paused, incomplete) fall into the free remainder.
  * Trialing Stripe subscriptions are counted apart: not yet paying, and not comped.
  */
 export function classifyUsers(rows: PlanRow[], totalUsers: number) {
@@ -302,7 +323,7 @@ export function classifyUsers(rows: PlanRow[], totalUsers: number) {
   for (const row of rows) {
     if (isPaying(row)) paying += row.n;
     else if (isTrialing(row)) trialing += row.n;
-    else if (row.plan_id !== 'free') comped += row.n;
+    else if (isComped(row)) comped += row.n;
   }
   return { paying, trialing, comped, free: Math.max(totalUsers - paying - trialing - comped, 0) };
 }
@@ -1054,7 +1075,7 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           <Stat label="Free users" value={users ? users.free : <Unavailable />} />
         </Grid>
         <Panel>
-          <p className="mb-2 text-xs text-white/50">Plan mix</p>
+          <p className="mb-2 text-xs text-white/50">Plan mix (subscription rows)</p>
           {summary.ok ? (
             <ul className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-1 text-sm">
               {planMix(summary.data.planRows).map(({ plan, n }) => (
@@ -1138,7 +1159,7 @@ and replace the `active` line, because every admin path starts with `/admin`:
 
 - [ ] **Step 1: Install.** `npm install @vercel/analytics`.
 
-- [ ] **Step 2: Add the component.** Create `src/components/privacy-analytics.tsx` (a client component rendering `<Analytics beforeSend={...} />` that runs `redactAnalyticsUrl` on every event URL), `src/lib/analytics-url.ts` (the pure helper: strips query string and fragment, replaces the token in `/cxd/share/<token>` and the id in `/cxd/overview/<id>`) and `src/lib/admin/__verify__/analytics-url.verify.ts`. In `src/app/layout.tsx`, import `PrivacyAnalytics` from `@/components/privacy-analytics` below the Speed Insights import and render `<PrivacyAnalytics />` directly after `<SpeedInsights />`. The final code is in those files.
+- [ ] **Step 2: Add the component.** Create `src/components/privacy-analytics.tsx` (a client component rendering `<Analytics beforeSend={...} />` that runs `redactAnalyticsUrl` on every event URL), `src/lib/analytics-url.ts` (the pure helper: strips query string and fragment, replaces the token in `/cxd/share/<token>` and the ids in `/cxd/overview/<id>`, `/admin/users/<id>` and `/admin/support/<id>`) and `src/lib/admin/__verify__/analytics-url.verify.ts`. In `src/app/layout.tsx`, import `PrivacyAnalytics` from `@/components/privacy-analytics` below the Speed Insights import and render `<PrivacyAnalytics />` directly after `<SpeedInsights />`. The final code is in those files.
 
 - [ ] **Step 3: Declare env vars.** Add `'VERCEL_ANALYTICS_TOKEN'`, `'VERCEL_ANALYTICS_PROJECT_ID'` and `'VERCEL_TEAM_ID'` to `optionalServerVars` in `src/lib/env.ts`. Add to `.env.example`:
 

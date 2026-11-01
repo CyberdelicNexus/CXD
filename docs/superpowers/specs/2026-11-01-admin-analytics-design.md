@@ -68,7 +68,7 @@ Each number links to where it is handled. The strip reads "All clear" when all a
 - MRR
 - Revenue in the selected range
 - Paying users: Stripe subscriptions with status `active` or `past_due`, plus `lifetime` plans whose `plan_source` is null or `stripe` (the checkout webhook sets `stripe` on lifetime purchases). Trialing subscriptions are counted apart and shown as a hint on the Paying card; they are not comped
-- Comped users: any plan other than `free` that nobody pays for, which covers beta testers and plans from Nexus or an admin grant
+- Comped users: a non-free plan with no Stripe subscription, or with `plan_source` `nexus` or `admin`, which covers beta testers and Nexus or admin grants. A lapsed Stripe customer (canceled, unpaid, paused, incomplete) is neither paying nor comped and falls into the Free remainder
 - New and cancelled subscribers in the range. New excludes `incomplete` and `incomplete_expired` and includes trials; cancelled uses the subscription's `ended_at`, when it actually stopped
 
 MRR is the list price of Stripe subscriptions with status `active`. Yearly prices divide by 12, weekly multiply by 52 and divide by 12, and quantity applies. Trials, past-due subscriptions and metered prices are excluded, and discounts are ignored, so it is labelled "MRR (list price)".
@@ -90,7 +90,7 @@ A user is active in a window if they signed in, or own a canvas updated, within 
 - Canvases created per day, from `cxd_projects.created_at`
 - Total canvases
 - AI credits used this period, with the trend from snapshots
-- Plan mix, a small list of plans with user counts
+- Plan mix, a small list of plans with user counts, labelled "Plan mix (subscription rows)" because it counts subscription rows and not users without one
 - Assistant feedback count in the range, from `canvas_assistant_feedback`
 
 ### 5. System
@@ -114,7 +114,7 @@ Supabase counts come from two `SECURITY DEFINER` RPCs with an empty `search_path
 ## Visitors (optional)
 
 - Add `@vercel/analytics` and render `<PrivacyAnalytics />` (a client wrapper around `<Analytics />`) beside `<SpeedInsights />` in `src/app/layout.tsx`.
-- Privacy: the wrapper's `beforeSend` runs `redactAnalyticsUrl`, which removes every query string and fragment (invite and unsubscribe links carry secrets there) and replaces the token in `/cxd/share/<token>` and the project id in `/cxd/overview/<id>` with a fixed placeholder, so no secret path reaches Vercel.
+- Privacy: the wrapper's `beforeSend` runs `redactAnalyticsUrl`, which removes every query string and fragment (invite and unsubscribe links carry secrets there) and replaces the token in `/cxd/share/<token>` and the ids in `/cxd/overview/<id>`, `/admin/users/<id>` and `/admin/support/<id>` with a fixed placeholder, so no secret path reaches Vercel.
 - The owner enables Web Analytics in the Vercel dashboard and sets `VERCEL_ANALYTICS_TOKEN` and `VERCEL_ANALYTICS_PROJECT_ID`, plus `VERCEL_TEAM_ID` for a team-owned project.
 - The reader calls `https://api.vercel.com/v1/query/web-analytics/visits/count`. Vercel's docs show two response shapes, so anything else counts as unavailable.
 - With no token, a rejected token, a plan refusal or an unknown response, the panel shows "Available in Vercel" with a link to that dashboard.

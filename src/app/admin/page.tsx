@@ -155,7 +155,7 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           <Stat label="Free users" value={users ? users.free : <Unavailable />} />
         </Grid>
         <Panel>
-          <p className="mb-2 text-xs text-white/50">Plan mix</p>
+          <p className="mb-2 text-xs text-white/50">Plan mix (subscription rows)</p>
           {summary.ok ? (
             <ul className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-1 text-sm">
               {planMix(summary.data.planRows).map(({ plan, n }) => (
