@@ -68,7 +68,7 @@ Each number links to where it is handled. The strip reads "All clear" when all a
 - MRR
 - Revenue in the selected range
 - Paying users: rows with a live Stripe subscription, plus `lifetime` plans with no `plan_source`
-- Comped users: `beta_tester` rows and rows with `plan_source` of `admin` or `nexus`
+- Comped users: any plan other than `free` that nobody pays for, which covers beta testers and plans from Nexus or an admin grant
 - New and cancelled subscribers in the range
 
 MRR is the list price of Stripe subscriptions with status `active`. Yearly prices divide by 12, weekly multiply by 52 and divide by 12, and quantity applies. Trials and past-due subscriptions are excluded, and discounts are ignored, so it is labelled "MRR (list price)".
@@ -109,14 +109,14 @@ A failed Stripe read writes the row with `mrr_cents` null, so the trend shows a 
 
 Credit usage resets each period, so the trend plots the snapshot total as stored and does not calculate daily differences.
 
-Supabase counts come from one `SECURITY DEFINER` RPC, `admin_analytics_summary(p_days integer)`, with an empty `search_path` and `EXECUTE` for `service_role` only. It avoids loading rows into the app and gives the page one query.
+Supabase counts come from two `SECURITY DEFINER` RPCs with an empty `search_path` and `EXECUTE` for `service_role` only: `admin_attention_summary(p_days integer)` for Needs attention, and `admin_analytics_summary(p_days integer)` for everything else. They avoid loading rows into the app, and Staff only ever trigger the first.
 
 ## Visitors (optional)
 
 - Add `@vercel/analytics` and `<Analytics />` beside `<SpeedInsights />` in `src/app/layout.tsx`.
-- The owner enables Web Analytics in the Vercel dashboard and sets `VERCEL_ANALYTICS_TOKEN`.
-- The reader calls `https://api.vercel.com/v1/query/web-analytics/visits/count`, using Vercel's project id.
-- With no token, a rejected token or a plan refusal, the panel shows "Visitor data is available in Vercel" with a link to that dashboard.
+- The owner enables Web Analytics in the Vercel dashboard and sets `VERCEL_ANALYTICS_TOKEN` and `VERCEL_ANALYTICS_PROJECT_ID`, plus `VERCEL_TEAM_ID` for a team-owned project.
+- The reader calls `https://api.vercel.com/v1/query/web-analytics/visits/count`. Vercel's docs show two response shapes, so anything else counts as unavailable.
+- With no token, a rejected token, a plan refusal or an unknown response, the panel shows "Available in Vercel" with a link to that dashboard.
 
 Visitor history starts on the day Web Analytics is enabled.
 
