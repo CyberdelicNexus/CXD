@@ -211,7 +211,7 @@ export default function TemplatesPage() {
       />
       <DashboardNavbar />
 
-      <div className="relative z-10 container mx-auto max-w-6xl px-4 py-10">
+      <div className="relative z-10 container mx-auto max-w-6xl px-4 pl-24 2xl:pl-4 py-10">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Templates</h1>

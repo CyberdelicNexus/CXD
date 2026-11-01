@@ -32,7 +32,7 @@ export default async function Dashboard() {
         hoverSize={400}
         smoothing={60}
       />
-      <DashboardNavbar overCover />
+      <DashboardNavbar />
       <DashboardContent userId={user.id} userEmail={user.email || ''} />
     </div>
   );

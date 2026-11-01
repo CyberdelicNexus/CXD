@@ -14,7 +14,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   return (
     <div className="min-h-screen bg-black text-white">
       <DashboardNavbar />
-      <div className="container mx-auto max-w-7xl px-4 py-6 grid md:grid-cols-[180px_1fr] gap-6">
+      <div className="container mx-auto max-w-7xl px-4 pl-24 2xl:pl-4 py-6 grid md:grid-cols-[180px_1fr] gap-6">
         <AdminNav role={staff.role} />
         <main className="min-w-0">{children}</main>
       </div>

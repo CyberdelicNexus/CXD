@@ -467,8 +467,8 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
       <div className="glow-orb" style={{ top: '10%', right: '10%', opacity: 0.3 }} />
       <div className="glow-orb glow-orb-cyan" style={{ bottom: '20%', left: '5%', opacity: 0.2 }} />
 
-      {/* Cover: a full-bleed band pulled up under the sticky navbar (-mt-20 = the navbar's h-20). */}
-      <section className="relative z-10 -mt-20 w-full h-[clamp(220px,30vh,300px)] overflow-hidden bg-gradient-to-br from-violet-900/30 via-purple-900/20 to-cyan-900/20">
+      {/* Cover: a full-bleed band at the top of the page, beside the left rail. */}
+      <section className="relative z-10 w-full h-[clamp(168px,22vh,220px)] overflow-hidden bg-gradient-to-br from-violet-900/30 via-purple-900/20 to-cyan-900/20">
         {userProfile?.cover_image ? (
           <div
             className={`absolute inset-0 ${isRepositionMode ? (isDraggingCover ? "cursor-grabbing" : "cursor-grab") : ""}`}
@@ -501,9 +501,8 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
         {/* Fades the cover into the page so the profile row stays readable */}
         <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black pointer-events-none" />
 
-        {/* Everything clickable starts below the navbar (top-20), which would otherwise sit on top of it */}
-        <div className={`absolute inset-x-0 top-20 bottom-0 ${isRepositionMode ? "pointer-events-none" : ""}`}>
-          <div className="relative container mx-auto px-4 max-w-7xl h-full">
+        <div className={`absolute inset-0 ${isRepositionMode ? "pointer-events-none" : ""}`}>
+          <div className="relative container mx-auto px-4 pl-24 2xl:pl-4 max-w-7xl h-full">
             {/* Cover Actions */}
             <div className="absolute top-4 right-4 flex gap-2 z-10 pointer-events-auto">
               <input type="file" id="cover-upload" accept="image/*" className="hidden" onChange={handleCoverImageUpload} disabled={isUploadingCover || isRepositionMode} />
@@ -629,7 +628,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
         </div>
       </section>
 
-      <div className="relative z-10 container mx-auto px-4 pt-5 pb-6 max-w-7xl">
+      <div className="relative z-10 container mx-auto px-4 pl-24 2xl:pl-4 pt-4 pb-6 max-w-7xl">
         {/* Main Content: project tiles take 40% (two columns), the preview 60% */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
           {/* Experience Maps */}
@@ -724,16 +723,16 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                           </div>
                         )}
 
-                        {/* Default Hypercube Logo - positioned above gradient */}
+                        {/* Default Hypercube Logo - fits the band between the badges and the name/actions block */}
                         {!coverImage && (
-                          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-                            <div className="opacity-40 group-hover:opacity-60 transition-opacity">
+                          <div className="absolute inset-x-0 top-10 bottom-[46%] flex items-center justify-center pointer-events-none">
+                            <div className="h-full max-h-[84px] aspect-square opacity-40 group-hover:opacity-60 transition-opacity">
                               <Image
                                 src="/images/CXD Logo 2.png"
                                 alt="Hypercube"
                                 width={100}
                                 height={100}
-                                className="object-contain drop-shadow-lg"
+                                className="w-full h-full object-contain drop-shadow-lg"
                               />
                             </div>
                           </div>
@@ -755,7 +754,7 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
                         </div>
 
                         {/* Project Name + Action Buttons - Bottom */}
-                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 via-black/60 to-transparent">
+                        <div className="absolute bottom-0 left-0 right-0 z-20 p-3 bg-gradient-to-t from-black/80 via-black/60 to-transparent">
                           <div className="text-center mb-2 px-1">
                             <h4 className="font-semibold text-white text-base truncate group-hover:text-violet-200 transition-colors drop-shadow-md">
                               {project.name}
@@ -851,13 +850,13 @@ export function DashboardContent({ userId, userEmail }: DashboardContentProps) {
             </div>
           </div>
 
-          {/* Preview column. Sticks below the navbar while the tiles scroll with the page. */}
+          {/* Preview column. Sticks to the top of the viewport while the tiles scroll with the page. */}
           {!isLoading && activeProjectId && (() => {
             const selProj = projects.find((p) => p.id === activeProjectId);
             const selIsOwner = !!selProj && selProj.ownerId === userId;
             const selIsFreePrimary = isFree && freePrimaryCanvasId === activeProjectId;
             return (
-              <aside className="order-first lg:order-none lg:col-span-3 h-[560px] lg:h-[calc(100vh-7rem)] lg:sticky lg:top-24">
+              <aside className="order-first lg:order-none lg:col-span-3 h-[560px] lg:h-[calc(100vh-2rem)] lg:sticky lg:top-4">
                 <ProjectDetailPanel
                   projectId={activeProjectId}
                   onEnterProject={(projectId) => {

@@ -159,7 +159,7 @@ export function MasterPlanContent() {
   // ── Not entitled: soft-locked upsell state (same convention as Plan View) ──
   if (!subLoading && !hasMasterPlan) {
     return (
-      <div className="container mx-auto px-4 py-16 max-w-2xl text-center">
+      <div className="container mx-auto px-4 pl-24 2xl:pl-4 py-16 max-w-2xl text-center">
         <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
           <Lock className="w-7 h-7 text-violet-400" />
         </div>
@@ -182,7 +182,7 @@ export function MasterPlanContent() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-[1600px]">
+    <div className="container mx-auto px-4 pl-24 py-6 max-w-[1600px]">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Master Plan</h1>

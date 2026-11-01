@@ -72,21 +72,23 @@ const notificationIcons: Record<NotificationType, React.ReactNode> = {
   project: <FolderOpen className="w-4 h-4 text-orange-400" />,
 };
 
-const pillClass = (isActive: boolean) =>
-  `relative flex items-center px-3 xl:px-4 py-2 group rounded-full text-white/90 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] border shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)] active:scale-95 overflow-hidden cursor-pointer ${
+// Rail buttons are 40px circles that grow into a pill on hover/focus, sliding the label out
+// to the right over the page (same motion as the canvas view switcher). The hover fill is
+// near-opaque because the expanded label sits on top of the cover and tiles.
+const railButtonClass = (isActive: boolean) =>
+  `relative flex items-center h-10 min-w-10 px-[10px] group/rail rounded-full text-white/90 border backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-95 cursor-pointer outline-none ${
     isActive
-      ? 'bg-violet-500/20 border-violet-500/30 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
-      : 'bg-white/[0.03] border-white/[0.08] hover:bg-violet-500/20 hover:border-violet-500/30 hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.2)]'
+      ? 'bg-violet-500/25 border-violet-500/40 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_0_20px_rgba(139,92,246,0.25)] hover:bg-zinc-950/90 hover:border-violet-400/70 hover:shadow-[0_0_0_1px_rgba(167,139,250,0.25),0_0_14px_rgba(139,92,246,0.55),inset_0_0_8px_rgba(139,92,246,0.25)]'
+      : 'bg-white/[0.03] border-white/[0.08] hover:bg-zinc-950/90 hover:border-violet-400/70 hover:shadow-[0_0_0_1px_rgba(167,139,250,0.25),0_0_14px_rgba(139,92,246,0.55),inset_0_0_8px_rgba(139,92,246,0.25)] focus-visible:bg-zinc-950/90 focus-visible:border-violet-400/70'
   }`;
 
-const pillContent = (Icon: LucideIcon, label: string, isActive: boolean) => (
+const railLabelClass =
+  'max-w-0 opacity-0 overflow-hidden whitespace-nowrap text-xs font-medium transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover/rail:max-w-[180px] group-hover/rail:opacity-100 group-hover/rail:ml-2 group-hover/rail:pr-1 group-focus-visible/rail:max-w-[180px] group-focus-visible/rail:opacity-100 group-focus-visible/rail:ml-2 group-focus-visible/rail:pr-1';
+
+const railContent = (Icon: LucideIcon, label: string, isActive: boolean) => (
   <>
-    <Icon className={`w-4 h-4 xl:mr-2 transition-colors ${isActive ? 'text-violet-200' : 'text-white/60 group-hover:text-violet-200'}`} />
-    <span className="hidden xl:inline text-xs font-medium whitespace-nowrap">{label}</span>
-    {/* Subtle inner top highlight */}
-    <span className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-    {/* Subtle bottom glow */}
-    <span className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-violet-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+    <Icon className={`w-[18px] h-[18px] flex-shrink-0 transition-colors ${isActive ? 'text-violet-200' : 'text-white/60 group-hover/rail:text-violet-200'}`} />
+    <span className={railLabelClass}>{label}</span>
   </>
 );
 
@@ -113,9 +115,9 @@ function serverMessageFor(status: number, error: unknown): ServerMessage | null 
   return null;
 }
 
-// `overCover`: the dashboard's cover image runs behind the navbar, so the bar goes
-// lighter and blurrier there instead of hiding the image.
-export default function DashboardNavbar({ overCover = false }: { overCover?: boolean }) {
+// A floating pill menu, vertically centred on the left edge. It overlays the page; content
+// containers keep clear of it below 2xl with `pl-24 2xl:pl-4`.
+export default function DashboardNavbar() {
   const supabase = createClient()
   const router = useRouter()
   const pathname = usePathname()
@@ -273,90 +275,84 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
 
   return (
     <>
-      <nav className={`w-full border-b border-white/10 sticky top-0 z-50 overflow-visible ${overCover ? 'bg-black/35 backdrop-blur-md' : 'bg-black/60 backdrop-blur-sm'}`}>
-        {/* Glass Reflection Effects */}
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-30" />
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-20" />
-        <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+      <nav
+        aria-label="Dashboard"
+        // Fixed width: a hovered button grows out past the bar instead of widening it
+        className="fixed left-6 top-1/2 -translate-y-1/2 z-50 w-[54px] flex flex-col items-start gap-1.5 p-1.5 rounded-full border border-white/10 bg-black/50 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.06)] overflow-visible transition-[border-color,box-shadow] duration-500 hover:border-violet-400/50 hover:shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_rgba(167,139,250,0.15),0_0_18px_rgba(139,92,246,0.35),inset_0_0_12px_rgba(139,92,246,0.12)] focus-within:border-violet-400/50"
+      >
+        <Link
+          href="/dashboard"
+          aria-label="Cyberdelic Design Canvas"
+          className="group/rail flex items-center h-10 px-[6px] rounded-full transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-zinc-950/90 hover:backdrop-blur-md outline-none focus-visible:bg-zinc-950/90"
+        >
+          <Image
+            src="/images/CXD Logo 2.png"
+            alt="CXD"
+            width={28}
+            height={28}
+            className="object-contain flex-shrink-0"
+          />
+          <span className={`${railLabelClass} !text-sm text-white/90`}>Cyberdelic Design Canvas</span>
+        </Link>
 
-        <div className="container mx-auto px-4 flex justify-between items-center max-w-7xl h-20">
-          <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="flex items-center gap-2 group px-3 py-2 rounded-full transition-all duration-300 hover:bg-white/5 pr-4">
-              <Image
-                src="/images/CXD Logo 2.png"
-                alt="CXD"
-                width={28}
-                height={28}
-                className="object-contain"
-              />
-              <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[200px] group-hover:opacity-100 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] whitespace-nowrap font-medium text-sm text-white/90">
-                Cyberdelic Design Canvas
-              </span>
-            </Link>
+        <div className="mx-auto my-0.5 h-px w-6 bg-white/10" />
 
-            {/* Navigation Links. Labels collapse to icons below xl. */}
-            <div className="hidden md:flex items-center gap-2">
-              {[
-                { id: 'dashboard', href: '/dashboard', icon: LayoutGrid, label: 'Dashboard' },
-                { id: 'docs', href: '/dashboard/docs', icon: BookOpen, label: 'Documentation' },
-              ].map((item) => (
-                <Link key={item.id} href={item.href} title={item.label} className={pillClass(pathname === item.href)}>
-                  {pillContent(item.icon, item.label, pathname === item.href)}
-                </Link>
-              ))}
+        {[
+          { id: 'dashboard', href: '/dashboard', icon: LayoutGrid, label: 'Dashboard' },
+          { id: 'docs', href: '/dashboard/docs', icon: BookOpen, label: 'Documentation' },
+        ].map((item) => (
+          <Link key={item.id} href={item.href} aria-label={item.label} className={railButtonClass(pathname === item.href)}>
+            {railContent(item.icon, item.label, pathname === item.href)}
+          </Link>
+        ))}
 
-              {/* Templates nav link — hidden until templates are production-ready */}
+        {/* Templates nav link — hidden until templates are production-ready */}
 
-              {/* Master Plan — Pro feature, clickable for everyone but blocked
-                  behind an upgrade modal (not a permanent "coming soon") */}
-              <button
-                type="button"
-                title="Master Plan"
-                onClick={() => {
-                  if (!hasMasterPlan) {
-                    setShowMasterPlanUpgrade(true);
-                    return;
-                  }
-                  router.push('/dashboard/master-plan');
-                }}
-                className={`${pillClass(pathname === '/dashboard/master-plan')} !overflow-visible ${!hasMasterPlan ? 'opacity-70' : ''}`}
-              >
-                {!hasMasterPlan && (
-                  <Lock className="w-3 h-3 absolute -top-1 -right-1 text-orange-400 z-10" />
-                )}
-                {pillContent(ClipboardList, 'Master Plan', pathname === '/dashboard/master-plan')}
-              </button>
+        {/* Master Plan — Pro feature, clickable for everyone but blocked
+            behind an upgrade modal (not a permanent "coming soon") */}
+        <button
+          type="button"
+          aria-label="Master Plan"
+          onClick={() => {
+            if (!hasMasterPlan) {
+              setShowMasterPlanUpgrade(true);
+              return;
+            }
+            router.push('/dashboard/master-plan');
+          }}
+          className={`${railButtonClass(pathname === '/dashboard/master-plan')} ${!hasMasterPlan ? 'opacity-70 hover:opacity-100' : ''}`}
+        >
+          {!hasMasterPlan && (
+            <Lock className="w-3 h-3 absolute -top-1 left-7 text-orange-400 z-10" />
+          )}
+          {railContent(ClipboardList, 'Master Plan', pathname === '/dashboard/master-plan')}
+        </button>
 
-              <Link href="/dashboard/tutorials" title="Tutorials" className={pillClass(pathname === '/dashboard/tutorials')}>
-                {pillContent(PlayCircle, 'Tutorials', pathname === '/dashboard/tutorials')}
-              </Link>
-            </div>
-          </div>
+        <Link href="/dashboard/tutorials" aria-label="Tutorials" className={railButtonClass(pathname === '/dashboard/tutorials')}>
+          {railContent(PlayCircle, 'Tutorials', pathname === '/dashboard/tutorials')}
+        </Link>
 
-          <div className="flex gap-2 items-center">
+        <div className="mx-auto my-0.5 h-px w-6 bg-white/10" />
+
+        <div className="flex flex-col items-start gap-1.5">
             {/* Back to the member's dashboard on Cyberdelic Nexus (only for members who came from there) */}
-            {nexusReturnUrl && <NexusReturnButton href={nexusReturnUrl} />}
+            {nexusReturnUrl && <NexusReturnButton href={nexusReturnUrl} expandLabel />}
 
-            {/* Changelog */}
-            <Link href="/changelog" title="Changelog" aria-label="Changelog" className="group active:scale-95 transition-all">
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
-                <Newspaper className="h-5 w-5 text-white/60 group-hover:text-violet-200" />
-              </div>
+            <Link href="/changelog" aria-label="Changelog" className={railButtonClass(false)}>
+              {railContent(Newspaper, 'Changelog', false)}
             </Link>
 
             {/* Notifications */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <div className="relative group cursor-pointer active:scale-95 transition-all">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
-                    <Bell className="h-5 w-5 text-white/60 group-hover:text-violet-200" />
-                    {unreadCount > 0 && (
-                      <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_10px_rgba(139,92,246,1)]" />
-                    )}
-                  </div>
-                </div>
+                <button type="button" aria-label="Notifications" className={railButtonClass(false)}>
+                  {railContent(Bell, 'Notifications', false)}
+                  {unreadCount > 0 && (
+                    <span className="absolute top-2 left-[25px] w-2 h-2 bg-primary rounded-full animate-pulse shadow-[0_0_10px_rgba(139,92,246,1)]" />
+                  )}
+                </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-80">
+              <DropdownMenuContent side="right" align="end" sideOffset={12} className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-80">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                   <span className="font-semibold text-sm">Notifications</span>
                   {unreadCount > 0 && (
@@ -481,13 +477,11 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
             {/* Help Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <div className="group cursor-pointer active:scale-95 transition-all">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
-                    <HelpCircle className="h-5 w-5 text-white/60 group-hover:text-violet-200" />
-                  </div>
-                </div>
+                <button type="button" aria-label="Help" className={railButtonClass(false)}>
+                  {railContent(HelpCircle, 'Help', false)}
+                </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
+              <DropdownMenuContent side="right" align="end" sideOffset={12} className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
                 <DropdownMenuItem
                   onClick={() => { setSupportKind('support'); setSubmitSuccess(false); setShowSupportModal(true) }}
                   className="cursor-pointer hover:bg-white/5"
@@ -515,13 +509,11 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <div className="group cursor-pointer active:scale-95 transition-all">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] group-hover:bg-violet-500/20 group-hover:border-violet-500/30 transition-all duration-300">
-                    <UserCircle className="h-6 w-6 text-white/60 group-hover:text-violet-200" />
-                  </div>
-                </div>
+                <button type="button" aria-label="Account" className={railButtonClass(pathname === '/dashboard/profile' || pathname === '/dashboard/settings')}>
+                  {railContent(UserCircle, 'Account', pathname === '/dashboard/profile' || pathname === '/dashboard/settings')}
+                </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
+              <DropdownMenuContent side="right" align="end" sideOffset={12} className="bg-zinc-900/95 backdrop-blur-xl border-white/10 w-48">
                 <DropdownMenuItem onClick={() => router.push('/dashboard/profile')} className="cursor-pointer hover:bg-white/5">
                   <UserCircle className="w-4 h-4 mr-2" />
                   Profile
@@ -543,7 +535,6 @@ export default function DashboardNavbar({ overCover = false }: { overCover?: boo
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
         </div>
       </nav>
 
