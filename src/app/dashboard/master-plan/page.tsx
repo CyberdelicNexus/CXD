@@ -24,7 +24,7 @@ export default async function MasterPlanPage() {
         hoverSize={400}
         smoothing={60}
       />
-      <DashboardNavbar />
+      <DashboardNavbar wide />
       <MasterPlanContent />
     </div>
   );

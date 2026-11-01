@@ -115,9 +115,11 @@ function serverMessageFor(status: number, error: unknown): ServerMessage | null 
   return null;
 }
 
-// A floating pill menu, vertically centred on the left edge. It overlays the page; content
-// containers keep clear of it below 2xl with `pl-24 2xl:pl-4`.
-export default function DashboardNavbar() {
+// A floating pill menu that sits just left of the centre column and stops at the screen edge
+// when there is no room. It overlays the page; content containers keep clear of it below 2xl
+// with `pl-24 2xl:pl-4`. The offsets assume the 1280px column, or `wide` for the 1600px board
+// on Master Plan, whose content keeps its `pl-24` at every size.
+export default function DashboardNavbar({ wide = false }: { wide?: boolean }) {
   const supabase = createClient()
   const router = useRouter()
   const pathname = usePathname()
@@ -278,7 +280,7 @@ export default function DashboardNavbar() {
       <nav
         aria-label="Dashboard"
         // Fixed width: a hovered button grows out past the bar instead of widening it
-        className="fixed left-6 top-1/2 -translate-y-1/2 z-50 w-[54px] flex flex-col items-start gap-1.5 p-1.5 rounded-full border border-white/10 bg-black/50 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.06)] overflow-visible transition-[border-color,box-shadow] duration-500 hover:border-violet-400/50 hover:shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_rgba(167,139,250,0.15),0_0_18px_rgba(139,92,246,0.35),inset_0_0_12px_rgba(139,92,246,0.12)] focus-within:border-violet-400/50"
+        className={`fixed ${wide ? 'left-[max(1.5rem,calc(50%-782px))]' : 'left-[max(1.5rem,calc(50%-702px))]'} top-1/2 -translate-y-1/2 z-50 w-[54px] flex flex-col items-start gap-1.5 p-1.5 rounded-full border border-white/10 bg-black/50 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.06)] overflow-visible transition-[border-color,box-shadow] duration-500 hover:border-violet-400/50 hover:shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_rgba(167,139,250,0.15),0_0_18px_rgba(139,92,246,0.35),inset_0_0_12px_rgba(139,92,246,0.12)] focus-within:border-violet-400/50`}
       >
         <Link
           href="/dashboard"
