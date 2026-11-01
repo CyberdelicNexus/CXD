@@ -5,9 +5,11 @@ import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { classifyUsers } from '@/lib/admin/analytics/metrics';
-import { fetchMrr, fetchSummary } from '@/lib/admin/analytics/sources';
+import { fetchMrr, fetchSummary, withTimeout } from '@/lib/admin/analytics/sources';
 
 export const dynamic = 'force-dynamic';
+
+const STRIPE_TIMEOUT_MS = 30000;
 
 export async function GET(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -21,8 +23,9 @@ export async function GET(req: Request) {
 
   try {
     const summary = await fetchSummary(30);
-    // A Stripe failure stores null, so the trend shows a gap and not a false zero.
-    const mrr = await fetchMrr().catch((err) => {
+    // A Stripe failure leaves mrr_cents out of the upsert: a new row keeps the column's null
+    // default (a gap, not a false zero) and a rerun cannot erase a value saved earlier today.
+    const mrr = await withTimeout(fetchMrr(), STRIPE_TIMEOUT_MS).catch((err) => {
       Sentry.captureException(err, { tags: { route: 'admin-metrics', source: 'stripe' } });
       return null;
     });
@@ -32,7 +35,7 @@ export async function GET(req: Request) {
       day: new Date().toISOString().slice(0, 10),
       active_7d: summary.active7d,
       active_30d: summary.active30d,
-      mrr_cents: mrr,
+      ...(mrr ? { mrr_cents: mrr } : {}),
       paying_users: users.paying,
       comped_users: users.comped,
       free_users: users.free,

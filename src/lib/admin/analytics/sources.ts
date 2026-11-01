@@ -5,6 +5,8 @@ import { getStripe } from '@/lib/stripe';
 import {
   computeMrr,
   computeRevenue,
+  countsAsNewSubscriber,
+  dayList,
   parseVisitors,
   type AttentionCounts,
   type CurrencyTotals,
@@ -15,17 +17,25 @@ import {
 } from './metrics';
 
 const CACHE_SECONDS = 300;
+const ATTENTION_CACHE_SECONDS = 60;
 const SOURCE_TIMEOUT_MS = 8000;
 
-function withTimeout<T>(work: Promise<T>): Promise<T> {
+/**
+ * unstable_cache keeps serving a stale entry when a refresh fails, with no age limit.
+ * The time bucket is part of the cache key, so each window gets a fresh read, and a
+ * source that has broken reads as unavailable instead of showing an old value.
+ */
+const bucket = (seconds: number) => Math.floor(Date.now() / (seconds * 1000));
+
+export function withTimeout<T>(work: Promise<T>, ms: number = SOURCE_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('source timed out')), SOURCE_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new Error('source timed out')), ms);
   });
   return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Failures throw inside the cached function, so a failure is never cached. */
+/** Failures throw inside the cached function, so a failure is never cached; the bucket bounds how long a good value lives. */
 async function guarded<T>(source: string, read: () => Promise<T>): Promise<SourceResult<T>> {
   try {
     return { ok: true, data: await withTimeout(read()) };
@@ -64,24 +74,33 @@ export async function fetchSummary(days: number): Promise<AnalyticsSummary> {
 }
 
 const cachedAttention = unstable_cache(
-  async (days: number): Promise<AttentionCounts> => {
+  async (days: number, _bucket: number): Promise<AttentionCounts> => {
     const { data, error } = await getSupabaseAdmin().rpc('admin_attention_summary', { p_days: days });
     if (error) throw new Error(error.message);
     return data as AttentionCounts;
   },
   ['admin-attention'],
-  { revalidate: 60 },
+  { revalidate: ATTENTION_CACHE_SECONDS },
 );
 
-const cachedSummary = unstable_cache(fetchSummary, ['admin-summary'], { revalidate: CACHE_SECONDS });
+const cachedSummary = unstable_cache(
+  async (days: number, _bucket: number): Promise<AnalyticsSummary> => fetchSummary(days),
+  ['admin-summary'],
+  { revalidate: CACHE_SECONDS },
+);
 
-async function listSubscriptions(): Promise<{ inputs: SubscriptionInput[]; created: number[]; canceled: number[] }> {
+async function listSubscriptions(): Promise<{
+  inputs: SubscriptionInput[];
+  created: { at: number; status: string }[];
+  ended: number[];
+}> {
   const inputs: SubscriptionInput[] = [];
-  const created: number[] = [];
-  const canceled: number[] = [];
+  const created: { at: number; status: string }[] = [];
+  const ended: number[] = [];
   for await (const subscription of getStripe().subscriptions.list({ status: 'all', limit: 100 })) {
-    created.push(subscription.created);
-    if (subscription.canceled_at) canceled.push(subscription.canceled_at);
+    created.push({ at: subscription.created, status: subscription.status });
+    // ended_at is when the subscription actually stopped, not when cancellation was requested.
+    if (subscription.ended_at) ended.push(subscription.ended_at);
     inputs.push({
       status: subscription.status,
       items: subscription.items.data.map((item) => ({
@@ -90,10 +109,11 @@ async function listSubscriptions(): Promise<{ inputs: SubscriptionInput[]; creat
         interval: item.price.recurring?.interval ?? 'month',
         intervalCount: item.price.recurring?.interval_count ?? 1,
         quantity: item.quantity ?? 1,
+        usageType: item.price.recurring?.usage_type ?? 'licensed',
       })),
     });
   }
-  return { inputs, created, canceled };
+  return { inputs, created, ended };
 }
 
 export async function fetchMrr(): Promise<CurrencyTotals> {
@@ -108,23 +128,26 @@ export interface StripeMetrics {
 }
 
 const cachedStripe = unstable_cache(
-  async (days: number): Promise<StripeMetrics> => {
+  async (days: number, _bucket: number): Promise<StripeMetrics> => {
     const since = Math.floor(Date.now() / 1000) - days * 86400;
-    const { inputs, created, canceled } = await listSubscriptions();
-    const charges = [];
-    for await (const charge of getStripe().charges.list({ created: { gte: since }, limit: 100 })) {
-      charges.push({
-        amount: charge.amount,
-        amountRefunded: charge.amount_refunded,
-        currency: charge.currency,
-        status: charge.status,
-      });
-    }
+    const listCharges = async () => {
+      const charges = [];
+      for await (const charge of getStripe().charges.list({ created: { gte: since }, limit: 100 })) {
+        charges.push({
+          amount: charge.amount,
+          amountRefunded: charge.amount_refunded,
+          currency: charge.currency,
+          status: charge.status,
+        });
+      }
+      return charges;
+    };
+    const [{ inputs, created, ended }, charges] = await Promise.all([listSubscriptions(), listCharges()]);
     return {
       mrr: computeMrr(inputs),
       revenue: computeRevenue(charges),
-      newSubscribers: created.filter((at) => at >= since).length,
-      canceledSubscribers: canceled.filter((at) => at >= since).length,
+      newSubscribers: created.filter((s) => s.at >= since && countsAsNewSubscriber(s.status)).length,
+      canceledSubscribers: ended.filter((at) => at >= since).length,
     };
   },
   ['admin-stripe'],
@@ -139,26 +162,26 @@ export interface Snapshot {
 }
 
 const cachedSnapshots = unstable_cache(
-  async (days: number): Promise<Snapshot[]> => {
+  async (days: number, _bucket: number): Promise<Snapshot[]> => {
     const { data, error } = await getSupabaseAdmin()
       .from('admin_daily_metrics')
       .select('day, active_30d, mrr_cents, credits_used_period')
-      .order('day', { ascending: false })
-      .limit(days);
+      .gte('day', dayList(days, new Date())[0])
+      .order('day', { ascending: true });
     if (error) throw new Error(error.message);
-    return ((data ?? []) as Snapshot[]).reverse();
+    return (data ?? []) as Snapshot[];
   },
   ['admin-snapshots'],
   { revalidate: CACHE_SECONDS },
 );
 
 export interface SystemMetrics {
-  errors: { id: string; title: string; level: string | null; created_at: string }[];
+  errors: { id: string; title: string | null; level: string | null; created_at: string }[];
   lastBroadcast: { subject: string; created_at: string; sent_count: number; failed_count: number } | null;
 }
 
 const cachedSystem = unstable_cache(
-  async (): Promise<SystemMetrics> => {
+  async (_bucket: number): Promise<SystemMetrics> => {
     const admin = getSupabaseAdmin();
     const [errors, broadcast] = await Promise.all([
       admin.from('fix_pipeline').select('id, title, level, created_at').order('created_at', { ascending: false }).limit(5),
@@ -179,7 +202,7 @@ const cachedSystem = unstable_cache(
 
 /** No token, or a plan that refuses the API, is an expected state and not an error. */
 const cachedVisitors = unstable_cache(
-  async (days: number): Promise<number | null> => {
+  async (days: number, _bucket: number): Promise<number | null> => {
     const token = process.env.VERCEL_ANALYTICS_TOKEN;
     const projectId = process.env.VERCEL_ANALYTICS_PROJECT_ID;
     if (!token || !projectId) return null;
@@ -203,9 +226,10 @@ const cachedVisitors = unstable_cache(
 );
 
 // Callers must check permission first: cached values are shared between viewers.
-export const readAttention = (range: Range) => guarded('attention', () => cachedAttention(range));
-export const readSummary = (range: Range) => guarded('supabase', () => cachedSummary(range));
-export const readStripe = (range: Range) => guarded('stripe', () => cachedStripe(range));
-export const readSnapshots = (range: Range) => guarded('snapshots', () => cachedSnapshots(range));
-export const readSystem = () => guarded('system', () => cachedSystem());
-export const readVisitors = (range: Range) => guarded('vercel', () => cachedVisitors(range));
+export const readAttention = (range: Range) =>
+  guarded('attention', () => cachedAttention(range, bucket(ATTENTION_CACHE_SECONDS)));
+export const readSummary = (range: Range) => guarded('supabase', () => cachedSummary(range, bucket(CACHE_SECONDS)));
+export const readStripe = (range: Range) => guarded('stripe', () => cachedStripe(range, bucket(CACHE_SECONDS)));
+export const readSnapshots = (range: Range) => guarded('snapshots', () => cachedSnapshots(range, bucket(CACHE_SECONDS)));
+export const readSystem = () => guarded('system', () => cachedSystem(bucket(CACHE_SECONDS)));
+export const readVisitors = (range: Range) => guarded('vercel', () => cachedVisitors(range, bucket(CACHE_SECONDS)));

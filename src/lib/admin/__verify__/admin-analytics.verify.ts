@@ -4,6 +4,11 @@
  */
 import {
   classifyUsers,
+  countsAsNewSubscriber,
+  fillDays,
+  dayList,
+  planMix,
+  toMajorUnits,
   computeMrr,
   computeRevenue,
   formatMoney,
@@ -21,7 +26,7 @@ function check(name: string, cond: boolean) {
 }
 
 const line = (over: Partial<SubscriptionInput['items'][number]> = {}) => ({
-  unitAmount: 1000, currency: 'usd', interval: 'month' as const, intervalCount: 1, quantity: 1, ...over,
+  unitAmount: 1000, currency: 'usd', interval: 'month' as const, intervalCount: 1, quantity: 1, usageType: 'licensed' as const, ...over,
 });
 const sub = (status: string, ...items: SubscriptionInput['items']): SubscriptionInput => ({ status, items });
 
@@ -36,6 +41,7 @@ check('canceled excluded', Object.keys(computeMrr([sub('canceled', line())])).le
 check('null price skipped', Object.keys(computeMrr([sub('active', line({ unitAmount: null }))])).length === 0);
 const mixed = computeMrr([sub('active', line()), sub('active', line({ currency: 'eur', unitAmount: 500 }))]);
 check('currencies stay separate', mixed.usd === 1000 && mixed.eur === 500);
+check('metered price skipped', Object.keys(computeMrr([sub('active', line({ usageType: 'metered' }))])).length === 0);
 check('no subscriptions is empty', Object.keys(computeMrr([])).length === 0);
 
 const revenue = computeRevenue([
@@ -67,7 +73,24 @@ const mix = classifyUsers(
   45,
 );
 check('paying counts live Stripe and owned lifetime', mix.paying === 3);
+check('no trialing in this mix', mix.trialing === 0);
 check('comped never counts as paying', mix.comped === 29);
+const mix2 = classifyUsers(
+  [
+    row('lifetime', 'active', false, 'stripe', 2),
+    row('pro', 'past_due', true, 'stripe', 1),
+    row('pro', 'trialing', true, 'stripe', 3),
+    row('pro', 'active', true, 'stripe', 1),
+    row('free', 'active', false, null, 4),
+  ],
+  20,
+);
+check('lifetime bought through Stripe is paying', mix2.paying === 4);
+check('past due still pays', mix2.paying === 4 && mix2.comped === 0);
+check('trialing counted apart', mix2.trialing === 3);
+check('trialing is not comped', mix2.comped === 0);
+check('free excludes trialing', mix2.free === 13);
+
 check('free includes users with no subscription row', mix.free === 13);
 
 const clear = { openTickets: 0, highPriorityTickets: 0, unresolvedErrors: 0, failedPayments: 0, failedEmails: 0 };
@@ -79,6 +102,22 @@ check('visitors in object', parseVisitors({ data: { visitors: 12 } }) === 12);
 check('visitors in array', parseVisitors({ data: [{ visitors: 7 }] }) === 7);
 check('unknown shape is null', parseVisitors({ data: { visitors: 'many' } }) === null);
 check('empty body is null', parseVisitors(null) === null);
+
+check('money in jpy has no minor unit', formatMoney(1500, 'jpy').includes('1,500') && !formatMoney(1500, 'jpy').includes('.'));
+check('zero-decimal major units', toMajorUnits(1500, 'jpy') === 1500 && toMajorUnits(1500, 'usd') === 15);
+check('new subscriber excludes incomplete', !countsAsNewSubscriber('incomplete') && !countsAsNewSubscriber('incomplete_expired'));
+check('new subscriber includes trials', countsAsNewSubscriber('trialing') && countsAsNewSubscriber('active'));
+
+const mixOrder = planMix([row('free', 'active', false, null, 2), row('pro', 'active', true, 'stripe', 5), row('pro', 'canceled', true, 'stripe', 1)]);
+check('plan mix groups and sorts', mixOrder[0].plan === 'pro' && mixOrder[0].n === 6 && mixOrder[1].plan === 'free');
+
+const now = new Date('2026-11-05T10:00:00Z');
+check('day list is oldest first and ends today', dayList(3, now).join() === '2026-11-03,2026-11-04,2026-11-05');
+const filled = fillDays([{ day: '2026-11-03', v: 1 }, { day: '2026-11-05', v: 3 }], 3, now);
+check('missed night is a gap', filled.length === 3 && filled[1].row === null);
+check('real rows kept in place', filled[0].row?.v === 1 && filled[2].row?.v === 3);
+check('rows outside the range are dropped', fillDays([{ day: '2026-10-01', v: 9 }], 3, now).every((entry) => entry.row === null));
+check('month boundary', dayList(3, new Date('2026-12-01T00:00:00Z')).join() === '2026-11-29,2026-11-30,2026-12-01');
 
 check('money', formatMoney(123456, 'usd').includes('1,234.56'));
 

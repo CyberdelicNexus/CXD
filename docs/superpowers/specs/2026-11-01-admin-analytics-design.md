@@ -67,15 +67,15 @@ Each number links to where it is handled. The strip reads "All clear" when all a
 
 - MRR
 - Revenue in the selected range
-- Paying users: rows with a live Stripe subscription, plus `lifetime` plans with no `plan_source`
+- Paying users: Stripe subscriptions with status `active` or `past_due`, plus `lifetime` plans whose `plan_source` is null or `stripe` (the checkout webhook sets `stripe` on lifetime purchases). Trialing subscriptions are counted apart and shown as a hint on the Paying card; they are not comped
 - Comped users: any plan other than `free` that nobody pays for, which covers beta testers and plans from Nexus or an admin grant
-- New and cancelled subscribers in the range
+- New and cancelled subscribers in the range. New excludes `incomplete` and `incomplete_expired` and includes trials; cancelled uses the subscription's `ended_at`, when it actually stopped
 
-MRR is the list price of Stripe subscriptions with status `active`. Yearly prices divide by 12, weekly multiply by 52 and divide by 12, and quantity applies. Trials and past-due subscriptions are excluded, and discounts are ignored, so it is labelled "MRR (list price)".
+MRR is the list price of Stripe subscriptions with status `active`. Yearly prices divide by 12, weekly multiply by 52 and divide by 12, and quantity applies. Trials, past-due subscriptions and metered prices are excluded, and discounts are ignored, so it is labelled "MRR (list price)".
 
 Revenue is succeeded Stripe charges minus refunds, created within the range. This covers lifetime plans and credit packs.
 
-Amounts stay in their own currency and are never converted. More than one currency shows one line each.
+Amounts stay in their own currency and are never converted. Zero-decimal currencies (JPY, KRW and the rest of Stripe's list) are not divided by 100. More than one currency shows one line each.
 
 ### 3. Growth
 
@@ -83,14 +83,14 @@ Amounts stay in their own currency and are never converted. More than one curren
 - Active users in 7 and 30 days
 - Visitors, when the Vercel source is available
 
-A user is active in a window if they signed in, or own a canvas updated, within it. The active-user trend comes from snapshots. Until enough snapshots exist, the chart reads "Collecting since <date>".
+A user is active in a window if they signed in, or own a canvas updated, within it. The active-user trend comes from snapshots. Until two real snapshots exist, the chart reads "Collecting since <date>". If the snapshot read fails, the trend panels read "Unavailable" instead. Snapshots are read by date for the selected range, and a night with no row is a gap in the chart.
 
 ### 4. Product usage
 
 - Canvases created per day, from `cxd_projects.created_at`
 - Total canvases
 - AI credits used this period, with the trend from snapshots
-- Plan mix
+- Plan mix, a small list of plans with user counts
 - Assistant feedback count in the range, from `canvas_assistant_feedback`
 
 ### 5. System
@@ -105,7 +105,7 @@ A user is active in a window if they signed in, or own a canvas updated, within 
 
 `GET /api/cron/admin-metrics` checks `CRON_SECRET` the way `src/app/api/cron/spend-monitor/route.ts` does, then upserts today's row, so a rerun is safe. It runs daily at 03:00 UTC through `vercel.json`, which stays within Hobby's daily schedule limit.
 
-A failed Stripe read writes the row with `mrr_cents` null, so the trend shows a gap and never a false zero. Cron failures go to Sentry.
+A failed Stripe read leaves `mrr_cents` out of the upsert. A new row keeps the column's null default, so the trend shows a gap and never a false zero, and a rerun cannot erase a value saved earlier the same day. The Stripe read gets 30 seconds in the cron. Cron failures go to Sentry.
 
 Credit usage resets each period, so the trend plots the snapshot total as stored and does not calculate daily differences.
 
@@ -113,7 +113,8 @@ Supabase counts come from two `SECURITY DEFINER` RPCs with an empty `search_path
 
 ## Visitors (optional)
 
-- Add `@vercel/analytics` and `<Analytics />` beside `<SpeedInsights />` in `src/app/layout.tsx`.
+- Add `@vercel/analytics` and render `<PrivacyAnalytics />` (a client wrapper around `<Analytics />`) beside `<SpeedInsights />` in `src/app/layout.tsx`.
+- Privacy: the wrapper's `beforeSend` runs `redactAnalyticsUrl`, which removes every query string and fragment (invite and unsubscribe links carry secrets there) and replaces the token in `/cxd/share/<token>` and the project id in `/cxd/overview/<id>` with a fixed placeholder, so no secret path reaches Vercel.
 - The owner enables Web Analytics in the Vercel dashboard and sets `VERCEL_ANALYTICS_TOKEN` and `VERCEL_ANALYTICS_PROJECT_ID`, plus `VERCEL_TEAM_ID` for a team-owned project.
 - The reader calls `https://api.vercel.com/v1/query/web-analytics/visits/count`. Vercel's docs show two response shapes, so anything else counts as unavailable.
 - With no token, a rejected token, a plan refusal or an unknown response, the panel shows "Available in Vercel" with a link to that dashboard.
@@ -125,6 +126,7 @@ Visitor history starts on the day Web Analytics is enabled.
 - Each reader catches its own failure, reports to Sentry with a tag and returns `{ ok: false }`. No secret or user data goes in the report.
 - A timeout of 8 seconds applies to each outside call, so a slow source cannot hold up the page.
 - A failed source is shown as "Unavailable", never as zero.
+- Cached reads carry a time bucket (60 seconds for Needs attention, 300 for the rest) in their cache key. `unstable_cache` otherwise serves a stale entry with no age limit and hides refresh failures, which would leave "All clear" on screen after a source broke.
 - Stripe reads page through all results. A failure partway reports the source as failed, never a partial total.
 - An unset `STRIPE_SECRET_KEY` reports the source as unavailable.
 
@@ -134,6 +136,8 @@ The gates are `npm run build` and `__verify__/*.verify.ts` run with `npx tsx`.
 
 - `admin-analytics.verify.ts`: MRR for monthly, yearly, weekly, quantity, mixed currency, trial and past-due inputs; revenue minus refunds; range parsing; paying versus comped classification; the "All clear" rule; a failed source staying distinct from zero
 - `admin-roles.verify.ts`: the `analytics.view` row
+- `analytics-url.verify.ts`: share tokens, project ids, query strings and fragments are redacted
+- Also in `admin-analytics.verify.ts`: lifetime bought through Stripe, trialing and past-due classification, metered prices, zero-decimal currencies, plan mix and day filling
 - `admin-routes.verify.ts`: unchanged rules cover the page
 
 Then browser-test `/admin` as Staff and as Owner on production after deploy. Staff must see only Needs attention, and must not receive revenue in the page payload.

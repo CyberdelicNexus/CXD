@@ -21,10 +21,22 @@ export interface SubscriptionInput {
     interval: 'day' | 'week' | 'month' | 'year';
     intervalCount: number;
     quantity: number;
+    /** Metered prices have no fixed amount per period, so they are skipped. */
+    usageType: 'licensed' | 'metered';
   }[];
 }
 
 const INTERVALS_PER_MONTH = { day: 365 / 12, week: 52 / 12, month: 1, year: 1 / 12 };
+
+/** Stripe's zero-decimal currencies: the amount is already in whole units. */
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf',
+]);
+
+/** Converts Stripe's smallest unit to the whole unit for display and charts. */
+export function toMajorUnits(amount: number, currency: string): number {
+  return ZERO_DECIMAL_CURRENCIES.has(currency.toLowerCase()) ? amount : amount / 100;
+}
 
 /** List price of active subscriptions: trials, past-due and discounts are not counted. */
 export function computeMrr(subscriptions: SubscriptionInput[]): CurrencyTotals {
@@ -32,7 +44,7 @@ export function computeMrr(subscriptions: SubscriptionInput[]): CurrencyTotals {
   for (const subscription of subscriptions) {
     if (subscription.status !== 'active') continue;
     for (const item of subscription.items) {
-      if (item.unitAmount == null) continue;
+      if (item.unitAmount == null || item.usageType === 'metered') continue;
       const monthly = (item.unitAmount * item.quantity * INTERVALS_PER_MONTH[item.interval]) / item.intervalCount;
       totals[item.currency] = (totals[item.currency] ?? 0) + monthly;
     }
@@ -65,22 +77,59 @@ export interface PlanRow {
   n: number;
 }
 
-const ENDED_STATUSES = ['canceled', 'incomplete_expired'];
+const PAYING_STATUSES = ['active', 'past_due'];
 
 function isPaying(row: PlanRow): boolean {
-  if (row.has_stripe_subscription && !ENDED_STATUSES.includes(row.status)) return true;
-  return row.plan_id === 'lifetime' && row.plan_source === null;
+  if (row.has_stripe_subscription && PAYING_STATUSES.includes(row.status)) return true;
+  // The checkout webhook sets plan_source 'stripe' on lifetime purchases.
+  return row.plan_id === 'lifetime' && (row.plan_source === null || row.plan_source === 'stripe');
 }
 
-/** Comped is any non-free plan nobody pays for, so beta testers never read as revenue. */
+function isTrialing(row: PlanRow): boolean {
+  return row.has_stripe_subscription && row.status === 'trialing';
+}
+
+/**
+ * Comped is any non-free plan nobody pays for, so beta testers never read as revenue.
+ * Trialing Stripe subscriptions are counted apart: not yet paying, and not comped.
+ */
 export function classifyUsers(rows: PlanRow[], totalUsers: number) {
   let paying = 0;
+  let trialing = 0;
   let comped = 0;
   for (const row of rows) {
     if (isPaying(row)) paying += row.n;
+    else if (isTrialing(row)) trialing += row.n;
     else if (row.plan_id !== 'free') comped += row.n;
   }
-  return { paying, comped, free: Math.max(totalUsers - paying - comped, 0) };
+  return { paying, trialing, comped, free: Math.max(totalUsers - paying - trialing - comped, 0) };
+}
+
+/** Plan mix for display: rows grouped by plan, largest first. */
+export function planMix(rows: PlanRow[]): { plan: string; n: number }[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.plan_id, (counts.get(row.plan_id) ?? 0) + row.n);
+  return Array.from(counts.entries()).map(([plan, n]) => ({ plan, n })).sort((a, b) => b.n - a.n);
+}
+
+/** UTC dates (YYYY-MM-DD) for the last `days` days, oldest first, ending today. */
+export function dayList(days: number, now: Date): string[] {
+  const out: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    out.push(new Date(now.getTime() - i * 86400000).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/** One entry per day in the range; a night with no snapshot has `row: null`, so a chart shows a gap. */
+export function fillDays<T extends { day: string }>(rows: T[], days: number, now: Date): { day: string; row: T | null }[] {
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  return dayList(days, now).map((day) => ({ day, row: byDay.get(day) ?? null }));
+}
+
+/** A new subscriber is anyone whose subscription got past checkout. */
+export function countsAsNewSubscriber(status: string): boolean {
+  return status !== 'incomplete' && status !== 'incomplete_expired';
 }
 
 export interface AttentionCounts {
@@ -106,5 +155,7 @@ export function parseVisitors(body: unknown): number | null {
 }
 
 export function formatMoney(cents: number, currency: string): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(cents / 100);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(
+    toMajorUnits(cents, currency),
+  );
 }

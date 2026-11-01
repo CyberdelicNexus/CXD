@@ -12,7 +12,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 
 export function Grid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{children}</div>;
+  return <div className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-4 gap-3 [&>*]:min-w-0">{children}</div>;
 }
 
 export function Panel({ children }: { children: ReactNode }) {
@@ -27,7 +27,7 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   return (
     <Panel>
       <p className="text-xs text-white/50">{label}</p>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="mt-1 text-xl sm:text-2xl font-semibold tabular-nums break-words">{value}</div>
       {hint && <p className="mt-1 text-xs text-white/40">{hint}</p>}
     </Panel>
   );

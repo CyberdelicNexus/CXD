@@ -74,6 +74,11 @@ src/app/admin/page.tsx                                   the dashboard
  */
 import {
   classifyUsers,
+  countsAsNewSubscriber,
+  fillDays,
+  dayList,
+  planMix,
+  toMajorUnits,
   computeMrr,
   computeRevenue,
   formatMoney,
@@ -91,7 +96,7 @@ function check(name: string, cond: boolean) {
 }
 
 const line = (over: Partial<SubscriptionInput['items'][number]> = {}) => ({
-  unitAmount: 1000, currency: 'usd', interval: 'month' as const, intervalCount: 1, quantity: 1, ...over,
+  unitAmount: 1000, currency: 'usd', interval: 'month' as const, intervalCount: 1, quantity: 1, usageType: 'licensed' as const, ...over,
 });
 const sub = (status: string, ...items: SubscriptionInput['items']): SubscriptionInput => ({ status, items });
 
@@ -106,6 +111,7 @@ check('canceled excluded', Object.keys(computeMrr([sub('canceled', line())])).le
 check('null price skipped', Object.keys(computeMrr([sub('active', line({ unitAmount: null }))])).length === 0);
 const mixed = computeMrr([sub('active', line()), sub('active', line({ currency: 'eur', unitAmount: 500 }))]);
 check('currencies stay separate', mixed.usd === 1000 && mixed.eur === 500);
+check('metered price skipped', Object.keys(computeMrr([sub('active', line({ usageType: 'metered' }))])).length === 0);
 check('no subscriptions is empty', Object.keys(computeMrr([])).length === 0);
 
 const revenue = computeRevenue([
@@ -137,7 +143,24 @@ const mix = classifyUsers(
   45,
 );
 check('paying counts live Stripe and owned lifetime', mix.paying === 3);
+check('no trialing in this mix', mix.trialing === 0);
 check('comped never counts as paying', mix.comped === 29);
+const mix2 = classifyUsers(
+  [
+    row('lifetime', 'active', false, 'stripe', 2),
+    row('pro', 'past_due', true, 'stripe', 1),
+    row('pro', 'trialing', true, 'stripe', 3),
+    row('pro', 'active', true, 'stripe', 1),
+    row('free', 'active', false, null, 4),
+  ],
+  20,
+);
+check('lifetime bought through Stripe is paying', mix2.paying === 4);
+check('past due still pays', mix2.paying === 4 && mix2.comped === 0);
+check('trialing counted apart', mix2.trialing === 3);
+check('trialing is not comped', mix2.comped === 0);
+check('free excludes trialing', mix2.free === 13);
+
 check('free includes users with no subscription row', mix.free === 13);
 
 const clear = { openTickets: 0, highPriorityTickets: 0, unresolvedErrors: 0, failedPayments: 0, failedEmails: 0 };
@@ -149,6 +172,22 @@ check('visitors in object', parseVisitors({ data: { visitors: 12 } }) === 12);
 check('visitors in array', parseVisitors({ data: [{ visitors: 7 }] }) === 7);
 check('unknown shape is null', parseVisitors({ data: { visitors: 'many' } }) === null);
 check('empty body is null', parseVisitors(null) === null);
+
+check('money in jpy has no minor unit', formatMoney(1500, 'jpy').includes('1,500') && !formatMoney(1500, 'jpy').includes('.'));
+check('zero-decimal major units', toMajorUnits(1500, 'jpy') === 1500 && toMajorUnits(1500, 'usd') === 15);
+check('new subscriber excludes incomplete', !countsAsNewSubscriber('incomplete') && !countsAsNewSubscriber('incomplete_expired'));
+check('new subscriber includes trials', countsAsNewSubscriber('trialing') && countsAsNewSubscriber('active'));
+
+const mixOrder = planMix([row('free', 'active', false, null, 2), row('pro', 'active', true, 'stripe', 5), row('pro', 'canceled', true, 'stripe', 1)]);
+check('plan mix groups and sorts', mixOrder[0].plan === 'pro' && mixOrder[0].n === 6 && mixOrder[1].plan === 'free');
+
+const now = new Date('2026-11-05T10:00:00Z');
+check('day list is oldest first and ends today', dayList(3, now).join() === '2026-11-03,2026-11-04,2026-11-05');
+const filled = fillDays([{ day: '2026-11-03', v: 1 }, { day: '2026-11-05', v: 3 }], 3, now);
+check('missed night is a gap', filled.length === 3 && filled[1].row === null);
+check('real rows kept in place', filled[0].row?.v === 1 && filled[2].row?.v === 3);
+check('rows outside the range are dropped', fillDays([{ day: '2026-10-01', v: 9 }], 3, now).every((entry) => entry.row === null));
+check('month boundary', dayList(3, new Date('2026-12-01T00:00:00Z')).join() === '2026-11-29,2026-11-30,2026-12-01');
 
 check('money', formatMoney(123456, 'usd').includes('1,234.56'));
 
@@ -184,10 +223,22 @@ export interface SubscriptionInput {
     interval: 'day' | 'week' | 'month' | 'year';
     intervalCount: number;
     quantity: number;
+    /** Metered prices have no fixed amount per period, so they are skipped. */
+    usageType: 'licensed' | 'metered';
   }[];
 }
 
 const INTERVALS_PER_MONTH = { day: 365 / 12, week: 52 / 12, month: 1, year: 1 / 12 };
+
+/** Stripe's zero-decimal currencies: the amount is already in whole units. */
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf',
+]);
+
+/** Converts Stripe's smallest unit to the whole unit for display and charts. */
+export function toMajorUnits(amount: number, currency: string): number {
+  return ZERO_DECIMAL_CURRENCIES.has(currency.toLowerCase()) ? amount : amount / 100;
+}
 
 /** List price of active subscriptions: trials, past-due and discounts are not counted. */
 export function computeMrr(subscriptions: SubscriptionInput[]): CurrencyTotals {
@@ -195,7 +246,7 @@ export function computeMrr(subscriptions: SubscriptionInput[]): CurrencyTotals {
   for (const subscription of subscriptions) {
     if (subscription.status !== 'active') continue;
     for (const item of subscription.items) {
-      if (item.unitAmount == null) continue;
+      if (item.unitAmount == null || item.usageType === 'metered') continue;
       const monthly = (item.unitAmount * item.quantity * INTERVALS_PER_MONTH[item.interval]) / item.intervalCount;
       totals[item.currency] = (totals[item.currency] ?? 0) + monthly;
     }
@@ -228,22 +279,59 @@ export interface PlanRow {
   n: number;
 }
 
-const ENDED_STATUSES = ['canceled', 'incomplete_expired'];
+const PAYING_STATUSES = ['active', 'past_due'];
 
 function isPaying(row: PlanRow): boolean {
-  if (row.has_stripe_subscription && !ENDED_STATUSES.includes(row.status)) return true;
-  return row.plan_id === 'lifetime' && row.plan_source === null;
+  if (row.has_stripe_subscription && PAYING_STATUSES.includes(row.status)) return true;
+  // The checkout webhook sets plan_source 'stripe' on lifetime purchases.
+  return row.plan_id === 'lifetime' && (row.plan_source === null || row.plan_source === 'stripe');
 }
 
-/** Comped is any non-free plan nobody pays for, so beta testers never read as revenue. */
+function isTrialing(row: PlanRow): boolean {
+  return row.has_stripe_subscription && row.status === 'trialing';
+}
+
+/**
+ * Comped is any non-free plan nobody pays for, so beta testers never read as revenue.
+ * Trialing Stripe subscriptions are counted apart: not yet paying, and not comped.
+ */
 export function classifyUsers(rows: PlanRow[], totalUsers: number) {
   let paying = 0;
+  let trialing = 0;
   let comped = 0;
   for (const row of rows) {
     if (isPaying(row)) paying += row.n;
+    else if (isTrialing(row)) trialing += row.n;
     else if (row.plan_id !== 'free') comped += row.n;
   }
-  return { paying, comped, free: Math.max(totalUsers - paying - comped, 0) };
+  return { paying, trialing, comped, free: Math.max(totalUsers - paying - trialing - comped, 0) };
+}
+
+/** Plan mix for display: rows grouped by plan, largest first. */
+export function planMix(rows: PlanRow[]): { plan: string; n: number }[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.plan_id, (counts.get(row.plan_id) ?? 0) + row.n);
+  return Array.from(counts.entries()).map(([plan, n]) => ({ plan, n })).sort((a, b) => b.n - a.n);
+}
+
+/** UTC dates (YYYY-MM-DD) for the last `days` days, oldest first, ending today. */
+export function dayList(days: number, now: Date): string[] {
+  const out: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    out.push(new Date(now.getTime() - i * 86400000).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/** One entry per day in the range; a night with no snapshot has `row: null`, so a chart shows a gap. */
+export function fillDays<T extends { day: string }>(rows: T[], days: number, now: Date): { day: string; row: T | null }[] {
+  const byDay = new Map(rows.map((row) => [row.day, row]));
+  return dayList(days, now).map((day) => ({ day, row: byDay.get(day) ?? null }));
+}
+
+/** A new subscriber is anyone whose subscription got past checkout. */
+export function countsAsNewSubscriber(status: string): boolean {
+  return status !== 'incomplete' && status !== 'incomplete_expired';
 }
 
 export interface AttentionCounts {
@@ -269,11 +357,13 @@ export function parseVisitors(body: unknown): number | null {
 }
 
 export function formatMoney(cents: number, currency: string): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(cents / 100);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(
+    toMajorUnits(cents, currency),
+  );
 }
 ```
 
-- [ ] **Step 4: Run it.** Expected: 0 failed. The weekly case is `1000 * 52 / 12 = 4333.33`, rounded to 4333.
+- [ ] **Step 4: Run it.** Expected: 0 failed (the blocks above are the reviewed final version). The weekly case is `1000 * 52 / 12 = 4333.33`, rounded to 4333.
 
 - [ ] **Step 5: Commit.** Message: `feat(admin): add dashboard calculations`.
 
@@ -392,6 +482,8 @@ import { getStripe } from '@/lib/stripe';
 import {
   computeMrr,
   computeRevenue,
+  countsAsNewSubscriber,
+  dayList,
   parseVisitors,
   type AttentionCounts,
   type CurrencyTotals,
@@ -402,17 +494,25 @@ import {
 } from './metrics';
 
 const CACHE_SECONDS = 300;
+const ATTENTION_CACHE_SECONDS = 60;
 const SOURCE_TIMEOUT_MS = 8000;
 
-function withTimeout<T>(work: Promise<T>): Promise<T> {
+/**
+ * unstable_cache keeps serving a stale entry when a refresh fails, with no age limit.
+ * The time bucket is part of the cache key, so each window gets a fresh read, and a
+ * source that has broken reads as unavailable instead of showing an old value.
+ */
+const bucket = (seconds: number) => Math.floor(Date.now() / (seconds * 1000));
+
+export function withTimeout<T>(work: Promise<T>, ms: number = SOURCE_TIMEOUT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('source timed out')), SOURCE_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new Error('source timed out')), ms);
   });
   return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Failures throw inside the cached function, so a failure is never cached. */
+/** Failures throw inside the cached function, so a failure is never cached; the bucket bounds how long a good value lives. */
 async function guarded<T>(source: string, read: () => Promise<T>): Promise<SourceResult<T>> {
   try {
     return { ok: true, data: await withTimeout(read()) };
@@ -451,24 +551,33 @@ export async function fetchSummary(days: number): Promise<AnalyticsSummary> {
 }
 
 const cachedAttention = unstable_cache(
-  async (days: number): Promise<AttentionCounts> => {
+  async (days: number, _bucket: number): Promise<AttentionCounts> => {
     const { data, error } = await getSupabaseAdmin().rpc('admin_attention_summary', { p_days: days });
     if (error) throw new Error(error.message);
     return data as AttentionCounts;
   },
   ['admin-attention'],
-  { revalidate: 60 },
+  { revalidate: ATTENTION_CACHE_SECONDS },
 );
 
-const cachedSummary = unstable_cache(fetchSummary, ['admin-summary'], { revalidate: CACHE_SECONDS });
+const cachedSummary = unstable_cache(
+  async (days: number, _bucket: number): Promise<AnalyticsSummary> => fetchSummary(days),
+  ['admin-summary'],
+  { revalidate: CACHE_SECONDS },
+);
 
-async function listSubscriptions(): Promise<{ inputs: SubscriptionInput[]; created: number[]; canceled: number[] }> {
+async function listSubscriptions(): Promise<{
+  inputs: SubscriptionInput[];
+  created: { at: number; status: string }[];
+  ended: number[];
+}> {
   const inputs: SubscriptionInput[] = [];
-  const created: number[] = [];
-  const canceled: number[] = [];
+  const created: { at: number; status: string }[] = [];
+  const ended: number[] = [];
   for await (const subscription of getStripe().subscriptions.list({ status: 'all', limit: 100 })) {
-    created.push(subscription.created);
-    if (subscription.canceled_at) canceled.push(subscription.canceled_at);
+    created.push({ at: subscription.created, status: subscription.status });
+    // ended_at is when the subscription actually stopped, not when cancellation was requested.
+    if (subscription.ended_at) ended.push(subscription.ended_at);
     inputs.push({
       status: subscription.status,
       items: subscription.items.data.map((item) => ({
@@ -477,10 +586,11 @@ async function listSubscriptions(): Promise<{ inputs: SubscriptionInput[]; creat
         interval: item.price.recurring?.interval ?? 'month',
         intervalCount: item.price.recurring?.interval_count ?? 1,
         quantity: item.quantity ?? 1,
+        usageType: item.price.recurring?.usage_type ?? 'licensed',
       })),
     });
   }
-  return { inputs, created, canceled };
+  return { inputs, created, ended };
 }
 
 export async function fetchMrr(): Promise<CurrencyTotals> {
@@ -495,23 +605,26 @@ export interface StripeMetrics {
 }
 
 const cachedStripe = unstable_cache(
-  async (days: number): Promise<StripeMetrics> => {
+  async (days: number, _bucket: number): Promise<StripeMetrics> => {
     const since = Math.floor(Date.now() / 1000) - days * 86400;
-    const { inputs, created, canceled } = await listSubscriptions();
-    const charges = [];
-    for await (const charge of getStripe().charges.list({ created: { gte: since }, limit: 100 })) {
-      charges.push({
-        amount: charge.amount,
-        amountRefunded: charge.amount_refunded,
-        currency: charge.currency,
-        status: charge.status,
-      });
-    }
+    const listCharges = async () => {
+      const charges = [];
+      for await (const charge of getStripe().charges.list({ created: { gte: since }, limit: 100 })) {
+        charges.push({
+          amount: charge.amount,
+          amountRefunded: charge.amount_refunded,
+          currency: charge.currency,
+          status: charge.status,
+        });
+      }
+      return charges;
+    };
+    const [{ inputs, created, ended }, charges] = await Promise.all([listSubscriptions(), listCharges()]);
     return {
       mrr: computeMrr(inputs),
       revenue: computeRevenue(charges),
-      newSubscribers: created.filter((at) => at >= since).length,
-      canceledSubscribers: canceled.filter((at) => at >= since).length,
+      newSubscribers: created.filter((s) => s.at >= since && countsAsNewSubscriber(s.status)).length,
+      canceledSubscribers: ended.filter((at) => at >= since).length,
     };
   },
   ['admin-stripe'],
@@ -526,26 +639,26 @@ export interface Snapshot {
 }
 
 const cachedSnapshots = unstable_cache(
-  async (days: number): Promise<Snapshot[]> => {
+  async (days: number, _bucket: number): Promise<Snapshot[]> => {
     const { data, error } = await getSupabaseAdmin()
       .from('admin_daily_metrics')
       .select('day, active_30d, mrr_cents, credits_used_period')
-      .order('day', { ascending: false })
-      .limit(days);
+      .gte('day', dayList(days, new Date())[0])
+      .order('day', { ascending: true });
     if (error) throw new Error(error.message);
-    return ((data ?? []) as Snapshot[]).reverse();
+    return (data ?? []) as Snapshot[];
   },
   ['admin-snapshots'],
   { revalidate: CACHE_SECONDS },
 );
 
 export interface SystemMetrics {
-  errors: { id: string; title: string; level: string | null; created_at: string }[];
+  errors: { id: string; title: string | null; level: string | null; created_at: string }[];
   lastBroadcast: { subject: string; created_at: string; sent_count: number; failed_count: number } | null;
 }
 
 const cachedSystem = unstable_cache(
-  async (): Promise<SystemMetrics> => {
+  async (_bucket: number): Promise<SystemMetrics> => {
     const admin = getSupabaseAdmin();
     const [errors, broadcast] = await Promise.all([
       admin.from('fix_pipeline').select('id, title, level, created_at').order('created_at', { ascending: false }).limit(5),
@@ -566,7 +679,7 @@ const cachedSystem = unstable_cache(
 
 /** No token, or a plan that refuses the API, is an expected state and not an error. */
 const cachedVisitors = unstable_cache(
-  async (days: number): Promise<number | null> => {
+  async (days: number, _bucket: number): Promise<number | null> => {
     const token = process.env.VERCEL_ANALYTICS_TOKEN;
     const projectId = process.env.VERCEL_ANALYTICS_PROJECT_ID;
     if (!token || !projectId) return null;
@@ -590,12 +703,13 @@ const cachedVisitors = unstable_cache(
 );
 
 // Callers must check permission first: cached values are shared between viewers.
-export const readAttention = (range: Range) => guarded('attention', () => cachedAttention(range));
-export const readSummary = (range: Range) => guarded('supabase', () => cachedSummary(range));
-export const readStripe = (range: Range) => guarded('stripe', () => cachedStripe(range));
-export const readSnapshots = (range: Range) => guarded('snapshots', () => cachedSnapshots(range));
-export const readSystem = () => guarded('system', () => cachedSystem());
-export const readVisitors = (range: Range) => guarded('vercel', () => cachedVisitors(range));
+export const readAttention = (range: Range) =>
+  guarded('attention', () => cachedAttention(range, bucket(ATTENTION_CACHE_SECONDS)));
+export const readSummary = (range: Range) => guarded('supabase', () => cachedSummary(range, bucket(CACHE_SECONDS)));
+export const readStripe = (range: Range) => guarded('stripe', () => cachedStripe(range, bucket(CACHE_SECONDS)));
+export const readSnapshots = (range: Range) => guarded('snapshots', () => cachedSnapshots(range, bucket(CACHE_SECONDS)));
+export const readSystem = () => guarded('system', () => cachedSystem(bucket(CACHE_SECONDS)));
+export const readVisitors = (range: Range) => guarded('vercel', () => cachedVisitors(range, bucket(CACHE_SECONDS)));
 ```
 
 - [ ] **Step 2: Type-check.** `npx tsc --noEmit`. Expected: no new errors. If a Stripe field name fails, read `node_modules/stripe/types` for version 17.6.0.
@@ -616,9 +730,11 @@ import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { getSupabaseAdmin } from '@/supabase/admin';
 import { classifyUsers } from '@/lib/admin/analytics/metrics';
-import { fetchMrr, fetchSummary } from '@/lib/admin/analytics/sources';
+import { fetchMrr, fetchSummary, withTimeout } from '@/lib/admin/analytics/sources';
 
 export const dynamic = 'force-dynamic';
+
+const STRIPE_TIMEOUT_MS = 30000;
 
 export async function GET(req: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -632,8 +748,9 @@ export async function GET(req: Request) {
 
   try {
     const summary = await fetchSummary(30);
-    // A Stripe failure stores null, so the trend shows a gap and not a false zero.
-    const mrr = await fetchMrr().catch((err) => {
+    // A Stripe failure leaves mrr_cents out of the upsert: a new row keeps the column's null
+    // default (a gap, not a false zero) and a rerun cannot erase a value saved earlier today.
+    const mrr = await withTimeout(fetchMrr(), STRIPE_TIMEOUT_MS).catch((err) => {
       Sentry.captureException(err, { tags: { route: 'admin-metrics', source: 'stripe' } });
       return null;
     });
@@ -643,7 +760,7 @@ export async function GET(req: Request) {
       day: new Date().toISOString().slice(0, 10),
       active_7d: summary.active7d,
       active_30d: summary.active30d,
-      mrr_cents: mrr,
+      ...(mrr ? { mrr_cents: mrr } : {}),
       paying_users: users.paying,
       comped_users: users.comped,
       free_users: users.free,
@@ -691,11 +808,11 @@ export function TrendChart({ data, label }: { data: TrendPoint[]; label: string 
   return (
     <div role="img" aria-label={label} className="h-40 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -24 }}>
+        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <XAxis dataKey="day" tickFormatter={(day: string) => day.slice(5)} stroke="rgba(255,255,255,0.4)" fontSize={11} minTickGap={32} />
-          <YAxis allowDecimals={false} stroke="rgba(255,255,255,0.4)" fontSize={11} width={48} />
+          <YAxis allowDecimals={false} stroke="rgba(255,255,255,0.4)" fontSize={11} width={40} />
           <Tooltip contentStyle={{ background: '#18181b', border: '1px solid rgba(255,255,255,0.1)', fontSize: 12 }} />
-          <Area type="monotone" dataKey="value" name={label} stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.15} connectNulls={false} />
+          <Area type="monotone" dataKey="value" name={label} stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.15} connectNulls={false} dot={{ r: 2, strokeWidth: 0, fill: '#a78bfa' }} activeDot={{ r: 4 }} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -720,7 +837,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 
 export function Grid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{children}</div>;
+  return <div className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-4 gap-3 [&>*]:min-w-0">{children}</div>;
 }
 
 export function Panel({ children }: { children: ReactNode }) {
@@ -735,7 +852,7 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   return (
     <Panel>
       <p className="text-xs text-white/50">{label}</p>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="mt-1 text-xl sm:text-2xl font-semibold tabular-nums break-words">{value}</div>
       {hint && <p className="mt-1 text-xs text-white/40">{hint}</p>}
     </Panel>
   );
@@ -784,7 +901,15 @@ import Link from 'next/link';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { can } from '@/lib/admin/permissions';
 import { singleParam } from '@/lib/admin/users-query';
-import { classifyUsers, parseRange, RANGES, type CurrencyTotals } from '@/lib/admin/analytics/metrics';
+import {
+  classifyUsers,
+  fillDays,
+  parseRange,
+  planMix,
+  RANGES,
+  toMajorUnits,
+  type CurrencyTotals,
+} from '@/lib/admin/analytics/metrics';
 import {
   readAttention,
   readSnapshots,
@@ -795,6 +920,7 @@ import {
 } from '@/lib/admin/analytics/sources';
 import { AttentionStrip, Grid, Money, Panel, Section, Stat, Unavailable } from '@/components/admin/dashboard/panels';
 import { TrendChart } from '@/components/admin/dashboard/trend-chart';
+import type { Snapshot } from '@/lib/admin/analytics/sources';
 
 const VERCEL_ANALYTICS_URL = 'https://vercel.com/dashboard';
 const MIN_TREND_POINTS = 2;
@@ -803,17 +929,17 @@ function mrrTotal(totals: CurrencyTotals | null): number | null {
   // Charts need one number per day, and no currency is converted.
   if (!totals) return null;
   const currencies = Object.keys(totals);
-  return currencies.length === 1 ? totals[currencies[0]] / 100 : currencies.length === 0 ? 0 : null;
+  return currencies.length === 1 ? toMajorUnits(totals[currencies[0]], currencies[0]) : currencies.length === 0 ? 0 : null;
 }
 
 export default async function AdminHome({ searchParams }: { searchParams: { range?: string | string[] } }) {
   const staff = await requirePagePermission('tickets.work');
   const range = parseRange(singleParam(searchParams.range));
-  const attention = await readAttention(range);
   const canSeeComms = can(staff.role, 'comms.send');
 
-  // Staff stop here: the analytics readers below are never called for them.
+  // Staff stop here: only the attention counts are read, and no analytics reader is called for them.
   if (!can(staff.role, 'analytics.view')) {
+    const attention = await readAttention(range);
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-semibold">Home</h1>
@@ -824,7 +950,8 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
     );
   }
 
-  const [summary, stripe, snapshots, system, visitors] = await Promise.all([
+  const [attention, summary, stripe, snapshots, system, visitors] = await Promise.all([
+    readAttention(range),
     readSummary(range),
     readStripe(range),
     readSnapshots(range),
@@ -833,8 +960,16 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
   ]);
   const users = summary.ok ? classifyUsers(summary.data.planRows, summary.data.totalUsers) : null;
   const history = snapshots.ok ? snapshots.data : [];
+  // Real rows decide whether there is a trend; filled days only add the gaps for missed nights.
   const hasHistory = history.length >= MIN_TREND_POINTS;
+  const filled = fillDays(history, range, new Date());
   const collecting = history[0] ? `Collecting since ${history[0].day}` : 'Collecting starts after the first nightly run';
+
+  const snapshotTrend = (label: string, pick: (row: Snapshot) => number | null) => {
+    if (!snapshots.ok) return <Unavailable />;
+    if (!hasHistory) return <p className="text-sm text-white/40">{collecting}</p>;
+    return <TrendChart label={label} data={filled.map(({ day, row }) => ({ day, value: row ? pick(row) : null }))} />;
+  };
 
   return (
     <div className="space-y-6">
@@ -862,18 +997,22 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
         <Grid>
           <Stat label="MRR (list price)" value={stripe.ok ? <Money totals={stripe.data.mrr} /> : <Unavailable />} />
           <Stat label={`Revenue, ${range} days`} value={stripe.ok ? <Money totals={stripe.data.revenue} /> : <Unavailable />} />
-          <Stat label="Paying users" value={users ? users.paying : <Unavailable />} />
+          <Stat
+            label="Paying users"
+            value={users ? users.paying : <Unavailable />}
+            hint={users && users.trialing > 0 ? `+${users.trialing} on trial` : undefined}
+          />
           <Stat label="Comped users" value={users ? users.comped : <Unavailable />} hint="Beta, Nexus and admin plans" />
-          <Stat label={`New subscribers, ${range} days`} value={stripe.ok ? stripe.data.newSubscribers : <Unavailable />} />
+          <Stat
+            label={`New subscribers, ${range} days`}
+            value={stripe.ok ? stripe.data.newSubscribers : <Unavailable />}
+            hint="Includes trials"
+          />
           <Stat label={`Cancelled, ${range} days`} value={stripe.ok ? stripe.data.canceledSubscribers : <Unavailable />} />
         </Grid>
         <Panel>
           <p className="mb-2 text-xs text-white/50">MRR trend</p>
-          {hasHistory ? (
-            <TrendChart label="MRR" data={history.map((row) => ({ day: row.day, value: mrrTotal(row.mrr_cents) }))} />
-          ) : (
-            <p className="text-sm text-white/40">{collecting}</p>
-          )}
+          {snapshotTrend('MRR', (row) => mrrTotal(row.mrr_cents))}
         </Panel>
       </Section>
 
@@ -902,11 +1041,7 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           </Panel>
           <Panel>
             <p className="mb-2 text-xs text-white/50">Active users, 30 days</p>
-            {hasHistory ? (
-              <TrendChart label="Active users" data={history.map((row) => ({ day: row.day, value: row.active_30d }))} />
-            ) : (
-              <p className="text-sm text-white/40">{collecting}</p>
-            )}
+            {snapshotTrend('Active users', (row) => row.active_30d)}
           </Panel>
         </div>
       </Section>
@@ -918,6 +1053,21 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           <Stat label={`Assistant feedback, ${range} days`} value={summary.ok ? summary.data.feedbackCount : <Unavailable />} />
           <Stat label="Free users" value={users ? users.free : <Unavailable />} />
         </Grid>
+        <Panel>
+          <p className="mb-2 text-xs text-white/50">Plan mix</p>
+          {summary.ok ? (
+            <ul className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-1 text-sm">
+              {planMix(summary.data.planRows).map(({ plan, n }) => (
+                <li key={plan} className="flex justify-between gap-2">
+                  <span className="truncate text-white/70">{plan.replace(/_/g, ' ')}</span>
+                  <span className="tabular-nums">{n}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Unavailable />
+          )}
+        </Panel>
         <div className="grid lg:grid-cols-2 gap-3">
           <Panel>
             <p className="mb-2 text-xs text-white/50">Canvases created per day</p>
@@ -925,11 +1075,7 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           </Panel>
           <Panel>
             <p className="mb-2 text-xs text-white/50">AI credits used</p>
-            {hasHistory ? (
-              <TrendChart label="AI credits" data={history.map((row) => ({ day: row.day, value: row.credits_used_period }))} />
-            ) : (
-              <p className="text-sm text-white/40">{collecting}</p>
-            )}
+            {snapshotTrend('AI credits', (row) => row.credits_used_period)}
           </Panel>
         </div>
       </Section>
@@ -943,13 +1089,15 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
             {system.ok &&
               system.data.errors.map((error) => (
                 <Link key={error.id} href="/admin/errors" className="block truncate text-sm text-violet-200 hover:underline">
-                  {error.title}
+                  {error.title ?? 'Untitled error'}
                 </Link>
               ))}
           </Panel>
           <Panel>
             <p className="text-xs text-white/50">Tracked emails, {range} days</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">{summary.ok ? summary.data.trackedEmails : <Unavailable />}</p>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">
+              {summary.ok ? summary.data.trackedEmails : <Unavailable />}
+            </div>
             <p className="mt-3 text-xs text-white/50">Last broadcast</p>
             {system.ok && system.data.lastBroadcast ? (
               <p className="mt-1 text-sm">
@@ -986,11 +1134,11 @@ and replace the `active` line, because every admin path starts with `/admin`:
 
 ## Task 7: Visitor tracking
 
-**Files:** Modify `package.json`, `package-lock.json`, `src/app/layout.tsx`, `.env.example`, `src/lib/env.ts`.
+**Files:** Modify `package.json`, `package-lock.json`, `src/app/layout.tsx`, `.env.example`, `src/lib/env.ts`. Create `src/components/privacy-analytics.tsx`, `src/lib/analytics-url.ts`, `src/lib/admin/__verify__/analytics-url.verify.ts`.
 
 - [ ] **Step 1: Install.** `npm install @vercel/analytics`.
 
-- [ ] **Step 2: Add the component.** In `src/app/layout.tsx`, add `import { Analytics } from "@vercel/analytics/next";` below the Speed Insights import, and render `<Analytics />` directly after `<SpeedInsights />`.
+- [ ] **Step 2: Add the component.** Create `src/components/privacy-analytics.tsx` (a client component rendering `<Analytics beforeSend={...} />` that runs `redactAnalyticsUrl` on every event URL), `src/lib/analytics-url.ts` (the pure helper: strips query string and fragment, replaces the token in `/cxd/share/<token>` and the id in `/cxd/overview/<id>`) and `src/lib/admin/__verify__/analytics-url.verify.ts`. In `src/app/layout.tsx`, import `PrivacyAnalytics` from `@/components/privacy-analytics` below the Speed Insights import and render `<PrivacyAnalytics />` directly after `<SpeedInsights />`. The final code is in those files.
 
 - [ ] **Step 3: Declare env vars.** Add `'VERCEL_ANALYTICS_TOKEN'`, `'VERCEL_ANALYTICS_PROJECT_ID'` and `'VERCEL_TEAM_ID'` to `optionalServerVars` in `src/lib/env.ts`. Add to `.env.example`:
 
@@ -1003,7 +1151,7 @@ VERCEL_ANALYTICS_PROJECT_ID=
 VERCEL_TEAM_ID=
 ```
 
-- [ ] **Step 4: Build and commit.** `npm run build`. Message: `feat(admin): add Vercel Web Analytics tracking`.
+- [ ] **Step 4: Build and commit.** `npm run build`. Message: `feat(admin): add Vercel Web Analytics tracking`. A later review round added the privacy wrapper and several fixes, which the code blocks above already reflect.
 
 ## Task 8: Verify and hand off
 

@@ -2,7 +2,15 @@ import Link from 'next/link';
 import { requirePagePermission } from '@/lib/admin/gate';
 import { can } from '@/lib/admin/permissions';
 import { singleParam } from '@/lib/admin/users-query';
-import { classifyUsers, parseRange, RANGES, type CurrencyTotals } from '@/lib/admin/analytics/metrics';
+import {
+  classifyUsers,
+  fillDays,
+  parseRange,
+  planMix,
+  RANGES,
+  toMajorUnits,
+  type CurrencyTotals,
+} from '@/lib/admin/analytics/metrics';
 import {
   readAttention,
   readSnapshots,
@@ -13,6 +21,7 @@ import {
 } from '@/lib/admin/analytics/sources';
 import { AttentionStrip, Grid, Money, Panel, Section, Stat, Unavailable } from '@/components/admin/dashboard/panels';
 import { TrendChart } from '@/components/admin/dashboard/trend-chart';
+import type { Snapshot } from '@/lib/admin/analytics/sources';
 
 const VERCEL_ANALYTICS_URL = 'https://vercel.com/dashboard';
 const MIN_TREND_POINTS = 2;
@@ -21,17 +30,17 @@ function mrrTotal(totals: CurrencyTotals | null): number | null {
   // Charts need one number per day, and no currency is converted.
   if (!totals) return null;
   const currencies = Object.keys(totals);
-  return currencies.length === 1 ? totals[currencies[0]] / 100 : currencies.length === 0 ? 0 : null;
+  return currencies.length === 1 ? toMajorUnits(totals[currencies[0]], currencies[0]) : currencies.length === 0 ? 0 : null;
 }
 
 export default async function AdminHome({ searchParams }: { searchParams: { range?: string | string[] } }) {
   const staff = await requirePagePermission('tickets.work');
   const range = parseRange(singleParam(searchParams.range));
-  const attention = await readAttention(range);
   const canSeeComms = can(staff.role, 'comms.send');
 
-  // Staff stop here: the analytics readers below are never called for them.
+  // Staff stop here: only the attention counts are read, and no analytics reader is called for them.
   if (!can(staff.role, 'analytics.view')) {
+    const attention = await readAttention(range);
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-semibold">Home</h1>
@@ -42,7 +51,8 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
     );
   }
 
-  const [summary, stripe, snapshots, system, visitors] = await Promise.all([
+  const [attention, summary, stripe, snapshots, system, visitors] = await Promise.all([
+    readAttention(range),
     readSummary(range),
     readStripe(range),
     readSnapshots(range),
@@ -51,8 +61,16 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
   ]);
   const users = summary.ok ? classifyUsers(summary.data.planRows, summary.data.totalUsers) : null;
   const history = snapshots.ok ? snapshots.data : [];
+  // Real rows decide whether there is a trend; filled days only add the gaps for missed nights.
   const hasHistory = history.length >= MIN_TREND_POINTS;
+  const filled = fillDays(history, range, new Date());
   const collecting = history[0] ? `Collecting since ${history[0].day}` : 'Collecting starts after the first nightly run';
+
+  const snapshotTrend = (label: string, pick: (row: Snapshot) => number | null) => {
+    if (!snapshots.ok) return <Unavailable />;
+    if (!hasHistory) return <p className="text-sm text-white/40">{collecting}</p>;
+    return <TrendChart label={label} data={filled.map(({ day, row }) => ({ day, value: row ? pick(row) : null }))} />;
+  };
 
   return (
     <div className="space-y-6">
@@ -80,18 +98,22 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
         <Grid>
           <Stat label="MRR (list price)" value={stripe.ok ? <Money totals={stripe.data.mrr} /> : <Unavailable />} />
           <Stat label={`Revenue, ${range} days`} value={stripe.ok ? <Money totals={stripe.data.revenue} /> : <Unavailable />} />
-          <Stat label="Paying users" value={users ? users.paying : <Unavailable />} />
+          <Stat
+            label="Paying users"
+            value={users ? users.paying : <Unavailable />}
+            hint={users && users.trialing > 0 ? `+${users.trialing} on trial` : undefined}
+          />
           <Stat label="Comped users" value={users ? users.comped : <Unavailable />} hint="Beta, Nexus and admin plans" />
-          <Stat label={`New subscribers, ${range} days`} value={stripe.ok ? stripe.data.newSubscribers : <Unavailable />} />
+          <Stat
+            label={`New subscribers, ${range} days`}
+            value={stripe.ok ? stripe.data.newSubscribers : <Unavailable />}
+            hint="Includes trials"
+          />
           <Stat label={`Cancelled, ${range} days`} value={stripe.ok ? stripe.data.canceledSubscribers : <Unavailable />} />
         </Grid>
         <Panel>
           <p className="mb-2 text-xs text-white/50">MRR trend</p>
-          {hasHistory ? (
-            <TrendChart label="MRR" data={history.map((row) => ({ day: row.day, value: mrrTotal(row.mrr_cents) }))} />
-          ) : (
-            <p className="text-sm text-white/40">{collecting}</p>
-          )}
+          {snapshotTrend('MRR', (row) => mrrTotal(row.mrr_cents))}
         </Panel>
       </Section>
 
@@ -120,11 +142,7 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           </Panel>
           <Panel>
             <p className="mb-2 text-xs text-white/50">Active users, 30 days</p>
-            {hasHistory ? (
-              <TrendChart label="Active users" data={history.map((row) => ({ day: row.day, value: row.active_30d }))} />
-            ) : (
-              <p className="text-sm text-white/40">{collecting}</p>
-            )}
+            {snapshotTrend('Active users', (row) => row.active_30d)}
           </Panel>
         </div>
       </Section>
@@ -136,6 +154,21 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           <Stat label={`Assistant feedback, ${range} days`} value={summary.ok ? summary.data.feedbackCount : <Unavailable />} />
           <Stat label="Free users" value={users ? users.free : <Unavailable />} />
         </Grid>
+        <Panel>
+          <p className="mb-2 text-xs text-white/50">Plan mix</p>
+          {summary.ok ? (
+            <ul className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-1 text-sm">
+              {planMix(summary.data.planRows).map(({ plan, n }) => (
+                <li key={plan} className="flex justify-between gap-2">
+                  <span className="truncate text-white/70">{plan.replace(/_/g, ' ')}</span>
+                  <span className="tabular-nums">{n}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Unavailable />
+          )}
+        </Panel>
         <div className="grid lg:grid-cols-2 gap-3">
           <Panel>
             <p className="mb-2 text-xs text-white/50">Canvases created per day</p>
@@ -143,11 +176,7 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
           </Panel>
           <Panel>
             <p className="mb-2 text-xs text-white/50">AI credits used</p>
-            {hasHistory ? (
-              <TrendChart label="AI credits" data={history.map((row) => ({ day: row.day, value: row.credits_used_period }))} />
-            ) : (
-              <p className="text-sm text-white/40">{collecting}</p>
-            )}
+            {snapshotTrend('AI credits', (row) => row.credits_used_period)}
           </Panel>
         </div>
       </Section>
@@ -161,13 +190,15 @@ export default async function AdminHome({ searchParams }: { searchParams: { rang
             {system.ok &&
               system.data.errors.map((error) => (
                 <Link key={error.id} href="/admin/errors" className="block truncate text-sm text-violet-200 hover:underline">
-                  {error.title}
+                  {error.title ?? 'Untitled error'}
                 </Link>
               ))}
           </Panel>
           <Panel>
             <p className="text-xs text-white/50">Tracked emails, {range} days</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">{summary.ok ? summary.data.trackedEmails : <Unavailable />}</p>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">
+              {summary.ok ? summary.data.trackedEmails : <Unavailable />}
+            </div>
             <p className="mt-3 text-xs text-white/50">Last broadcast</p>
             {system.ok && system.data.lastBroadcast ? (
               <p className="mt-1 text-sm">
