@@ -4,6 +4,7 @@ import "react-day-picker/dist/style.css";
 import "./globals.css";
 import Script from "next/script";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { PrivacyAnalytics } from "@/components/privacy-analytics";
 import { TempoInit } from "@/components/tempo-init";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -80,6 +81,7 @@ export default function RootLayout({
         </ThemeProvider>
         <TempoInit />
         <SpeedInsights />
+        <PrivacyAnalytics />
       </body>
     </html>
   );

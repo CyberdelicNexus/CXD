@@ -16,6 +16,9 @@ const optionalServerVars = [
   'RESEND_FROM_EMAIL',
   'EMAIL_UNSUBSCRIBE_SECRET',
   'EMAIL_POSTAL_ADDRESS',
+  'VERCEL_ANALYTICS_TOKEN',
+  'VERCEL_ANALYTICS_PROJECT_ID',
+  'VERCEL_TEAM_ID',
 ] as const;
 
 export function validateEnv() {

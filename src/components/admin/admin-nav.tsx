@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, LifeBuoy, Megaphone, ScrollText, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Home, LifeBuoy, Megaphone, ScrollText, Users, type LucideIcon } from 'lucide-react';
 import { can, type Permission, type StaffRole } from '@/lib/admin/permissions';
 
 const ITEMS: { href: string; label: string; icon: LucideIcon; permission: Permission }[] = [
+  { href: '/admin', label: 'Home', icon: Home, permission: 'tickets.work' },
   { href: '/admin/support', label: 'Support', icon: LifeBuoy, permission: 'tickets.work' },
   { href: '/admin/users', label: 'Users', icon: Users, permission: 'users.view' },
   { href: '/admin/errors', label: 'Errors', icon: Activity, permission: 'errors.view' },
@@ -18,7 +19,7 @@ export function AdminNav({ role }: { role: StaffRole }) {
   return (
     <nav aria-label="Admin" className="flex md:flex-col gap-1 overflow-x-auto">
       {ITEMS.filter((item) => can(role, item.permission)).map(({ href, label, icon: Icon }) => {
-        const active = pathname.startsWith(href);
+        const active = href === '/admin' ? pathname === '/admin' : pathname.startsWith(href);
         return (
           <Link
             key={href}

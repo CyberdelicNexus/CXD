@@ -17,6 +17,7 @@ export const PERMISSIONS = [
   'users.edit',
   'comms.send',
   'audit.view',
+  'analytics.view',
   'roles.assign',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -28,6 +29,7 @@ const ALLOWED: Record<Permission, readonly StaffRole[]> = {
   'users.edit': ['admin', 'owner'],
   'comms.send': ['admin', 'owner'],
   'audit.view': ['admin', 'owner'],
+  'analytics.view': ['admin', 'owner'],
   'roles.assign': ['owner'],
 };
 

@@ -13,7 +13,7 @@ function check(name: string, cond: boolean) {
 
 const EXPECTED: Record<StaffRole, Permission[]> = {
   staff: ['users.view', 'tickets.work', 'errors.view'],
-  admin: ['users.view', 'tickets.work', 'errors.view', 'users.edit', 'comms.send', 'audit.view'],
+  admin: ['users.view', 'tickets.work', 'errors.view', 'users.edit', 'comms.send', 'audit.view', 'analytics.view'],
   owner: [...PERMISSIONS],
 };
 
