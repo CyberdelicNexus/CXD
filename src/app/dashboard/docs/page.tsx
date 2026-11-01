@@ -13,7 +13,8 @@ import {
   Layers,
   ClipboardList,
   Users,
-  Share2
+  Share2,
+  Sparkles
 } from 'lucide-react';
 
 interface DocSection {
@@ -66,9 +67,6 @@ const docSections: DocSection[] = [
 
               </p>
             </div>
-            <p>
-              it embodies a core cybernetic principle: we shape our realities through feedback loops that, in turn, shape us back.
-            </p>
           </div>
 
         </div>
@@ -293,7 +291,7 @@ const docSections: DocSection[] = [
           </ol>
           <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 mt-4">
             <p className="text-sm text-white/70">
-              <strong className="text-amber-300">Free Plan:</strong> 1 canvas with up to 100 objects, every Plan view, the Quickstart templates and 25 AI credits a month.
+              <strong className="text-amber-300">Free Plan:</strong> 1 canvas with up to 100 objects, every Plan view, the Quickstart templates, 3 frameworks and 25 AI credits a month.
               Upgrade to Pro for unlimited canvases and objects, the full template catalog, collaboration and the Master Plan.
             </p>
           </div>
@@ -358,6 +356,37 @@ const docSections: DocSection[] = [
           <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
             <p className="text-sm text-white/70">
               <strong className="text-violet-300">When to use:</strong> Complete the wizard when creating a new project. You can return anytime by clicking "Framing" in the navbar.
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Choose What You're Framing</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Before the first step, the wizard asks <strong className="text-white">"What are you framing?"</strong> The methodology adapts its
+            language to your practice: same backbone, different lens. The canvas, Map, tagging and Plan work the same for all four.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold text-sm text-white">Experience Design</h3>
+              <p className="text-xs text-white/50">Immersive, transformative experiences across realities. For experience designers, immersive artists and event creators.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <h3 className="font-semibold text-sm text-white">Ritual & Ceremony</h3>
+              <p className="text-xs text-white/50">Sacred containers, retreats and rites of passage. For facilitators, retreat leaders and ceremony designers.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+              <h3 className="font-semibold text-sm text-white">Learning Journey</h3>
+              <p className="text-xs text-white/50">Courses, workshops and transformational education. For educators, workshop leaders and course creators.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-pink-500/10 border border-pink-500/20">
+              <h3 className="font-semibold text-sm text-white">Brand & Product Experience</h3>
+              <p className="text-xs text-white/50">How a brand is felt across every touchpoint. For brand strategists, product teams and agencies.</p>
+            </div>
+          </div>
+          <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 mt-4">
+            <p className="text-sm text-white/70">
+              <strong className="text-amber-300">Choose carefully:</strong> You pick the framing type once for each project, and it can't be changed later.
             </p>
           </div>
         </div>
@@ -503,13 +532,31 @@ const docSections: DocSection[] = [
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">"Skip for now"</strong> lets you move forward without completing a step</span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span>On the final step, click <strong className="text-white">"Complete & View Canvas"</strong> to finish and start building</span>
+              <span>On the final step, click <strong className="text-white">"Complete"</strong> to finish</span>
             </li>
           </ul>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">When You Finish</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Your answers become a living canvas. Under <strong className="text-white">"How should your canvas start?"</strong> choose one of three options:
+          </p>
+          <div className="space-y-3">
+            <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold text-sm text-white">Framing blocks (Recommended)</h3>
+              <p className="text-xs text-white/50">Your framing as a connected board of live cards, personas and prompts.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+              <h3 className="font-semibold text-sm text-white">AI Composer (Pro)</h3>
+              <p className="text-xs text-white/50">AI reads your framing and sets up the best-fitting template.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+              <h3 className="font-semibold text-sm text-white">Blank</h3>
+              <p className="text-xs text-white/50">Start empty and drag blocks in whenever you want them.</p>
+            </div>
+          </div>
+          <p className="text-sm text-white/50 mt-3">Then go straight to the Canvas, the Hypercube Map or the Plan.</p>
         </div>
       </div>
     )
@@ -564,7 +611,7 @@ const docSections: DocSection[] = [
         <div>
           <h2 className="text-2xl font-semibold mb-3 text-white">Element Types (Toolbar)</h2>
           <p className="text-white/60 mb-4 leading-relaxed">
-            The center toolbar lets you create 8 types of elements. Click a tool, then click on the canvas to place it.
+            The center toolbar holds 9 element tools plus Comment mode. Click a tool, then click on the canvas to place it.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
@@ -581,23 +628,31 @@ const docSections: DocSection[] = [
             </div>
             <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
               <h3 className="font-semibold text-sm text-white">Image (I)</h3>
-              <p className="text-xs text-white/50">Upload images or drag & drop. Supports crop, flip, and rotation.</p>
+              <p className="text-xs text-white/50">Upload images or drag & drop. Supports crop, flip, and rotation. Switch to Storyboard for a framed cell with a caption, or convert an image with "Add caption (storyboard)".</p>
             </div>
             <div className="p-3 rounded-lg bg-pink-500/10 border border-pink-500/20">
               <h3 className="font-semibold text-sm text-white">Container (O)</h3>
-              <p className="text-xs text-white/50">Group elements together. Children move with parent. Auto-expands to fit content.</p>
+              <p className="text-xs text-white/50">Group elements together. Children move with parent. Auto-expands to fit content. Drag to draw one around existing elements and it captures any whose center is inside. Containers can nest.</p>
             </div>
             <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
               <h3 className="font-semibold text-sm text-white">Line (L)</h3>
-              <p className="text-xs text-white/50">Connect elements with lines. Drag handles to adjust start/end points and bends.</p>
+              <p className="text-xs text-white/50">Connect elements with lines. Drag handles to adjust start/end points and bends. New connectors pick up the color of the flow they extend, and connecting two elements copies the source's Hypercube tags to the target.</p>
             </div>
             <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
               <h3 className="font-semibold text-sm text-white">Link (E)</h3>
-              <p className="text-xs text-white/50">3 modes: Bookmark (URL preview), Embed (content viewer), or File (upload).</p>
+              <p className="text-xs text-white/50">3 modes: Link (rich URL preview), Embed (live content on the canvas), or File (upload).</p>
             </div>
             <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20">
               <h3 className="font-semibold text-sm text-white">Board (B)</h3>
-              <p className="text-xs text-white/50">Nested canvas boards. Double-click to enter. Navigate via breadcrumb path.</p>
+              <p className="text-xs text-white/50">A full canvas inside your canvas. Double-click the hexagon portal to step inside. Navigate via breadcrumb path.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+              <h3 className="font-semibold text-sm text-white">Table</h3>
+              <p className="text-xs text-white/50">Data grids with resizable, reorderable rows and columns. Solid or gradient fills per cell, row, column or table. Rows grow to fit your text.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-teal-500/10 border border-teal-500/20">
+              <h3 className="font-semibold text-sm text-white">Comment mode</h3>
+              <p className="text-xs text-white/50">Click the canvas, write your comment, then press Enter or Post. Threads stay pinned in place, so teammates can reply next to the thing being discussed, then resolve it.</p>
             </div>
           </div>
         </div>
@@ -706,6 +761,23 @@ const docSections: DocSection[] = [
         </div>
 
         <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Canvas Inbox</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            The Inbox is a holding area for things that don't have a place on the canvas yet. It has <strong className="text-white">Tasks</strong> and <strong className="text-white">Notes</strong> tabs, and tasks can be filtered by status.
+          </p>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Add to it</strong> — Use "New note", choose "Send to Inbox" on an element, drag an element onto the Inbox button, or save an AI reply</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Place an item</strong> — Drag it out of the Inbox and drop it anywhere on the canvas</span>
+            </li>
+          </ul>
+        </div>
+
+        <div>
           <h2 className="text-2xl font-semibold mb-3 text-white">Hypercube Tagging</h2>
           <p className="text-white/60 mb-4 leading-relaxed">
             Tag canvas elements with the 6 Hypercube dimensions to organize them by experiential domain:
@@ -795,6 +867,72 @@ const docSections: DocSection[] = [
     )
   },
   {
+    id: 'templates',
+    title: 'Templates',
+    icon: <Sparkles className="w-4 h-4" />,
+    content: (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Templates & Frameworks</h1>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Start from a real design. Templates aren't empty boxes: they come with tinted zones, guidance, connected flows,
+            and cards already styled for you to edit. Frameworks add a library of proven methods you can run on the canvas.
+          </p>
+          <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+            <p className="text-sm text-white/70">
+              <strong className="text-violet-300">Where to find them:</strong> Click <strong>Templates</strong> in the navbar or your account menu to open <strong>Add a Template</strong>.
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Quickstart Templates</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">Four templates available on every plan:</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold text-sm text-white">Intention Core Starter</h3>
+              <p className="text-xs text-white/50">Anchor the experience: pulls, anti-vision and the evidence behind both.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+              <h3 className="font-semibold text-sm text-white">World · Story · Magic</h3>
+              <p className="text-xs text-white/50">Portal walls for your meaning architecture.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+              <h3 className="font-semibold text-sm text-white">User Persona Engine</h3>
+              <p className="text-xs text-white/50">Gather real signals in four zones, then distill them into persona boards.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-pink-500/10 border border-pink-500/20">
+              <h3 className="font-semibold text-sm text-white">Storyboard Flow</h3>
+              <p className="text-xs text-white/50">One opening shot branches into two sequences and reconverges.</p>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Templates Inside Templates</h2>
+          <p className="text-white/60 leading-relaxed">
+            In Quickstart templates, the hexagon portals open onto layouts of their own. Double-click one to land in a ready-to-fill
+            Storyboard, Moodboard or Research board instead of a blank canvas.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">What's in Each Plan</h2>
+          <div className="space-y-3">
+            <div className="p-4 rounded-lg bg-white/5 border border-white/10">
+              <h3 className="font-semibold text-white mb-2">Free</h3>
+              <p className="text-sm text-white/60">The 4 Quickstart templates, plus 3 frameworks: Iceberg Model, How Might We + Crazy 8s, and Impact–Effort Matrix.</p>
+            </div>
+            <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+              <h3 className="font-semibold text-white mb-2">Pro and Lifetime</h3>
+              <p className="text-sm text-white/60">The full catalog across Experience Design, Product & Brand, Creative & General and all 12 frameworks, plus AI Composer at the end of the Framing wizard.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  },
+  {
     id: 'map',
     title: 'Map',
     icon: <Layers className="w-4 h-4" />,
@@ -806,6 +944,25 @@ const docSections: DocSection[] = [
             The Hypercube Map is a 3D visualization that shows your experience design across 6 dimensions simultaneously.
             It helps you understand balance, identify gaps, and see relationships between different aspects of your design.
           </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Why a Hypercube</h2>
+          <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20 mb-4">
+            <p className="text-sm text-white/70">
+              <strong className="text-violet-300">Flat tools produce flat experiences.</strong> The Hypercube gives experience design dimensional intelligence.
+            </p>
+          </div>
+          <div className="text-white/60 leading-relaxed space-y-4">
+            <p>
+              Experiences are layered. They happen on more than one surface of reality at once, activate more than one sense,
+              and shift more than one kind of presence.
+            </p>
+            <p>
+              That's why CXD uses a higher-dimensional geometry: six faces, six dimensions, and one object you can rotate, tag,
+              and align every part of your experience to.
+            </p>
+          </div>
         </div>
 
         <div>
@@ -929,6 +1086,44 @@ const docSections: DocSection[] = [
         </div>
 
         <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Ask Hypercube Intelligence</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Tag canvas elements to a face to give them context, then ask questions and get answers grounded in exactly what you tagged.
+          </p>
+          <ol className="space-y-3 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">1</div>
+              <span>On the canvas, select an element and use <strong className="text-white">Tag to Hypercube</strong>. In the Map, <strong className="text-white">Suggest tags</strong> proposes tags for you to review first</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">2</div>
+              <span>Open <strong className="text-white">Hypercube Intelligence</strong> to ask about your whole design, or select a face or the Core to scope the chat to it</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0 text-xs text-violet-300">3</div>
+              <span>Use the actions under a reply, when it has something to act on: <strong className="text-white">Save as note</strong> puts it in your Canvas Inbox, and <strong className="text-white">Add tasks</strong> lets you review tasks before adding them to your Plan</span>
+            </li>
+          </ol>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">System Insights</h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Select a face, the Core or a chat to open the System Insights panel. It reviews your design for Balance, Coverage, Coherence, Risk,
+            Opportunity and Integration, and can generate questions you can send to the chat.
+          </p>
+          <p className="text-sm text-white/50">When a chat is scoped to a face or the Core, the <strong className="text-white/70">Configure</strong> button in its header sits alongside, so you can adjust settings as you read.</p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Choosing a Model</h2>
+          <p className="text-white/60 leading-relaxed">
+            Pick the active model from the credit meter in the navbar, or under <strong className="text-white">Settings → AI</strong>.
+            Free uses Gemini Flash. Pro and Lifetime add premium Claude and Gemini models.
+          </p>
+        </div>
+
+        <div>
           <h2 className="text-2xl font-semibold mb-3 text-white">Keyboard Shortcuts</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div className="p-2 rounded bg-white/5"><kbd className="bg-white/10 px-1.5 py-0.5 rounded">1-6</kbd> Select face</div>
@@ -958,8 +1153,9 @@ const docSections: DocSection[] = [
         <div>
           <h1 className="text-3xl font-bold mb-4 text-gradient-purple">Plan View</h1>
           <p className="text-white/60 mb-4 leading-relaxed">
-            Plan View transforms your canvas cards into actionable tasks. It provides 4 different views
-            to manage your experience production: Kanban, Table, Timeline, and Calendar.
+            Plan View transforms your canvas cards into actionable tasks. It provides 5 views
+            to manage your experience production: Roadmap, Kanban, Table, Timeline, and Calendar. Same tasks,
+            different perspectives, and every view writes back to the element it came from on the canvas.
           </p>
           <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
             <p className="text-sm text-white/70">
@@ -995,8 +1191,12 @@ const docSections: DocSection[] = [
         </div>
 
         <div>
-          <h2 className="text-2xl font-semibold mb-3 text-white">The 4 Views</h2>
+          <h2 className="text-2xl font-semibold mb-3 text-white">The 5 Views</h2>
           <div className="space-y-4">
+            <div className="p-4 rounded-lg bg-pink-500/10 border border-pink-500/20">
+              <h3 className="font-semibold text-white mb-2">Roadmap View</h3>
+              <p className="text-sm text-white/60">Your versions as milestones. Open a version to set its OKRs (Objectives & Key Results).</p>
+            </div>
             <div className="p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
               <h3 className="font-semibold text-white mb-2">Kanban View</h3>
               <p className="text-sm text-white/60 mb-2">Drag-and-drop task cards across 4 status columns:</p>
@@ -1013,7 +1213,7 @@ const docSections: DocSection[] = [
             </div>
             <div className="p-4 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
               <h3 className="font-semibold text-white mb-2">Timeline View (Gantt)</h3>
-              <p className="text-sm text-white/60">Gantt-style visualization. Tasks with start/due dates appear as horizontal bars. Drag bars to reschedule. Zoom: Day, Week, or Month.</p>
+              <p className="text-sm text-white/60">Gantt-style visualization. Tasks with start/due dates appear as horizontal bars. Drag bars to reschedule. Zoom: Day, Week, or Month. Drag between tasks to create a dependency. With Auto-reschedule dependencies on, moving a task later pushes the tasks waiting on it forward; moving it earlier leaves them where they are.</p>
             </div>
             <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
               <h3 className="font-semibold text-white mb-2">Calendar View</h3>
@@ -1058,13 +1258,9 @@ const docSections: DocSection[] = [
         <div>
           <h2 className="text-2xl font-semibold mb-3 text-white">Filtering Tasks</h2>
           <p className="text-white/60 mb-4 leading-relaxed">
-            Click the filter icon to open the filter panel. You can filter by:
+            In Timeline view, open the <strong className="text-white">Filter</strong> menu to narrow tasks by:
           </p>
           <ul className="space-y-2 text-white/60">
-            <li className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Task Type</strong> — Markdown tasks, explicitly actionable, or hypercube-tagged</span>
-            </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
               <span><strong className="text-white">Status</strong> — Filter by one or more status values</span>
@@ -1075,11 +1271,7 @@ const docSections: DocSection[] = [
             </li>
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Hypercube Faces</strong> — Filter by dimension tags</span>
-            </li>
-            <li className="flex items-start gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
-              <span><strong className="text-white">Show Completed</strong> — Toggle to show/hide completed tasks</span>
+              <span><strong className="text-white">Hypercube Faces</strong> — Filter by dimension tags, to see only the slice you're designing</span>
             </li>
           </ul>
         </div>
@@ -1119,6 +1311,28 @@ const docSections: DocSection[] = [
             <li className="flex items-start gap-3">
               <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
               <span><strong className="text-white">Add Task</strong> — Click the + button in the header to create a new task card directly from Plan View.</span>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-3 text-white">Sync to Your Calendar <span className="text-xs bg-violet-500/30 px-2 py-0.5 rounded ml-2 align-middle">Pro</span></h2>
+          <p className="text-white/60 mb-4 leading-relaxed">
+            Deadlines land in the calendar you already live in. Open <strong className="text-white">Sync to Calendar</strong> from your profile, or
+            <strong className="text-white"> Calendar Feed</strong> in Export & Deliverables, copy your feed link, and subscribe to it:
+          </p>
+          <ul className="space-y-2 text-white/60">
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Google Calendar</strong> — Settings → Add calendar → From URL</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Apple Calendar</strong> — File → New Calendar Subscription</span>
+            </li>
+            <li className="flex items-start gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-violet-400 mt-2 flex-shrink-0" />
+              <span><strong className="text-white">Outlook</strong> — Add calendar → Subscribe from web</span>
             </li>
           </ul>
         </div>
@@ -1193,6 +1407,10 @@ const docSections: DocSection[] = [
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
               <h3 className="font-semibold text-white mb-2">Selection Tracking</h3>
               <p className="text-sm text-white/60">See which elements other collaborators have selected. This helps avoid editing conflicts.</p>
+            </div>
+            <div className="p-4 rounded-lg bg-white/5 border border-white/10">
+              <h3 className="font-semibold text-white mb-2">Follow a Collaborator</h3>
+              <p className="text-sm text-white/60">Ride along with someone. Click their bubble under the Collaboration button in the navbar and your view centers on their cursor, matches their zoom and moves between boards with them. Click anywhere to stop following.</p>
             </div>
           </div>
         </div>
