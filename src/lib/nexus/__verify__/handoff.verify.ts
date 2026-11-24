@@ -32,6 +32,8 @@ import {
 } from '../listing';
 import { bearerToken, getHandoffConfig, verifyNexusBridgeToken } from '../config';
 import { readProjectDeepLink } from '../../project-deep-link';
+import { buildTeamProject, parseTeamIds } from '../team';
+import { isUuid } from '../handoff';
 
 let failures = 0;
 function check(cond: boolean, msg: string) {
@@ -293,6 +295,33 @@ async function main() {
   check(getHandoffConfig() === null, 'plain-http issuer refused');
   process.env.NEXUS_ISSUER = ISSUER;
   check(getHandoffConfig()?.issuer === ISSUER, 'https issuer accepted');
+
+  // Platform D337: team projects.
+  const joined = parseIntent({ go: 'project', id: PROJECT, join: true, view: 'overview' });
+  check(joined.go === 'project' && joined.join === true && joined.view === 'overview', 'team project intent keeps join and overview');
+  const plain = parseIntent({ go: 'project', id: PROJECT, join: 'yes', view: 'map' });
+  check(plain.go === 'project' && !('join' in plain) && !('view' in plain), 'join only as true, view only as overview');
+  check(destinationForProject(PROJECT, true, 'overview') === `/cxd/overview/${PROJECT}`, 'overview destination');
+  check(destinationForProject(PROJECT, false, 'overview') === '/dashboard', 'no access → dashboard, overview or not');
+  check(parseTeamIds(`${PROJECT.toUpperCase()},${PROJECT}`, isUuid)?.length === 1, 'team ids: lower-cased, distinct');
+  check(parseTeamIds('abc', isUuid) === null && parseTeamIds(null, isUuid) === null, 'team ids: bad or missing → null');
+  check(parseTeamIds(Array.from({ length: 41 }, () => PROJECT).join(','), isUuid) === null, 'team ids: more than 40 → null');
+  const team = buildTeamProject(
+    {
+      id: PROJECT,
+      name: 'Salon',
+      description: null,
+      updated_at: '2026-11-24T10:00:00Z',
+      project_data: {
+        coverImage: 'http://insecure.example/c.png',
+        canvasLayout: { elements: [{ id: 'card-1', type: 'text', content: '- [x] Book venue\n- [ ] Confirm guest', position: { x: 0, y: 0 }, size: { width: 10, height: 10 }, zIndex: 0 }] },
+      },
+    },
+    3,
+  );
+  check(team.coverImage === null && team.collaborators === 3 && team.description === '', 'team project shape');
+  check(team.tasks.length === 2 && team.tasks[0].status === 'completed' && team.tasks[1].status === 'not_started', 'each checkbox of a card is a task, as on the Plan tab');
+  check(Array.isArray(team.tasks[0].assignees) && team.tasks[0].assignees.length === 0, 'no assignee → empty list');
 
   console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);

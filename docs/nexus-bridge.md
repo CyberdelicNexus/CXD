@@ -52,6 +52,13 @@ update of that column. The Stripe webhook sets `plan_source='stripe'` on Pro
 and Lifetime checkout, and `customer.subscription.deleted` no longer downgrades
 a `plan_source='nexus'` row.
 
+### Team projects (platform D337)
+
+The Nexus staff area shows the team's projects and their tasks, and staff join them from there. The platform's contract rows are "Team projects" and "Joining a team project" in its `docs/05-data-model.md` §5.
+
+- `GET /api/nexus/team-projects?ids=<uuid>,<uuid>…`: same Bearer, kill switch and rate limit as `/api/nexus/projects`. At most 40 ids (else 400); an unknown id is absent. Answer `{projects:[{id,name,description,updatedAt,coverImage,collaborators,tasks:[{id,title,status,priority,dueDate,assignees,percent}]}]}`: the Plan tab's task projection (completed included, archived left out), at most 300 per project; `assignees` are the names typed on the card. Built in `src/lib/nexus/team.ts`.
+- The `cxd` intent for a project may carry `join: true` (the platform signs it only for its staff and its team list) and `view: 'overview'`. With `join`, a user who is neither owner nor collaborator is added to `canvas_collaborators` as a collaborator (`added_by` the owner) by the service role, outside the plan's collaborator cap (`joinTeamProject` in `src/lib/nexus/server.ts`). `view: 'overview'` lands on `/cxd/overview/<id>`.
+
 ## Code
 
 Pure logic (no network, no database) lives in `src/lib/nexus/` so the verify

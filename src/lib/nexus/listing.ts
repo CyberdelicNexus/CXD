@@ -105,8 +105,9 @@ export function buildNewProjectRow(id: string, name: string, ownerId: string, no
 }
 
 /** Where a resolved intent sends the browser. `access` is decided by the caller. */
-export function destinationForProject(id: string, hasAccess: boolean): string {
-  return hasAccess ? `/cxd?project=${id}` : '/dashboard';
+export function destinationForProject(id: string, hasAccess: boolean, view?: 'overview'): string {
+  if (!hasAccess) return '/dashboard';
+  return view === 'overview' ? `/cxd/overview/${id}` : `/cxd?project=${id}`;
 }
 
 export function destinationForNewProject(id: string): string {

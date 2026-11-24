@@ -34,9 +34,12 @@ export function isNexusTier(value: unknown): value is NexusTier {
 // Intent (`cxd` claim)
 // ---------------------------------------------------------------------------
 
+// A Nexus team project (platform D337) adds `join: true`, which the platform signs only for its
+// staff and only for a project on its team list: the user is added as a collaborator on arrival.
+// `view: 'overview'` lands on the project overview instead of the canvas.
 export type NexusIntent =
   | { go: 'dashboard' }
-  | { go: 'project'; id: string }
+  | { go: 'project'; id: string; join?: true; view?: 'overview' }
   | { go: 'new'; name: string };
 
 const DASHBOARD: NexusIntent = { go: 'dashboard' };
@@ -50,7 +53,11 @@ export function parseIntent(raw: unknown): NexusIntent {
   const obj = raw as Record<string, unknown>;
 
   if (obj.go === 'project') {
-    return isUuid(obj.id) ? { go: 'project', id: obj.id.toLowerCase() } : DASHBOARD;
+    if (!isUuid(obj.id)) return DASHBOARD;
+    const intent: NexusIntent = { go: 'project', id: obj.id.toLowerCase() };
+    if (obj.join === true) intent.join = true;
+    if (obj.view === 'overview') intent.view = 'overview';
+    return intent;
   }
 
   if (obj.go === 'new') {
