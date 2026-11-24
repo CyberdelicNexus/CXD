@@ -251,6 +251,28 @@ export async function userCanOpenProject(admin: SupabaseClient, userId: string, 
   return Boolean(collab);
 }
 
+/**
+ * Platform D337: adds a Nexus staff member to a team project as a collaborator. Only called for a
+ * verified token whose intent carries `join` (the platform signs it for its staff and its team
+ * list only). Outside the plan's collaborator cap: team work is not a member's plan. True when the
+ * user can now open the project.
+ */
+export async function joinTeamProject(admin: SupabaseClient, userId: string, projectId: string): Promise<boolean> {
+  const { data: project } = await admin.from('cxd_projects').select('owner_id').eq('id', projectId).maybeSingle();
+  if (!project) return false;
+  const { error } = await admin
+    .from('canvas_collaborators')
+    .upsert(
+      { canvas_id: projectId, user_id: userId, role: 'collaborator', added_by: (project as { owner_id: string }).owner_id },
+      { onConflict: 'canvas_id,user_id', ignoreDuplicates: true },
+    );
+  if (error) {
+    console.error('[nexus] team project join failed', error.code);
+    return false;
+  }
+  return true;
+}
+
 export async function countOwnedProjects(admin: SupabaseClient, userId: string): Promise<number | null> {
   const { count, error } = await admin
     .from('cxd_projects')
@@ -269,7 +291,9 @@ export async function resolveIntentDestination(
 ): Promise<string> {
   try {
     if (intent.go === 'project') {
-      return destinationForProject(intent.id, await userCanOpenProject(admin, userId, intent.id));
+      let access = await userCanOpenProject(admin, userId, intent.id);
+      if (!access && intent.join) access = await joinTeamProject(admin, userId, intent.id);
+      return destinationForProject(intent.id, access, intent.view);
     }
     if (intent.go === 'new') {
       const owned = await countOwnedProjects(admin, userId);
